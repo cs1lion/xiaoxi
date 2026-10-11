@@ -190,6 +190,42 @@ idle:
     # 说话时头随音频包络轻微律动（rhythmic head motion 的廉价版）
     amp: 0.18
     freq: 2.7
+  blink_while_speaking: 0.65    # 说话时眨眼间隔的乘数（越小越频繁）
+
+# ---------- 眼神：眼睛要"在看某处"，而不是随机飘 ----------
+# target 是注视点（归一化，0 = 正视前方），drift 是围绕该点的游走半径。
+# 真人移视是弹道式的（50~80ms 到位），所以这里 move.duration 给得短；
+# 落在目标上之后才是围绕它的微注视抖动。
+gaze:
+  targets:
+    viewer: { x:  0.00, y:  0.00, drift: 0.10 }   # 看用户（默认）
+    mic:    { x: -0.34, y:  0.20, drift: 0.06 }  # 你在说话：略偏下方，专注
+    think:  { x:  0.62, y: -0.36, drift: 0.17 }  # 想事情：飘到右上方
+    down:   { x: -0.18, y:  0.54, drift: 0.09 }  # 收敛 / 有点不好意思
+  move:
+    duration: 0.14          # 换一个注视点的移视时间
+  micro:                    # 落点之后的微注视抖动
+    mean_interval: 0.85
+    radius: 0.11
+    duration: 0.10
+  # 消息类型 -> 注视点。见 web/avatar/index.js
+  on_message:
+    thinking: think
+    recording: mic
+    text: viewer
+    done: viewer
+    playback_stopped: viewer
+    interrupted: viewer
+
+# ---------- 无障碍：尊重系统的"减少动态效果" ----------
+# 策略是"把快的压慢压小，把慢的留住"，不是把角色冻住：
+# 眨眼完全不降级（去掉眨眼角色会显得是坏了，而不是安静）。
+reduced_motion:
+  sway: 0.22              # 头微动幅度乘数
+  bob: 0.0                # 说话时的头律动直接关掉
+  secondary: 0.15         # 头发/呆毛的滞后与过冲
+  gaze_drift: 0.3         # 眼神游走
+  gesture: 0.55           # 手势幅度（时长不变，只是幅度小、过渡慢）
 
 # ---------- 手势轨道：一次性动作 ----------
 # at   = 轨道内起始秒

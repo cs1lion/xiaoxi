@@ -117,6 +117,12 @@ export class SvgRig {
       ahoge: new Spring(55, 6),
       brow: new Spring(170, 20),
     };
+    /* 系统"减少动态效果"时把次级运动压下去，见 config/avatar.yaml */
+    this.secondaryScale = 1;
+  }
+
+  setSecondaryMotion(scale) {
+    this.secondaryScale = clamp(scale, 0, 1);
   }
 
   mount(container, look = {}) {
@@ -293,8 +299,9 @@ export class SvgRig {
      * 直接用弹簧位置做位移是不够的，必须用"头 - 弹簧"这个差值。 */
     const hx = this.spring.hairX.step(yaw, dt);
     const hy = this.spring.hairY.step(pitch, dt);
-    const lagX = yaw - hx;
-    const lagY = pitch - hy;
+    const s = this.secondaryScale;
+    const lagX = (yaw - hx) * s;
+    const lagY = (pitch - hy) * s;
     n.hairLock.setAttribute(
       "transform",
       `translate(${(-lagX * 6).toFixed(2)} ${(-lagY * 3.5).toFixed(2)}) ` +
@@ -302,12 +309,12 @@ export class SvgRig {
     );
 
     const bh = this.spring.brow.step(pitch, dt);
-    n.browLag.setAttribute("transform", `translate(0 ${(-(pitch - bh) * 9).toFixed(2)})`);
+    n.browLag.setAttribute("transform", `translate(0 ${(-(pitch - bh) * 9 * s).toFixed(2)})`);
 
     /* 呆毛跟着翻滚和点头甩，但左右转头时也该被带一下，
        只跟 roll 的话呆毛在日常动作里几乎不会动。 */
     const ah = this.spring.ahoge.step(rollA * 22 + bob + yaw * 11, dt);
-    n.ahoge.setAttribute("transform", `rotate(${(ah * 1.25).toFixed(2)} 4 -102)`);
+    n.ahoge.setAttribute("transform", `rotate(${(ah * 1.25 * s).toFixed(2)} 4 -102)`);
 
     // 呼吸：整块轻微缩放，比单独动胸腔更像在呼吸
     const breath = p.ParamBreath * 0.010 + 0.998;

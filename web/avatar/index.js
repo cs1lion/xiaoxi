@@ -9,7 +9,7 @@
  * 对外只暴露几个事件式方法，app.js 那边不需要知道内部有四个驱动。
  */
 
-import { ParamStore, Rigger, clamp, clamp01 } from "./params.js";
+import { ParamStore, Rigger, clamp, clamp01, lerp } from "./params.js";
 import { buildTimeline } from "./timeline.js";
 import { IdleDriver } from "./drivers/idle.js";
 import { LipDriver } from "./drivers/lip.js";
@@ -37,6 +37,7 @@ export class Avatar {
     this._pending = [];
     this.outAnalyser = null;
     this._outBuf = null;
+    this.reducedMotion = false;
   }
 
   configure(cfg) {
@@ -46,19 +47,36 @@ export class Avatar {
     this.rig = new Rigger(this.cfg.neutral || {});
     for (const [name, priority] of LAYERS) this.rig.register(name, priority);
 
-    this.idle = new IdleDriver(this.cfg.idle || {});
+    // gaze 是顶层契约（"在看哪"不是"待机噪声"），要显式并进去
+    this.idle = new IdleDriver({ ...this.cfg.idle, gaze: this.cfg.gaze });
     this.lip = new LipDriver();
     this.emotion = new EmotionDriver(this.cfg.emotions || {});
     this.gesture = new GestureDriver(this.cfg.triggers || {});
     this.gesture.setTracks(this.cfg.gestures || {});
     this.gesture.setTriggers(this.cfg.triggers || {});
-    this.emotion.set("base");
+this.emotion.set("base");
 
-    // 配置晚于第一条音频帧到达时，这里补播
+    /* 配置晚于第一条音频帧到达时，这里补播 */
     for (const item of this._pending.splice(0)) {
       this.lip.speak(buildTimeline(item.text, item.duration), item.startedAt);
     }
     return this;
+  }
+
+  /* 尊重系统的"减少动态效果"。策略是压低幅度和过冲，不是把角色冻住——
+   * 眨眼完全保留：去掉眨眼看起来像坏了，而不是安静。
+   * 比例见 config/avatar.yaml 的 reduced_motion。 */
+  setReducedMotion(enabled) {
+    this.reducedMotion = !!enabled;
+    const cfg = this.cfg.reduced_motion || {};
+    const pick = (key) => (this.reducedMotion ? Number(cfg[key] ?? 0) : 1);
+    this.idle.setMotion({
+      sway: pick("sway"),
+      bob: pick("bob"),
+      gazeDrift: pick("gaze_drift"),
+    });
+    this.svg.setSecondaryMotion(pick("secondary"));
+    this.gestureScale = pick("gesture");
   }
 
   mount(container) {
@@ -91,10 +109,10 @@ export class Avatar {
     this._outBuf = node ? new Float32Array(node.fftSize) : null;
   }
 
-  /* 没有 analyser（静音 TTS、测试驱动）时包络恒为 0，
-   口型仍然完全由文本时间轴驱动，不会退化。 */
+  /* 没有 analyser（静音 TTS、测试驱动）时返回 null——"没有包络数据"
+   和"包络为零"是两回事，不能当成同一件事。 */
   _readRms() {
-    if (!this.outAnalyser) return 0;
+    if (!this.outAnalyser) return null;
     const buf = this._outBuf;
     this.outAnalyser.getFloatTimeDomainData(buf);
     let sum = 0;
@@ -146,6 +164,14 @@ export class Avatar {
         break;
     }
 
+    /* 注视点跟着消息走：说话时看用户，你在说话时看向输入区。 */
+    const gazeRules = (this.cfg.gaze && this.cfg.gaze.on_message) || {};
+    if (msg.type === "recording") {
+      this.idle.setGaze(msg.state ? gazeRules.recording : gazeRules.text || "viewer");
+    } else if (gazeRules[msg.type]) {
+      this.idle.setGaze(gazeRules[msg.type]);
+    }
+
     if (msg.type !== "text") return;
 
     const emotion = msg.emotion || "base";
@@ -174,7 +200,7 @@ export class Avatar {
 
     const rms = this._readRms();
     const speaking = this.lip.speaking;
-    const idleOut = this.idle.update(dt, { speaking, rms });
+    const idleOut = this.idle.update(dt, { speaking, rms: rms || 0 });
 
     // 眨眼是"扣减"：叠在情绪的睁眼度上，眯眼时眨一次就是真闭眼
     rig.add("idle", "ParamEyeLOpen", -idleOut.blink);
@@ -199,17 +225,27 @@ export class Avatar {
 
     const pose = this.gesture.update(dt, store, this.clock);
     if (pose) {
-      for (const [key, value] of Object.entries(pose)) rig.set("gesture", key, value);
+      // reduced-motion 下压低手势幅度而不是取消手势：
+      // 一个幅度减半的点头仍然读得出"在点头"，完全没有动作则读不出。
+      const g = this.reducedMotion ? this.gestureScale : 1;
+      for (const [key, value] of Object.entries(pose)) {
+        rig.set("gesture", key, lerp(store.neutral[key] || 0, value, g));
+      }
     }
 
     // 包络要在采样之前交给 lip，否则这一帧的张口度用的是上一帧的音量
-    this.lip.setRms(rms);
+    this.lip.setEnvelope(rms || 0, rms !== null);
     const frame = this.lip.sample(this.audioCtx);
     if (frame) {
       rig.set("lip", "ParamMouthOpenY", frame.open);
       rig.set("lip", "ParamMouthForm", frame.form);
       rig.set("lip", "ParamMouthRound", frame.round);
       rig.mute("lip", "ParamMouthOpenY");
+      // 共发音的眯眼用叠加而不是覆盖，才能和情绪的眯眼/眨眼一起算
+      if (frame.squint > 0) {
+        rig.add("lip", "ParamEyeLOpen", -frame.squint);
+        rig.add("lip", "ParamEyeROpen", -frame.squint);
+      }
     }
 
     rig.commit(store);
@@ -225,6 +261,14 @@ export async function boot(containerId = "avatarStage") {
   const res = await fetch("/api/avatar");
   const cfg = await res.json();
   avatar.configure(cfg);
+
+  // 系统开了"减少动态效果"就跟着降下来，并且允许运行中切换
+  if (window.matchMedia) {
+    const mq = window.matchMedia("(prefers-reduced-motion: reduce)");
+    avatar.setReducedMotion(mq.matches);
+    mq.addEventListener?.("change", (e) => avatar.setReducedMotion(e.matches));
+  }
+
   const container = document.getElementById(containerId);
   if (container) avatar.mount(container);
   return avatar;

@@ -7,12 +7,23 @@
  * 闭塞音（open < 0.05）不调制，否则 b/p/m 的闭合会被音量糊掉。
  */
 
+/* 有 analyser 时做"微调制"：给张口幅度一点起伏和抖动，让嘴活起来。
+ * 闭塞音（open < 0.05）不调制，否则 b/p/m 的闭合会被音量糊掉。
+ *
+ * 注意：没有挂 analyser（静音 TTS、测试驱动）时 active=false，必须完全
+ * 跳过调制。之前这里无条件乘一个 <1 的系数，导致没有音频分析的场合嘴
+ * 永久偏小 38%。 */
+
 import { clamp } from "../params.js";
 import { sampleTimeline } from "../timeline.js";
 
 /* wide -> ParamMouthForm(-1 撅 / +1 咧) 的映射区间 */
 const WIDE_CENTER = 0.54;
 const WIDE_SPAN = 0.34;
+
+/* TTS 输出的 RMS 经 ×5 归一后，讲话时典型落在 0.65 附近 */
+const RMS_FLOOR = 0.65;
+const RMS_GAIN = 0.45;
 
 export class LipDriver {
   constructor() {
@@ -21,6 +32,7 @@ export class LipDriver {
     this.duration = 0;
     this.speaking = false;
     this.rms = 0;
+    this.hasEnvelope = false;
     this._smoothRms = 0;
   }
 
@@ -37,8 +49,9 @@ export class LipDriver {
     this.timeline = null;
   }
 
-  setRms(value) {
-    this.rms = clamp(value);
+  setEnvelope(rms, active) {
+    this.rms = clamp(rms);
+    this.hasEnvelope = !!active;
   }
 
   /* ctx: AudioContext，用于取播放位置。返回 null 表示这一帧不碰嘴。 */
@@ -55,22 +68,27 @@ export class LipDriver {
     const frame = sampleTimeline(this.timeline, t);
     if (!frame) return null;
 
-    // 包络跟着音频走，做平滑避免频谱抖动
     this._smoothRms += (this.rms - this._smoothRms) * 0.35;
 
     let open = frame.open;
-    if (open > 0.05) {
-      const energy = 0.62 + 0.55 * this._smoothRms;
-      open = open * energy + this._smoothRms * 0.05;
-    } else {
-      // 闭塞音：保留闭合，只留一点点唇缝颤动
-      open += this._smoothRms * 0.012;
+    if (this.hasEnvelope) {
+      const delta = this._smoothRms - RMS_FLOOR;
+      const energy = clamp(1 + RMS_GAIN * delta, 0.7, 1.25);
+      if (open > 0.05) {
+        open = open * energy + delta * 0.06;
+      } else {
+        // 闭塞音：保留闭合，只留一点点唇缝颤动
+        open += delta * 0.03;
+      }
     }
 
     return {
       open: clamp(open, 0, 1),
       form: clamp((frame.wide - WIDE_CENTER) / WIDE_SPAN, -1, 1),
       round: clamp((frame.round - 0.42) / 0.52, -1, 1),
+      // 共发音：张大嘴时眼睛会跟着眯一点。只在开口很大时起效，
+      // 小幅口型保持原样，否则整句话都在眯眼。
+      squint: Math.max(0, clamp(open, 0, 1) - 0.55) * 0.55,
     };
   }
 }
