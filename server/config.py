@@ -54,11 +54,30 @@ DEFAULTS: dict[str, Any] = {
     "llm_model": os.getenv("LLM_MODEL", "deepseek-chat"),
     "llm_temperature": float(os.getenv("LLM_TEMPERATURE", "0.9")),
     "llm_max_tokens": int(os.getenv("LLM_MAX_TOKENS", "400")),
+    # 对话用的 token 预算，和"回复该多短"是两件事。
+    # 之前从字数上限反推（400字//2+120=320），推理模型会正好在 320 被截断，
+    # 结果是 finish_reason=length + 回复只剩半个字符。
+    "llm_reply_tokens": int(os.getenv("LLM_REPLY_TOKENS", "900")),
+    "llm_reasoning_effort": os.getenv("LLM_REASONING_EFFORT", ""),
+    # 重复抑制。0 = 不下发该字段。个别 OpenAI 兼容网关会因未知字段直接 400，
+    # 所以默认关着，确认你的网关支持再在 .env 里开（对话建议 0.2 / 0.2）。
+    "llm_frequency_penalty": float(os.getenv("LLM_FREQUENCY_PENALTY", "0")),
+    "llm_presence_penalty": float(os.getenv("LLM_PRESENCE_PENALTY", "0")),
+    # 记忆抽取单独一个模型。会演的模型适合对话但会把一句话拆成三条记忆，
+    # 慢一点的反而更准；抽取在后台跑，慢一点不影响体验。
+    "llm_extract_model": os.getenv("LLM_EXTRACT_MODEL", ""),
+    "llm_extract_effort": os.getenv("LLM_EXTRACT_EFFORT", "low"),
+    "asr_engine": os.getenv("ASR_ENGINE", "whisper"),
     "asr_model": os.getenv("ASR_MODEL", "small"),
+    "asr_model_id": os.getenv("ASR_MODEL_ID", "stepaudio-2.5-asr"),
     "asr_device": os.getenv("ASR_DEVICE", "cpu"),
     "asr_compute_type": os.getenv("ASR_COMPUTE_TYPE", "int8"),
     "asr_language": os.getenv("ASR_LANGUAGE", "zh"),
     "tts_engine": os.getenv("TTS_ENGINE", "edge_tts"),
+    "tts_model": os.getenv("TTS_MODEL", "stepaudio-2.5-tts"),
+    "tts_voice": os.getenv("TTS_VOICE", "livelybreezy-female"),
+    "tts_format": os.getenv("TTS_FORMAT", "mp3"),
+    "tts_sample_rate": int(os.getenv("TTS_SAMPLE_RATE", "24000")),
     "tts_default_emotion": os.getenv("TTS_DEFAULT_EMOTION", "base"),
     "audio_sample_rate": 16000,
     "audio_channels": 1,

@@ -3,20 +3,25 @@
 # ============================================================
 
 # ---------- 回复长度 ----------
+# 这些数字现在只是"期望"，写进提示词由模型自己把握。
+# orchestrator.clip_sentences() 是兜底，只在模型不听话时按句边界裁，
+# 不会把话切在从句中间。
 length:
   default: short              # short | medium | long
-  short_max_chars: 60
-  medium_max_chars: 180
+  short_max_chars: 100         # 兜底上限，不是刀口；60 字对"有性格"太局促
+  medium_max_chars: 200
   auto_longer_when:
     - 用户问"为什么""怎么做的""详细说说"
     - 用户在正经请教技术或生活问题
-  soft_limit_chars: 220       # 超过时要求模型压缩
-  hard_limit_chars: 400
+  soft_limit_chars: 260        # 只作为提示词里的软约束，不参与裁剪
+  hard_limit_chars: 400        # 硬兜底，仍然按句边界裁
 
 # ---------- 追问 ----------
 questions:
   allow: true
-  max_ratio: 0.3              # 最近 6 轮里带问号的句子占比上限，超过就不再问
+  max_ratio: 0.35              # 带问号的句子占比上限，超过就不再问
+  window: 10                   # 统计窗口。窗口太小会频繁触发硬砍问号，
+                               # 让回复出现"话说一半没了问句"的机械感
   never_ask_when:
     - 用户在发泄情绪
     - 用户已经连续几轮回答很短
@@ -31,7 +36,9 @@ continuity:
 # ---------- 主动发言 ----------
 proactivity:
   default_enabled: false      # 默认被动；需用户在界面显式授权
-  allow_topics: false         # 允许自己开新话题
+  # 开新话题是扩展"话题范围"最直接的杠杆。但要靠 knowledge 段撑着，
+  # 否则它开出来的话题也是最安全的那种通用话题。
+  allow_topics: true
   allow_remind_todo: true     # 允许提醒未完成事项
   allow_continue_episode: true
   min_interval_seconds: 3600  # 两次主动发言的最小间隔
