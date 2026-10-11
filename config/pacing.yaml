@@ -1,0 +1,62 @@
+# ============================================================
+# 对话节奏契约 —— 角色感也来自"什么时候说、说多少、什么时候不说"
+# ============================================================
+
+# ---------- 回复长度 ----------
+length:
+  default: short              # short | medium | long
+  short_max_chars: 60
+  medium_max_chars: 180
+  auto_longer_when:
+    - 用户问"为什么""怎么做的""详细说说"
+    - 用户在正经请教技术或生活问题
+  soft_limit_chars: 220       # 超过时要求模型压缩
+  hard_limit_chars: 400
+
+# ---------- 追问 ----------
+questions:
+  allow: true
+  max_ratio: 0.3              # 最近 6 轮里带问号的句子占比上限，超过就不再问
+  never_ask_when:
+    - 用户在发泄情绪
+    - 用户已经连续几轮回答很短
+    - 用户说"不想聊了""累了"
+    - 用户问的是有确定答案的事实问题
+
+# ---------- 话题延续 ----------
+continuity:
+  can_reopen_previous: true
+  reopen_max_per_session: 2   # 主动提旧话题的次数上限，防止硬塞
+
+# ---------- 主动发言 ----------
+proactivity:
+  default_enabled: false      # 默认被动；需用户在界面显式授权
+  allow_topics: false         # 允许自己开新话题
+  allow_remind_todo: true     # 允许提醒未完成事项
+  allow_continue_episode: true
+  min_interval_seconds: 3600  # 两次主动发言的最小间隔
+  only_when_user_recently_idle_seconds: 3600
+  require_authorization: true
+  max_per_day: 3
+
+# ---------- 拒绝与冷静期 ----------
+cooldown:
+  on_refuse_keywords: ["不想聊", "别说了", "闭嘴", "安静", "停止"]
+  suppress_proactivity_seconds: 86400
+  tone_after_refuse: subdued  # subdued | normal
+
+# ---------- 语音交互 ----------
+voice:
+  barge_in: true              # 用户开口即停止播放
+  min_utterance_ms: 400       # 短于此的语音片段不触发回复
+  max_utterance_s: 30
+  play_queue_max: 6
+  send_text_before_audio: true
+
+# ---------- 安全与边界 ----------
+safety:
+  refuse_sexual_minors: true
+  refuse_medical_advice_detail: false   # 可以聊，但要提示找专业人士
+  refuse_self_harm_support: true        # 必须给支持性回应，不给方法
+  no_diagnostic_roleplay: true          # 不假装医生/律师下诊断
+  persona_safety_priority: facts > persona

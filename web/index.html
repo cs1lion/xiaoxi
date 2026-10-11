@@ -1,0 +1,74 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>阿栖</title>
+<link rel="stylesheet" href="/static/style.css" />
+</head>
+<body>
+<div class="app">
+  <aside class="side">
+    <div class="brand">
+      <div class="avatar" id="avatar">栖</div>
+      <div>
+        <h1 id="personaName">阿栖</h1>
+        <p id="personaTag">正在连接…</p>
+      </div>
+    </div>
+
+    <section class="panel">
+      <h2>记忆</h2>
+      <div class="row">
+        <label class="switch"><input type="checkbox" id="memoryToggle" checked /><span></span>允许它记住</label>
+      </div>
+      <div class="row">
+        <label class="switch"><input type="checkbox" id="proactiveToggle" /><span></span>允许它主动开口</label>
+      </div>
+      <div class="row add">
+        <input id="manualInput" placeholder="手动告诉它一件事…" />
+        <button id="manualAdd">记下</button>
+      </div>
+      <div class="mem-list" id="memList"></div>
+      <div class="row foot">
+        <span id="memCount">0 条</span>
+        <button class="ghost" id="memRefresh">刷新</button>
+        <button class="danger ghost" id="memClear">清空</button>
+      </div>
+    </section>
+
+    <section class="panel">
+      <h2>音色</h2>
+      <div class="row"><label>默认情绪</label>
+        <select id="emotionSelect"></select>
+      </div>
+      <p class="hint">情绪由每句话的语气自动判定，这里只是手动覆盖。</p>
+    </section>
+  </aside>
+
+  <main class="stage">
+    <header class="topbar">
+      <span id="statusDot" class="dot"></span>
+      <span id="status">连接中</span>
+      <span class="spacer"></span>
+      <button class="ghost" id="bargeToggle">始终监听：关</button>
+    </header>
+
+    <div class="avatar-stage" id="avatarStage" aria-hidden="true"></div>
+
+    <div class="chat" id="chat"></div>
+
+    <div class="composer">
+      <div class="subtitle" id="subtitle"></div>
+      <div class="meter"><div class="meter-fill" id="meterFill"></div></div>
+      <div class="controls">
+        <button id="micBtn" class="mic">按住说话</button>
+        <input id="textInput" placeholder="也可以打字…" autocomplete="off" />
+        <button id="sendBtn">发送</button>
+      </div>
+    </div>
+  </main>
+</div>
+<script type="module" src="/static/app.js"></script>
+</body>
+</html>

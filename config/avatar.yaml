@@ -1,0 +1,296 @@
+# ============================================================
+# 姿态契约 —— 把"活着的形象"写成可观察、可验收的规则
+#
+# 这一层只描述"某个时刻每个参数该是多少"，不含任何渲染代码。
+# 驱动层（idle/lip/emotion/gesture）负责产出参数，svg.js 负责画。
+# 参数名沿用 Live2D ParameterModel 命名，将来换 Live2D/VRM 只要重写
+# render 一层，配置和驱动可以整体搬过去。
+#
+# 约定：所有参数为 -1..1 或 0..1 的归一值，0 = 静止/中位。
+# ============================================================
+
+# ---------- 外观（交给 svg.js 配色） ----------
+look:
+  skin: "#f6ddd2"
+  skin_shade: "#e8c3b4"
+  hair: "#4a4256"
+  hair_hi: "#6b6079"
+  blush: "#f0908a"
+  lip: "#c96a63"
+  mouth_in: "#8e3b3b"
+  cloth: "#5b6bb5"
+  cloth_dark: "#46528c"
+  eye: "#3b3348"
+  bg_glow: "#5aa7c9"
+
+# ---------- 中位姿态（所有驱动叠加前的基准） ----------
+neutral:
+  ParamAngleX: 0.0
+  ParamAngleY: 0.0
+  ParamAngleZ: 0.0
+  ParamBodyAngleX: 0.0
+  ParamBodyAngleZ: 0.0
+  ParamBodyLeanX: 0.0
+  ParamEyeLOpen: 1.0
+  ParamEyeROpen: 1.0
+  ParamEyeBallX: 0.0
+  ParamEyeBallY: 0.0
+  ParamBrowLY: 0.0
+  ParamBrowRY: 0.0
+  ParamBrowLAngle: 0.0
+  ParamBrowRAngle: 0.0
+  ParamBrowLForm: 0.0
+  ParamBrowRForm: 0.0
+  ParamMouthOpenY: 0.0
+  ParamMouthForm: 0.0
+  ParamMouthRound: 0.0
+  ParamMouthY: 0.0
+  ParamCheek: 0.0
+  ParamBreath: 0.0
+
+# ---------- 响应速度：每个参数跟随目标的一阶时间常数（秒） ----------
+# 越大越迟钝。嘴要跟得上音频，头和身体要拖在后面。
+response:
+  ParamMouthOpenY: 0.022
+  ParamMouthForm: 0.035
+  ParamMouthRound: 0.035
+  ParamMouthY: 0.05
+  ParamEyeLOpen: 0.028
+  ParamEyeROpen: 0.028
+  ParamEyeBallX: 0.07
+  ParamEyeBallY: 0.07
+  ParamBrowLY: 0.09
+  ParamBrowRY: 0.09
+  ParamBrowLAngle: 0.11
+  ParamBrowRAngle: 0.11
+  ParamBrowLForm: 0.09
+  ParamBrowRForm: 0.09
+  ParamAngleX: 0.10
+  ParamAngleY: 0.09
+  ParamAngleZ: 0.13
+  ParamBodyAngleX: 0.22
+  ParamBodyAngleZ: 0.26
+  ParamBodyLeanX: 0.24
+  ParamCheek: 0.14
+  ParamBreath: 0.25
+
+# ---------- 表情（情绪标签 -> 目标姿态偏移，叠加在中位之上） ----------
+# 键名和 persona.yaml 的 tts_emotions 一一对应。
+# shift 是目标值；blend 是过渡时长（秒），到点后保持直到情绪变化。
+emotions:
+  base:
+    blend: 0.6
+    shift: { ParamMouthForm: 0.18, ParamEyeLOpen: 0.97, ParamEyeROpen: 0.97 }
+
+  调侃:
+    blend: 0.35
+    shift:
+      ParamBrowLY: 0.42
+      ParamBrowLAngle: -0.35
+      ParamBrowRForm: -0.30
+      ParamAngleZ: -0.20
+      ParamAngleY: -0.10
+      ParamEyeLOpen: 0.80
+      ParamEyeROpen: 0.84
+      ParamMouthForm: 0.42
+      ParamCheek: 0.25
+
+  得意:
+    blend: 0.30
+    shift:
+      ParamBrowLY: 0.18
+      ParamBrowRY: 0.22
+      ParamBrowLForm: 0.20
+      ParamBrowRForm: 0.24
+      ParamAngleY: -0.34
+      ParamAngleZ: 0.16
+      ParamEyeLOpen: 0.66
+      ParamEyeROpen: 0.62
+      ParamMouthForm: 0.52
+      ParamCheek: 0.40
+
+  认真:
+    blend: 0.40
+    shift:
+      ParamBrowLForm: 0.62
+      ParamBrowRForm: 0.62
+      ParamBrowLY: -0.34
+      ParamBrowRY: -0.30
+      ParamEyeLOpen: 1.0
+      ParamEyeROpen: 1.0
+      ParamMouthForm: -0.10
+      ParamAngleY: 0.14
+
+  收敛:
+    blend: 0.55
+    shift:
+      ParamBrowLY: 0.34
+      ParamBrowLAngle: 0.40
+      ParamBrowRY: 0.30
+      ParamBrowRAngle: 0.36
+      ParamEyeBallY: -0.45
+      ParamEyeLOpen: 0.74
+      ParamEyeROpen: 0.76
+      ParamAngleY: 0.30
+      ParamMouthForm: -0.22
+      ParamMouthY: -0.20
+
+  轻微不服:
+    blend: 0.40
+    shift:
+      ParamBrowLY: -0.26
+      ParamBrowRForm: 0.40
+      ParamAngleX: 0.26
+      ParamAngleZ: 0.14
+      ParamAngleY: -0.20
+      ParamEyeBallX: 0.55
+      ParamEyeLOpen: 0.72
+      ParamEyeROpen: 0.68
+      ParamMouthForm: -0.34
+      ParamMouthY: 0.12
+
+  变小气:
+    blend: 0.6
+    shift:
+      ParamBrowLY: -0.14
+      ParamBrowRY: -0.10
+      ParamAngleX: -0.30
+      ParamAngleZ: -0.10
+      ParamEyeBallX: -0.62
+      ParamEyeBallY: 0.18
+      ParamEyeLOpen: 0.82
+      ParamEyeROpen: 0.78
+      ParamMouthForm: -0.28
+      ParamMouthY: -0.14
+
+# ---------- 待机：没有动作指令时自己该有的微动 ----------
+# 程序化生成，参数含义见 web/avatar/drivers/idle.js；
+# sway / speaking_sway 的数值是写进 ParamAngle* 的归一量（±1 = 满量程）。
+idle:
+  blink:
+    mean_interval: 3.4      # 秒（泊松过程均值）
+    min_interval: 0.9
+    double_prob: 0.18       # 概率接一次快速二连眨
+    close_ms: 90            # 闭上 / 睁开各一次的时间
+    hold_ms: 34             # 完全闭着的保持时间
+  saccade:
+    mean_interval: 1.9
+    max_shift: 0.55
+    duration: 0.22
+  breath:
+    period: 4.1
+    depth: 1.0              # ParamBreath 归一量
+  sway:
+    # 低频噪声驱动的微小头动，避免"死人的微动"
+    amp_x: 0.12
+    amp_y: 0.085
+    speed_x: 0.16
+    speed_y: 0.13
+  speaking_sway:
+    # 说话时头随音频包络轻微律动（rhythmic head motion 的廉价版）
+    amp: 0.18
+    freq: 2.7
+
+# ---------- 手势轨道：一次性动作 ----------
+# at   = 轨道内起始秒
+# dur  = 从当前值过渡到该关键帧所需秒数（缓入缓出）
+# priority 越大越难被打断；同轨播放，前一轨可被更高优先级打断。
+gestures:
+  nod:
+    priority: 40
+    cooldown: 1.6
+    keys:
+      - { at: 0.00, dur: 0.09, params: { ParamAngleY: 0.30 } }
+      - { at: 0.09, dur: 0.13, params: { ParamAngleY: -0.22 } }
+      - { at: 0.22, dur: 0.10, params: { ParamAngleY: 0.24 } }
+      - { at: 0.32, dur: 0.18, params: { ParamAngleY: 0.00 } }
+
+  shake:
+    priority: 40
+    cooldown: 1.8
+    keys:
+      - { at: 0.00, dur: 0.08, params: { ParamAngleZ: 0.32 } }
+      - { at: 0.08, dur: 0.11, params: { ParamAngleZ: -0.28 } }
+      - { at: 0.19, dur: 0.11, params: { ParamAngleZ: 0.20 } }
+      - { at: 0.30, dur: 0.16, params: { ParamAngleZ: 0.00 } }
+
+  think:
+    # 收到"在想…"后挂住，直到文本到达由 gesture.js 释放
+    priority: 55
+    cooldown: 2.5
+    hold: true
+    keys:
+      - { at: 0.00, dur: 0.22, params: { ParamAngleZ: -0.26, ParamAngleX: 0.18 } }
+      - { at: 0.22, dur: 0.30, params: { ParamAngleY: -0.16, ParamBrowLForm: 0.45 } }
+      - { at: 0.52, dur: 0.55, params: { ParamEyeBallX: 0.52, ParamEyeBallY: -0.42, ParamBrowRForm: 0.40 } }
+      - { at: 1.60, dur: 0.45, params: { ParamEyeBallX: 0.10, ParamEyeBallY: 0.00 } }
+
+  listen:
+    # 用户说话时：微微前倾 + 认真看着。hold 由前端控制
+    priority: 30
+    cooldown: 0.8
+    hold: true
+    keys:
+      - { at: 0.00, dur: 0.30, params: { ParamBodyLeanX: 0.22, ParamAngleY: 0.14 } }
+      - { at: 0.30, dur: 0.40, params: { ParamAngleY: -0.06, ParamBrowLForm: 0.22, ParamBrowRForm: 0.22 } }
+
+  surprise:
+    priority: 70
+    cooldown: 2.2
+    keys:
+      - { at: 0.00, dur: 0.07, params: { ParamBrowLY: 0.85, ParamBrowRY: 0.85, ParamEyeLOpen: 1.0, ParamEyeROpen: 1.0 } }
+      - { at: 0.07, dur: 0.11, params: { ParamAngleY: -0.42, ParamAngleX: 0.14, ParamMouthOpenY: 0.42, ParamMouthForm: -0.12 } }
+      - { at: 0.18, dur: 0.34, params: { ParamAngleY: 0.05, ParamBrowLY: 0.22, ParamBrowRY: 0.22, ParamMouthOpenY: 0.04 } }
+
+  laugh:
+    priority: 65
+    cooldown: 2.6
+    keys:
+      - { at: 0.00, dur: 0.08, params: { ParamAngleY: -0.30, ParamEyeLOpen: 0.12, ParamEyeROpen: 0.12 } }
+      - { at: 0.08, dur: 0.10, params: { ParamAngleY: 0.22, ParamAngleZ: 0.20, ParamMouthOpenY: 0.55, ParamMouthForm: 0.55 } }
+      - { at: 0.18, dur: 0.09, params: { ParamAngleY: -0.16, ParamAngleZ: -0.14, ParamMouthOpenY: 0.62 } }
+      - { at: 0.27, dur: 0.10, params: { ParamAngleY: 0.14, ParamAngleZ: 0.10, ParamMouthOpenY: 0.50 } }
+      - { at: 0.37, dur: 0.30, params: { ParamAngleY: 0.0, ParamAngleZ: 0.0, ParamEyeLOpen: 0.85, ParamEyeROpen: 0.85, ParamMouthOpenY: 0.02 } }
+
+  lean_in:
+    priority: 35
+    cooldown: 4.0
+    keys:
+      - { at: 0.00, dur: 0.45, params: { ParamBodyLeanX: 0.34, ParamAngleY: 0.18, ParamAngleX: 0.10 } }
+      - { at: 1.30, dur: 0.60, params: { ParamBodyLeanX: 0.0, ParamAngleY: 0.0, ParamAngleX: 0.0 } }
+
+  look_away:
+    # 想起什么事：视线先飘走再回来
+    priority: 25
+    cooldown: 5.0
+    keys:
+      - { at: 0.00, dur: 0.28, params: { ParamEyeBallX: -0.72, ParamEyeBallY: -0.30, ParamAngleX: -0.18 } }
+      - { at: 0.80, dur: 0.18, params: { ParamEyeBallX: -0.20, ParamEyeBallY: 0.10 } }
+      - { at: 1.05, dur: 0.40, params: { ParamEyeBallX: 0.0, ParamEyeBallY: 0.0, ParamAngleX: 0.0 } }
+
+  shrug:
+    priority: 45
+    cooldown: 6.0
+    keys:
+      - { at: 0.00, dur: 0.16, params: { ParamBrowLY: 0.50, ParamBrowRY: 0.50, ParamAngleZ: -0.14 } }
+      - { at: 0.16, dur: 0.34, params: { ParamBrowLY: 0.34, ParamBrowRY: 0.38, ParamAngleY: 0.12, ParamMouthForm: 0.30 } }
+      - { at: 0.62, dur: 0.40, params: { ParamBrowLY: 0.0, ParamBrowRY: 0.0, ParamAngleY: 0.0, ParamAngleZ: 0.0 } }
+
+# ---------- 自动手势触发器 ----------
+# on_*: 按 WebSocket 消息类型触发
+# text: 按回复文本特征触发（longest-first 匹配，见 drivers/gesture.js）
+triggers:
+  on_thinking: think
+  on_user_speech: listen
+  on_emotion:
+    # 某些情绪开口时先有个小动作；chance 防止每次都演一遍
+    laugh:
+      emotions: [调侃, 得意]
+      chance: 0.45
+  text:
+    laugh: ["哈哈", "嘿嘿", "hhh"]
+    surprise: ["！", "!!", "？"]
+    nod: ["嗯", "对", "好", "确实", "是的"]
+    shake: ["不对", "不是", "错", "才不"]
+    shrug: ["随便", "都行", "无所谓", "你决定"]
+  idle_look_away_every: 11.0          # 待机多久飘一次视线（秒）

@@ -1,0 +1,95 @@
+# ============================================================
+# 记忆契约 —— 先定义信息怎么用，再决定存哪
+# 每种类型回答六个问题：什么值得记 / 何时存 / 何时用 / 冲突 / 不确定 / 用户管理
+# ============================================================
+
+# 统一原则：
+#   没有检索到记忆 ≠ 这件事没发生过 → 允许说"我可能忘了"
+#   检索到相关记忆 ≠ 它仍然准确   → 允许"你之前说过 X，现在还是吗"
+#   必须区分：你明确说过 / 我推测 / 我不确定
+
+kinds:
+  - name: fact          # 用户事实与偏好
+    desc: 关于用户的、可被明确陈述的事实或偏好
+    worth: >
+      用户明确说出的偏好/习惯/称呼；重复出现两次以上的倾向；
+      用户明确要求"记住这个"
+    not_worth: >
+      一次性的情绪、当天的时间地点、随口的口头禅、从上下文猜出的爱好
+    when_use: >
+      与当前话题相关时才用；也可以在用户提到相关领域时主动引用一次。
+      绝不在无关话题里硬塞个人信息。
+    inject_as: stated
+    importance_default: 0.5
+
+  - name: episode       # 共同经历
+    desc: 我们一起聊过、发生过的事
+    worth: 用户明确复述的互动或事件、我们达成过的约定
+    not_worth: 系统层面的元信息、每轮闲聊的原文
+    when_use: 用户提到相关线索时接续；用户问"我们之前聊过什么"时使用
+    inject_as: stated
+    importance_default: 0.45
+
+  - name: todo          # 未完成事项
+    desc: 想聊的话题、正在推进的计划、答应过要做的事
+    worth: 明确提到的计划、约定、"下次再聊"
+    not_worth: 已经完成的事（完成后转为 episode，不主动再提）
+    when_use: 相关话题出现时，或在允许的主动发言场景里提醒一次
+    inject_as: stated
+    importance_default: 0.6
+
+  - name: self_state    # 角色自身连续性
+    desc: 它自己的偏好、做过的承诺、对用户的看法
+    worth: 角色明确表达过的立场、对用户的称呼、承诺
+    not_worth: 每句的情绪标签
+    when_use: 需要保持一致性、或用户质疑"你上次不是这么说的"时
+    inject_as: stated
+    importance_default: 0.5
+
+# ---------- 写入策略 ----------
+write:
+  mode: incremental          # incremental=每轮结束即抽取；end_of_session=会话结束统一整理
+  extract_every_n_turns: 1
+  max_infer_per_session: 8   # "我推测"的条数上限，防止把猜测固化成事实
+  infer_decay_hours: 72      # 推测超过该时长未复述则不再注入
+  allow_self_write: true
+
+# ---------- 冲突处理 ----------
+conflict:
+  strategy: supersede         # 新信息覆盖旧信息，但旧信息保留在历史里
+  keep_history: true
+  on_user_correction: >
+    用户说"我早就不玩 X 了"这类纠正时，直接标记旧记忆为 superseded，
+    不再注入，但保留可追溯记录。
+  on_contradiction_detected:
+    - "在回复里承认：'你之前说过 X，现在看是不太一样了'"
+    - "不要私自把旧记忆改掉成新值"
+
+# ---------- 不确定怎么办 ----------
+uncertainty:
+  on_missing:
+    - 允许说"这个我好像没印象了，你再说一遍？"
+    - 禁止脑补共同经历
+  on_low_confidence:
+    - 注入时标注"（不太确定）"，让角色有机会求证
+  require_confirmation_before_promote: true
+
+# ---------- 用户如何管理记忆 ----------
+user_control:
+  can_list: true
+  can_correct: true
+  can_delete: true
+  delete_semantics: hard      # hard=真删除：行、索引、摘要、派生统计全部清除
+  can_export: true
+  can_disable_memory_globally: true
+  autosave_prompt: true       # 新增重要记忆时用一句话告知用户，不是弹窗
+
+# ---------- 检索策略 ----------
+retrieval:
+  top_k: 6
+  recency_half_life_days: 14
+  importance_weight: 0.35
+  recency_weight: 0.25
+  similarity_weight: 0.40
+  min_score: 0.12             # 低于此分视为"没找到"，宁可不注入
+  max_inject_chars: 600

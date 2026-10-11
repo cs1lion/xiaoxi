@@ -1,0 +1,23 @@
+[project]
+name = "chat-companion"
+version = "0.1.0"
+description = "有性格、有记忆、支持语音的角色聊天系统"
+requires-python = ">=3.11"
+dependencies = [
+    "fastapi>=0.115",
+    "uvicorn[standard]>=0.30",
+    "httpx>=0.27",
+    "pyyaml>=6.0",
+    "python-dotenv>=1.0",
+    "numpy>=1.26",
+    "sounddevice>=0.4.6",
+    "faster-whisper>=1.0.3",
+    "ctranslate2==4.5.0",
+    "setuptools<81",
+    "edge-tts>=6.1.10",
+    "scikit-learn>=1.5",
+    "python-multipart>=0.0.9",
+]
+
+[tool.uv]
+package = false
