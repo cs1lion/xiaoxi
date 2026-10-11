@@ -114,6 +114,39 @@ export class IdleDriver {
     this._moveTo(t.x, t.y, this.cfg.gaze.move.duration);
   }
 
+  /* 动态注视目标：角色看向指定位置（如鼠标）。
+   * 这会覆盖当前的注视点，直到下一个 setGaze 调用。 */
+  /* 动态注视目标：角色看向指定位置（如鼠标）。
+   * 这会覆盖当前的注视点，直到下一个 setGaze 调用。 */
+  setGazeTarget(x, y) {
+    this.targetName = "custom";
+    this._moveTo(x, y, 0.12);
+  }
+
+  /* 启用/禁用鼠标跟随模式。
+   * 启用后，每帧根据鼠标位置自动更新注视目标。 */
+  setMouseFollow(enabled) {
+    this.mouseFollow = !!enabled;
+    if (enabled) {
+      this.targetName = "custom";
+    }
+  }
+
+  _updateMouseFollow(dt) {
+    if (!this.mouseFollow || !this.mousePos) return;
+    // 直接设置目标，不需要平滑过渡（直接跟随）
+    this.gazeToX = this.mousePos.x;
+    this.gazeToY = this.mousePos.y;
+    this.gazeT = 0;
+    this.gazeDur = 0.08; // 更快的跟随速度
+    this.targetName = "custom";
+    this.gazeOwned = false; // 允许被其他驱动覆盖
+  }
+
+  setMousePos(x, y) {
+    this.mousePos = { x, y };
+  }
+
   /* 落点之后的微注视抖动：围绕 target 游走，不离开注视对象 */
   _drift() {
     const t = this.cfg.gaze.targets[this.targetName];
@@ -134,6 +167,18 @@ export class IdleDriver {
     this.gazeToY = y;
     this.gazeT = 0;
     this.gazeDur = Math.max(0.02, duration);
+  }
+
+  /* 鼠标跟随：直接把注视目标设为鼠标位置，更快的响应。 */
+  _updateMouseFollow(dt) {
+    if (!this.mousePos) return;
+    // 直接设置目标为鼠标位置，使用更短的过渡时间
+    this.gazeToX = this.mousePos.x;
+    this.gazeToY = this.mousePos.y;
+    this.gazeT = 0;
+    this.gazeDur = 0.08; // 更快的跟随速度
+    this.targetName = "custom";
+    this.gazeOwned = false; // 允许被其他驱动覆盖
   }
 
   update(dt, { speaking = false, rms = 0 } = {}) {
@@ -173,10 +218,15 @@ export class IdleDriver {
 
     /* --- 注视点 --- */
     if (!this.gazeOwned) {
-      this.nextMicro -= dt;
-      if (this.nextMicro <= 0) {
-        this._drift();
-        this.nextMicro = this._sampleMicro();
+      // 鼠标跟随模式
+      if (this.mouseFollow) {
+        this._updateMouseFollow(dt);
+      } else {
+        this.nextMicro -= dt;
+        if (this.nextMicro <= 0) {
+          this._drift();
+          this.nextMicro = this._sampleMicro();
+        }
       }
       if (this.gazeT < 1) {
         this.gazeT = Math.min(1, this.gazeT + dt / this.gazeDur);

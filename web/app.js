@@ -437,6 +437,38 @@ el("faceToggle").onclick = async () => {
   }
 };
 
+let followActive = false;
+el("followToggle").onclick = async () => {
+  if (followActive) {
+    avatar.setMouseFollow(false);
+    followActive = false;
+    el("followToggle").textContent = "视线跟随：关";
+    return;
+  }
+  avatar.setMouseFollow(true);
+  followActive = true;
+  el("followToggle").textContent = "视线跟随：开";
+};
+
+/* 用户互动反馈：角色对用户的操作做出反应。
+ * 鼠标移动时角色看向鼠标，点击时角色有反应。 */
+document.addEventListener("mousemove", (e) => {
+  const stage = document.querySelector(".avatar-stage");
+  if (!stage) return;
+  const rect = stage.getBoundingClientRect();
+  const x = ((e.clientX - rect.left) / rect.width) * 2 - 1;
+  const y = ((e.clientY - rect.top) / rect.height) * 2 - 1;
+  avatar.onUserInteraction("mousemove", x, y);
+});
+document.addEventListener("click", (e) => {
+  const stage = document.querySelector(".avatar-stage");
+  if (!stage) return;
+  const rect = stage.getBoundingClientRect();
+  const x = ((e.clientX - rect.left) / rect.width) * 2 - 1;
+  const y = ((e.clientY - rect.top) / rect.height) * 2 - 1;
+  avatar.onUserInteraction("click", x, y);
+});
+
 function pushConfig() {
   ws.send(
     JSON.stringify({

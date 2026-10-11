@@ -117,6 +117,25 @@ this.idle = new IdleDriver({ ...this.cfg.idle, gaze: this.cfg.gaze });
     this._outBuf = node ? new Float32Array(node.fftSize) : null;
   }
 
+  /* 用户互动反馈：角色对用户的操作做出反应。
+   * type: "mousemove" | "click" | "scroll"
+   * x, y: 鼠标位置（归一化到 -1..1） */
+  onUserInteraction(type, x, y) {
+    if (type === "mousemove") {
+      // 角色看向鼠标
+      this.idle.setGazeTarget(x, y);
+      this.idle.setMousePos(x, y);
+    } else if (type === "click") {
+      // 点击时角色有反应：快速转头看一眼，然后回来
+      this.gesture.play("look_at_user", this.clock);
+    }
+  }
+
+  /* 开启/关闭鼠标跟随模式。 */
+  setMouseFollow(enabled) {
+    this.idle.setMouseFollow(enabled);
+  }
+
   /* 没有 analyser（静音 TTS、测试驱动）时返回 null——"没有包络数据"
    和"包络为零"是两回事，不能当成同一件事。 */
   _readRms() {
