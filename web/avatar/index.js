@@ -148,48 +148,53 @@ this.emotion.set("base");
 
   /* ---- WebSocket 消息入口 ---- */
 
+  /* 事件顺序：asr -> thinking -> emotion -> text_delta* -> audio* -> done
+   * 情绪标签先于正文到达，所以表情可以比声音早起；hold 轨道必须在
+   * emotion 上就松手，否则 thinking 的姿势会一直挂到下一轮。 */
   onMessage(msg) {
-    if (!this.cfg) return;
+    if (!this.cfg || !msg || typeof msg !== "object") return;
     const t = this.triggers;
     switch (msg.type) {
-      case "thinking":
-        // 松开倾听姿势，换成思考
-        this.gesture.stop(t.on_user_speech);
-        this.gesture.play(t.on_thinking, this.clock);
-        break;
       case "recording":
+        // 你在说话：起倾听姿势；松手了收掉
         if (msg.state) this.gesture.play(t.on_user_speech, this.clock);
         else this.gesture.stop(t.on_user_speech);
         break;
       case "asr":
-      case "text":
-        // 文本到了，思考/倾听姿势收掉
+        this.gesture.stop(t.on_user_speech);
+        break;
+      case "thinking":
+        this.gesture.stop(t.on_user_speech);
+        this.gesture.play(t.on_thinking, this.clock);
+        break;
+      case "emotion":
+        this.setEmotion(msg.emotion || "base");
         this.gesture.stop(t.on_thinking);
         this.gesture.stop(t.on_user_speech);
+        break;
+      case "text_delta":
+        break;                 // 字幕的事，不进形象层
+      case "done":
+        // 完整文本到手，这时才有依据做文本特征手势
+        for (const name of this.gesture.matchText(msg.text)) {
+          this.gesture.play(name, this.clock);
+        }
         break;
       case "playback_stopped":
       case "interrupted":
         this.onBargeIn();
         break;
       default:
+        // 以后新增的消息类型走这里，忽略即可，不该让形象层崩掉
         break;
     }
 
-    /* 注视点跟着消息走：说话时看用户，你在说话时看向输入区。 */
+    /* 注视点跟着消息走：思考时飘开，开口说话时看回来。 */
     const gazeRules = (this.cfg.gaze && this.cfg.gaze.on_message) || {};
     if (msg.type === "recording") {
-      this.idle.setGaze(msg.state ? gazeRules.recording : gazeRules.text || "viewer");
+      this.idle.setGaze(msg.state ? gazeRules.recording : gazeRules.emotion || "viewer");
     } else if (gazeRules[msg.type]) {
       this.idle.setGaze(gazeRules[msg.type]);
-    }
-
-    if (msg.type !== "text") return;
-
-    // 文本一到就开始过渡表情，不必等音频；音频开始时再 setEmotion 一次是
-    // 无操作（emotion.set 对相同情绪返回 false），逐句情绪时则以音频为准。
-    this.setEmotion(msg.emotion || "base");
-    for (const name of this.gesture.matchText(msg.text)) {
-      this.gesture.play(name, this.clock);
     }
   }
 

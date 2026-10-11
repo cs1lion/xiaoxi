@@ -212,7 +212,7 @@ gaze:
   on_message:
     thinking: think
     recording: mic
-    text: viewer
+    emotion: viewer        # 情绪标签先于正文到达，开口说话前把视线收回来
     done: viewer
     playback_stopped: viewer
     interrupted: viewer

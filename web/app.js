@@ -230,7 +230,13 @@ ws.onopen = () => {
 };
 
 ws.onmessage = async (event) => {
-  const msg = JSON.parse(event.data);
+  let msg;
+  try {
+    msg = JSON.parse(event.data);
+  } catch (_) {
+    return;                       // 后端发了非 JSON，不该让整个前端挂掉
+  }
+  if (!msg || typeof msg !== "object" || typeof msg.type !== "string") return;
   avatar.onMessage(msg);
   switch (msg.type) {
     case "ready":
@@ -249,21 +255,30 @@ ws.onmessage = async (event) => {
       currentBubble.classList.add("thinking");
       setStatus("在想…", "busy");
       break;
-    case "text":
-      pendingText = msg.text;
-      subtitle.textContent = msg.text;
-      if (!currentBubble) currentBubble = addBubble("bot", msg.text);
-      else {
-        currentBubble.textContent = msg.text;
+    case "emotion":
+      // 情绪先于正文到达，正好用来提前准备音色/立绘表情
+      if (msg.emotion) avatar.emotion.set(msg.emotion);
+      break;
+    case "text_delta":
+      // 流式增量：字幕跟着生成走，不用等整句
+      if (currentBubble && currentBubble.classList.contains("thinking")) {
+        currentBubble.textContent = "";
         currentBubble.classList.remove("thinking");
       }
+      pendingText = (pendingText || "") + (msg.delta || "");
+      if (currentBubble) {
+        currentBubble.textContent = pendingText;
+        chat.scrollTop = chat.scrollHeight;
+      }
+      subtitle.textContent = pendingText;
       break;
     case "audio":
-      await enqueueAudio(msg.data, msg.text, msg.emotion);
+      if (msg.data) await enqueueAudio(msg.data, msg.text, msg.emotion);
       break;
     case "done":
       setStatus("在线", "on");
       subtitle.textContent = "";
+      if (currentBubble && msg.text) currentBubble.textContent = msg.text;
       setTimeout(() => { if (!playing && !recording && alwaysListen) startRecording(); }, 400);
       break;
     case "interrupted":
@@ -271,12 +286,18 @@ ws.onmessage = async (event) => {
       setStatus("在线", "on");
       break;
     case "memory_notice":
-      showMemoryNotice(msg.items);
-      loadMemories();
+      if (msg.items) {
+        showMemoryNotice(msg.items);
+        loadMemories();
+      }
       break;
     case "error":
       setStatus("出错了", "");
-      subtitle.textContent = msg.message;
+      subtitle.textContent = msg.message || "出错了";
+      break;
+    default:
+      // 新增的消息类型会落到这里。以后加类型时记得同步 avatar.onMessage，
+      // 否则形象层会漏掉这一类事件——scripts/check_protocol.py 会查出来。
       break;
   }
 };
