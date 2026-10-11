@@ -411,6 +411,32 @@ el("bargeToggle").onclick = () => {
   if (alwaysListen && !recording) startRecording();
 };
 
+/* 面部反应：角色镜像用户的表情/视线/头部动作。
+   默认关闭（隐私），需要用户显式授权摄像头。 */
+let faceActive = false;
+let faceVideo = null;
+el("faceToggle").onclick = async () => {
+  if (faceActive) {
+    avatar.face.stop();
+    faceActive = false;
+    if (faceVideo) { faceVideo.remove(); faceVideo = null; }
+    el("faceToggle").textContent = "面部反应：关";
+    return;
+  }
+  faceVideo = document.createElement("video");
+  faceVideo.style.display = "none";
+  document.body.appendChild(faceVideo);
+  try {
+    await avatar.face.start(faceVideo);
+    faceActive = true;
+    el("faceToggle").textContent = "面部反应：开";
+  } catch (err) {
+    console.warn("面部反应启动失败：", err);
+    if (faceVideo) { faceVideo.remove(); faceVideo = null; }
+    el("faceToggle").textContent = "面部反应：关（摄像头不可用）";
+  }
+};
+
 function pushConfig() {
   ws.send(
     JSON.stringify({

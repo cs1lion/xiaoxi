@@ -15,9 +15,13 @@ import { IdleDriver } from "./drivers/idle.js";
 import { LipDriver } from "./drivers/lip.js";
 import { EmotionDriver } from "./drivers/emotion.js";
 import { GestureDriver } from "./drivers/gesture.js";
+import { FaceDriver } from "./drivers/face.js";
+import { BeatDriver } from "./drivers/beat.js";
+import { MotionMagic, getMotionProfile } from "./drivers/motion.js";
 import { SvgRig } from "./render/svg.js";
 
 const LAYERS = [
+  ["face", 5],
   ["idle", 10],
   ["emotion", 20],
   ["gesture", 30],
@@ -48,13 +52,17 @@ export class Avatar {
     for (const [name, priority] of LAYERS) this.rig.register(name, priority);
 
     // gaze 是顶层契约（"在看哪"不是"待机噪声"），要显式并进去
-    this.idle = new IdleDriver({ ...this.cfg.idle, gaze: this.cfg.gaze });
+this.idle = new IdleDriver({ ...this.cfg.idle, gaze: this.cfg.gaze });
     this.lip = new LipDriver();
     this.emotion = new EmotionDriver(this.cfg.emotions || {});
     this.gesture = new GestureDriver(this.cfg.triggers || {});
     this.gesture.setTracks(this.cfg.gestures || {});
     this.gesture.setTriggers(this.cfg.triggers || {});
-this.emotion.set("base");
+    this.face = new FaceDriver();
+    this.beat = new BeatDriver();
+    this.motion = new MotionMagic();
+    this.motion.setComponents(getMotionProfile("base"));
+    this.emotion.set("base");
 
     /* 配置晚于第一条音频帧到达时，这里补播 */
     for (const item of this._pending.splice(0)) {
@@ -169,11 +177,22 @@ this.emotion.set("base");
         break;
       case "emotion":
         this.setEmotion(msg.emotion || "base");
+        this.motion.setComponents(getMotionProfile(msg.emotion || "base"));
         this.gesture.stop(t.on_thinking);
         this.gesture.stop(t.on_user_speech);
         break;
       case "text_delta":
-        break;                 // 字幕的事，不进形象层
+        // 延迟标签：文本中的 [gesture:xxx] 在语音播放到对应位置时触发
+        if (msg.delta) {
+          const m = msg.delta.match(/\[gesture:(\w+)\]/);
+          if (m) {
+            const name = m[1];
+            if (this.gesture.tracks[name]) {
+              this.gesture.play(name, this.clock);
+            }
+          }
+        }
+        break;
       case "done":
         // 完整文本到手，这时才有依据做文本特征手势
         for (const name of this.gesture.matchText(msg.text)) {
@@ -222,6 +241,24 @@ this.emotion.set("base");
     rig.add("idle", "ParamAngleX", idleOut.swayX);
     rig.add("idle", "ParamAngleY", idleOut.swayY);
     rig.add("idle", "ParamAngleZ", idleOut.bob);
+
+    // Motion Magic：程序化动作生成，无限不循环
+    const motionOut = this.motion.update(dt);
+    if (motionOut) {
+      for (const [key, value] of Object.entries(motionOut)) {
+        rig.add("idle", key, value);
+      }
+    }
+
+    // 节拍同步：音频节拍驱动弹跳
+    const beatOut = this.beat.update(this.outAnalyser, dt);
+    if (beatOut.pulse > 0.01) {
+      rig.add("idle", "ParamAngleY", beatOut.pulse * 0.12);
+      rig.add("idle", "ParamBodyAngleX", beatOut.pulse * 0.08);
+    }
+
+    // 用户面部反应（优先级最低，其他层可以覆盖）
+    this.face.apply(rig);
 
     this.emotion.update(dt);
     const gazeShift = this.emotion.shift();
