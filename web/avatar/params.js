@@ -86,6 +86,44 @@ export function makeRng(seed = 0x2f6e2b1) {
   };
 }
 
+/* 二阶弹簧-阻尼，用来做次级运动（头发/呆毛/眉毛滞后于头）。
+ *
+ * 和 approach() 的区别：approach 是一阶低通，只能单调地"慢慢跟上"；
+ * 弹簧有二阶惯性，会滞后、会过冲、会回摆——这正是"活的"和"贴纸"的区别。
+ *
+ * 阻尼比 zeta = c / (2*sqrt(k))：
+ *   zeta < 1  欠阻尼，过冲（头发/呆毛要这个）
+ *   zeta = 1  临界阻尼，不超调
+ *
+ * 内部按 1/240s 细分子步跑半隐式欧拉：显式欧拉在高刚度下会发散，
+ * 而一帧的 dt 可能因为标签页切回来而很大。
+ */
+export class Spring {
+  constructor(stiffness = 90, damping = 12, value = 0) {
+    this.k = stiffness;
+    this.c = damping;
+    this.x = value;
+    this.v = 0;
+  }
+
+  step(target, dt) {
+    if (!(dt > 0)) return this.x;
+    let remain = Math.min(dt, 0.1);
+    while (remain > 1e-6) {
+      const h = remain > 1 / 240 ? 1 / 240 : remain;
+      this.v += (this.k * (target - this.x) - this.c * this.v) * h;
+      this.x += this.v * h;
+      remain -= h;
+    }
+    return this.x;
+  }
+
+  reset(value = 0) {
+    this.x = value;
+    this.v = 0;
+  }
+}
+
 /* 驱动仲裁：多个驱动往同一个参数上叠加偏移。
  *
  * 为什么是叠加而不是"高优先级覆盖"：眯眼(情绪) + 闭眼(眨眼) 必须能加成

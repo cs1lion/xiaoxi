@@ -9,7 +9,7 @@
  *   翻滚 AngleZ -> 直接旋转
  */
 
-import { clamp } from "../params.js";
+import { clamp, Spring } from "../params.js";
 
 const NS = "http://www.w3.org/2000/svg";
 const DEG = 180 / Math.PI;
@@ -109,6 +109,14 @@ export class SvgRig {
   constructor() {
     this.root = null;
     this.nodes = {};
+    /* 次级运动的弹簧。刻意比头软：zeta 越低甩得越明显。
+     * hair  zeta≈0.58 轻微过冲 / ahoge zeta≈0.41 明显甩动 / brow zeta≈0.77 几乎不超调 */
+    this.spring = {
+      hairX: new Spring(90, 11),
+      hairY: new Spring(78, 10),
+      ahoge: new Spring(55, 6),
+      brow: new Spring(170, 20),
+    };
   }
 
   mount(container, look = {}) {
@@ -161,17 +169,20 @@ export class SvgRig {
     const roll = el("g", {}, head);
     n.roll = roll;
 
-    /* 后发：从头顶顺着两侧垂到肩，带一点外扩的弧度 */
+    /* 后发：从头顶顺着两侧垂到肩。放进独立 group 走弹簧，
+       否则头一转头发是刚性跟上的，立刻出戏。 */
+    const hairLock = el("g", {}, roll);
+    n.hairLock = hairLock;
     el("path", {
       d: "M -100 -44 C -124 24 -112 128 -84 200 L -50 200 " +
          "C -76 126 -92 48 -84 -46 Z",
       fill: L.hair,
-    }, roll);
+    }, hairLock);
     el("path", {
       d: "M 100 -44 C 124 24 112 128 84 200 L 50 200 " +
          "C 76 126 92 48 84 -46 Z",
       fill: L.hair,
-    }, roll);
+    }, hairLock);
 
     /* 脸 */
     el("path", {
@@ -207,8 +218,11 @@ export class SvgRig {
                    "stroke-linecap": "round" }, features),
     ];
     n.browG = [];
+    /* 眉毛单独一层：低头/抬头时眉毛要比脸慢半拍才自然 */
+    const browLag = el("g", {}, features);
+    n.browLag = browLag;
     for (const side of [-1, 1]) {
-      n.browG.push(el("g", { transform: `translate(${side * EYE_X} ${EYE_Y})` }, features));
+      n.browG.push(el("g", { transform: `translate(${side * EYE_X} ${EYE_Y})` }, browLag));
     }
     n.browG[0].appendChild(n.brow[0]);
     n.browG[1].appendChild(n.brow[1]);
@@ -262,14 +276,38 @@ export class SvgRig {
     return svg;
   }
 
-  /* p: ParamStore.current */
-  draw(p) {
+  /* p: ParamStore.current，dt: 秒 */
+  draw(p, dt = 1 / 60) {
     const n = this.nodes;
     if (!n.stage) return;
 
     const yaw = clamp(p.ParamAngleX);
     const pitch = clamp(p.ParamAngleY);
     const rollA = clamp(p.ParamAngleZ);
+    const bob = clamp(p.ParamBodyAngleX) * 6;
+
+    /* --- 次级运动 ---
+     * 弹簧追的是"头的姿态"，但头发挂在滞后量上：
+     * 头在转 -> 弹簧落后 -> 头发被"拖"在后面；
+     * 头急停   -> 弹簧冲过头 -> 头发甩过头再荡回来。
+     * 直接用弹簧位置做位移是不够的，必须用"头 - 弹簧"这个差值。 */
+    const hx = this.spring.hairX.step(yaw, dt);
+    const hy = this.spring.hairY.step(pitch, dt);
+    const lagX = yaw - hx;
+    const lagY = pitch - hy;
+    n.hairLock.setAttribute(
+      "transform",
+      `translate(${(-lagX * 6).toFixed(2)} ${(-lagY * 3.5).toFixed(2)}) ` +
+      `rotate(${(lagX * 2.6).toFixed(2)})`
+    );
+
+    const bh = this.spring.brow.step(pitch, dt);
+    n.browLag.setAttribute("transform", `translate(0 ${(-(pitch - bh) * 9).toFixed(2)})`);
+
+    /* 呆毛跟着翻滚和点头甩，但左右转头时也该被带一下，
+       只跟 roll 的话呆毛在日常动作里几乎不会动。 */
+    const ah = this.spring.ahoge.step(rollA * 22 + bob + yaw * 11, dt);
+    n.ahoge.setAttribute("transform", `rotate(${(ah * 1.25).toFixed(2)} 4 -102)`);
 
     // 呼吸：整块轻微缩放，比单独动胸腔更像在呼吸
     const breath = p.ParamBreath * 0.010 + 0.998;
@@ -337,12 +375,8 @@ export class SvgRig {
     n.mouth.setAttribute("fill", m.fill ? this.look.mouthIn : "none");
     n.tongue.setAttribute("opacity", p.ParamMouthOpenY > 0.28 ? "0.85" : "0");
 
-    /* --- 腮红 / 呆毛 --- */
+    /* --- 腮红 --- */
     const cheek = clamp01(p.ParamCheek);
     for (const b of n.blush) b.setAttribute("opacity", (cheek * 0.55).toFixed(3));
-
-    const bob = clamp(p.ParamBodyAngleX) * 6;
-    n.ahoge.setAttribute("transform",
-      `rotate(${(bob + rollA * 22).toFixed(2)} ${4} -102)`);
   }
 }

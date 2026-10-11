@@ -214,7 +214,7 @@ export class Avatar {
 
     rig.commit(store);
     store.blend(dt);
-    this.svg.draw(store.current);
+    this.svg.draw(store.current, dt);
   }
 }
 
