@@ -135,6 +135,17 @@ this.emotion.set("base");
     this.lip.stop();
   }
 
+  /* 在音频真正开始播放时切表情，而不是等文本到达。
+   * 目前后端整轮只给一个情绪，所以这等价于空操作；
+   * 一旦它逐句给不同情绪，表情会跟着声音自动切换，不需要改前端。 */
+  setEmotion(name) {
+    if (name && this.emotion.set(name)) {
+      for (const gesture of this.gesture.matchEmotion(name)) {
+        this.gesture.play(gesture, this.clock);
+      }
+    }
+  }
+
   /* ---- WebSocket 消息入口 ---- */
 
   onMessage(msg) {
@@ -174,12 +185,9 @@ this.emotion.set("base");
 
     if (msg.type !== "text") return;
 
-    const emotion = msg.emotion || "base";
-    if (this.emotion.set(emotion)) {
-      for (const name of this.gesture.matchEmotion(emotion)) {
-        this.gesture.play(name, this.clock);
-      }
-    }
+    // 文本一到就开始过渡表情，不必等音频；音频开始时再 setEmotion 一次是
+    // 无操作（emotion.set 对相同情绪返回 false），逐句情绪时则以音频为准。
+    this.setEmotion(msg.emotion || "base");
     for (const name of this.gesture.matchText(msg.text)) {
       this.gesture.play(name, this.clock);
     }

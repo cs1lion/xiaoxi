@@ -67,11 +67,11 @@ function ensureCtx() {
   return audioCtx;
 }
 
-async function enqueueAudio(b64, text) {
+async function enqueueAudio(b64, text, emotion) {
   const ctx = ensureCtx();
   const bytes = Uint8Array.from(atob(b64), (c) => c.charCodeAt(0));
   const buffer = await ctx.decodeAudioData(bytes.buffer);
-  playQueue.push({ buffer, text: text || "" });
+  playQueue.push({ buffer, text: text || "", emotion: emotion || "" });
   if (!playing) drainQueue();
 }
 
@@ -83,7 +83,7 @@ function drainQueue() {
   }
   playing = true;
   const ctx = ensureCtx();
-  const { buffer, text } = playQueue.shift();
+  const { buffer, text, emotion } = playQueue.shift();
   sourceNode = ctx.createBufferSource();
   sourceNode.buffer = buffer;
   sourceNode.connect(playAnalyser);
@@ -96,6 +96,9 @@ function drainQueue() {
   sourceNode.start(startedAt);
   avatar.setAudioContext(ctx);
   avatar.speak(text, ctx, startedAt, buffer.duration);
+  // 情绪跟着声音走而不是跟着文本走：目前后端整轮只给一个情绪，
+  // 这里等于无操作；一旦它逐句给不同情绪，表情会自己跟着切换。
+  avatar.setEmotion(emotion);
 }
 
 function stopPlayback() {
@@ -256,7 +259,7 @@ ws.onmessage = async (event) => {
       }
       break;
     case "audio":
-      await enqueueAudio(msg.data, msg.text);
+      await enqueueAudio(msg.data, msg.text, msg.emotion);
       break;
     case "done":
       setStatus("在线", "on");
