@@ -2,8 +2,13 @@
 import assert from 'node:assert/strict';
 import {createHash} from 'node:crypto';
 import {mkdir,readFile,writeFile} from 'node:fs/promises';
+import {existsSync} from 'node:fs';
 import {chromium} from '@playwright/test';
 const root='eval/avatar/face-shading';
+if (process.argv.length === 2 && !existsSync(`${root}/before/vrm.js`)) {
+  console.log('SKIP face-calibration-cache: 缺少 before 源快照夹具（本地证据未入 git；重新捕获后恢复）');
+  process.exit(0);
+}
 const reports=[];
 for(const label of ['before','after']) {
   const browser=await chromium.launch({headless:true,args:['--use-angle=swiftshader','--enable-unsafe-swiftshader']});

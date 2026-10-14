@@ -3,12 +3,17 @@
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
+import { existsSync } from 'node:fs';
 import { chromium } from '@playwright/test';
 
 const origin = process.env.AVATAR_TEST_ORIGIN || 'http://127.0.0.1:8000';
 const baseline = process.argv.includes('--before');
 const focus = process.argv.includes('--focus');
 const root = 'eval/avatar/gesture-paths';
+if (process.argv.length === 2 && !existsSync(`${root}/before/report.json`)) {
+  console.log('SKIP gesture-paths: 缺少 before 夹具（本地证据未入 git；先跑一次 --before 捕获后恢复）');
+  process.exit(0);
+}
 const requestedLabel = process.argv.find(value => value.startsWith('--label='))?.slice(8);
 if (requestedLabel) assert(/^[a-z0-9-]+$/.test(requestedLabel), 'artifact label is a plain directory name');
 const label = baseline ? 'before' : requestedLabel || 'after';

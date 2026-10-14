@@ -47,6 +47,13 @@ def fixture():
              ]}]
 
 
+def setUpModule():
+    """评测夹具是本地撰写的语料（随 /eval 清理被删、从未入 git）；缺失时整组跳过而非报红。"""
+    fixture = Path(__file__).resolve().parents[1] / "eval/research/procedural_memory_eval_cases.json"
+    if not fixture.exists():
+        raise unittest.SkipTest("缺少本地评测夹具 procedural_memory_eval_cases.json（曾随 /eval 清理被删，未入 git）；补齐该文件后自动恢复")
+
+
 class SourceProjectionTests(unittest.TestCase):
     def test_independent_error_confirmation_and_version_evidence_stays_in_place(self):
         bundle = fixture()

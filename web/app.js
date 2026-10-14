@@ -622,9 +622,24 @@ window.addEventListener("beforeunload", cleanupVoice);
 navigator.mediaDevices?.addEventListener?.('devicechange', () => baseline.invalidate('device_changed'));
 
 /* ---------------- WebSocket ---------------- */
+/* 主动搭话心跳（协议第六节）：空闲时周期性请求服务端做主动发言/自进化检查。
+ * 本地只做最轻门控（授权 + 页面可见 + 本地空闲）；practice/experience/忙碌守卫以服务端为准。
+ * 没有这条线，proactive_check 永不被触发，主动开口与自进化都不可达。 */
+const PROACTIVE_HEARTBEAT_MS = 45000;
+let proactiveHeartbeat = null;
+function proactiveLocallyIdle() {
+  return document.visibilityState === "visible" && !recording && !manualHeld
+    && !turns.id && !playback.busy && !microphone.pending;
+}
+function proactiveHeartbeatTick() {
+  if (el("proactiveToggle")?.checked && proactiveLocallyIdle()) {
+    send({ type: "proactive_check" });
+  }
+}
 ws.onopen = () => {
   setStatus("在线", "on");
   ws.send(JSON.stringify({ type: "config", proactivity: el("proactiveToggle").checked, memory: el("memoryToggle").checked }));
+  if (!proactiveHeartbeat) proactiveHeartbeat = setInterval(proactiveHeartbeatTick, PROACTIVE_HEARTBEAT_MS);
 };
 
 ws.onmessage = async (event) => {
@@ -781,6 +796,7 @@ ws.onmessage = async (event) => {
 
 ws.onclose = () => {
   experienceUI.onDisconnect();
+  if (proactiveHeartbeat) { clearInterval(proactiveHeartbeat); proactiveHeartbeat = null; }
   cleanupVoice();
   setStatus("断开", "");
   subtitle.textContent = "连接已断开，麦克风已释放。请刷新后重试。";
@@ -1147,7 +1163,7 @@ el("faceToggle").onclick = async () => {
   }
 };
 
-let followActive = false;
+let followActive = true;   // 默认开启视线跟随（打磨计划修正 #2）：眼神跟着光标，身体不抽搐
 el("followToggle").onclick = async () => {
   if (followActive) {
     avatar.setMouseFollow(false);
@@ -1159,6 +1175,8 @@ el("followToggle").onclick = async () => {
   followActive = true;
   el("followToggle").textContent = "视线跟随：开";
 };
+
+el("followToggle").textContent = "视线跟随：开";
 
 /* 用户互动反馈：角色对用户的操作做出反应。
  * 鼠标移动时角色看向鼠标，点击时角色有反应。 */
@@ -1224,16 +1242,17 @@ boot().then(() => {
   if (!select.querySelector('option[value="seed-daily"]')) select.add(new Option("及肩短发 · 日常外套", "seed-daily"));
   if (!select.querySelector('option[value="seed-daily-eyes"]')) select.add(new Option("日常造型 · 眉眼升级", "seed-daily-eyes"));
   if (!select.querySelector('option[value="seed-daily-lids"]')) select.add(new Option("日常造型 · 细腻笑眼", "seed-daily-lids"));
+  if (!select.querySelector('option[value="seed-daily-hair"]')) select.add(new Option("日常造型 · 发丝物理", "seed-daily-hair"));
   let selectedModel = "svg";
   select.onchange = async () => {
     select.disabled = true;
     status.textContent = "正在加载形象，聊天和语音不受影响…";
     try {
       const choice = select.value;
-      const isDaily = choice === "seed-daily" || choice === "seed-daily-eyes" || choice === "seed-daily-lids";
+      const isDaily = choice === "seed-daily" || choice === "seed-daily-eyes" || choice === "seed-daily-lids" || choice === "seed-daily-hair";
       const isSeed = choice === "seed" || choice === "seed-warm" || isDaily;
       await avatar.setRenderer(isSeed ? "vrm" : choice,
-        choice === "seed-daily-lids" ? "/static/models/seed-daily-lids.vrm" : choice === "seed-daily-eyes" ? "/static/models/seed-daily-eyes.vrm" : isDaily ? "/static/models/seed-daily.vrm" : isSeed ? "/static/models/seed-san.vrm" : "/static/models/sample.vrm");
+        choice === "seed-daily-lids" ? "/static/models/seed-daily-lids.vrm" : choice === "seed-daily-eyes" ? "/static/models/seed-daily-eyes.vrm" : choice === "seed-daily-hair" ? "/static/models/seed-daily-hair.vrm" : isDaily ? "/static/models/seed-daily.vrm" : isSeed ? "/static/models/seed-san.vrm" : "/static/models/sample.vrm");
       avatar.svg.setPresentation?.(isSeed);
       avatar.svg.setPalette?.(choice === "seed-warm" ? "warm" : "original");
       selectedModel = choice;
@@ -1251,7 +1270,11 @@ boot().then(() => {
   if (["vrm", "seed", "seed-warm", "seed-daily", "seed-daily-eyes", "seed-daily-lids"].includes(requestedAvatar)) {
     select.value = requestedAvatar;
     select.onchange();
+    return;
   }
+  // 默认推荐造型：发丝物理 + 眼睑校准的日常造型（打磨计划修正 #3）；加载失败自动回退 SVG。
+  select.value = "seed-daily-hair";
+  select.onchange();
 }).catch((err) => {
   console.warn("形象模块启动失败：", err);
   el("avatarRenderer").disabled = true;

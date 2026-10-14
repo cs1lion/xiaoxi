@@ -2,6 +2,7 @@
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
+import { existsSync } from 'node:fs';
 import { chromium } from '@playwright/test';
 
 const base = 'eval/avatar/face-shading';
@@ -13,6 +14,10 @@ const dynamic = process.argv.includes('--dynamic');
 const verify = process.argv.includes('--verify');
 const reuse = process.argv.includes('--reuse');
 const out = `${base}/${label}`;
+if (process.argv.length === 2 && !existsSync(`${out}/vrm.js`)) {
+  console.log(`SKIP face-shading: 缺少 ${label} 夹具（本地证据未入 git；用 --label=<name> 捕获后恢复）`);
+  process.exit(0);
+}
 const settingsFile = process.argv.find(x => x.startsWith('--settings='))?.slice(11);
 const settings = settingsFile ? JSON.parse(await readFile(settingsFile, 'utf8')) : null;
 const origin = process.env.AVATAR_TEST_ORIGIN || 'http://127.0.0.1:8000';

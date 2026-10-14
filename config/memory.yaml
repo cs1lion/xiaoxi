@@ -129,7 +129,7 @@ retrieval:
 # 且距上一轮复盘超过 idle_minutes 时运行；主动开口仍受 pacing.yaml 的
 # proactivity.require_authorization 门与拒绝关键词冷静期约束。
 self_evolution:
-  enabled: false             # 总开关
-  idle_minutes: 240          # 距上轮对话/上次复盘至少这么久才允许一轮
+  enabled: true              # 总开关（打磨期默认开：配合前端主动搭话心跳生效）
+  idle_minutes: 60           # 距上轮对话/上次复盘至少这么久才允许一轮（打磨期调敏：1 小时）
   max_per_day: 3             # 每天最多复盘轮数
   allow_sources: [taste, worldview, spark]  # 允许产出并注入的变更类型

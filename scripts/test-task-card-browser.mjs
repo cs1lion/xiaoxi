@@ -24,7 +24,9 @@ try{
   }return r.fulfill({json:{items:reminders}});
  });
  await page.goto('http://127.0.0.1:8000/');
- await page.locator('#avatarStage svg, #avatarStage canvas').waitFor();
+ await page.locator('#avatarStage svg:visible, #avatarStage canvas:visible').waitFor();
+ // 助手面板被 workspace 收进"待办" Tab（side#work-tasks 默认 display:none），先切 Tab 再点摘要。
+ await page.locator('#work-tasks-tab').click();
  await page.getByText('任务与提醒',{exact:true}).click();
  const card=page.locator('.task-progress-card');await card.waitFor();
  await card.locator('.task-editor summary').first().click();

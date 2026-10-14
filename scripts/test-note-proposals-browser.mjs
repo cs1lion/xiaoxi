@@ -3,7 +3,7 @@ import { readFile, mkdir } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
 
 // Every asset and API is intercepted. No live DB, model, audio, microphone or socket.
-const files = ['style.css', 'workspace.css', 'writing.css', 'experience.css', 'voice/interaction-state.css', 'companion.css', 'note-proposals.css',
+const files = ['style.css', 'workspace.css', 'writing.css', 'experience.css', 'voice/interaction-state.css', 'companion.css', 'avatar/dialogue-review.css', 'note-proposals.css',
   'assistant.js', 'task-card.js', 'interaction-preferences.js', 'companion.js', 'note-proposals.js', 'ui.js', 'chat-scroll.js', 'context-usage.js'];
 const assets = new Map(await Promise.all(files.map(async file => [`/static/${file}`, await readFile(fileURLToPath(new URL(`../web/${file}`, import.meta.url)), 'utf8')])));
 const html = (await readFile(fileURLToPath(new URL('../web/index.html', import.meta.url)), 'utf8'))

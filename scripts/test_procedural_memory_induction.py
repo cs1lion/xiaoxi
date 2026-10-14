@@ -24,6 +24,13 @@ def candidate(ids):
                      'evidence': [{'observation_id': identifier} for identifier in ids]}}
 
 
+def setUpModule():
+    """评测夹具是本地撰写的语料（随 /eval 清理被删、从未入 git）；缺失时整组跳过而非报红。"""
+    fixture = Path(__file__).resolve().parents[1] / "eval/research/procedural_memory_eval_cases.json"
+    if not fixture.exists():
+        raise unittest.SkipTest("缺少本地评测夹具 procedural_memory_eval_cases.json（曾随 /eval 清理被删，未入 git）；补齐该文件后自动恢复")
+
+
 class FormatTests(unittest.TestCase):
     def setUp(self):
         self.corpus = SimpleNamespace(forbidden_identifiers={'HISTORIC_ID'},

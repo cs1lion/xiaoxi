@@ -9,7 +9,7 @@ try {
  await page.route('**/api/memories',r=>r.fulfill({json:{count:0,items:[]}}));
  await page.routeWebSocket('**/ws',socket=>socket.onMessage(()=>{}));
  await page.goto('http://127.0.0.1:8000/');
- await page.locator('#avatarStage svg, #avatarStage canvas').waitFor();
+ await page.locator('#avatarStage svg:visible, #avatarStage canvas:visible').waitFor();
  await page.emulateMedia({reducedMotion:'reduce'});
  await mkdir('eval/ui',{recursive:true});
  await page.screenshot({path:'eval/ui/preview-desktop.png',fullPage:true});

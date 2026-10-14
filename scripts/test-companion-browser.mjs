@@ -4,7 +4,7 @@ import { fileURLToPath } from 'node:url';
 
 // Actual homepage DOM and UI modules, entirely synthetic routes. No live user DB,
 // model, paid speech, microphone or WebSocket is involved.
-const files = ['style.css', 'workspace.css', 'writing.css', 'experience.css', 'voice/interaction-state.css', 'companion.css',
+const files = ['style.css', 'workspace.css', 'writing.css', 'experience.css', 'voice/interaction-state.css', 'companion.css', 'avatar/dialogue-review.css',
   'companion.js', 'note-proposals.js', 'note-proposals.css', 'assistant.js', 'task-card.js', 'interaction-preferences.js', 'ui.js', 'chat-scroll.js', 'context-usage.js'];
 const assets = new Map(await Promise.all(files.map(async name => [`/static/${name}`, await readFile(fileURLToPath(new URL(`../web/${name}`, import.meta.url)), 'utf8')])));
 const index = (await readFile(fileURLToPath(new URL('../web/index.html', import.meta.url)), 'utf8'))

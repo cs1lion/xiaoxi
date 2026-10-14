@@ -35,14 +35,14 @@ continuity:
 
 # ---------- 主动发言 ----------
 proactivity:
-  default_enabled: false      # 默认被动；需用户在界面显式授权
+  default_enabled: false      # 服务端总门仍默认关；界面"允许阿栖主动开口"勾选后即授权
   # 开新话题是扩展"话题范围"最直接的杠杆。但要靠 knowledge 段撑着，
   # 否则它开出来的话题也是最安全的那种通用话题。
   allow_topics: true
   allow_remind_todo: true     # 允许提醒未完成事项
   allow_continue_episode: true
-  min_interval_seconds: 3600  # 两次主动发言的最小间隔
-  only_when_user_recently_idle_seconds: 3600
+  min_interval_seconds: 1800  # 两次主动发言的最小间隔（打磨期调密：30 分钟）
+  only_when_user_recently_idle_seconds: 900  # 用户静默多久后允许主动（打磨期调敏：15 分钟）
   require_authorization: true
   max_per_day: 3
 
@@ -65,7 +65,7 @@ voice:
 # audio 事件不带 chunk、不发 speech_plan，与现状逐字节一致。
 # 打开后：微句切分（子句边界优先）+ 有界预加载并发 + chunk 呼吸停顿字段。
 speech:
-  enabled: false
+  enabled: true             # 默认开启微句流（首包提速 + 呼吸停顿）；false 时回到 60 字顺序合成
   micro_chunk:
     target_chars: 20          # 微句目标长度（子句边界优先，落在 12-25 区间）
     max_chars: 60             # 无边界时的硬顶

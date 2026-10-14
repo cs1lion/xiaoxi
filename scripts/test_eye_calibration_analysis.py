@@ -6,13 +6,26 @@ import tempfile
 import unittest
 
 import numpy as np
-from PIL import Image
+try:
+    from PIL import Image
+except ImportError:  # 可选依赖缺失时整组跳过，不留红灯
+    Image = None
+
+PILLOW_MISSING = "缺少 Pillow（可选依赖）；安装后可跑：.venv\\Scripts\\python.exe -m pip install pillow"
 
 spec = importlib.util.spec_from_file_location("eye_analysis", Path(__file__).with_name("analyze-eye-calibration.py"))
 analysis = importlib.util.module_from_spec(spec)
-spec.loader.exec_module(analysis)
+try:
+    spec.loader.exec_module(analysis)
+    ANALYSIS_IMPORT_ERROR = None
+except ImportError as exc:  # 被载脚本自身依赖 Pillow；缺失时整组跳过，不留红灯
+    ANALYSIS_IMPORT_ERROR = str(exc)
 
 
+SKIP_REASON = PILLOW_MISSING if ANALYSIS_IMPORT_ERROR is None else f"{PILLOW_MISSING}（{ANALYSIS_IMPORT_ERROR}）"
+
+
+@unittest.skipIf(Image is None or ANALYSIS_IMPORT_ERROR is not None, SKIP_REASON)
 class CalibrationAnalysisTests(unittest.TestCase):
     def test_normalized_roi_uses_actual_image_dimensions(self):
         self.assertEqual(analysis.roi_rect([.25, .1, .5, .4], (120, 80)), (30, 8, 90, 40))

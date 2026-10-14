@@ -63,6 +63,13 @@ def simple_catalog():
     return {'read': read, 'preview': preview, 'failure': failure}
 
 
+def setUpModule():
+    """评测夹具是本地撰写的语料（随 /eval 清理被删、从未入 git）；缺失时整组跳过而非报红。"""
+    fixture = Path(__file__).resolve().parents[1] / "eval/research/procedural_memory_boundary_cases_v1.json"
+    if not fixture.exists():
+        raise unittest.SkipTest("缺少本地评测夹具 procedural_memory_boundary_cases_v1.json（曾随 /eval 清理被删，未入 git）；补齐该文件后自动恢复")
+
+
 class SpecificationTests(unittest.TestCase):
     def test_fixed_boundary_specification_and_role_mapping(self):
         cases = target.load_sources()

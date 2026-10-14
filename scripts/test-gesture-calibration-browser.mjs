@@ -2,11 +2,16 @@
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
+import { existsSync } from 'node:fs';
 import { chromium } from '@playwright/test';
 
 const origin = process.env.AVATAR_TEST_ORIGIN || 'http://127.0.0.1:8000';
 const label = process.argv.includes('--baseline') ? 'baseline' : 'calibrated';
 const out = `eval/avatar/gesture-calibration/${label}`;
+if (process.argv.length === 2 && !existsSync('eval/avatar/gesture-calibration/baseline/report.json')) {
+  console.log('SKIP gesture-calibration: 缺少 baseline 夹具（本地证据未入 git；先跑一次 --baseline 捕获后恢复）');
+  process.exit(0);
+}
 const browser = await chromium.launch({ headless: true, args: ['--enable-unsafe-swiftshader', '--autoplay-policy=no-user-gesture-required'] });
 const page = await browser.newPage({ viewport: { width: 1440, height: 1000 }, reducedMotion: 'no-preference' });
 page.setDefaultTimeout(20000);

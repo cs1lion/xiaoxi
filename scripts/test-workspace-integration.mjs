@@ -16,7 +16,7 @@ try{
   }
   if(req.method()!=='GET')throw Error('Unexpected production mutation');return route.continue();
  });
- await page.goto('http://127.0.0.1:8000/');await page.locator('#avatarStage svg, #avatarStage canvas').waitFor();
+ await page.goto('http://127.0.0.1:8000/');await page.locator('#avatarStage svg:visible, #avatarStage canvas:visible').waitFor();
  await page.locator('#work-notes-tab').click();const note=page.frameLocator('iframe[title="个人笔记编辑器"]');
  await note.locator('#title').fill('便笺整合测试');await note.locator('#body').fill('整理两个候选地点');
  await page.locator('#work-tasks-tab').click();await page.locator('#work-notes-tab').click();

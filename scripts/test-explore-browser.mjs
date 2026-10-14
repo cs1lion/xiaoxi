@@ -10,13 +10,13 @@ try {
  await page.route('**/api/memories',r=>r.fulfill({json:{count:0,items:[]}}));
  await page.routeWebSocket('**/ws',socket=>socket.onMessage(data=>{if(typeof data==='string')sent.push(JSON.parse(data));}));
  await page.goto('http://127.0.0.1:8000/');
- await page.locator('#avatarStage svg, #avatarStage canvas').waitFor();
+ await page.locator('#avatarStage svg:visible, #avatarStage canvas:visible').waitFor();
  const baseline=await page.locator('.stage').evaluate(el=>getComputedStyle(el).background);
  assert(await page.locator('#exploreLauncher').count()===0,'Normal URL has no experimental controls');
  assert(!await page.evaluate(()=>performance.getEntriesByType('resource').some(e=>e.name.endsWith('/explore.js'))),'Normal URL does not download experimental module');
  await page.goto('http://127.0.0.1:8000/?explore=1');
  await page.locator('#exploreLauncher').waitFor();
- await page.locator('#avatarStage svg, #avatarStage canvas').waitFor();
+ await page.locator('#avatarStage svg:visible, #avatarStage canvas:visible').waitFor();
  await page.locator('#textInput').fill('保留这段草稿');
  await page.locator('#exploreLauncher').click();
  await mkdir('eval/ui/explore',{recursive:true});

@@ -15,7 +15,7 @@ try {
    };
  });
  await page.goto('http://127.0.0.1:8000/');
- await page.locator('#avatarStage svg, #avatarStage canvas').waitFor();
+ await page.locator('#avatarStage svg:visible, #avatarStage canvas:visible').waitFor();
  await page.waitForFunction(()=>document.querySelector('#status').textContent==='在线');
  await page.locator('#micBtn').focus();
  await page.keyboard.down('Space');
