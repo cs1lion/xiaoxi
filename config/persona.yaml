@@ -251,9 +251,9 @@ voice_style:
 tts_emotions:
   base:
     voice: livelybreezy-female
-    instruction: 语气自然随意，像熟人聊天，略带懒洋洋，不要播音腔，不要过分热情
-    rate: "+4%"
-    pitch: "+2Hz"
+    instruction: 语气自然随意，像熟人聊天，不要播音腔，不刻意表演
+    rate: "+0%"
+    pitch: "+0Hz"
   调侃:
     voice: livelybreezy-female
     instruction: 带点调侃和促狭，语速轻快，尾音上扬，但不是在生气

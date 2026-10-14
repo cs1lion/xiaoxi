@@ -1,12 +1,34 @@
 from __future__ import annotations
 
-import time
+import math
+import json
+import re
 from typing import Any
 
 from ..config import memory_cfg
-from .extractor import extract_memories
+from .extractor import MAX_EVIDENCE_QUOTE_CHARS, MAX_KEY_CHARS, extract_memories, is_direct_user_evidence
 from .retriever import MemoryRetriever
-from .store import Memory, MemoryStore, store as default_store
+from .preference import normalize_preference, PreferenceValidationError
+from .store import KINDS, SOURCES, Memory, MemoryStore, store as default_store
+
+
+# Change words are a conservative gate, not proof of semantic entailment.
+# Ambiguous changes remain conflicts; users can correct them in the memory UI.
+_EXPLICIT_CHANGE = re.compile(
+    r"纠正|更正|说错|记错|改为|改成|改了|换到|换成|不再|已经不|早就不|"
+    r"(?:以前|之前|原来).*(?:现在|如今)|"
+    r"\b(?:correction|no longer|used to|changed to|switched to)\b", re.I,
+)
+
+
+def _score(value: Any) -> float | None:
+    if isinstance(value, bool):
+        return None
+    try:
+        number = float(value)
+    except (TypeError, ValueError, OverflowError):
+        return None
+    return number if math.isfinite(number) and 0 <= number <= 1 else None
 
 
 class MemoryManager:
@@ -14,105 +36,218 @@ class MemoryManager:
         self.store = store or default_store
         self.cfg = memory_cfg()
         self.retriever = retriever or MemoryRetriever(self.store)
-        self.enabled = True
+        self._enabled = True
 
-    # ---------- write path ----------
+    @property
+    def enabled(self) -> bool:
+        return self._enabled
+
+    @enabled.setter
+    def enabled(self, value: bool) -> None:
+        value = bool(value)
+        if value != self._enabled:
+            # Inputs received while disabled cannot become eligible on re-enable.
+            self.store.invalidate_pending()
+            self._enabled = value
+
+    def capture_write_epoch(self) -> int:
+        """Capture synchronously when a turn/job is accepted, before scheduling."""
+        return self.store.write_epoch
+
     async def observe_turn(
-        self,
-        *,
-        session_id: str,
-        user_text: str,
-        assistant_text: str,
-        recent_context: str = "",
+        self, *, session_id: str, user_text: str, assistant_text: str,
+        recent_context: str = "", user_message_id: int | None = None,
+        write_epoch: int | None = None,
+        extraction_provider: Any = None, trace: dict[str, Any] | None = None,
+        max_attempts: int | None = None,
     ) -> list[Memory]:
-        """Extract candidates from one exchange and persist them."""
-        if not self.enabled:
+        """Extract only from the saved user message belonging to this turn.
+
+        Free text/history cannot substitute for a saved message. The parser and
+        manager independently validate evidence; storage checks the epoch with
+        its write transaction, including across database connections.
+        """
+        epoch, floor = self.store.write_state()
+        expected_epoch = epoch if write_epoch is None else write_epoch
+        if (not self.enabled or type(expected_epoch) is not int or expected_epoch != epoch
+                or type(user_message_id) is not int or user_message_id <= floor):
+            if trace is not None:
+                trace['manager_skip'] = 'write_state_ineligible'
             return []
-        cfg = self.cfg
-        items = await extract_memories(user_text, assistant_text, recent_context=recent_context)
+        message = self.store.get_message(user_message_id)
+        if (message is None or message["role"] != "user" or message["session_id"] != session_id
+                or message["text"] != user_text or not is_direct_user_evidence(user_text)):
+            if trace is not None:
+                trace['manager_skip'] = 'unavailable_or_non_direct_user_message'
+            return []
+        extraction_options: dict[str, Any] = {}
+        if extraction_provider is not None:
+            extraction_options['provider'] = extraction_provider
+        if trace is not None:
+            extraction_options['trace'] = trace
+        if max_attempts is not None:
+            extraction_options['max_attempts'] = max_attempts
+        items = await extract_memories(
+            user_text, assistant_text, recent_context=recent_context, evidence_messages=[message],
+            **extraction_options,
+        )
+        if not self.enabled or self.store.write_epoch != expected_epoch or not isinstance(items, list):
+            return []
         saved: list[Memory] = []
         infer_budget = self._infer_budget(session_id)
-        written_infer = 0
-        for item in items:
-            if not cfg["write"].get("allow_self_write", True) and item["subject"] == "self":
+        for raw in items:
+            item = self._linked_candidate(raw, message)
+            if item is None or (item["source"] != "stated" and infer_budget <= 0):
                 continue
-            if item["source"] != "stated" and infer_budget <= written_infer:
-                continue
-            memory = self._persist(item, session_id=session_id)
-            if memory is None:
-                continue
-            if memory.source != "stated":
-                written_infer += 1
-            saved.append(memory)
+            memory = self._persist(item, session_id=session_id, expected_write_epoch=expected_epoch)
+            if memory is not None:
+                if item["source"] != "stated":
+                    infer_budget -= 1
+                saved.append(memory)
         return saved
 
     def _infer_budget(self, session_id: str) -> int:
-        return int(self.cfg["write"].get("max_infer_per_session", 8))
+        maximum = max(0, int(self.cfg["write"].get("max_infer_per_session", 8)))
+        return max(0, maximum - self.store.count_inferences(session_id))
 
-    def _persist(self, item: dict[str, Any], *, session_id: str | None) -> Memory | None:
-        existing = self.store.list_memories(status="active", limit=5000)
-        by_key = {m.key: m for m in existing}
-        prior = by_key.get(item["key"])
-        new_id = self.store.upsert(session_id=session_id, **item)
-        if prior is not None and prior.id != new_id and prior.value != item["value"]:
-            self.store.link_supersedes(new_id, prior.id)
-        memory = self.store.get(new_id)
-        return memory
+    def _linked_candidate(self, raw: Any, message: dict[str, Any]) -> dict[str, Any] | None:
+        if not isinstance(raw, dict):
+            return None
+        if (raw.get("kind") not in ("fact", "episode", "todo") or raw.get("subject") != "user"
+                or raw.get("source") not in SOURCES or raw.get("operation") not in ("add", "update")):
+            return None
+        key, value, quote = raw.get("key"), raw.get("value"), raw.get("evidence_quote")
+        if (not isinstance(key, str) or not key.strip() or len(key) > MAX_KEY_CHARS
+                or ":" not in key or not all(part.strip() for part in key.split(":", 1))
+                or not isinstance(value, str) or not value.strip() or len(value) > 120
+                or not isinstance(quote, str) or not quote.strip()
+                or len(quote) > MAX_EVIDENCE_QUOTE_CHARS or quote not in message["text"]):
+            return None
+        identifier = raw.get("evidence_message_id", message["id"])
+        if type(identifier) is not int or identifier != message["id"]:
+            return None
+        importance = _score(raw.get("importance", .5))
+        confidence = _score(raw.get("confidence", {"stated": .95, "inferred": .6, "uncertain": .35}[raw["source"]]))
+        if importance is None or confidence is None:
+            return None
+        # Never forward model-controlled status, supersedes, session or decision.
+        # Confidence is a ranking convention, not a measured truth probability.
+        preference_fields = ("preference_target", "preference_level", "preference_scope")
+        if "preference" in raw and raw["preference"] is None:
+            return None
+        raw_preference = (raw["preference"] if "preference" in raw else
+                          {"target": raw.get("preference_target"), "level": raw.get("preference_level"),
+                           "scope": raw.get("preference_scope")} if any(field in raw for field in preference_fields)
+                          else None)
+        try:
+            preference = normalize_preference(
+                raw_preference,
+                quote, value, key.strip().lower(), raw["kind"], "user", raw["source"],
+                message_text=message["text"],
+            )
+        except PreferenceValidationError:
+            return None
+        return {
+            "kind": raw["kind"], "subject": "user", "source": raw["source"],
+            "key": key.strip().lower(), "value": " ".join(value.strip().split()),
+            "importance": importance,
+            "confidence": {"stated": .95, "inferred": .6, "uncertain": .35}[raw["source"]],
+            "operation": raw["operation"], "evidence_message_id": identifier,
+            "evidence_quote": quote, "evidence_state": "linked",
+            **(preference or {}),
+        }
+
+    def _persist(self, item: dict[str, Any], *, session_id: str | None,
+                 expected_write_epoch: int | None = None) -> Memory | None:
+        item = dict(item)
+        operation = item.pop("operation", "add")
+        if item.get("preference_target"):
+            item["identity_slot"] = json.dumps(
+                [item["preference_target"], item["preference_scope"]],
+                ensure_ascii=False, separators=(",", ":"))
+        prior = self.store.active_for(kind=item["kind"], subject=item["subject"], key=item["key"],
+                                      identity_slot=item.get("identity_slot", ""))
+        if item.get("evidence_state") == "linked" and prior is not None and not item.get("preference_target"):
+            identifier = item["evidence_message_id"]
+            observed = max(prior.last_observed_message_id or 0, prior.evidence_message_id or 0)
+            if identifier < observed:
+                return None
+            if prior.value != item["value"]:
+                explicit_update = (
+                    operation == "update" and item["source"] == "stated"
+                    and _EXPLICIT_CHANGE.search(item["evidence_quote"]) is not None
+                    and identifier > observed
+                )
+                if not explicit_update:
+                    item["status"] = "conflict"
+        new_id = self.store.upsert(session_id=session_id, expected_write_epoch=expected_write_epoch, **item)
+        return self.store.get(new_id) if new_id is not None else None
 
     def remember(self, **item: Any) -> Memory | None:
-        """Direct write used by API/tests."""
-        return self._persist(item, session_id=item.pop("session_id", None))
+        """Explicit manual write. Never pretend it was extracted from a chat."""
+        kind, subject, source = item.get("kind"), item.get("subject", "user"), item.get("source", "stated")
+        value = item.get("value")
+        key = item.get("key") or value
+        if (kind not in KINDS or subject not in ("user", "self", "assistant") or source not in SOURCES
+                or not isinstance(value, str) or not value.strip() or not isinstance(key, str) or not key.strip()):
+            return None
+        importance, confidence = _score(item.get("importance", .5)), _score(item.get("confidence", .8))
+        if importance is None or confidence is None:
+            return None
+        self.store.invalidate_pending()
+        return self._persist({
+            "kind": kind, "subject": subject, "source": source,
+            "key": key.strip().lower(), "value": " ".join(value.strip().split()),
+            "importance": importance, "confidence": confidence,
+            "evidence_state": "manual", "evidence_message_id": None, "evidence_quote": "",
+        }, session_id=item.get("session_id"))
 
-    # ---------- correction / deletion ----------
     def correct(self, memory_id: int, value: str, *, source: str = "stated") -> Memory | None:
         memory = self.store.get(memory_id)
-        if memory is None:
+        if memory is None or not isinstance(value, str) or not value.strip() or source not in SOURCES:
             return None
-        value = " ".join(value.strip().split())
+        self.store.invalidate_pending()
         new_id = self.store.upsert(
-            kind=memory.kind,
-            subject=memory.subject,
-            key=memory.key,
-            value=value,
-            source=source,
-            status="active",
+            kind=memory.kind, subject=memory.subject, key=memory.key,
+            value=" ".join(value.strip().split()), source=source,
             importance=memory.importance,
-            confidence=0.95,
-            session_id=memory.session_id,
-            supersedes=memory.id if value != memory.value else None,
+            confidence={"stated": .95, "inferred": .6, "uncertain": .35}[source],
+            session_id=memory.session_id, evidence_state="manual",
+            identity_slot=memory.identity_slot,
+            force_revision=True,
         )
-        return self.store.get(new_id)
+        return self.store.get(new_id) if new_id is not None else None
 
     def forget(self, memory_id: int, *, purge_history: bool = True) -> int:
-        """Hard delete. By default the whole chain of the same key goes with it,
-        because "忘掉这件事" should not leave an old version behind."""
+        """Delete this fact's complete identity chain unless explicitly limited."""
         memory = self.store.get(memory_id)
         if memory is None:
             return 0
         if purge_history:
-            return self.forget_key(memory.key)
+            return self.store.delete_key(memory.key, kind=memory.kind, subject=memory.subject,
+                                         identity_slot=memory.identity_slot)
         return 1 if self.store.delete(memory_id) else 0
 
     def forget_all(self, **filters: Any) -> int:
         return self.store.delete_all(**filters)
 
     def forget_key(self, key: str) -> int:
-        memories = self.store.list_memories(status=None, include_history=True, limit=1000)
-        targets = [m for m in memories if m.key == key.lower()]
-        for memory in targets:
-            self.store.delete(memory.id)
-        return len(targets)
+        return self.store.delete_key(key)
 
-    # ---------- read path ----------
     def context_for(self, query: str, *, subject: str | None = None) -> str:
         if not self.enabled:
             return ""
-        block, _ids = self.retriever.build_context(query, subject=subject)
+        block, _ids, _found = self.retriever.build_context(query, subject=subject)
         return block
 
+    def context_with_status(self, query: str, *, subject: str | None = None) -> tuple[str, bool]:
+        if not self.enabled:
+            return "", False
+        block, _ids, found = self.retriever.build_context(query, subject=subject)
+        return block, found
+
     def snapshot(self, *, include_history: bool = False, limit: int = 300) -> list[dict[str, Any]]:
-        rows = self.store.list_memories(include_history=include_history, limit=limit)
-        return [m.to_dict() for m in rows]
+        return [m.to_dict() for m in self.store.list_memories(include_history=include_history, limit=limit)]
 
     def history_of(self, key: str) -> list[dict[str, Any]]:
         return [m.to_dict() for m in self.store.history_for_key(key.lower())]

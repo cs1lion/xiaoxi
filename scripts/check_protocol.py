@@ -73,12 +73,28 @@ def frontend_cases() -> dict[str, set[str]]:
     body = text[start:end if end > 0 else len(text)]
 
     cases: dict[str, set[str]] = {}
-    marks = [(m.start(), m.group(1)) for m in re.finditer(r'case "([a-z_]+)":', body)]
+    marks = [(m.start(), m.group(1)) for m in re.finditer(r'''case ["']([a-z_]+)["']:''', body)]
     for i, (pos, name) in enumerate(marks):
         stop = marks[i + 1][0] if i + 1 < len(marks) else len(body)
         fields = set(re.findall(r"\bmsg\.([a-z_]+)", body[pos:stop]))
         cases.setdefault(name, set()).update(fields)
     return cases
+
+
+def turn_envelope_fields() -> set[str]:
+    """Read fields actually added by Connection.send_turn, rather than exempting them."""
+    tree = ast.parse((SERVER_DIR / 'app.py').read_text(encoding='utf-8'))
+    for cls in tree.body:
+        if not isinstance(cls, ast.ClassDef) or cls.name != 'Connection':
+            continue
+        for method in cls.body:
+            if not isinstance(method, ast.AsyncFunctionDef) or method.name != 'send_turn':
+                continue
+            for node in ast.walk(method):
+                if (isinstance(node, ast.Dict) and any(k is None and isinstance(v, ast.Name)
+                        and v.id == 'payload' for k, v in zip(node.keys, node.values))):
+                    return {k.value for k in node.keys if isinstance(k, ast.Constant) and isinstance(k.value, str)}
+    return set()
 
 
 def main() -> int:
@@ -125,14 +141,56 @@ def main() -> int:
         if target not in targets:
             problems.append(f"gaze.on_message.{name} 指向不存在的注视点 {target!r}")
 
+    # 注视点的坐标被 web/avatar/test_gaze.js 抄了一份。
+    # 那份抄本必须和这里的配置一致，否则"眼-头时序"那几条断言
+    # 会在错误的注视点上跑——而它们恰恰是最容易被误判成"通过"的类型：
+    # 目标回退到原点的 viewer 时，眼不动、头也不动，断言反而会按预期方向成立。
+    test_gaze = ROOT / "web" / "avatar" / "test_gaze.js"
+    if test_gaze.exists():
+        src = test_gaze.read_text(encoding="utf-8")
+        for name, spec in ((avatar.get("gaze") or {}).get("targets") or {}).items():
+            want = f"{name}: {{ x: {float(spec['x']):.2f}, y: {float(spec['y']):.2f},"
+            if want not in src:
+                problems.append(
+                    f"web/avatar/test_gaze.js 里的注视点 {name!r} 和 config/avatar.yaml 不一致"
+                    f"（应形如 {want!r}）"
+                )
+
+    # 共发音参数：buildTimeline 会读 config 里的 coarticulation，
+    # 少了整段就用代码里的默认值，两者一旦漂移，调试时很难看出是谁在起作用。
+    if "coarticulation" not in avatar:
+        problems.append("config/avatar.yaml 缺 coarticulation 段（口型会退回代码默认值）")
+
+    # ---- 5. 连续情感维度 ----
+    # 每个情绪都要有 arousal/valence。少了不会报错、不会崩，
+    # 只是那个情绪退回中性唤醒度——所有情绪强度变得一模一样，
+    # 这种"静默变平"正是最难察觉的一类回归。
+    for name, rule in avatar["emotions"].items():
+        for key in ("arousal", "valence"):
+            if key not in rule:
+                problems.append(f"情绪 {name!r} 缺 {key}（会退回中性，表情强度全被拉平）")
+                continue
+            v = rule[key]
+            lo, hi = (0.0, 1.0) if key == "arousal" else (-1.0, 1.0)
+            if not isinstance(v, (int, float)) or not (lo <= v <= hi):
+                problems.append(f"情绪 {name!r} 的 {key}={v!r} 超出 [{lo}, {hi}]")
+
+    # 眼-头协调参数是 gaze 契约的一部分，缺了会退回代码默认值，
+    # 而默认值的征用门槛和 YAML 里配的不一样（见 config 注释）。
+    for key in ("recruit", "head_capacity", "head_lead", "head_lag", "opn_gate"):
+        if key not in ((avatar.get("gaze") or {}).get("coord") or {}):
+            problems.append(f"gaze.coord 缺 {key!r}（眼-头协调会退回代码默认值）")
+
     # ---- 4. 线上协议：前端读的字段后端必须真的发 ----
     emitted = emitted_types()
+    envelope = turn_envelope_fields()
     cases = frontend_cases()
     for name, fields in sorted(cases.items()):
         if name not in emitted:
             problems.append(f"app.js 处理了 {name!r}，但服务端找不到发这个消息的地方")
             continue
-        missing = {f for f in fields if f != "type"} - emitted[name]
+        common = envelope if name not in ('ready', 'config_ack') else set()
+        missing = {f for f in fields if f != "type"} - emitted[name] - common
         if missing:
             problems.append(
                 f"app.js 的 {name!r} 分支读了 {sorted(missing)}，"
