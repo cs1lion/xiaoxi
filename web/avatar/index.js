@@ -54,6 +54,7 @@ export class Avatar {
     this._raf = 0;
     this._last = 0;
     this._pending = [];
+    this.speechPlan = null;
     this.outAnalyser = null;
     this._outBuf = null;
     this.reducedMotion = false;
@@ -107,6 +108,16 @@ this.face = new FaceDriver();
    * 代价只是几个字段拷贝，不值得为此缓存一份再处理失效。 */
   coarticulationOpts() {
     return this.cfg.coarticulation ? { coarticulation: this.cfg.coarticulation } : undefined;
+  }
+
+  /* buildTimeline 的选项：共发音参数来自 config；微句流的 chunk 与长播报
+   * 预告（speech_plan）由说话层经 options / onMessage 透传。
+   * 两者都有存在性守卫：字段缺失时与逐句播放的现状完全一致。 */
+  timelineOpts(options = {}) {
+    const opts = this.coarticulationOpts() || {};
+    if (options && options.chunk) opts.chunk = options.chunk;
+    if (this.speechPlan) opts.speechPlan = this.speechPlan;
+    return opts;
   }
 
   /* 尊重系统的"减少动态效果"。策略是压低幅度和过冲，不是把角色冻住——
@@ -314,7 +325,7 @@ this.face = new FaceDriver();
       this._pending.push({ text, startedAt, duration: durationSec, options });
       return;
     }
-    this.lip.speak(buildTimeline(text, durationSec, this.coarticulationOpts()), startedAt);
+    this.lip.speak(buildTimeline(text, durationSec, this.timelineOpts(options)), startedAt);
     this.dialogueGaze.startSpeech(this.audioCtx, startedAt, durationSec);
     this.performance.speak(text, this.audioCtx, startedAt, durationSec, options);
     // Legacy head/body text tracks follow playback too. An explicit semantic
@@ -351,10 +362,21 @@ this.face = new FaceDriver();
    * emotion 上就松手，否则 thinking 的姿势会一直挂到下一轮。 */
   onMessage(msg) {
     if (!msg || typeof msg !== "object") return;
+    /* F2 长播报预告（协议第十一节）：在首个 audio 之前到达。
+     * 提前于其它子系统消费，未知事件不会向 performance / dialogueGaze 传播；
+     * 缺 mode 字段时保持现状，不进入长播报模式。 */
+    if (msg.type === "speech_plan") {
+      if (typeof msg.mode === "string") {
+        this.speechPlan = { mode: msg.mode, expected_chunks: msg.expected_chunks,
+          first_chunk_chars: msg.first_chunk_chars, turn_id: msg.turn_id };
+      }
+      return;
+    }
     // Cancellation can arrive while the model/config is still loading. Clear
     // deferred speech before the configuration guard so it cannot revive later.
     if (msg.type === "thinking" || (msg.type === "recording" && msg.state) ||
         msg.type === "interrupted" || msg.type === "playback_stopped") {
+      this.speechPlan = null; // 新轮次开始或被打断：长播报预告随之过期
       this.stopSpeaking({ preserveDialogue: true });
     }
     this.performance.onEvent(msg);

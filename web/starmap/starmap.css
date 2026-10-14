@@ -1,0 +1,256 @@
+/* 星图视图样式。画布是深墨夜空（内容面，不是装饰光斑），
+ * 页面其余部分沿用主工作台的暖白与低对比边框。 */
+
+.stage > .starmap-mount { display: none; }
+.stage > .starmap-mount:not([hidden]) {
+  display: flex;
+  flex: 1;
+  min-height: 0;
+  flex-direction: column;
+}
+/* 视图打开时收起后面的舞台内容，顶栏（在挂载点之前）保持可见 */
+.stage > .starmap-mount:not([hidden]) ~ * { display: none !important; }
+
+.starmap {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+  background: var(--bg, #f5f5ef);
+}
+
+.starmap-bar {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+  padding: 12px 22px;
+  border-bottom: 1px solid #dee1d580;
+}
+.starmap-title { display: flex; align-items: baseline; gap: 10px; min-width: 0; }
+.starmap-title h2 {
+  margin: 0;
+  font-family: Georgia, "Songti SC", serif;
+  font-size: 19px;
+  font-weight: 600;
+  color: #303d36;
+  letter-spacing: 0;
+}
+.starmap-title .hint { margin: 0; font-size: 11px; }
+.starmap-search { display: flex; align-items: center; gap: 6px; margin-left: auto; }
+.starmap-search input {
+  width: min(240px, 44vw);
+  padding: 7px 11px;
+  border: 1px solid #dee1d5;
+  border-radius: 10px;
+  background: #fff;
+  font-size: 13px;
+  color: #303d36;
+}
+.starmap-search input:focus { outline: 2px solid #456e5466; outline-offset: 1px; }
+.starmap-search .ghost { padding: 6px 10px; font-size: 12px; }
+.starmap-close { padding: 7px 12px; font-size: 12px; }
+
+.starmap-body { position: relative; display: flex; flex: 1; min-height: 0; }
+
+.starmap-canvas {
+  position: relative;
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+  background:
+    radial-gradient(ellipse at 30% 20%, #22332a 0%, transparent 55%),
+    radial-gradient(ellipse at 75% 85%, #1d2b33 0%, transparent 50%),
+    #141d18;
+  overflow: hidden;
+}
+.starmap-svg { display: block; width: 100%; height: 100%; touch-action: none; cursor: grab; }
+.starmap-svg:active { cursor: grabbing; }
+
+.starmap-tools {
+  position: absolute;
+  top: 10px;
+  right: 10px;
+  display: flex;
+  gap: 4px;
+}
+.starmap-tools .ghost {
+  padding: 5px 9px;
+  font-size: 11px;
+  background: #f5f5ef1c;
+  border-color: #f5f5ef33;
+  color: #e8ece6;
+}
+.starmap-tools .ghost:hover { background: #f5f5ef2e; }
+
+.star-edge { stroke: #dfe8df; stroke-linecap: round; }
+.star-edge.kind-evidences { stroke-opacity: .5; }
+.star-edge.kind-born { stroke-opacity: .45; stroke-dasharray: 5 3; }
+.star-edge.kind-shaped { stroke-opacity: .4; stroke-dasharray: 1 3; }
+.star-edge.kind-mentions { stroke-opacity: .16; }
+
+.star-node { cursor: pointer; }
+.star-node .star-dot { transition: r 140ms ease; }
+.star-node .star-halo { fill: none; stroke: currentColor; stroke-opacity: 0; stroke-width: 1.5; }
+.star-node .star-label {
+  fill: #eef1ea;
+  font-size: 11px;
+  text-anchor: middle;
+  opacity: 0;
+  transition: opacity 160ms ease;
+  pointer-events: none;
+}
+.star-node.has-label .star-label { opacity: .92; }
+.star-node.group-user { color: #e9b578; }
+.star-node.group-user .star-dot { fill: #e9b578; }
+.star-node.group-self { color: #9cc7a9; }
+.star-node.group-self .star-dot { fill: #9cc7a9; }
+.star-node.kind-diary .star-dot { fill: none; stroke: currentColor; stroke-width: 2; }
+.star-node.kind-spark .star-dot { stroke: currentColor; stroke-width: 1.5; stroke-dasharray: 2 2; }
+.star-node:hover .star-dot,
+.star-node:focus-visible .star-dot { filter: brightness(1.25); }
+.star-node:hover .star-halo,
+.star-node:focus-visible .star-halo { stroke-opacity: .8; }
+.star-node.is-selected .star-halo { stroke-opacity: 1; stroke-width: 2.5; }
+.star-node.is-narrating .star-halo { stroke-opacity: .9; animation: starmap-pulse 1.6s ease-in-out infinite; }
+.star-node:focus { outline: none; }
+@keyframes starmap-pulse {
+  0%, 100% { stroke-opacity: .25; stroke-width: 1.5; }
+  50% { stroke-opacity: .95; stroke-width: 3.5; }
+}
+
+.starmap-detail {
+  width: min(340px, 42%);
+  min-height: 0;
+  overflow-y: auto;
+  padding: 16px 18px;
+  background: #f7f6f0;
+  border-left: 1px solid #dee1d580;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.starmap-detail-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.starmap-detail-tags { display: flex; flex-wrap: wrap; gap: 6px; }
+.starmap-detail-tags .tag {
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: #456e5414;
+  color: #456e54;
+  font-size: 11px;
+}
+.starmap-detail-tags .tag.group-user { background: #b97f3f1f; color: #9a6428; }
+.starmap-detail-close { padding: 4px 9px; font-size: 11px; }
+.starmap-detail-title {
+  margin: 0;
+  font-size: 16px;
+  font-weight: 600;
+  color: #303d36;
+  letter-spacing: 0;
+}
+.starmap-detail-body {
+  margin: 0;
+  font-size: 13.5px;
+  line-height: 1.75;
+  color: #303d36;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+.starmap-detail-extra { margin: 0; font-size: 11px; line-height: 1.8; }
+.starmap-narrate { margin-top: auto; display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.starmap-narrate-btn {
+  padding: 9px 16px;
+  border: none;
+  border-radius: 12px;
+  background: #456e54;
+  color: #f5f5ef;
+  font-size: 13px;
+  cursor: pointer;
+}
+.starmap-narrate-btn:hover:not(:disabled) { background: #3a5f49; }
+.starmap-narrate-btn:disabled { background: #456e5459; cursor: default; }
+.starmap-narrate .ghost { padding: 8px 12px; font-size: 12px; }
+.starmap-narrate-note { margin: 0; flex-basis: 100%; font-size: 11px; }
+
+.starmap-empty, .starmap-error {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  padding: 24px;
+  text-align: center;
+  pointer-events: none;
+}
+.starmap-empty .ghost, .starmap-error .ghost { pointer-events: auto; }
+.starmap-empty[hidden], .starmap-error[hidden] { display: none; }
+.starmap-empty-text, .starmap-error-text {
+  margin: 0;
+  max-width: 34em;
+  font-size: 13px;
+  line-height: 1.8;
+  color: #cfd8cf;
+}
+.starmap-error-text { color: #ecc9c9; }
+
+.starmap-search-status {
+  margin: 0;
+  padding: 4px 22px 0;
+  min-height: 18px;
+  font-size: 11px;
+}
+
+.starmap-legend {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 14px;
+  padding: 8px 22px 12px;
+  font-size: 11px;
+  color: #5c6b60;
+}
+.starmap-legend[hidden] { display: none; }
+.starmap-legend-nodes, .starmap-legend-edges { display: flex; flex-wrap: wrap; gap: 6px 12px; }
+.starmap-legend-edges { padding-left: 14px; border-left: 1px solid #dee1d580; }
+.legend-chip { display: inline-flex; align-items: center; gap: 5px; }
+.legend-chip[hidden] { display: none; }
+.legend-chip .swatch { width: 10px; height: 10px; border-radius: 50%; display: inline-block; }
+.swatch.group-user { background: #e9b578; }
+.swatch.group-self { background: #9cc7a9; }
+.swatch.kind-memory { background: #e9b578; }
+.swatch.kind-diary { background: none; border: 2px solid #9cc7a9; }
+.swatch.kind-spark { background: none; border: 1.5px dashed #d9c48a; border-radius: 2px; }
+.swatch.kind-taste { background: #7fb08e; border-radius: 2px; }
+.swatch.kind-worldview { background: #6f9fd8; border-radius: 2px; }
+.swatch.edge-evidences { width: 14px; height: 0; border-radius: 0; border-top: 2px solid #8a9a8d; }
+.swatch.edge-born { width: 14px; height: 0; border-radius: 0; border-top: 2px dashed #8a9a8d; }
+.swatch.edge-shaped { width: 14px; height: 0; border-radius: 0; border-top: 2px dotted #8a9a8d; }
+.swatch.edge-mentions { width: 14px; height: 0; border-radius: 0; border-top: 2px solid #8a9a8d66; }
+.starmap-truncated { margin: 0; flex-basis: 100%; font-size: 11px; }
+.starmap-truncated[hidden] { display: none; }
+
+@media (max-width: 760px) {
+  .stage > .starmap-mount:not([hidden]) { height: calc(100dvh - 68px); }
+  .starmap-bar { padding: 10px 12px; gap: 8px; }
+  .starmap-title { flex-basis: 100%; }
+  .starmap-title .hint { display: none; }
+  .starmap-search { margin-left: 0; flex: 1; }
+  .starmap-search input { width: 100%; flex: 1; }
+  .starmap-body { flex-direction: column; }
+  .starmap-detail {
+    width: auto;
+    max-height: 52%;
+    border-left: none;
+    border-top: 1px solid #dee1d580;
+  }
+  .starmap-legend { padding: 8px 12px 10px; }
+  .starmap-legend-edges { padding-left: 0; border-left: none; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .star-node .star-label, .star-node .star-dot { transition: none; }
+  .star-node.is-narrating .star-halo { animation: none; stroke-opacity: .9; stroke-width: 3; }
+}

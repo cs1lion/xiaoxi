@@ -1,0 +1,5 @@
+/* 星图数据桥：docs/PROTOCOL.md 第十三节契约的纯逻辑层。
+ * 取数、检索去抖、narrate 状态机都在这里，不碰 DOM、不 import 任何模块——
+ * node 单测经 data: URL 以 ESM 加载（package.json 没有 type:module），
+ * 相对导入会解析失败，所以这一层必须自给自足。 */
+export const NODE_KINDS = ["memory", "diary", "spark", "taste", "worldview"];

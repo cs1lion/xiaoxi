@@ -30,6 +30,8 @@ if(mount){
   // CSS changes the existing editor's layout; reparenting its iframe can reload
   // its browsing context and discard the draft even if the node is retained.
   writing=value;document.body.classList.toggle('is-writing',value);writingHeader.hidden=!value;
+  // 与星图等其它整幅视图互斥：广播一次，对方自行收起
+  if(value)window.dispatchEvent(new CustomEvent('aqi-fullview',{detail:'writing'}));
   shell.setAttribute('aria-label',value?'一起写':'工作便笺');side?.setAttribute('aria-label',value?'一起写':'记忆与偏好');
   writingToggle?.setAttribute('aria-expanded',String(value));
   if(value){select(tabs[1]);returnToChat.focus({preventScroll:true});}
@@ -37,6 +39,7 @@ if(mount){
   syncEditor();
  }
  if(writingToggle)writingToggle.onclick=()=>setWriting(!writing);
+window.addEventListener('aqi-fullview',event=>{if(event.detail!=='writing'&&writing)setWriting(false);});
  window.addEventListener('aqi-editor-discussion-start',()=>setWriting(false));
  window.addEventListener('aqi-editor-discussion-return',()=>setWriting(true));
  returnToChat.onclick=()=>setWriting(false);
