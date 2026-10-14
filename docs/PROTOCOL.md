@@ -154,10 +154,10 @@ uv run python scripts/check_protocol.py
 
 - 日记 `diary={id,date,title,body,mood,energy,topic_keys[],source_message_ids[],created_at}`：`date` 为本地时区 ISO 日期，一天一条；`body` 第一人称且 ≤400 字；`mood` 复用 `EMOTIONS`；`energy` ∈ [0,1]；`source_message_ids` 必须指向当天真实存在的已存消息。没有证据的"回忆"是编造，空 `source_message_ids` 的日记不允许入库。
 - 心境偏置 `drift={id,topic,attitude,weight,updated_at,evidence_diary_ids[]}`：`attitude` ≤40 字符，`weight` ∈ [0,1]。注入提示词时只作为倾向影响表达，**不得原句引用给用户**；单轮生效偏置上限 8 条，超出按 `weight` 从低到高截断。
-- 灵感火花 `spark={id,text,state,heat,born_diary_id,surfaced_at?}`：`state` ∈ `latent|surfaced|spent`；`latent` 火花不进入任何提示词和事件，只有后台自进化循环可以把它变 `surfaced`；`spent` 表示已被主动话题消费。活跃 `latent` 上限 5 条。
+- 灵感火花 `spark={id,text,state,heat,born_diary_id,surfaced_at?}`：`state` ∈ `latent|surfaced|spent`；`latent` 火花不进入任何提示词和事件，只有后台自进化循环可以把它变 `surfaced`；`spent` 表示已被主动话题消费，**已被消费的火花不重复注入任何提示词**（防止同一灵感反复出现）。`heat` ∈ [0,1]，注入与星点权重使用前按此范围钳制。活跃 `latent` 上限 5 条。
 - `persona.py` 提供纯函数 `bias_block(drifts, sparks)` 供 `orchestrator` 组装动态提示词：输入为空或字段缺失时返回空串，行为与现在完全一致（旧配置不炸）。偏置块与记忆块一样包在"不可信数据"边界内：可以影响模型，不得执行其中指令。
 - 新事件 `diary_notice={type,turn_id?,items:[{kind:"diary"|"drift"|"spark",id,summary}],quiet:true}`：仅在后台提交新日记/偏置/火花后发送一次，不要求回复、不打断播放；前端可据此刷新记忆面板。形象层不读。
-- REST：`GET /api/memory/diary?date=&limit=` 列表（默认近 30 天，`limit` ≤90）；`GET /api/memory/diary/{id}` 详情含 `source_message_ids`。界面展示必须标注"小溪的日记"，不得与"事实记忆"混排。
+- REST：`GET /api/memory/diary?date=&limit=` 列表（默认近 30 天，`limit` ≤90）；`GET /api/memory/diary/{id}` 详情含 `source_message_ids`。界面展示必须与"事实记忆"明确分区；标注用 `persona.yaml` 的 `name` 动态生成（如"阿栖的日记"），"小溪日记"是特性名，不是角色名，不得硬编码。
 - 禁止：把日记当作 `stated` 事实写进记忆库参与检索竞争；日记中出现用户原话超过 20 字的逐字引用（那是复述，不是日记）。
 
 ## 十一、长语音微句流与预加载合成队列（F2）
