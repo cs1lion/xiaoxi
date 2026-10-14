@@ -17,9 +17,13 @@ export class BeatDriver {
     this.smoothEnergy = 0;
     this.lastBeatTime = 0;
     this.beatInterval = 0.5;       // 估计的节拍间隔（秒）
-    this.pulse = new Spring(180, 8);  // 弹跳弹簧
+    // 弹跳弹簧：约 4Hz、几乎不过阻尼 —— 节拍的"顶一下"就该干脆利落地弹回来
+    this.pulse = new Spring(4.0, 0.34);
     this.pulseValue = 0;
     this.enabled = true;
+    /* 冲量大小除以 omega 就是位移幅度。这里 omega=4Hz -> 25.1，
+     * 取 6.6 约合 0.26 的峰值，和改动前的观感一致。 */
+    this.kickGain = 6.6;
   }
 
   /* 每帧调用。analyser 是播放链路上的 AnalyserNode。 */
@@ -46,13 +50,15 @@ export class BeatDriver {
     const isBeat = this.energy > threshold && now - this.lastBeatTime > this.beatInterval * 0.6;
 
     if (isBeat) {
+      const since = now - this.lastBeatTime;
       this.lastBeatTime = now;
-      // 更新估计的节拍间隔（指数移动平均）
-      if (now - this.lastBeatTime > 0) {
-        // 用当前间隔更新估计
+      // 估计节拍间隔：慢速 EMA 往实测值靠。
+      // 阻尼压得比理想值高，是为了不跟着 TTS 的每个字跳 ——
+      // 节拍同步要的是"跟着句子的重音走"，不是跟着音节走。
+      if (since > 0.15 && since < 2.0) {
+        this.beatInterval += (since - this.beatInterval) * 0.15;
       }
-      // 触发弹跳脉冲
-      this.pulse.v += 3.5;
+      this.pulse.kick(this.kickGain);
     }
 
     // 弹簧自然衰减

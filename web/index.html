@@ -3,74 +3,116 @@
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
-<title>阿栖</title>
+<meta name="theme-color" content="#f5f5ef" />
+<title>阿栖 · 留一点时间给自己</title>
 <link rel="stylesheet" href="/static/style.css" />
+<link rel="stylesheet" href="/static/avatar/dialogue-review.css" />
+<link rel="stylesheet" href="/static/workspace.css" />
+<link rel="stylesheet" href="/static/writing.css" />
+<link rel="stylesheet" href="/static/voice/interaction-state.css" />
+<link rel="stylesheet" href="/static/experience.css" />
+<link rel="stylesheet" href="/static/companion.css" />
+<link rel="stylesheet" href="/static/note-proposals.css" />
+<script type="importmap">
+{"imports":{"three":"/static/vendor/three/three.module.js","three/addons/":"/static/vendor/three/addons/","@pixiv/three-vrm":"/static/vendor/three-vrm/three-vrm.module.js","/static/avatar/params.js":"/static/avatar/params.js?v=20261013-neutral-1"}}
+</script>
 </head>
 <body>
+<a class="skip-link" href="#textInput">跳到对话输入</a>
 <div class="app">
-  <aside class="side">
+  <aside class="side" id="sidePanel" aria-label="记忆与偏好">
     <div class="brand">
-      <div class="avatar" id="avatar">栖</div>
-      <div>
-        <h1 id="personaName">阿栖</h1>
-        <p id="personaTag">正在连接…</p>
-      </div>
+      <div class="avatar" id="avatar" aria-hidden="true">栖</div>
+      <div><h1 id="personaName">阿栖</h1><p id="personaTag">正在连接…</p></div>
+      <span class="brand-note">陪伴日常</span>
     </div>
-
+    <div class="side-intro"><span class="eyebrow">YOUR QUIET CORNER</span><p>琐碎的小事，也值得被记住。</p></div>
     <section class="panel">
-      <h2>记忆</h2>
-      <div class="row">
-        <label class="switch"><input type="checkbox" id="memoryToggle" checked /><span></span>允许它记住</label>
-      </div>
-      <div class="row">
-        <label class="switch"><input type="checkbox" id="proactiveToggle" /><span></span>允许它主动开口</label>
-      </div>
-      <div class="row add">
-        <input id="manualInput" placeholder="手动告诉它一件事…" />
-        <button id="manualAdd">记下</button>
-      </div>
+      <h2>关于你的记忆 <span class="section-mark">01</span></h2>
+      <div class="row"><label class="switch"><input type="checkbox" id="memoryToggle" checked /><span></span>允许阿栖记住</label></div>
+      <div class="row"><label class="switch"><input type="checkbox" id="proactiveToggle" /><span></span>允许阿栖主动开口</label></div>
+      <div class="row add"><input id="manualInput" aria-label="手动添加记忆" placeholder="告诉阿栖一件小事…" /><button id="manualAdd">记下</button></div>
+      <p class="hint" id="memoryFeedback" role="status" aria-live="polite"></p>
+      <div class="row"><label><input type="checkbox" id="memHistory" />显示历史和待核对记录</label></div>
       <div class="mem-list" id="memList"></div>
-      <div class="row foot">
-        <span id="memCount">0 条</span>
-        <button class="ghost" id="memRefresh">刷新</button>
-        <button class="danger ghost" id="memClear">清空</button>
-      </div>
+      <div class="row foot"><span id="memCount">0 条</span><button class="ghost" id="memRefresh">刷新</button><button class="danger ghost" id="memClear">清空</button></div>
     </section>
+    <a class="text-link" href="/static/interpret.html">英 → 中实时字幕 · 共享音频 / 麦克风 ↗</a>
+    <a class="text-link" href="/static/music.html">原创音乐 · 异步创作实验 ↗</a>
+    <div id="experienceMount"></div>
+    <div id="assistantMount"></div>
 
-    <section class="panel">
-      <h2>音色</h2>
-      <div class="row"><label>默认情绪</label>
-        <select id="emotionSelect"></select>
-      </div>
-      <p class="hint">情绪由每句话的语气自动判定，这里只是手动覆盖。</p>
-    </section>
+    <a class="text-link" href="/static/threads.html">共同事项 · 正在一起做 ↗</a>
+    <details class="panel preferences">
+      <summary>声音与形象 <span class="section-mark">偏好</span></summary>
+      <h2>形象 · 实验版</h2>
+      <div class="row"><select id="avatarRenderer" aria-label="形象渲染模式"><option value="svg">插画形象 · SVG</option><option value="vrm">立体形象 · VRM 示例</option></select></div>
+      <p class="hint" id="avatarRendererStatus" role="status">可切换立体形象，失败保留当前形象。</p>
+      <a class="text-link" href="/static/avatar_lab.html" target="_blank" rel="noopener">探索形象实验室 ↗</a>
+      <div id="dialogueReviewMount"></div>
+      <h2>英语口语搭档 · 实验</h2>
+      <label for="practiceMode">练习场景</label><select id="practiceMode"><option value="off">普通陪聊</option><option value="free">英语自由聊</option><option value="cafe">咖啡店点单</option><option value="interview">面试练习</option></select>
+      <label for="practiceLevel">表达难度</label><select id="practiceLevel"><option>A2</option><option selected>B1</option><option>B2</option></select>
+      <label for="practiceCorrection">纠错方式</label><select id="practiceCorrection"><option value="off">不纠错</option><option value="after" selected>回顾时纠错</option><option value="immediate">对话中轻度纠错</option></select>
+      <button id="practiceApply" type="button">应用练习设置</button><button id="practiceReview" type="button" disabled>回顾本次表达</button>
+      <p class="hint" id="practiceStatus" role="status">改变练习设置会清空本次练习上下文。练习不执行任务、不写长期记忆；反馈只评估文字表达，不打发音分数。请从打招呼或介绍自己开始。</p>
+      <label for="practicePause">练习收句等待</label><select id="practicePause"><option value="1600">1.6秒</option><option value="2200" selected>2.2秒</option><option value="3000">3秒</option></select>
+      <h2>全双工 · 实验</h2>
+      <div class="row"><label for="duplexMode">抢话策略</label><select id="duplexMode"><option value="headset">耳机 · 平衡</option><option value="speaker">外放 · 保守</option><option value="immediate">快速打断</option><option value="manual">播放时仅按键打断</option></select></div>
+      <p class="hint">自动模式先压低回复，持续说话才打断。混响、噪声可能误触发，轻声也可能漏检；不稳定时选“播放时仅按键打断”。短声不代表语义附和识别。</p>
+      <p class="hint" id="voiceDiagnostics">尚未采集 · 指标仅在本页内存，不保存录音</p>
+      <button class="ghost" id="resetVoiceMetrics">清空语音指标</button>
+      <div id="voiceBaselineMount"></div>
+      <h2>声音</h2><div class="row"><label for="emotionSelect">说话语气</label><select id="emotionSelect"></select></div>
+      <p class="hint">日常默认自然语气。可以手动换语气，或选择自动随内容变化。</p>
+      <div class="preference-actions"><button class="ghost" id="faceToggle">面部反应：关</button><button class="ghost" id="followToggle">视线跟随：关</button></div>
+      <p class="hint">面部反应需授权摄像头，默认关闭。</p>
+    </details>
+    <p class="side-footer">慢慢来，我们不赶时间。<span aria-hidden="true">✳</span></p>
   </aside>
-
   <main class="stage">
     <header class="topbar">
-      <span id="statusDot" class="dot"></span>
-      <span id="status">连接中</span>
+      <button class="ghost sidebar-toggle" id="sidebarToggle" aria-expanded="false" aria-controls="sidePanel">记忆与偏好</button>
+      <div class="connection" role="status"><span id="statusDot" class="dot"></span><span id="status">连接中</span></div>
       <span class="spacer"></span>
-      <button class="ghost" id="bargeToggle">始终监听：关</button>
-      <button class="ghost" id="faceToggle">面部反应：关</button>
-      <button class="ghost" id="followToggle">视线跟随：关</button>
+      <button class="ghost" id="writingToggle" aria-expanded="false" aria-controls="work-notes">一起写</button>
+      <button class="ghost" id="bargeToggle" aria-pressed="false" title="开启后检测开口与停顿；确认开口才上传音频。建议戴耳机。">连续对话：关</button>
+      <button class="ghost" id="stopBtn" title="停止当前录音与回复；连续模式仍在本地监听，关闭连续对话可释放麦克风。不会撤销已执行的操作。">停止回复</button>
+      <button class="ghost" id="resumeSpeechBtn" hidden title="只续播刚被打断的当前句剩余音频，不重做任务；90秒内有效。">续播被打断句</button>
     </header>
-
+    <div class="room-label"><span class="room-line"></span> 一段只属于你的时间 <span aria-hidden="true">✧</span></div>
     <div class="avatar-stage" id="avatarStage" aria-hidden="true"></div>
-
-    <div class="chat" id="chat"></div>
-
+    <p id="interactionState" class="interaction-state">正在连接…</p>
+    <section id="companionMount" aria-label="正在一起做的事"></section>
+    <div class="chat" id="chat" role="log" aria-label="对话记录" aria-live="polite">
+      <section class="welcome" id="welcome">
+        <span class="eyebrow">A LITTLE SPACE, JUST FOR YOU</span>
+        <h2>把今天，<br>轻轻放在<span class="title-highlight">这里</span><span class="heading-dot">。</span></h2>
+        <p>聊一件开心的小事，或什么都不想做。<br>不用组织好语言，想到哪里就说到哪里。</p>
+        <div class="suggestions" aria-label="开始聊天的灵感">
+          <button data-prompt="今天有件小事想和你分享。"><span aria-hidden="true">☀</span> 分享今天的小事 <span aria-hidden="true">↗</span></button>
+          <button data-prompt="我想休息一下，陪我随便聊聊吧。"><span aria-hidden="true">☕</span> 陪我放空一会儿 <span aria-hidden="true">↗</span></button>
+          <button data-prompt="帮我梳理一下今天要做的事情。"><span aria-hidden="true">✓</span> 理一理待办事项 <span aria-hidden="true">↗</span></button>
+        </div>
+        <span class="welcome-note" id="draftFeedback" role="status" aria-live="polite">从一句「嗨」开始，也很好。</span>
+      </section>
+    </div>
     <div class="composer">
-      <div class="subtitle" id="subtitle"></div>
-      <div class="meter"><div class="meter-fill" id="meterFill"></div></div>
-      <div class="controls">
-        <button id="micBtn" class="mic">按住说话</button>
-        <input id="textInput" placeholder="也可以打字…" autocomplete="off" />
-        <button id="sendBtn">发送</button>
-      </div>
+      <button id="latestMessage" class="latest-message" hidden>回到最新 ↓</button>
+      <div class="subtitle" id="subtitle" role="status" aria-live="polite"></div>
+      <div class="meter" aria-hidden="true"><div class="meter-fill" id="meterFill"></div></div>
+      <div class="controls"><button id="micBtn" class="mic" title="按住说话；键盘可按住空格">按住说话</button><input id="textInput" aria-label="给阿栖的消息" placeholder="想说什么，都可以…" autocomplete="off" /><button id="sendBtn">发送 <span aria-hidden="true">↑</span></button></div>
+      <div class="composer-foot"><p class="hint" id="voiceHint">连续对话：开口即录，停顿约一秒发送；停止回复后仍监听。关闭连续对话释放麦克风，建议戴耳机。</p><span class="composer-signature" aria-hidden="true">在这里，做你自己</span></div>
     </div>
   </main>
 </div>
 <script type="module" src="/static/app.js"></script>
+<script type="module" src="/static/ui.js"></script>
+<script type="module" src="/static/workspace.js"></script>
+<script type="module">
+if (new URLSearchParams(location.search).get('explore') === '1') {
+  import('/static/explore.js').then(module => module.mountExploration()).catch(error => console.warn('设计探索未加载，原界面不受影响', error));
+}
+</script>
 </body>
 </html>

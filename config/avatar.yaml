@@ -6,20 +6,22 @@
 # 参数名沿用 Live2D ParameterModel 命名，将来换 Live2D/VRM 只要重写
 # render 一层，配置和驱动可以整体搬过去。
 #
-# 约定：所有参数为 -1..1 或 0..1 的归一值，0 = 静止/中位。
+# 约定：有符号动作 -1..1；眼开度 0..1.2，瞳孔倍率 0.55..1.5。
+# 睁眼、瞳孔和高光的中位是 1；表情 shift 是绝对目标姿态。
 # ============================================================
 
 # ---------- 外观（交给 svg.js 配色） ----------
 look:
   skin: "#f6ddd2"
   skin_shade: "#e8c3b4"
-  hair: "#4a4256"
+  hair: "#25212a"
   hair_hi: "#6b6079"
   blush: "#f0908a"
   lip: "#c96a63"
   mouth_in: "#8e3b3b"
-  cloth: "#5b6bb5"
-  cloth_dark: "#46528c"
+  cloth: "#8490c8"
+  cloth_dark: "#4958a1"
+  cloth_hi: "#c9cee7"
   eye: "#3b3348"
   bg_glow: "#5aa7c9"
 
@@ -33,8 +35,23 @@ neutral:
   ParamBodyLeanX: 0.0
   ParamEyeLOpen: 1.0
   ParamEyeROpen: 1.0
+  # 笑眼：眼睛收成向上弯的弧，这是"真的在笑"而不是"眯眼"的分界线。
+  # 中位 0.0（不笑）。这两个键以前漏在这里，check_protocol.py 会报
+  # "params.js 声明了但 neutral 没写"——检查存在就是为了防这种漂移。
+  ParamEyeLSmile: 0.0
+  ParamEyeRSmile: 0.0
   ParamEyeBallX: 0.0
   ParamEyeBallY: 0.0
+  # 虹膜整体缩放：Live2D 标准参数 ParamEyeBallForm，-1 收小 / +1 放大。
+  # 和上面的 ParamPupil 是两个通道：那个缩放瞳孔（括约肌），
+  # 这个缩放整个虹膜。Animaze 的扩展集里它专门配笑/皱眉改变眼睛轮廓。
+  ParamEyeBallForm: 0.0
+  # 瞳孔大小倍率。中位 1.0；情绪层按唤醒度往上推（见 emotions.arousal）。
+  # 生理上放大的是瞳孔而不是虹膜——两者是不同的肌肉（虹膜括约肌 vs 瞳孔开大肌），
+  # 表达的东西也不同（专注 vs 瞪眼），所以必须是独立的一条通道。
+  ParamPupil: 1.0
+  # 眼内高光可见度，与瞳孔大小、注视方向独立控制。
+  ParamEyeHighlight: 1.0
   ParamBrowLY: 0.0
   ParamBrowRY: 0.0
   ParamBrowLAngle: 0.0
@@ -57,8 +74,15 @@ response:
   ParamMouthY: 0.05
   ParamEyeLOpen: 0.028
   ParamEyeROpen: 0.028
+  ParamEyeLSmile: 0.02
+  ParamEyeRSmile: 0.02
   ParamEyeBallX: 0.07
   ParamEyeBallY: 0.07
+  ParamEyeBallForm: 0.0
+  # 瞳孔比眼位慢一点：它由虹膜括约肌控制，不受眼外肌驱动，
+  # 所以眼珠已经看过去了、瞳孔还在路上。这一小段迟滞正是"活"的来源。
+  ParamPupil: 0.18
+  ParamEyeHighlight: 0.10
   ParamBrowLY: 0.09
   ParamBrowRY: 0.09
   ParamBrowLAngle: 0.11
@@ -74,15 +98,25 @@ response:
   ParamCheek: 0.14
   ParamBreath: 0.25
 
-# ---------- 表情（情绪标签 -> 目标姿态偏移，叠加在中位之上） ----------
+# ---------- 表情（情绪标签 -> 绝对目标姿态，强度围绕中位缩放） ----------
 # 键名和 persona.yaml 的 tts_emotions 一一对应。
 # shift 是目标值；blend 是过渡时长（秒），到点后保持直到情绪变化。
 emotions:
   base:
+    # arousal 唤醒度 0..1；valence 效价 -1..1。
+    # arousal 决定表情打多大，并独立改写呼吸频率、眼跳时长、瞳孔大小；
+    # valence 决定眨眼疏密（实测：越正面眨眼越频繁）。
+    arousal: 0.25
+    valence: 0.15
     blend: 0.6
     shift: { ParamMouthForm: 0.18, ParamEyeLOpen: 0.97, ParamEyeROpen: 0.97 }
 
   调侃:
+    # arousal 唤醒度 0..1；valence 效价 -1..1。
+    # arousal 决定表情打多大，并独立改写呼吸频率、眼跳时长、瞳孔大小；
+    # valence 决定眨眼疏密（实测：越正面眨眼越频繁）。
+    arousal: 0.55
+    valence: 0.60
     blend: 0.35
     shift:
       ParamBrowLY: 0.42
@@ -96,6 +130,11 @@ emotions:
       ParamCheek: 0.25
 
   得意:
+    # arousal 唤醒度 0..1；valence 效价 -1..1。
+    # arousal 决定表情打多大，并独立改写呼吸频率、眼跳时长、瞳孔大小；
+    # valence 决定眨眼疏密（实测：越正面眨眼越频繁）。
+    arousal: 0.85
+    valence: 0.85
     blend: 0.30
     shift:
       ParamBrowLY: 0.18
@@ -110,6 +149,11 @@ emotions:
       ParamCheek: 0.40
 
   认真:
+    # arousal 唤醒度 0..1；valence 效价 -1..1。
+    # arousal 决定表情打多大，并独立改写呼吸频率、眼跳时长、瞳孔大小；
+    # valence 决定眨眼疏密（实测：越正面眨眼越频繁）。
+    arousal: 0.60
+    valence: -0.15
     blend: 0.40
     shift:
       ParamBrowLForm: 0.62
@@ -122,7 +166,13 @@ emotions:
       ParamAngleY: 0.14
 
   收敛:
+    # arousal 唤醒度 0..1；valence 效价 -1..1。
+    # arousal 决定表情打多大，并独立改写呼吸频率、眼跳时长、瞳孔大小；
+    # valence 决定眨眼疏密（实测：越正面眨眼越频繁）。
+    arousal: 0.20
+    valence: -0.25
     blend: 0.55
+    owns_gaze: true
     shift:
       ParamBrowLY: 0.34
       ParamBrowLAngle: 0.40
@@ -136,7 +186,13 @@ emotions:
       ParamMouthY: -0.20
 
   轻微不服:
+    # arousal 唤醒度 0..1；valence 效价 -1..1。
+    # arousal 决定表情打多大，并独立改写呼吸频率、眼跳时长、瞳孔大小；
+    # valence 决定眨眼疏密（实测：越正面眨眼越频繁）。
+    arousal: 0.50
+    valence: -0.40
     blend: 0.40
+    owns_gaze: true
     shift:
       ParamBrowLY: -0.26
       ParamBrowRForm: 0.40
@@ -150,7 +206,13 @@ emotions:
       ParamMouthY: 0.12
 
   变小气:
+    # arousal 唤醒度 0..1；valence 效价 -1..1。
+    # arousal 决定表情打多大，并独立改写呼吸频率、眼跳时长、瞳孔大小；
+    # valence 决定眨眼疏密（实测：越正面眨眼越频繁）。
+    arousal: 0.25
+    valence: -0.70
     blend: 0.6
+    owns_gaze: true
     shift:
       ParamBrowLY: -0.14
       ParamBrowRY: -0.10
@@ -171,8 +233,12 @@ idle:
     mean_interval: 3.4      # 秒（泊松过程均值）
     min_interval: 0.9
     double_prob: 0.18       # 概率接一次快速二连眨
-    close_ms: 90            # 闭上 / 睁开各一次的时间
-    hold_ms: 34             # 完全闭着的保持时间
+    # 眨眼是三段，闭眼和睁眼**必须**给不同时长：
+    # 真人闭眼约 70ms、睁开约 110ms。对称版本一眼就看出是机械快门。
+    close_ms: 70            # 闭合段
+    hold_ms: 20             # 完全闭着的保持时间
+    open_ms: 110            # 睁开段（应当 > close_ms）
+    double_gap_ms: 240      # 二连眨两下之间的间隔（缺了它两下会连成一次长眨）
   saccade:
     mean_interval: 1.9
     max_shift: 0.55
@@ -192,6 +258,45 @@ idle:
     freq: 2.7
   blink_while_speaking: 0.65    # 说话时眨眼间隔的乘数（越小越频繁）
 
+  # ---------- 慢层：精神状态 ----------
+  # 快层（眨眼/眼跳/呼吸）反应在几十毫秒内完成，慢层决定的是
+  # "没人理她时整个人慢慢松下来"。这两条时间尺度必须分开调：
+  # 混在一起的结果只能是"要么呆滞、要么神经质"——
+  # 快层要长时间不眨眼才像发呆，慢层却要眼睛一直有生气地在动。
+  # 没有这层，待机就永远是同一副精神抖擞的样子，看着像屏保而不是人。
+  energy:
+    drain_per_sec: 0.022        # 静置时精神掉得多快（约 45 秒到底）
+    drain_speaking: 0.35        # 说话时也在掉，但慢得多（讲着话不该越讲越困）
+    recover_per_sec: 0.9        # 恢复速率（由 wake() 按互动强度给量）
+    stages:                     # 阈值从高到低排列，依次进入
+      - { at: 0.55, name: drowsy }   # 开始松，眼神飘得更远
+      - { at: 0.30, name: sleepy }   # 眨眼变慢变长
+      - { at: 0.10, name: dozing }   # 头一点一点往下垂
+    blink_slowdown: 2.6        # 最困时眨眼间隔乘到几倍（成倍，不是线性）
+    blink_dilate: 2.0          # 最困时单次眨眼时长乘到几倍
+    droop_per_stage: 0.22      # 每进一档头垂多少（ParamAngleY 归一量）
+    droop_release: 0.6         # 回神时抬头速度（每秒）——和垂下不同速，
+                               # 因为"一下子抬头"才读得出"注意到你了"
+
+  # ---------- 唤醒度/效价如何改写生理通道 ----------
+  # 这不是"表情的加强版"，而是三条互相独立、都有实测支撑的关系。
+  # 分开做的好处：即使表情标签没变，只改 arousal，
+  # 呼吸、眼跳、眨眼、瞳孔也会一起变，观感立刻不一样。
+  affect:
+    # 唤醒度越高，眼跳**变慢**。反直觉但有实测依据：
+    # 情绪激动时动作精度下降、运动变慢变重。
+    # （"激动=动得快"说的是眨眼，不是眼跳。）
+    saccade_slow: 0.55
+    # 效价与眨眼间隔呈线性关系：越正面，眨眼越频繁。
+    # 和犯困（energy 低）方向相反，所以驱动时用乘算而不是加算——
+    # "又困又开心"的真实表现是"间隔长但每次很慢"，两种特征都在。
+    blink_positive: 0.45       # 正面情绪下眨眼间隔缩到几成
+    blink_negative: 1.35       # 负面情绪下眨眼间隔拉到几倍
+    # 安静状态实测约 0.27Hz（周期 3.7s），深度呼吸降到 0.21Hz。
+    breath_fast: 1.65          # 唤醒度拉满时呼吸频率乘到几倍
+    breath_min: 1.0            # 精神饱满时的呼吸周期倍率
+    breath_max: 1.6            # 快睡着时的呼吸周期倍率（浅而慢）
+
 # ---------- 眼神：眼睛要"在看某处"，而不是随机飘 ----------
 # target 是注视点（归一化，0 = 正视前方），drift 是围绕该点的游走半径。
 # 真人移视是弹道式的（50~80ms 到位），所以这里 move.duration 给得短；
@@ -208,6 +313,14 @@ gaze:
     mean_interval: 0.85
     radius: 0.11
     duration: 0.10
+  # 眼跳是弹道运动：位移越大耗时越长，但有上下限。
+  # 恒定时长会同时踩两个坑——微扫视被拖成慢慢飘（读成眼神涣散），
+  # 大扫视瞬间到位（读成闪现）。这里按"速度"折算时长，
+  # 折算速度取自真人眼跳峰值约 800 度/秒。
+  # 数值都是归一化眼动单位：全幅约 2.0。
+  speed: 3.5             # 归一化单位/秒
+  min_duration: 0.035    # 微眼跳实测 30~50ms，低于此会读成抽搐
+  max_duration: 0.18     # 再大的位移也封在这里，避免"飘过去"
   # 消息类型 -> 注视点。见 web/avatar/index.js
   on_message:
     thinking: think
@@ -216,6 +329,45 @@ gaze:
     done: viewer
     playback_stopped: viewer
     interrupted: viewer
+
+  # 相互凝视调节：
+  # 真人持续注视对方眼睛有上限（约 3-7 秒），超过会自然移开。
+  # 这里用最大凝视时长 + 强制断开时间来模拟。
+  # 只有在相互注视（用户看角色、角色看用户）时生效。
+  mutual_gaze:
+    enabled: true
+    max_duration: 5.0      # 最大持续凝视时长（秒）
+    break_duration: [0.8, 2.0] # 打破凝视后的回避时长范围（秒）
+    recovery_delay: 0.5    # 重新建立眼神接触的延迟
+
+  # ---------- 眼-头协调 ----------
+  # 移视幅度小于约 15~20 度时只动眼睛，超过这个门槛头才被"征用"。
+  # 头跟着小幅移视一起动，会读成"整个人在紧张地看"。
+  #
+  # 时序上分两种，是这一层最要紧的区别：
+  #   可预期的注视点（思考时飘开、听你说话时低头——我们自己决定看哪）
+  #     头**先**动，比眼早约 100ms
+  #   不可预期的刺激（鼠标突然跑掉）
+  #     眼**先**动，头晚约 35ms 才跟上
+  # 同一个动作，顺序反过来读出来的东西完全不同。
+  #
+  # 数值是归一化眼动单位，全幅 2.0 大致对应眼球的常规活动范围。
+  # 换算成角度是粗略的（recruit≈11~14 度、head_capacity≈30 度），
+  # 2D 侧没有真实的眼球角位移可依，这里只需要比例关系对。
+  coord:
+    recruit: 0.42          # 超过这个幅度头才参与
+    head_capacity: 1.15    # 头部最多贡献多少眼动当量的转动
+    head_lead: 0.10        # 可预期注视：头领先眼
+    head_lag: 0.035        # 反应性注视：头落后眼
+    blink_on_shift: 0.75   # 大于此幅度的移视，**到位后**补一次眨眼
+    refractory: 0.15       # 两次自发眼跳之间的最小间隔（生理不应期）
+    # 眼跳与眨眼互相抑制。两者由同一套机制门控（omnipause neuron），
+    # 眼跳期间扣住眨眼，眨眼期间也扣住眼跳。所以下面这几条不是可选项：
+    # 大幅移视时闭眼，眼球就会从上眼睑底下滑过去——
+    # 那恰恰是最该避免的画面，却是最容易凭直觉写出来的写法。
+    opn_gate: true         # 眼跳期间不许眨眼
+    opn_settle: 0.06       # 眼跳结束后多久才允许眨眼
+    opn_lock: 0.08         # 眨眼期间不许发起眼跳
 
 # ---------- 无障碍：尊重系统的"减少动态效果" ----------
 # 策略是"把快的压慢压小，把慢的留住"，不是把角色冻住：
@@ -226,6 +378,30 @@ reduced_motion:
   secondary: 0.15         # 头发/呆毛的滞后与过冲
   gaze_drift: 0.3         # 眼神游走
   gesture: 0.55           # 手势幅度（时长不变，只是幅度小、过渡慢）
+
+# ---------- 口型的共发音 ----------
+# 嘴的动作比声音早：真人发 /k/ 时嘴唇已经开始为后面的 /u/ 收圆了
+# （pre-rounding），声学与视觉特征的最大相关点平均落在 120ms 的过去。
+# 硬切或线性插值的口型永远做不到这一点，所以整段对话虽然对得上嘴，
+# 却总像在"追"声音而不是在"预告"它。
+#
+# 模型是 Cohen-Massaro 的 dominance function：每个音素带一条影响力曲线，
+# 多条曲线重叠后按权重混合。曲线用升余弦，两端一阶导为零，
+# 混合出来的口型在音素边界不会有速度折角。
+coarticulation:
+  lead: 0.42              # 提前量（相对本段时长的倍数）
+  lead_cap: 0.090         # 提前量的绝对上限（秒）
+  trail: 0.34             # 保持量：音素结束后影响力还留多久
+  trail_cap: 0.070
+  resistance: 0.98        # 闭合音素对混合的抵抗力
+  closure_lock: 1         # 闭合时把张口压向 0 的强度上限
+
+# lead_cap 不是摆设：一个 365ms 的 "a" 若按比例提前 153ms，
+# 它会在前面 80ms 的 b/p/m 还没闭完时就把嘴拉开，于是 ba 的双唇永远合不拢。
+# 加了这个上限，共发音既"提前"又不破坏闭塞音。
+#
+# resistance < 1 而不是 =1：唇要真的合上（否则像弱化音），
+# 但留一点点弹性——完全不让步会让闭合变成生硬的开关，反而读成机械音。
 
 # ---------- 手势轨道：一次性动作 ----------
 # at   = 轨道内起始秒

@@ -5,6 +5,25 @@
    --------------------------------------------------------------- */
 
 import { avatar, boot } from "./avatar/index.js";
+import { interactionState, reflectInteractionState } from './voice/interaction-state.js';
+import { StreamingResampler, SampleFramer, pcm16 } from "./voice/pcm.js";
+import { EnergyVad } from "./voice/vad.js";
+import { PlaybackQueue } from "./voice/playback.js";
+import { TurnGate } from "./voice/turns.js";
+import { MicrophoneLease } from "./voice/microphone.js";
+import { createCapture } from "./voice/capture.js";
+import { DuplexGate } from "./voice/duplex.js";
+import { PlaybackCheckpoint, VoiceMetrics } from "./voice/checkpoint.js";
+import { mountVoiceBaseline } from './voice/baseline-ui.js';
+import { mountDialogueReview } from './avatar/dialogue-review-ui.js';
+import { mountEditorInsightVoice } from './voice/editor-insight.js';
+import { mountEditorDiscussion } from './voice/editor-discussion.js';
+import { bootAssistant, showAssistantResult } from "./assistant.js";
+import { bootCompanion } from './companion.js';
+import { mountExperience } from './experience.js';
+import { appendContextUsage } from './context-usage.js';
+bootAssistant().catch(error => console.warn('助手面板启动失败', error));
+bootCompanion().catch(error => console.warn('共同事项启动失败', error));
 
 const TARGET_RATE = 16000;
 const ws = new WebSocket(`${location.protocol === "https:" ? "wss" : "ws"}://${location.host}/ws`);
@@ -18,210 +37,582 @@ const micBtn = el("micBtn");
 const meterFill = el("meterFill");
 
 let audioCtx = null;
-let playQueue = [];
-let playing = false;
-let stream = null;
-let sourceNode = null;
-let procNode = null;
-let analyser = null;
+let sourceNode = null; // Output only; never shared with the microphone.
+let capture = null;
+let capturePending = null;
 let playAnalyser = null;
-let recorderNode = null;
+let outputGain = null;
+let resampler = null;
+let referenceResampler = null;
+let framer = null;
+let referenceFramer = null;
+let playbackState = null;
+let playbackBaselineTurn = null;
+let ducked = false;
+let candidateSince = null;
+let submittedAt = null;
+let firstAudioPending = false;
+const checkpoint = new PlaybackCheckpoint({ onExpire: () => updateResume() });
+const metrics = new VoiceMetrics();
+let duplexMode = 'headset';
+const duplex = new DuplexGate();
 let recording = false;
+let recordingMode = null;
+let manualHeld = false;
+let manualRequest = 0;
+let manualTimer = null;
+let sentSamples = 0;
 let alwaysListen = false;
-let speakingHeard = false;
-let emotionOverride = "";
+let disposed = false;
+let micGeneration = 0;
+let turnCounter = 0;
+const turns = new TurnGate();
+let resumeReviewId = null;
+const dialogueReview = mountDialogueReview({ mount: el('dialogueReviewMount'), avatar,
+  metadata: () => ({ model: avatar.rendererKind, page: 'chat' }) });
+let editorInsightVoice = null;
+let editorDiscussion = null;
+let editorDiscussionTurn = null;
+let editorSubmittedText = null;
+const vad = new EnergyVad();
+const microphone = new MicrophoneLease(() => navigator.mediaDevices.getUserMedia({
+  audio: { channelCount: 1, echoCancellation: true, noiseSuppression: true, autoGainControl: true },
+}));
+let practiceMode = 'off';
+let experienceMode = 'off';
+const baselineTurns = new Map();
+let baselineChunk = 0;
+let baselineEnergy = null;
+let baselineGateOnset = false;
+const baseline = mountVoiceBaseline({ root: el('voiceBaselineMount'), getContext: () => {
+  const settings = microphone.stream?.getAudioTracks?.()[0]?.getSettings?.() || {};
+  return { mode: duplexMode, captureKind: capture?.kind || 'none',
+    timingSource: capture?.timingSource || null,
+    referenceAvailable: capture ? !!capture.hasReference : null,
+    activity: experienceMode !== 'off' ? experienceMode : practiceMode,
+    endpointWaitMs: vad.pauseMs,
+    echoCancellation: typeof settings.echoCancellation === 'boolean' ? settings.echoCancellation : null,
+    noiseSuppression: typeof settings.noiseSuppression === 'boolean' ? settings.noiseSuppression : null,
+    autoGainControl: typeof settings.autoGainControl === 'boolean' ? settings.autoGainControl : null };
+} });
+let emotionOverride = null;
 let pendingText = "";
 let currentBubble = null;
+let pendingConfirmation = null;
+const experienceUI = mountExperience({
+  sendConfig: payload => {
+    if (ws.readyState !== WebSocket.OPEN) throw new Error('连接未就绪');
+    ws.send(JSON.stringify(payload));
+  },
+  onSwitch: () => {
+    if (ws.readyState !== WebSocket.OPEN) throw new Error('连接未就绪');
+    baseline.invalidate('mode_changed');
+    editorDiscussion?.end();
+    manualHeld = false; manualRequest++; cancelRecording(); cancelTurn(); resetDuplex(); vad.reset();
+    checkpoint.clear(); updateResume();
+    if (!alwaysListen) teardownMic();
+  },
+  sendText: text => {
+    if (ws.readyState !== WebSocket.OPEN) throw new Error('连接未就绪');
+    el('textInput').value = text;
+    el('sendBtn').click();
+  },
+});
+experienceUI.importSelection();
 
 /* ---------------- 文本气泡 ---------------- */
 function addBubble(role, text) {
   const node = document.createElement("div");
   node.className = `msg ${role === "user" ? "user" : "bot"}`;
   node.textContent = text;
+  if (editorDiscussionTurn && turns.id === editorDiscussionTurn) node.classList.add('editor-discussion-message');
   const time = document.createElement("span");
   time.className = "time";
   time.textContent = new Date().toLocaleTimeString();
   node.appendChild(time);
   chat.appendChild(node);
-  chat.scrollTop = chat.scrollHeight;
   return node;
 }
 
-function setStatus(text, state) {
+function setStatus(text, state, interaction = state === 'busy' ? 'preparing' : state === 'on' ? 'idle' : 'unavailable') {
   statusText.textContent = text;
   statusDot.className = `dot ${state || ""}`;
+  reflectInteractionState(interaction, text);
+  avatar.setDialogueState(interaction);
 }
 
-/* ---------------- 音频 ---------------- */
+/* ---------------- 音频 / 轮次 ---------------- */
+function send(message) {
+  if (ws.readyState !== WebSocket.OPEN) return false;
+  ws.send(JSON.stringify(message)); return true;
+}
 function ensureCtx() {
   if (!audioCtx) {
     audioCtx = new (window.AudioContext || window.webkitAudioContext)();
-    // 播放路上的分析器：给口型做实时包络，不只是"能不能出声"
     playAnalyser = audioCtx.createAnalyser();
     playAnalyser.fftSize = 512;
     playAnalyser.smoothingTimeConstant = 0.3;
-    playAnalyser.connect(audioCtx.destination);
+    outputGain = audioCtx.createGain();
+    playAnalyser.connect(outputGain);
+    outputGain.connect(audioCtx.destination);
     avatar.attachOutputAnalyser(playAnalyser);
   }
-  if (audioCtx.state === "suspended") audioCtx.resume();
+  if (audioCtx.state === "suspended") audioCtx.resume().catch(error => voiceError(error));
   return audioCtx;
 }
-
-async function enqueueAudio(b64, text, emotion) {
-  const ctx = ensureCtx();
-  const bytes = Uint8Array.from(atob(b64), (c) => c.charCodeAt(0));
-  const buffer = await ctx.decodeAudioData(bytes.buffer);
-  playQueue.push({ buffer, text: text || "", emotion: emotion || "" });
-  if (!playing) drainQueue();
+function updateVoiceDiagnostics() {
+  const node = el('voiceDiagnostics');
+  if (!node) return;
+  const data = metrics.snapshot();
+  const latency = data.timings.submitToFirstAudio;
+  node.textContent = `${capture?.kind || '未采集'} · ${capture?.hasReference ? '有播放参照' : '无播放参照'} · 候选 ${data.counts.candidate || 0} / 抢话 ${data.counts.barge || 0} / 回声帧 ${data.counts.echo || 0}` +
+    (latency ? ` · 提交→浏览器播放启动 p50 ${latency.p50}ms / p95 ${latency.p95}ms（${latency.n}次）` : '');
+}
+function setDucked(value) {
+  if (ducked === value) return;
+  ducked = value;
+  if (outputGain) {
+    const gain = outputGain.gain;
+    if (gain.setTargetAtTime) { gain.cancelScheduledValues(audioCtx.currentTime); gain.setTargetAtTime(value ? .22 : 1, audioCtx.currentTime, .025); }
+    else gain.value = value ? .22 : 1;
+  }
+}
+function updateResume() {
+  const button = el('resumeSpeechBtn');
+  if (button) { button.hidden = !checkpoint.available; button.disabled = recording || manualHeld || !!turns.id || playback.busy; }
+}
+function resetDuplex(options) { duplex.reset(options); candidateSince = null; baselineGateOnset = false; setDucked(false); }
+function voiceError(error) {
+  dialogueReview?.event({ type: 'error', turn_id: resumeReviewId || turns.id, meta: { reason: 'playback-error' } });
+  if (resumeReviewId) { dialogueReview?.endTurn(resumeReviewId, 'error'); resumeReviewId = null; }
+  editorInsightVoice?.fail(error);
+  subtitle.textContent = `语音提示：${error.message || error}`;
+  setStatus("语音暂不可用", "", currentInteraction().id);
+}
+function currentInteraction() {
+  return interactionState({recording, manual:recordingMode==='manual', playing:!!sourceNode, queued:playback.busy, turn:!!turns.id, continuous:alwaysListen, ducked});
+}
+function idleStatus() {
+  updateResume();
+  const state = currentInteraction();
+  setStatus(state.text, state.tone, state.id);
+}
+function finishTurn() {
+  if (!turns.done || playback.busy || recording) return;
+  dialogueReview?.endTurn(turns.id, 'complete');
+  editorInsightVoice?.finish(turns.id);
+  turns.clear(); currentBubble = null; pendingText = "";
+  avatar.stopSpeaking(); idleStatus();
+}
+const playback = new PlaybackQueue({
+  decode: async item => {
+    recordBaselineItem('decode_start', item);
+    try {
+      let buffer = item.buffer;
+      if (!buffer) {
+        if (item.data.length > 12 * 1024 * 1024) throw new Error("音频片段过大，已跳过");
+        const bytes = Uint8Array.from(atob(item.data), c => c.charCodeAt(0));
+        buffer = await ensureCtx().decodeAudioData(bytes.buffer);
+      }
+      recordBaselineItem('decode_end', item); return buffer;
+    } catch (error) { recordBaselineItem('decode_error', item); throw error; }
+  },
+  play: (buffer, item, done) => {
+    const ctx = ensureCtx();
+    const source = ctx.createBufferSource(); sourceNode = source;
+    source.buffer = buffer; source.connect(playAnalyser);
+    const cleanup = () => {
+      source.onended = null;
+      try { source.disconnect(); } catch (_) {}
+      if (sourceNode === source) { sourceNode = null; playbackState = null; playbackBaselineTurn = null; }
+    };
+    source.onended = () => {
+      dialogueReview?.event({ type: 'playback-end', turn_id: item.turn_id || item._baselineTurn, meta: { reason: 'natural', audioTime: ctx.currentTime } });
+      recordBaselineItem('playback_end', item, { reason: 'natural' }); cleanup(); done();
+    };
+    try {
+      const at = ctx.currentTime;
+      const offset = Math.max(0, Math.min(item.offset || 0, buffer.duration));
+      playbackState = { buffer, offset, startedAt: at, text: item.text || '', emotion: item.emotion || '' };
+      playbackBaselineTurn = item.turn_id || item._baselineTurn || null;
+      source.start(at, offset);
+      dialogueReview?.event({ type: 'playback-start', turn_id: item.turn_id || item._baselineTurn,
+        text: item.resumed ? '' : item.text || '', meta: { source: item.resumed ? 'resume' : 'playback',
+          reason: item.resumed ? 'audio-only-resume-no-text-alignment' : 'audio-start', durationMs: (buffer.duration - offset) * 1000, audioTime: at } });
+      editorInsightVoice?.playing(item.turn_id);
+      recordBaselineItem('playback_start', item, { durationMs: (buffer.duration - offset) * 1000 });
+      if (!item.resumed && firstAudioPending && submittedAt !== null) {
+        metrics.timing('submitToFirstAudio', performance.now() - submittedAt); firstAudioPending = false; updateVoiceDiagnostics();
+      }
+      if (item.text) subtitle.textContent = item.text;
+      avatar.setEmotion(item.emotion || "");
+      avatar.setAudioContext(ctx);
+      avatar.speak(item.resumed ? '' : (item.text || ''), ctx, at, buffer.duration - offset, {
+        // Audio-only continuation intentionally does not replay prior gestures.
+        performance: item.resumed ? { version: 1, source: 'llm', cues: [] } : item.performance,
+        wordTimings: item.resumed ? undefined : item.word_timings,
+      });
+      idleStatus();
+    } catch (error) { cleanup(); try { source.stop(); } catch (_) {} throw error; }
+    return () => {
+      dialogueReview?.event({ type: 'playback-end', turn_id: item.turn_id || item._baselineTurn, meta: { reason: 'cancelled', audioTime: ctx.currentTime } });
+      cleanup(); recordBaselineItem('playback_stop_requested', item, { reason: 'cancelled' }); try { source.stop(); } catch (_) {}
+    };
+  },
+  onIdle: () => {
+    if (resumeReviewId) { dialogueReview?.endTurn(resumeReviewId, 'complete'); resumeReviewId = null; }
+    avatar.stopSpeaking({turnPending: !!turns.id && !turns.done}); finishTurn(); idleStatus();
+  },
+  onError: voiceError,
+});
+editorInsightVoice = mountEditorInsightVoice({
+  available: () => !disposed && !document.hidden,
+  ensureAudio: ensureCtx,
+  beginLocal: () => {
+    manualHeld = false; manualRequest++; cancelRecording(); cancelTurn(); resetDuplex(); vad.reset();
+    if (!alwaysListen) teardownMic();
+    checkpoint.clear(); updateResume();
+    const id = `editor-insight-${globalThis.crypto?.randomUUID?.() || `${Date.now()}-${++turnCounter}`}`;
+    turns.begin(id);
+    dialogueReview?.beginTurn({ id, input: '观点语音播报' });
+    submittedAt = null; firstAudioPending = false;
+    setStatus('正在准备这条观点…', 'busy');
+    return id;
+  },
+  enqueueAudio: item => {
+    const accepted = playback.enqueue(item);
+    if (accepted && turns.id === item.turn_id) dialogueReview?.event({ type: 'done', turn_id: item.turn_id, text: item.text || '' });
+    if (accepted && turns.id === item.turn_id) { turns.done = true; finishTurn(); }
+    return accepted;
+  },
+  stopLocal: id => {
+    if (!id || turns.id !== id) return;
+    stopPlayback(); dialogueReview?.endTurn(id, 'interrupted'); turns.clear(); currentBubble = null; pendingText = '';
+    resetDuplex(); idleStatus();
+  },
+  retireServerTurn: id => turns.retire(id),
+});
+const discussionBanner = document.createElement('section');
+discussionBanner.id = 'editorDiscussion'; discussionBanner.className = 'editor-discussion';
+discussionBanner.hidden = true; discussionBanner.setAttribute('aria-label', '围绕稿件观点继续讨论');
+const discussionPoint = document.createElement('p');
+const discussionHint = document.createElement('small');
+const discussionActions = document.createElement('div'); discussionActions.className = 'editor-discussion-actions';
+const returnToDraft = document.createElement('button'); returnToDraft.type = 'button'; returnToDraft.textContent = '回到稿子';
+const endDiscussion = document.createElement('button'); endDiscussion.type = 'button'; endDiscussion.textContent = '结束讨论';
+discussionActions.append(returnToDraft, endDiscussion);
+discussionBanner.append(discussionPoint, discussionHint, discussionActions);
+el('textInput').closest('.composer').prepend(discussionBanner);
+const ordinaryPlaceholder = el('textInput').placeholder;
+const ordinaryMaxLength = el('textInput').getAttribute('maxlength');
+function stopDiscussionTurn() {
+  if (editorDiscussionTurn && turns.id === editorDiscussionTurn) {
+    manualHeld = false; manualRequest++; cancelRecording(); cancelTurn(); resetDuplex(); vad.reset();
+    checkpoint.clear(); updateResume();
+    if (!alwaysListen) teardownMic();
+  }
+}
+editorDiscussion = mountEditorDiscussion({
+  available: () => !disposed && !document.hidden && ws.readyState === WebSocket.OPEN,
+  onChange: context => {
+    discussionBanner.hidden = !context;
+    document.body.classList.toggle('has-editor-discussion', !!context);
+    discussionBanner.classList.toggle('is-invalid', !!context?.invalid);
+    discussionPoint.textContent = context ? (context.invalid || `正在聊这一点：${context.point}`) : '';
+    discussionHint.textContent = context?.invalid ? '回到稿子重新看看，或结束讨论继续聊天。' : '可以问“为什么”，也可以不同意或一起想怎么改。';
+    el('textInput').placeholder = context ? '围绕这条观点，继续说…' : ordinaryPlaceholder;
+    if (context) el('textInput').setAttribute('maxlength', '1000');
+    else if (ordinaryMaxLength === null) el('textInput').removeAttribute('maxlength');
+    else el('textInput').setAttribute('maxlength', ordinaryMaxLength);
+  },
+  onStart: () => {
+    manualHeld = false; manualRequest++; cancelRecording(); cancelTurn(); resetDuplex(); vad.reset();
+    checkpoint.clear(); updateResume(); if (!alwaysListen) teardownMic();
+    window.dispatchEvent(new Event('aqi-editor-discussion-start'));
+    subtitle.textContent = '接着聊刚才这一点。按住说话，或者直接打字。';
+    el('textInput').focus({ preventScroll: true });
+  },
+  onInvalidate: stopDiscussionTurn,
+  onEnd: stopDiscussionTurn,
+});
+returnToDraft.onclick = () => window.dispatchEvent(new Event('aqi-editor-discussion-return'));
+endDiscussion.onclick = () => { editorDiscussion.end(); subtitle.textContent = '已结束这条观点的讨论，继续聊。'; };
+function stopPlayback() {
+  playback.stop();
+  if (resumeReviewId) { dialogueReview?.endTurn(resumeReviewId, 'interrupted'); resumeReviewId = null; }
+  setDucked(false); avatar.stopSpeaking();
+}
+function cancelTurn(preserveAudio = false) {
+  const cancelledId = turns.id;
+  if (cancelledId) dialogueReview?.event({ type: 'interrupted', turn_id: cancelledId });
+  editorInsightVoice?.cancel();
+  rejectConfirmation('播报已打断，请查看任务面板中的实际结果；不会自动重试操作。');
+  if (preserveAudio && playbackState && audioCtx) {
+    checkpoint.save({ ...playbackState, offset: playbackState.offset + Math.max(0, audioCtx.currentTime - playbackState.startedAt) });
+  }
+  if (turns.id) { recordBaselineTurn('turn_cancel', turns.id); send({ type: "barge_in", turn_id: turns.id }); }
+  stopPlayback();
+  if (cancelledId) dialogueReview?.endTurn(cancelledId, 'interrupted');
+  turns.clear(); avatar.onBargeIn(); currentBubble = null; pendingText = "";
+  editorDiscussionTurn = null;
+  editorSubmittedText = null;
+}
+function registerBaselineTurn(id, input) {
+  dialogueReview?.beginTurn({ id, input: input === 'resume' ? '续播被打断句 · 无剩余文字对齐' : input === 'proactive' ? '主动回应' : '' });
+  const token = baseline.captureToken();
+  baselineTurns.set(id, { token, input });
+  if (baselineTurns.size > 128) baselineTurns.delete(baselineTurns.keys().next().value);
+  baseline.record({ type: 'turn_begin', turn_id: id, meta: { input } }, { token });
+}
+function recordBaselineTurn(type, id = turns.id, meta = {}, at = performance.now()) {
+  const observed = baselineTurns.get(id);
+  baseline.record({ type, turn_id: id, at, meta: { input: observed?.input, ...meta } }, { token: observed?.token });
+}
+function recordBaselineItem(type, item, meta = {}) {
+  baseline.record({ type, turn_id: item.turn_id || item._baselineTurn,
+    meta: { chunkIndex: item._baselineChunk, resumed: !!item.resumed, source: 'playback', ...meta } },
+  { token: item._baselineToken });
+}
+function observeBaselineEnergy(voiced, at, source, keepQuiet = false) {
+  const token = baseline.captureToken();
+  if (!token) { baselineEnergy = null; return; }
+  if (baselineEnergy?.token !== token) baselineEnergy = null;
+  if (voiced) {
+    if (!baselineEnergy) baselineEnergy = { token, first: at, last: at, source, recordedTurn: null };
+    baselineEnergy.last = at;
+    if (recording) recordBaselineSpeech();
+  } else if (!recording && !keepQuiet) baselineEnergy = null;
+}
+function recordBaselineSpeech() {
+  const observed = baselineTurns.get(turns.id);
+  if (!baselineEnergy || observed?.token !== baselineEnergy.token) return;
+  if (baselineEnergy.recordedTurn !== turns.id) {
+    recordBaselineTurn('speech_first_energy', turns.id, { source: baselineEnergy.source }, baselineEnergy.first);
+    baselineEnergy.recordedTurn = turns.id;
+  }
+  recordBaselineTurn('speech_last_energy', turns.id, { source: baselineEnergy.source }, baselineEnergy.last);
+}
+function beginTurn(type, extra = {}, baselineInput = type === 'text' ? 'text' : 'confirmation') {
+  let editorContext = null;
+  if (type === 'text' || type === 'start') {
+    try { editorContext = editorDiscussion?.requestContext(); }
+    catch (error) { subtitle.textContent = error.message; return null; }
+  }
+  const interrupted = !!turns.id || playback.busy;
+  cancelTurn(true);
+  if (interrupted) avatar.onBargeIn();
+  const id = `client-${globalThis.crypto?.randomUUID?.() || `${Date.now()}-${++turnCounter}`}`;
+  turns.begin(id); registerBaselineTurn(id, baselineInput);
+  if (typeof extra.text === 'string') dialogueReview?.event({ type: 'input', turn_id: id, text: extra.text });
+  editorDiscussionTurn = editorContext ? id : null;
+  editorSubmittedText = editorContext && type === 'text' ? { id, text: extra.text } : null;
+  send({ type, turn_id: id, ...extra, ...(editorContext ? { editor_insight: editorContext } : {}) });
+  return id;
+}
+function rejectConfirmation(message) {
+  if (!pendingConfirmation) return;
+  const pending = pendingConfirmation; pendingConfirmation = null;
+  clearTimeout(pending.timer); pending.reject(new Error(message));
+}
+function confirmAssistant(result, approve) {
+  if (ws.readyState !== WebSocket.OPEN) return Promise.reject(new Error('连接未就绪，请刷新后核对实际结果。'));
+  // Unlock output during the button gesture, before waiting for the action result.
+  ensureCtx(); cancelRecording(); resetDuplex(); vad.reset();
+  const id = beginTurn('assistant_confirm', {
+    run_id: result.run_id, confirmation_id: result.confirmation.id, approve,
+  });
+  submittedAt = performance.now(); firstAudioPending = true;
+  return new Promise((resolve, reject) => {
+    pendingConfirmation = { id, resolve, reject, timer: setTimeout(() => {
+      rejectConfirmation('确认结果等待超时，请查看任务面板；不会自动重试操作。');
+    }, 45000) };
+  });
 }
 
-function drainQueue() {
-  if (!playQueue.length) {
-    playing = false;
-    avatar.stopSpeaking();
+/* ---------------- 麦克风：静音监听不上传 ---------------- */
+function recordingUi() {
+  micBtn.classList.toggle("recording", recording);
+  micBtn.textContent = recordingMode === "manual" ? "松开结束" : "按住说话";
+  micBtn.setAttribute("aria-pressed", String(recording));
+}
+function startUtterance(mode) {
+  if (ws.readyState !== WebSocket.OPEN) return false;
+  if (!beginTurn("start", {}, mode === 'auto' ? 'voice_auto' : 'voice_manual')) {
+    if (!alwaysListen) teardownMic();
+    return false;
+  }
+  recording = true; recordingMode = mode; sentSamples = 0;
+  recordBaselineSpeech();
+  recordingUi(); idleStatus();
+  if (mode === "manual") manualTimer = setTimeout(() => {
+    if (recordingMode === "manual") {
+      endRecording(); subtitle.textContent = "已达到单次录音上限，请松开后再说。";
+    }
+  }, 29500);
+  return true;
+}
+function sendPcm(samples) {
+  if (!recording || !samples.length || ws.readyState !== WebSocket.OPEN) return;
+  if (ws.bufferedAmount > 1024 * 1024) {
+    cancelRecording(); cancelTurn(); vad.reset({ cooldown: true });
+    if (!alwaysListen) teardownMic();
+    voiceError(new Error("网络发送拥堵，本次录音已取消")); return;
+  }
+  const remaining = 472000 - sentSamples; // 29.5 seconds including pre-roll.
+  const part = samples.subarray(0, Math.max(0, remaining));
+  if (part.length) { ws.send(pcm16(part)); sentSamples += part.length; }
+}
+function processFrame(frame, reference = null, frameAt = performance.now()) {
+  if (recordingMode === "manual") {
+    const rms = Math.sqrt(frame.reduce((sum, sample) => sum + sample * sample, 0) / frame.length);
+    observeBaselineEnergy(rms >= Math.max(.012, vad.noise * 3), frameAt, 'manual');
+    meterFill.style.width = `${Math.min(100, rms * 380)}%`;
+    sendPcm(frame);
+    if (sentSamples >= 472000) { endRecording(); subtitle.textContent = "已达到单次录音上限，请松开后再说。"; }
     return;
   }
-  playing = true;
-  const ctx = ensureCtx();
-  const { buffer, text, emotion } = playQueue.shift();
-  sourceNode = ctx.createBufferSource();
-  sourceNode.buffer = buffer;
-  sourceNode.connect(playAnalyser);
-  sourceNode.onended = () => {
-    sourceNode = null;
-    drainQueue();
-  };
-  // 记下真实的播放起点，口型时间轴才对得齐（不能用 setTimeout 的时刻）
-  const startedAt = ctx.currentTime;
-  sourceNode.start(startedAt);
-  avatar.setAudioContext(ctx);
-  avatar.speak(text, ctx, startedAt, buffer.duration);
-  // 情绪跟着声音走而不是跟着文本走：目前后端整轮只给一个情绪，
-  // 这里等于无操作；一旦它逐句给不同情绪，表情会自己跟着切换。
-  avatar.setEmotion(emotion);
-}
-
-function stopPlayback() {
-  playQueue = [];
-  if (sourceNode) {
-    try { sourceNode.stop(); } catch (_) {}
-    sourceNode = null;
+  if (!alwaysListen || manualHeld) return;
+  if (!recording && vad.cooldown) {
+    vad.push(frame, false); resetDuplex(); return;
   }
-  playing = false;
-  avatar.stopSpeaking();
-}
-
-/* ---------------- 录音 ---------------- */
-async function startRecording() {
-  if (recording) return;
-  ensureCtx();
-  stopPlayback();
-  stream = stream || (await navigator.mediaDevices.getUserMedia({
-    audio: { channelCount: 1, echoCancellation: true, noiseSuppression: true },
-  }));
-  const ctx = audioCtx;
-  sourceNode = ctx.createMediaStreamSource(stream);
-  analyser = ctx.createAnalyser();
-  analyser.fftSize = 1024;
-  procNode = ctx.createScriptProcessor(4096, 1, 1);
-  recorderNode = ctx.createBuffer(1, 2048, ctx.sampleRate);
-  let filled = 0;
-
-  procNode.onaudioprocess = (event) => {
-    const input = event.inputBuffer.getChannelData(0);
-    if (analyser) {
-      const buf = new Float32Array(analyser.fftSize);
-      analyser.getFloatTimeDomainData(buf);
-      let sum = 0;
-      for (let i = 0; i < buf.length; i++) sum += buf[i] * buf[i];
-      const rms = Math.sqrt(sum / buf.length);
-      meterFill.style.width = `${Math.min(100, rms * 380)}%`;
-      if (rms > 0.02) speakingHeard = true;
+  if (!recording) {
+    const gateTurn = turns.id || playbackBaselineTurn;
+    const decision = duplex.push(frame, { reference, playback: !!sourceNode, referenceAvailable: !!capture?.hasReference, mode: duplexMode });
+    if (decision.metrics.protected) {
+      observeBaselineEnergy(decision.metrics.voiced, frameAt, 'duplex', decision.metrics.candidateMs > 0);
+      if (decision.metrics.candidateMs > 0 && !baselineGateOnset) {
+        recordBaselineTurn('gate_onset', gateTurn, { source: 'duplex' }, frameAt - Math.max(0, decision.metrics.candidateMs - 20));
+      }
+      baselineGateOnset = decision.metrics.candidateMs > 0;
     }
-    if (!recording) return;
-    recorderNode.getChannelData(filled).set(input.subarray(0, recorderNode.length - filled));
-    filled += input.length;
-    if (filled >= recorderNode.length) {
-      const chunk = downsample(recorderNode.getChannelData(0).slice(), ctx.sampleRate, TARGET_RATE);
-      ws.send(int16ToArrayBuffer(chunk));
-      filled = 0;
+    if (decision.reason === 'echo') metrics.count('echo');
+    if (decision.candidate && candidateSince === null) { candidateSince = performance.now(); metrics.count('candidate'); recordBaselineTurn('gate_candidate', gateTurn, { source: 'duplex' }); }
+    if (!decision.candidate && !decision.commit) candidateSince = null;
+    setDucked(!!decision.duck); idleStatus();
+    if (decision.commit) {
+      recordBaselineTurn('gate_commit', gateTurn, { source: 'duplex', voicedMs: decision.metrics.voicedMs, candidateMs: decision.metrics.candidateMs });
+      metrics.count('barge');
+      if (candidateSince !== null) metrics.timing('candidateToInterrupt', performance.now() - candidateSince);
+      if (!startUtterance('auto')) { resetDuplex(); return; }
+      const frames = decision.frames || [frame];
+      vad.adopt(frames, decision.metrics.voicedMs);
+      for (const part of frames) sendPcm(part);
+      candidateSince = null; setDucked(false); updateVoiceDiagnostics(); return;
     }
-  };
-
-  sourceNode.connect(analyser);
-  sourceNode.connect(procNode);
-  procNode.connect(ctx.destination);
-  recording = true;
-  speakingHeard = false;
-  micBtn.classList.add("recording");
-  micBtn.textContent = "松开/点击结束";
-  ws.send(JSON.stringify({ type: "start" }));
+    if (decision.suppress || decision.metrics?.protected || decision.candidate || sourceNode) {
+      vad.reset(); updateVoiceDiagnostics(); return;
+    }
+  }
+  if (recordingMode === 'auto') {
+    const tail = duplex.push(frame, { reference, playback: !!sourceNode, referenceAvailable: !!capture?.hasReference, mode: duplexMode });
+    if (tail.suppress) { metrics.count('echo'); frame = new Float32Array(frame.length); }
+  }
+  const energy = Math.sqrt(frame.reduce((sum, sample) => sum + sample * sample, 0) / frame.length);
+  observeBaselineEnergy(energy >= Math.max(.012, vad.noise * 3), frameAt, 'vad');
+  const result = vad.push(frame, false);
+  meterFill.style.width = `${Math.min(100, result.rms * 380)}%`;
+  if (result.start && !startUtterance("auto")) { vad.reset(); return; }
+  for (const samples of result.frames || []) sendPcm(samples);
+  if (result.end && recordingMode === "auto") {
+    if (result.valid) endRecording(false);
+    else { cancelRecording(); cancelTurn(); idleStatus(); }
+    resetDuplex();
+    if (result.limit) subtitle.textContent = "已达到单次录音上限，安静片刻后可继续。";
+  }
 }
-
-function endRecording() {
+async function ensureMic() {
+  if (capture) return true;
+  if (capturePending) return capturePending;
+  const generation = micGeneration;
+  const request = (async () => {
+    const ctx = ensureCtx();
+    const stream = await microphone.open();
+    if (!stream || generation !== micGeneration || disposed || (!manualHeld && !alwaysListen)) return false;
+    if (ws.readyState !== WebSocket.OPEN) { teardownMic(); return false; }
+    const micResampler = new StreamingResampler(ctx.sampleRate, TARGET_RATE);
+    const refResampler = new StreamingResampler(ctx.sampleRate, TARGET_RATE);
+    const micFrames = new SampleFramer(), refFrames = new SampleFramer();
+    try {
+      const handle = await createCapture({ context: ctx, stream, referenceNode: outputGain,
+        onError: error => {
+          if (generation !== micGeneration) return;
+          manualHeld = false; alwaysListen = false; cancelRecording(); cancelTurn(); teardownMic(); updateContinuousVoice(); voiceError(error);
+        },
+        onChunk: chunk => {
+          if (generation !== micGeneration) return;
+          // Map the first sample's capture clock, including resampler/framer carry,
+          // to performance time. This is a software clock proxy, not acoustic onset.
+          const clockOffset = performance.now() - ctx.currentTime * 1000;
+          const carryMs = micFrames.pending.length / TARGET_RATE * 1000 + micResampler.weight / ctx.sampleRate * 1000;
+          const firstFrameAt = Number.isFinite(chunk.audioTime) ? clockOffset + chunk.audioTime * 1000 - carryMs : performance.now() - carryMs;
+          const frames = micFrames.push(micResampler.push(chunk.microphone));
+          const references = refFrames.push(refResampler.push(chunk.reference));
+          for (let i = 0; i < frames.length; i++) {
+            if (generation !== micGeneration) break;
+            processFrame(frames[i], references[i], firstFrameAt + i * 20);
+          }
+        },
+      });
+      if (generation !== micGeneration || disposed || (!alwaysListen && !manualHeld)) { handle.stop(); return false; }
+      capture = handle; resampler = micResampler; referenceResampler = refResampler;
+      framer = micFrames; referenceFramer = refFrames;
+      stream.getAudioTracks?.()[0]?.addEventListener?.('ended', () => {
+        if (generation !== micGeneration) return;
+        baseline.invalidate('capture_lost');
+        manualHeld = false; alwaysListen = false; cancelRecording(); cancelTurn(); teardownMic(); updateContinuousVoice(); idleStatus();
+      }, { once: true });
+      updateVoiceDiagnostics(); idleStatus(); return true;
+    } catch (error) { if (generation === micGeneration) teardownMic(); throw error; }
+  })();
+  capturePending = request;
+  try { return await request; } finally { if (capturePending === request) capturePending = null; }
+}
+function endRecording(flush = true) {
   if (!recording) return;
-  recording = false;
-  meterFill.style.width = "0";
-  micBtn.classList.remove("recording");
-  micBtn.textContent = "按住说话";
-  ws.send(JSON.stringify({ type: "audio_end" }));
-  if (!alwaysListen) teardownMic();
-}
-
-function teardownMic() {
-  if (procNode) { procNode.onaudioprocess = null; procNode.disconnect(); procNode = null; }
-  if (sourceNode) { try { sourceNode.disconnect(); } catch (_) {} sourceNode = null; }
-  recorderNode = null;
-}
-
-function downsample(buffer, inRate, outRate) {
-  if (inRate === outRate) return buffer;
-  const ratio = inRate / outRate;
-  const length = Math.round(buffer.length / ratio);
-  const output = new Float32Array(length);
-  for (let i = 0; i < length; i++) {
-    const start = Math.floor(i * ratio);
-    const end = Math.min(Math.floor((i + 1) * ratio), buffer.length);
-    let sum = 0;
-    for (let j = start; j < end; j++) sum += buffer[j];
-    output[i] = sum / Math.max(1, end - start);
+  if (flush && resampler && framer) {
+    for (const frame of framer.push(resampler.flush())) sendPcm(frame);
+    if (recording && framer) sendPcm(framer.flush());
+    if (referenceResampler && referenceFramer) { referenceResampler.flush(); referenceFramer.flush(); }
   }
-  return output;
+  if (!recording) return;
+  submittedAt = performance.now(); firstAudioPending = true;
+  recordBaselineTurn('audio_submit', turns.id, { reason: recordingMode === 'manual' ? 'manual' : 'automatic' });
+  send({ type: "audio_end", turn_id: turns.id });
+  recording = false; recordingMode = null; clearTimeout(manualTimer); manualTimer = null;
+  baselineEnergy = null;
+  recordingUi(); if (!alwaysListen) teardownMic({ planned: true }); idleStatus();
 }
-
-function int16ToArrayBuffer(float32) {
-  const buf = new ArrayBuffer(float32.length * 2);
-  const view = new DataView(buf);
-  for (let i = 0; i < float32.length; i++) {
-    const s = Math.max(-1, Math.min(1, float32[i]));
-    view.setInt16(i * 2, s < 0 ? s * 0x8000 : s * 0x7fff, true);
-  }
-  return buf;
+function cancelRecording() {
+  baselineEnergy = null;
+  recording = false; recordingMode = null; clearTimeout(manualTimer); manualTimer = null;
+  recordingUi();
 }
-
-/* ---------------- 打断 ---------------- */
-let lastRms = 0, bargeStreak = 0;
-function watchForBargeIn() {
-  if (!analyser || !playing) { bargeStreak = 0; return; }
-  const buf = new Float32Array(analyser.fftSize);
-  analyser.getFloatTimeDomainData(buf);
-  let sum = 0;
-  for (let i = 0; i < buf.length; i++) sum += buf[i] * buf[i];
-  const rms = Math.sqrt(sum / buf.length);
-  if (rms > 0.035 && rms > lastRms) {
-    bargeStreak++;
-    if (bargeStreak > 6) {
-      stopPlayback();
-      avatar.onBargeIn();
-      ws.send(JSON.stringify({ type: "barge_in" }));
-      bargeStreak = 0;
-    }
-  } else {
-    bargeStreak = Math.max(0, bargeStreak - 1);
-  }
-  lastRms = rms;
+function releaseManual() {
+  manualHeld = false; manualRequest++;
+  if (recordingMode === "manual") { endRecording(); vad.reset(); }
+  if (!alwaysListen && !recording) teardownMic({ planned: true });
 }
-setInterval(watchForBargeIn, 60);
+function teardownMic({ planned = false } = {}) {
+  if (!planned && (capture || capturePending || microphone.stream)) baseline.invalidate('capture_lost');
+  micGeneration++;
+  capture?.stop(); capture = null; capturePending = null;
+  resampler = framer = referenceResampler = referenceFramer = null;
+  resetDuplex(); microphone.close(); meterFill.style.width = "0"; updateVoiceDiagnostics();
+}
+function cleanupVoice() {
+  dialogueReview?.stop('disconnected');
+  editorDiscussion?.dispose();
+  editorInsightVoice?.cancel();
+  baseline.invalidate('disconnected');
+  disposed = true; manualHeld = false; alwaysListen = false;
+  cancelRecording(); cancelTurn(); teardownMic(); updateContinuousVoice();
+  try { playAnalyser?.disconnect(); } catch (_) {}
+  checkpoint.clear(); updateResume();
+  if (audioCtx) { audioCtx.close().catch(() => {}); audioCtx = null; playAnalyser = outputGain = null; }
+}
+window.addEventListener("pagehide", cleanupVoice);
+window.addEventListener("beforeunload", cleanupVoice);
+navigator.mediaDevices?.addEventListener?.('devicechange', () => baseline.invalidate('device_changed'));
 
 /* ---------------- WebSocket ---------------- */
 ws.onopen = () => {
@@ -237,23 +628,59 @@ ws.onmessage = async (event) => {
     return;                       // 后端发了非 JSON，不该让整个前端挂掉
   }
   if (!msg || typeof msg !== "object" || typeof msg.type !== "string") return;
+  if (editorInsightVoice?.blocksServer(msg)) return;
+  if (!turns.accept(msg, !recording && !manualHeld && !microphone.pending && !playback.busy)) return;
+  if (msg.type === 'turn_started' && !baselineTurns.has(msg.turn_id)) registerBaselineTurn(msg.turn_id, 'proactive');
+  dialogueReview?.event({ ...msg, meta: msg.type === 'done' ? { textStatus: msg.delivery?.text_status, audioStatus: msg.delivery?.audio_status } : undefined });
   avatar.onMessage(msg);
   switch (msg.type) {
+    case "editor_discussion":
+      if (!editorDiscussion?.acceptInsight(msg.insight)) {
+        editorDiscussion?.invalidate('讨论对应的观点已经变化，请回到稿子重新选择。');
+        cancelTurn();
+      }
+      break;
+    case 'config_ack':
+      if (typeof msg.emotion === 'string' && (emotionOverride === null || msg.emotion_error)) {
+        emotionOverride = msg.emotion;
+        el('emotionSelect').value = msg.emotion;
+      }
+      if (msg.emotion_error) setStatus(msg.emotion_error, 'error', currentInteraction().id);
+      const experienceAccepted = experienceUI.onAck(msg);
+      const staleExperienceAck = Object.hasOwn(msg, 'experience_request_id') && !experienceAccepted;
+      if (!staleExperienceAck && msg.practice_error) {
+        el('practiceStatus').textContent = msg.practice_error;
+      } else if (!staleExperienceAck && msg.practice) {
+        practiceMode = msg.practice.mode;
+        el('practiceReview').disabled = practiceMode === 'off';
+      }
+      // The panel validates request IDs. A late rejected snapshot must not
+      // change the effective endpoint or invalidate an unrelated voice trial.
+      experienceMode = experienceUI.activeMode();
+      vad.pauseMs = experienceMode === 'off'
+        ? (practiceMode === 'off' ? 900 : Number(el('practicePause').value))
+        : (experienceMode === 'expression' ? Number(el('practicePause').value) : 1200);
+      baseline.setContext({ activity: experienceMode !== 'off' ? experienceMode : practiceMode, endpointWaitMs: vad.pauseMs });
+      break;
+    case "turn_started":
+      idleStatus();
+      break;
     case "ready":
       setStatus("在线", "on");
       subtitle.textContent = "按住左下角说话，或者打字。";
       break;
     case "recording":
-      setStatus("录音中", "busy");
+      setStatus("录音中", "busy", "listening");
       break;
     case "asr":
+      recordBaselineTurn('asr_received', msg.turn_id, { empty: !msg.text, source: 'ws' });
       if (msg.text) addBubble("user", msg.text);
       break;
     case "thinking":
       pendingText = "";
       currentBubble = addBubble("bot", "…");
       currentBubble.classList.add("thinking");
-      setStatus("在想…", "busy");
+      setStatus("在想…", "busy", "thinking");
       break;
     case "emotion":
       // 情绪先于正文到达，正好用来提前准备音色/立绘表情
@@ -268,30 +695,72 @@ ws.onmessage = async (event) => {
       pendingText = (pendingText || "") + (msg.delta || "");
       if (currentBubble) {
         currentBubble.textContent = pendingText;
-        chat.scrollTop = chat.scrollHeight;
-      }
-      subtitle.textContent = pendingText;
+            }
+      // Keep the subtitle on the audible sentence while later text streams ahead.
+      if (!sourceNode) subtitle.textContent = pendingText;
       break;
     case "audio":
-      if (msg.data) await enqueueAudio(msg.data, msg.text, msg.emotion);
+      if (typeof msg.data === "string" && msg.data.length <= 12 * 1024 * 1024) {
+        recordBaselineTurn('audio_received', msg.turn_id, { source: 'ws' });
+        const item = { ...msg, _baselineToken: baselineTurns.get(msg.turn_id)?.token, _baselineChunk: ++baselineChunk };
+        if (!playback.enqueue(item)) recordBaselineTurn('queue_rejected', msg.turn_id);
+        idleStatus();
+      }
+      else if (msg.data) voiceError(new Error("音频片段无效或过大，已跳过"));
       break;
     case "done":
-      setStatus("在线", "on");
-      subtitle.textContent = "";
+      recordBaselineTurn('turn_done', msg.turn_id, { textStatus: msg.delivery?.text_status, audioStatus: msg.delivery?.audio_status });
+      if (pendingConfirmation?.id === msg.turn_id) rejectConfirmation('未收到行动结果，请查看任务面板；不会自动重试操作。');
       if (currentBubble && msg.text) currentBubble.textContent = msg.text;
-      setTimeout(() => { if (!playing && !recording && alwaysListen) startRecording(); }, 400);
+      if (msg.delivery && currentBubble) {
+        const notes = [];
+        if (msg.delivery.text_status === 'limit_reached') notes.push('本轮已达长度上限，可能尚未展开完整；可以让我继续。');
+        if (msg.delivery.text_status === 'partial') notes.push('生成中断，这里只保留了部分回答。');
+        if (['partial', 'failed'].includes(msg.delivery.audio_status)) notes.push('部分或全部语音合成失败，请阅读文字。');
+        if (notes.length) {
+          const note = document.createElement('small');
+          note.className = 'delivery-note';
+          note.setAttribute('role', 'status');
+          note.textContent = notes.join(' ');
+          currentBubble.append(document.createElement('br'), note);
+        }
+      }
+      if (currentBubble) appendContextUsage(currentBubble, msg.context_usage);
+      turns.done = true;
+      finishTurn();
       break;
     case "interrupted":
     case "playback_stopped":
-      setStatus("在线", "on");
+      rejectConfirmation('播报已打断，请查看任务面板中的实际结果；不会自动重试操作。');
+      cancelRecording(); stopPlayback(); dialogueReview?.endTurn(turns.id, 'interrupted'); turns.clear(); resetDuplex(); vad.reset();
+      if (!alwaysListen) teardownMic();
+      idleStatus();
+      break;
+    case "assistant_result":
+      if (pendingConfirmation?.id === msg.turn_id) {
+        const pending = pendingConfirmation; pendingConfirmation = null;
+        clearTimeout(pending.timer); pending.resolve(msg.result);
+      } else showAssistantResult(msg.result, { confirm: confirmAssistant });
       break;
     case "memory_notice":
       if (msg.items) {
         showMemoryNotice(msg.items);
-        loadMemories();
+        refreshMemories();
       }
       break;
     case "error":
+      recordBaselineTurn('turn_error', msg.turn_id, { source: 'ws' });
+      if (msg.recoverable) {
+        subtitle.textContent = msg.message || '部分交付失败，文字仍可阅读。';
+        break;
+      }
+      rejectConfirmation(msg.message || '确认结果无法取得，请查看任务面板；不会自动重试操作。');
+      if (msg.scope === 'editor_insight' && editorSubmittedText?.id === msg.turn_id && !el('textInput').value) {
+        el('textInput').value = editorSubmittedText.text;
+      }
+      if (msg.scope === 'editor_insight' && msg.editor_context_valid === false) editorDiscussion?.invalidate(msg.message);
+      cancelRecording(); stopPlayback(); dialogueReview?.endTurn(turns.id, 'error'); turns.clear(); resetDuplex(); vad.reset();
+      if (!alwaysListen) teardownMic();
       setStatus("出错了", "");
       subtitle.textContent = msg.message || "出错了";
       break;
@@ -302,113 +771,346 @@ ws.onmessage = async (event) => {
   }
 };
 
-ws.onclose = () => setStatus("断开", "");
+ws.onclose = () => {
+  experienceUI.onDisconnect();
+  cleanupVoice();
+  setStatus("断开", "");
+  subtitle.textContent = "连接已断开，麦克风已释放。请刷新后重试。";
+};
+ws.onerror = () => { subtitle.textContent = "连接出现错误，请检查网络。"; };
+document.addEventListener("visibilitychange", () => {
+  if (document.hidden) {
+    manualHeld = false; alwaysListen = false; cancelRecording(); cancelTurn(); teardownMic();
+    vad.reset(); updateContinuousVoice(); setStatus("已暂停监听", "");
+  }
+});
 
 /* ---------------- 记忆面板 ---------------- */
 const KIND_LABEL = { fact: "事实", episode: "经历", todo: "待办", self_state: "自我" };
 const SRC_LABEL = { stated: "你说过", inferred: "我推测", uncertain: "不确定" };
+const STATUS_LABEL = { active: "当前", superseded: "历史", done: "已完成", conflict: "待核对，不自动使用" };
+const PREFERENCE_LEVEL_LABEL = { like: '喜欢', favorite: '最喜欢', dislike: '不喜欢' };
+const PREFERENCE_SCOPE_LABEL = { long_term: '长期自述', recent: '最近自述', current: '当时自述', unspecified: '时间范围未明确' };
+function memorySourceLabel(memory) {
+  if (memory.source !== "stated") return SRC_LABEL[memory.source] || "未知来源";
+  return memory.evidence_state === "linked" ? "有原话证据"
+    : memory.evidence_state === "manual" ? "手动保存" : "旧记忆，未关联原话";
+}
 
+async function mutateMemory(control, path, options, message) {
+  control.disabled = true;
+  try {
+    const response = await fetch(path, options);
+    if (!response.ok) throw new Error(`操作未完成（${response.status}），请重试。`);
+    el("memoryFeedback").textContent = message;
+    try { await loadMemories(); }
+    catch { el("memoryFeedback").textContent = `${message}列表刷新失败，请点击刷新。`; }
+  } catch (error) { el("memoryFeedback").textContent = error.message; }
+  finally { control.disabled = false; }
+}
+function refreshMemories() {
+  return loadMemories().catch(error => { el("memoryFeedback").textContent = `记忆未刷新：${error.message}`; });
+}
 async function loadMemories() {
-  const res = await fetch("/api/memories");
+  const res = await fetch(el("memHistory")?.checked ? "/api/memories?include_history=true" : "/api/memories");
+  if (!res.ok) throw new Error(`无法加载记忆（${res.status}）`);
   const data = await res.json();
+  if (!Array.isArray(data.items)) throw new Error("记忆列表格式异常");
   const list = el("memList");
-  list.innerHTML = "";
-  el("memCount").textContent = `${data.count} 条`;
+  list.replaceChildren();
+  el("memCount").textContent = `${data.count} 条当前记忆`;
   data.items.forEach((m) => {
     const div = document.createElement("div");
     div.className = "mem";
-    const val = document.createElement("div");
-    val.className = "val";
+    div.dataset.memoryId = String(m.id);
+    const val = document.createElement("button");
+    val.type = "button";
+    val.className = "val ghost";
     val.textContent = m.value;
+    val.setAttribute("aria-label", `编辑记忆：${m.value}`);
     val.title = "点击可以改";
     val.onclick = async () => {
       const next = prompt("改成：", m.value);
       if (next && next !== m.value) {
-        await fetch(`/api/memories/${m.id}`, {
+        await mutateMemory(val, `/api/memories/${m.id}`, {
           method: "PATCH",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ value: next }),
-        });
-        loadMemories();
+        }, "记忆已更新。");
       }
     };
     const meta = document.createElement("div");
     meta.className = "meta";
-    meta.innerHTML = `<span class="tag">${KIND_LABEL[m.kind] || m.kind}</span>` +
-      `<span class="tag ${m.source}">${SRC_LABEL[m.source] || m.source}</span>` +
-      `<span>${m.key}</span>`;
+    for (const [text, className] of [[KIND_LABEL[m.kind] || m.kind, "tag"], [memorySourceLabel(m), "tag"],
+      [STATUS_LABEL[m.status] || "当前", "tag"], [m.key, ""]]) {
+      const label = document.createElement("span");
+      label.className = className;
+      label.textContent = text;
+      meta.append(label);
+    }
+    if (m.source === 'stated' && m.evidence_state === 'linked' && typeof m.preference_target === 'string' && m.preference_target &&
+        Object.hasOwn(PREFERENCE_LEVEL_LABEL, m.preference_level) && Object.hasOwn(PREFERENCE_SCOPE_LABEL, m.preference_scope)) {
+      const preference = document.createElement('span'); preference.className = 'tag';
+      preference.textContent = `${PREFERENCE_LEVEL_LABEL[m.preference_level]}：${m.preference_target}`;
+      const scope = document.createElement('span'); scope.className = 'tag';
+      scope.textContent = PREFERENCE_SCOPE_LABEL[m.preference_scope];
+      meta.append(preference, scope);
+      if (Number.isFinite(m.preference_as_of)) {
+        const date = new Date(m.preference_as_of * 1000);
+        if (Number.isFinite(date.getTime())) {
+          const label = document.createElement('span');
+          label.textContent = `原话日期 ${date.toISOString().slice(0, 10)}（UTC）`;
+          meta.append(label);
+        }
+      }
+      if (m.preference_scope === 'recent' || m.preference_scope === 'current') {
+        const caution = document.createElement('span');
+        caution.textContent = '仅原话当时自述，未确认延续至今；未设定过期日';
+        meta.append(caution);
+      }
+    }
     const del = document.createElement("button");
     del.className = "ghost danger";
     del.textContent = "忘掉";
     del.onclick = async () => {
-      await fetch(`/api/memories/${m.id}`, { method: "DELETE" });
-      loadMemories();
+      await mutateMemory(del, `/api/memories/${m.id}`, { method: "DELETE" }, "已忘掉这条记忆。");
     };
     meta.appendChild(del);
     div.append(val, meta);
+    if (m.evidence_state === "linked" && typeof m.evidence_quote === "string" && m.evidence_quote) {
+      const evidence = document.createElement("details");
+      const summary = document.createElement("summary");
+      summary.textContent = "查看原话";
+      const quote = document.createElement("blockquote");
+      quote.textContent = m.evidence_quote;
+      evidence.append(summary, quote);
+      div.append(evidence);
+    }
     list.appendChild(div);
   });
 }
 
+window.addEventListener('context-reference-manage', event => {
+  const {kind, id} = event.detail || {};
+  if (!['memory','preference','task'].includes(kind) || typeof id !== 'string' || !id || id.length > 256) return;
+  if (document.body.classList.contains('is-writing')) el('writingToggle')?.click();
+  el('sidePanel')?.classList.add('is-open');
+  el('sidebarToggle')?.setAttribute('aria-expanded', 'true');
+  if (kind !== 'task' && !el('memoryToggle')?.checked) {
+    el('memoryFeedback').textContent = '当前已关闭记忆。没有读取或刷新这条记录；可以在记忆与偏好中自行管理。';
+    el('memoryFeedback').scrollIntoView({block:'nearest'}); return;
+  }
+  if (kind !== 'memory') el('work-tasks-tab')?.click();
+  const panel = kind === 'preference' ? document.querySelector('[data-interaction-preferences]') : null;
+  if (panel) panel.open = true;
+  const selector = {memory:'[data-memory-id]',preference:'[data-claim-id]',task:'[data-task-id]'}[kind];
+  const key = {memory:'memoryId',preference:'claimId',task:'taskId'}[kind];
+  const match = [...document.querySelectorAll(selector)].find(element => element.dataset[key] === id);
+  const fallback = kind === 'memory' ? el('memList') : panel || document.querySelector('#assistantMount');
+  const target = match || fallback;
+  if (target) {
+    for (let ancestor = target.parentElement; ancestor; ancestor = ancestor.parentElement) {
+      if (ancestor.tagName === 'DETAILS') ancestor.open = true;
+    }
+    target.tabIndex = -1; target.scrollIntoView({block:'nearest'}); target.focus({preventScroll:true});
+  }
+  if (!match) {
+    const feedback = kind === 'memory' ? el('memoryFeedback') : panel?.querySelector('[role="alert"]') || el('work-feedback');
+    if (feedback) feedback.textContent = '这条记录不在当前管理列表中，可能已更改、删除或尚未刷新。请在这里核对；没有自动更换记录。';
+  }
+});
+
 function showMemoryNotice(items) {
   if (!items || !items.length) return;
-  const names = items.map((i) => SRC_LABEL[i.source]).join("、");
-  subtitle.textContent = `（它${names}：${items.map((i) => i.value).join("；")}）`;
+  const active = items.filter(item => item.status === "active");
+  const conflicts = items.filter(item => item.status === "conflict");
+  if (active.length) subtitle.textContent = `（记下了：${active.map(item => item.value).join("；")}）`;
+  if (conflicts.length) el("memoryFeedback").textContent = "有新说法待核对，原记忆仍保留。勾选显示历史和待核对记录可查看并修改。";
 }
 
 /* ---------------- 绑定 ---------------- */
+async function requestRecording() {
+  if (manualHeld || disposed) return;
+  if (ws.readyState !== WebSocket.OPEN) {
+    subtitle.textContent = "连接还没准备好，请稍后再试。"; return;
+  }
+  editorInsightVoice?.cancel();
+  manualHeld = true;
+  const request = ++manualRequest;
+  if (recordingMode === "auto") { cancelRecording(); cancelTurn(); }
+  resetDuplex(); vad.reset();
+  const generation = micGeneration;
+  try {
+    if (await ensureMic() && manualHeld && request === manualRequest && generation === micGeneration) startUtterance("manual");
+  } catch (error) {
+    if (generation !== micGeneration || request !== manualRequest) return;
+    manualHeld = false; alwaysListen = false; teardownMic(); updateContinuousVoice();
+    voiceError(new Error(`无法使用麦克风：${error.message}`));
+  }
+}
 micBtn.addEventListener("pointerdown", async (e) => {
   e.preventDefault();
-  await startRecording();
+  await requestRecording();
 });
-document.addEventListener("pointerup", () => {
-  if (recording) endRecording();
+micBtn.addEventListener("keydown", (event) => {
+  if ((event.code === "Space" || event.code === "Enter") && !event.repeat) {
+    event.preventDefault(); requestRecording();
+  }
 });
+micBtn.addEventListener("keyup", (event) => {
+  if (event.code === "Space" || event.code === "Enter") {
+    event.preventDefault(); releaseManual();
+  }
+});
+micBtn.addEventListener("blur", releaseManual);
+document.addEventListener("pointerup", releaseManual);
+document.addEventListener("pointercancel", releaseManual);
+
+el('practiceApply').onclick = () => {
+  if (ws.readyState !== WebSocket.OPEN) { subtitle.textContent = '连接未就绪，练习设置未应用。'; return; }
+  if (!window.confirm('应用设置将结束当前回复；改变场景、难度或纠错方式会清空本次练习上下文。继续吗？')) return;
+  baseline.invalidate('mode_changed');
+  editorDiscussion?.end();
+  manualHeld = false; manualRequest++; cancelRecording(); cancelTurn(); resetDuplex(); vad.reset();
+  checkpoint.clear(); updateResume();
+  if (!alwaysListen) teardownMic();
+  practiceMode = el('practiceMode').value;
+  vad.pauseMs = practiceMode === 'off' ? 900 : Number(el('practicePause').value);
+  ws.send(JSON.stringify({type:'config',practice:{mode:practiceMode,level:el('practiceLevel').value,correction:el('practiceCorrection').value}}));
+  el('practiceReview').disabled = practiceMode === 'off';
+  el('practiceStatus').textContent = practiceMode === 'off' ? '已回到普通陪聊。' : '练习已开启：可以用英语打招呼，卡住时用中文求助。收句后回复；不执行任务，不写长期记忆。';
+};
+el('practicePause').onchange = () => {
+  baseline.invalidate('mode_changed');
+  if (practiceMode !== 'off' && !recording) vad.pauseMs = Number(el('practicePause').value);
+};
+el('practiceReview').onclick = () => {
+  if (practiceMode === 'off' || ws.readyState !== WebSocket.OPEN) return;
+  manualHeld = false; manualRequest++; cancelRecording(); resetDuplex(); vad.reset();
+  if (!alwaysListen) teardownMic();
+  beginTurn('practice_review');
+};
 
 el("sendBtn").onclick = async () => {
   const input = el("textInput");
   const text = input.value.trim();
   if (!text) return;
+  if (ws.readyState !== WebSocket.OPEN) {
+    subtitle.textContent = "连接暂不可用，消息已留在输入框里。";
+    return;
+  }
+  manualHeld = false; cancelRecording(); vad.reset();
+  if (!alwaysListen) teardownMic();
+  resetDuplex(); if (!beginTurn("text", { text })) return;
+  submittedAt = performance.now(); firstAudioPending = true; idleStatus();
   input.value = "";
-  ws.send(JSON.stringify({ type: "text", text }));
+  input.focus();
 };
 el("textInput").addEventListener("keydown", (e) => {
-  if (e.key === "Enter") el("sendBtn").click();
+  if (e.key === "Enter" && !e.isComposing && e.keyCode !== 229) el("sendBtn").click();
 });
 
-el("memoryToggle").onchange = (e) =>
-  fetch("/api/memory/toggle", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ enabled: e.target.checked }),
+async function saveMemoryRequest(path, body) {
+  const response = await fetch(path, {
+    method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body),
   });
+  if (!response.ok) throw new Error(`服务暂不可用（${response.status}），请重试。`);
+}
+el("memoryToggle").onchange = async (event) => {
+  const control = event.target;
+  const enabled = control.checked;
+  control.disabled = true;
+  try {
+    await saveMemoryRequest("/api/memory/toggle", { enabled });
+    el("memoryFeedback").textContent = enabled ? "已允许记录新的记忆。" : "已暂停记录，已有记忆不会删除。";
+    if (!enabled) editorDiscussion?.invalidate('已暂停看稿，结束讨论后可以继续聊天。');
+  } catch (error) {
+    control.checked = !enabled;
+    el("memoryFeedback").textContent = `设置未保存：${error.message}`;
+  } finally { control.disabled = false; }
+};
 
 el("manualAdd").onclick = async () => {
-  const value = el("manualInput").value.trim();
-  if (!value) return;
-  await fetch("/api/memory/manual", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ kind: "fact", subject: "user", value, importance: 0.7 }),
-  });
-  el("manualInput").value = "";
-  loadMemories();
+  const input = el("manualInput");
+  const value = input.value.trim();
+  if (!value) { input.focus(); return; }
+  const button = el("manualAdd");
+  button.disabled = true;
+  try {
+    await saveMemoryRequest("/api/memory/manual", { kind: "fact", subject: "user", value, importance: 0.7 });
+    if (input.value.trim() === value) input.value = "";
+    el("memoryFeedback").textContent = "记下了。你随时可以修改或忘掉它。";
+    try { await loadMemories(); }
+    catch { el("memoryFeedback").textContent = "已保存，但列表刷新失败，请点击刷新。"; }
+  } catch (error) {
+    el("memoryFeedback").textContent = `没有记下，输入已保留：${error.message}`;
+  } finally { button.disabled = false; }
 };
-el("memRefresh").onclick = loadMemories;
+el("manualInput").addEventListener("keydown", event => {
+  if (event.key === "Enter" && !event.isComposing && event.keyCode !== 229) el("manualAdd").click();
+});
+el("memRefresh").onclick = refreshMemories;
+el("memHistory")?.addEventListener("change", refreshMemories);
 el("memClear").onclick = async () => {
-  if (!confirm("会硬删除全部记忆（行、索引、派生统计一起清），确定？")) return;
-  await fetch("/api/memory/reset", {
+  if (!confirm("清空后无法恢复，确定删除全部记忆吗？")) return;
+  await mutateMemory(el("memClear"), "/api/memory/reset", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({}),
-  });
-  loadMemories();
+  }, "全部记忆已清空。");
 };
 
-el("bargeToggle").onclick = () => {
-  alwaysListen = !alwaysListen;
-  el("bargeToggle").textContent = `始终监听：${alwaysListen ? "开" : "关"}`;
-  if (alwaysListen && !recording) startRecording();
+function updateContinuousVoice() {
+  el("bargeToggle").textContent = `连续对话：${alwaysListen ? "开" : "关"}`;
+  el("bargeToggle").setAttribute("aria-pressed", String(alwaysListen));
+}
+function disableContinuousVoice() {
+  alwaysListen = false;
+  if (recordingMode === "auto") { cancelRecording(); cancelTurn(); }
+  if (!manualHeld && recordingMode !== "manual") teardownMic();
+  vad.reset(); updateContinuousVoice(); idleStatus();
+}
+el("bargeToggle").onclick = async () => {
+  if (alwaysListen) { disableContinuousVoice(); return; }
+  if (disposed || ws.readyState !== WebSocket.OPEN) { voiceError(new Error("连接还没准备好")); return; }
+  alwaysListen = true; vad.reset(); updateContinuousVoice();
+  setStatus("正在请求麦克风…", "busy");
+  const generation = micGeneration;
+  try { await ensureMic(); }
+  catch (error) {
+    if (generation !== micGeneration) return;
+    alwaysListen = false; manualHeld = false; teardownMic(); updateContinuousVoice();
+    voiceError(new Error(`无法使用麦克风：${error.message}`));
+  }
+};
+el("stopBtn").onclick = () => {
+  manualHeld = false; cancelRecording(); cancelTurn(true); resetDuplex(); vad.reset({ cooldown: true });
+  if (!alwaysListen) teardownMic();
+  idleStatus();
+  subtitle.textContent = alwaysListen
+    ? "已停止回复，仍在本地监听；安静片刻后可继续说。已执行的操作不会撤销。"
+    : "已停止录音与回复。已执行的操作不会撤销。";
+};
+
+el('duplexMode').onchange = event => {
+  duplexMode = event.target.value;
+  baseline.setContext({ mode: duplexMode });
+  if (!recording) { resetDuplex(); vad.reset({ cooldown: vad.cooldown }); }
+  updateVoiceDiagnostics();
+};
+el('resetVoiceMetrics').onclick = () => { metrics.reset(); updateVoiceDiagnostics(); };
+el('resumeSpeechBtn').onclick = () => {
+  if (recording || manualHeld || turns.id || playback.busy) return;
+  const saved = checkpoint.take(); updateResume();
+  if (!saved) return;
+  const id = `baseline-resume-${++turnCounter}`;
+  registerBaselineTurn(id, 'resume');
+  resumeReviewId = id;
+  resetDuplex();
+  if (!playback.enqueue({ ...saved, resumed: true, _baselineTurn: id, _baselineToken: baselineTurns.get(id)?.token, _baselineChunk: ++baselineChunk })) {
+    dialogueReview?.endTurn(id, 'error'); resumeReviewId = null;
+  }
+  subtitle.textContent = '只续播被打断的当前句剩余音频，不重做任务。'; idleStatus();
 };
 
 /* 面部反应：角色镜像用户的表情/视线/头部动作。
@@ -475,7 +1177,7 @@ function pushConfig() {
       type: "config",
       proactivity: el("proactiveToggle").checked,
       memory: el("memoryToggle").checked,
-      emotion: emotionOverride,
+      ...(emotionOverride !== null ? { emotion: emotionOverride } : {}),
     })
   );
 }
@@ -492,17 +1194,59 @@ fetch("/api/persona")
     el("personaTag").textContent = p.tagline;
     document.querySelector(".avatar").textContent = p.name[0];
     const sel = el("emotionSelect");
-    sel.innerHTML = '<option value="">自动</option>' +
-      p.voices.map((v) => `<option value="${v}">${v}</option>`).join("");
+    sel.innerHTML = '<option value="">自动（随内容变化）</option>' +
+      p.voices.map((v) => `<option value="${v}">${v === 'base' ? '自然' : v}</option>`).join("");
+    if (emotionOverride === null) {
+      emotionOverride = p.voices.includes(p.default_voice) ? p.default_voice : (p.voices.includes('base') ? 'base' : '');
+    }
+    sel.value = emotionOverride;
     sel.onchange = () => {
       emotionOverride = sel.value;
       pushConfig();
     };
   });
-loadMemories();
+refreshMemories();
 
 /* 形象启动失败不应该拖垮聊天，所以单独兜住 */
-boot().catch((err) => {
+boot().then(() => {
+  const select = el("avatarRenderer");
+  const status = el("avatarRendererStatus");
+  if (!select.querySelector('option[value="seed"]')) select.add(new Option("半身陪聊 · Seed-san", "seed"));
+  if (!select.querySelector('option[value="seed-warm"]')) select.add(new Option("半身陪聊 · 暖杏奶油", "seed-warm"));
+  if (!select.querySelector('option[value="seed-daily"]')) select.add(new Option("及肩短发 · 日常外套", "seed-daily"));
+  if (!select.querySelector('option[value="seed-daily-eyes"]')) select.add(new Option("日常造型 · 眉眼升级", "seed-daily-eyes"));
+  if (!select.querySelector('option[value="seed-daily-lids"]')) select.add(new Option("日常造型 · 细腻笑眼", "seed-daily-lids"));
+  let selectedModel = "svg";
+  select.onchange = async () => {
+    select.disabled = true;
+    status.textContent = "正在加载形象，聊天和语音不受影响…";
+    try {
+      const choice = select.value;
+      const isDaily = choice === "seed-daily" || choice === "seed-daily-eyes" || choice === "seed-daily-lids";
+      const isSeed = choice === "seed" || choice === "seed-warm" || isDaily;
+      await avatar.setRenderer(isSeed ? "vrm" : choice,
+        choice === "seed-daily-lids" ? "/static/models/seed-daily-lids.vrm" : choice === "seed-daily-eyes" ? "/static/models/seed-daily-eyes.vrm" : isDaily ? "/static/models/seed-daily.vrm" : isSeed ? "/static/models/seed-san.vrm" : "/static/models/sample.vrm");
+      avatar.svg.setPresentation?.(isSeed);
+      avatar.svg.setPalette?.(choice === "seed-warm" ? "warm" : "original");
+      selectedModel = choice;
+      status.textContent = isDaily
+        ? "及肩短发与日常外套已启用 · Seed-san 衍生造型 · 原模型 © VirtualCast, Inc. · VRM Public License 1.0"
+        : isSeed
+        ? `半身表演已启用${choice === "seed-warm" ? " · 暖杏奶油配色" : ""} · Seed-san © VirtualCast, Inc. · VRM Public License 1.0`
+        : avatar.rendererKind === "vrm" ? "3 渲 2 已启用 · 官方测试模型，非最终角色。" : "已切回原版 SVG。";
+    } catch (error) {
+      select.value = selectedModel;
+      status.textContent = `加载失败，保留当前形象：${error.message}`;
+    } finally { select.disabled = false; }
+  };
+  const requestedAvatar = new URLSearchParams(location.search).get("avatar");
+  if (["vrm", "seed", "seed-warm", "seed-daily", "seed-daily-eyes", "seed-daily-lids"].includes(requestedAvatar)) {
+    select.value = requestedAvatar;
+    select.onchange();
+  }
+}).catch((err) => {
   console.warn("形象模块启动失败：", err);
+  el("avatarRenderer").disabled = true;
+  el("avatarRendererStatus").textContent = `形象启动失败：${err.message}`;
   document.getElementById("avatarStage")?.remove();
 });

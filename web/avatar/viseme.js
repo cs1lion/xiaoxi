@@ -16,6 +16,16 @@ const ALPHABET = "0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ
 /* 与 scripts/gen_pinyin_table.py 的 INITIAL_CLASSES 同序，改动要同步。 */
 const INITIAL_NAMES = ["SIL", "PP", "FF", "DD", "KK", "SS", "NN", "CH"];
 
+/* 闭合类音素：b/p/m 的双唇闭合、鼻韵尾的收束。
+ *
+ * 单独标出来不是为了画图（画图只需要 open/wide/round），而是因为
+ * 共发音混合有个物理上的死角：多个音素的 dominance 加权平均，永远
+ * 达不到"完全闭合"——唇始终留一条缝。听起来和看起来都不像真的 b/p/m。
+ * 所以这类音素要额外加一个抗混合项，见 timeline.js 的 resistance。
+ * 音素学知识留在本文件，不让 timeline 去猜"open 小于多少算闭合"。 */
+export const CLOSURE_INITIALS = new Set(["PP"]);
+export const CLOSURE_NUCLEUS = new Set(["SIL"]);
+
 export const INITIAL_SHAPES = {
   SIL: { open: 0.02, wide: 0.50, round: 0.50 },  // 零声母，直接进韵母
   PP:  { open: 0.00, wide: 0.52, round: 0.55 },  // b p m 双唇闭合
@@ -134,25 +144,48 @@ export function lookup(char) {
   return SYLLABLE.get(char);
 }
 
-/* 单个音节展开成口型段。权重是相对值，由 timeline.js 归一化到实际时长。 */
+/* 单个音节展开成口型段。权重是相对值，由 timeline.js 归一化到实际时长。
+ *
+ * parts 里的每一项：
+ *   shape    口型目标
+ *   weight   相对时长
+ *   closure  是否是"必须真的闭到零"的音素（双唇闭合/鼻韵尾收束）
+ *   rubber   共发音弹性。母音核会把嘴拉向自己的形状（跟着走），
+ *            闭塞音则几乎不参与形变（抗混合）。这个区分是共发音
+ *            能读对的关键：a-i-au-i 这种连读里嘴是一路滑过去的，
+ *            而 ba-ba-ba 里每个 b 都要真的闭死再弹开。
+ */
 export function segmentsFor(char) {
   if (CJK.test(char)) {
     const hit = SYLLABLE.get(char);
     // 未收录的字走中性张口：中文里 -a 类韵母本来就是最大占比
-    if (!hit) return { parts: [{ shape: NUCLEUS_SHAPES.A, weight: 1 }], weight: 1 };
+    if (!hit) return { parts: [{ shape: NUCLEUS_SHAPES.A, weight: 1, rubber: 1 }], weight: 1 };
     const [initial, final] = hit;
     const finals = F[final] || [];
     if (!finals.length) {
       // 零韵母（嗯/呣 之类的成音节），嘴基本不动
-      return { parts: [{ shape: NUCLEUS_SHAPES.MUR, weight: 1 }], weight: 1 };
+      return { parts: [{ shape: NUCLEUS_SHAPES.MUR, weight: 1, rubber: 1 }], weight: 1 };
     }
     const parts = [];
     if (initial !== "SIL") {
-      parts.push({ shape: INITIAL_SHAPES[initial], weight: 0.18 });
+      parts.push({
+        shape: INITIAL_SHAPES[initial],
+        weight: 0.18,
+        closure: CLOSURE_INITIALS.has(initial),
+        // 声母的形变时间短，不该把嘴长时间拽在自己身上
+        rubber: 0.35,
+      });
     }
     const rest = initial === "SIL" ? 1 : 0.82;
     for (const [name, w] of finals) {
-      parts.push({ shape: NUCLEUS_SHAPES[name], weight: w * rest });
+      const closure = CLOSURE_NUCLEUS.has(name);
+      parts.push({
+        shape: NUCLEUS_SHAPES[name],
+        weight: w * rest,
+        closure,
+        // 鼻韵尾收束要真的闭上，不能被前面的元音拉成半开
+        rubber: closure ? 0.15 : 1,
+      });
     }
     return { parts, weight: 1 };
   }
@@ -161,11 +194,15 @@ export function segmentsFor(char) {
   if (LATIN[ch]) {
     const name = LATIN[ch];
     const shape = NUCLEUS_SHAPES[name] || INITIAL_SHAPES[name] || INITIAL_SHAPES.DD;
-    return { parts: [{ shape, weight: 1 }], weight: 0.6 };
+    const closure = CLOSURE_INITIALS.has(name);
+    return {
+      parts: [{ shape, weight: 1, closure, rubber: closure ? 0.35 : 1 }],
+      weight: 0.6,
+    };
   }
   if (PUNCT_PAUSE.includes(ch)) {
     return {
-      parts: [{ shape: NUCLEUS_SHAPES.SIL, weight: 1 }],
+      parts: [{ shape: NUCLEUS_SHAPES.SIL, weight: 1, closure: true, rubber: 0.2 }],
       weight: 0.55,
       pause: LONG_PAUSE.includes(ch) ? 1.8 : 1,
     };

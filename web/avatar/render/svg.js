@@ -49,8 +49,13 @@ function clamp01(v) {
   return v < 0 ? 0 : v > 1 ? 1 : v;
 }
 
-/* 眼睛：上眼睑下降模拟眨眼，下眼睑基本不动。open=0 时收成一道弯。 */
-function eyePath(open, w, top, bot, tilt = 0) {
+/* 眼睛：上眼睑下降模拟眨眼，下眼睑基本不动。open=0 时收成一道弯。
+ *
+ * lid 是眼睑随眼球上下动的偏移量（lid saccade）。真实眼球转上转下时上眼睑
+ * 会跟着压下来/抬起来，两者高度相关。少了这条，眼球转动时虹膜会顶着上眼睑
+ * 边滑过去，看着像"贴纸眼睛"——这是 2D 角色最容易被看穿的破绽之一。
+ * 只跟随约 70%：眼睑跟满 100% 会读成"眼珠被眼皮拖着走"，反而假。 */
+function eyePath(open, w, top, bot, tilt = 0, lid = 0) {
   const o = clamp01(open);
   const cy = (top + bot) / 2;
   if (o < 0.16) {
@@ -60,7 +65,8 @@ function eyePath(open, w, top, bot, tilt = 0) {
     return `M ${-w} ${y} Q ${-w * 0.5} ${y - bow} 0 ${y - bow * 0.7} ` +
            `Q ${w * 0.5} ${y - bow} ${w} ${y}`;
   }
-  const yTop = top + (bot - top) * (1 - o);
+  // 上睑最低不能压过下睑，否则倒视（眼睛在下面）会画成一个倒扣的口袋
+  const yTop = Math.max(top - 9, Math.min(bot - 5, top + (bot - top) * (1 - o) + lid));
   const t = tilt;
   return `M ${-w} ${cy} Q ${-w * 0.58} ${yTop + t} 0 ${yTop + t} ` +
          `Q ${w * 0.58} ${yTop + t} ${w} ${cy} ` +
@@ -68,10 +74,10 @@ function eyePath(open, w, top, bot, tilt = 0) {
 }
 
 /* 眼睑线：只在半闭时画粗，不然眼睛会像贴纸 */
-function lidPath(open, w, top, bot) {
+function lidPath(open, w, top, bot, lid = 0) {
   const o = clamp01(open);
   const cy = (top + bot) / 2;
-  const yTop = top + (bot - top) * (1 - o);
+  const yTop = Math.max(top - 9, Math.min(bot - 5, top + (bot - top) * (1 - o) + lid));
   return `M ${-w} ${cy} Q ${-w * 0.58} ${yTop} 0 ${yTop} Q ${w * 0.58} ${yTop} ${w} ${cy}`;
 }
 
@@ -149,20 +155,37 @@ export class SvgRig {
   constructor() {
     this.root = null;
     this.nodes = {};
-    /* 次级运动的弹簧。刻意比头软：zeta 越低甩得越明显。
-     * hair  zeta≈0.58 轻微过冲 / ahoge zeta≈0.41 明显甩动 / brow zeta≈0.77 几乎不超调 */
+    /* 次级运动的弹簧。参数是「频率 f(Hz) / 阻尼比 zeta」，见 params.js 的说明。
+     * 关键的取法：zeta 决定"甩几下"，f 决定"多快"。头发要的是
+     * 明显过冲（低 zeta），眉毛几乎不过冲（高 zeta）。
+     * 头发链上从根部到尖端 f 递减、zeta 也递减 —— 末梢又轻又慢，
+     * 才会像链条一样飘；整条同频就成了整块一起晃的塑料板。 */
     this.spring = {
-      hairX: new Spring(90, 11),
-      hairY: new Spring(78, 10),
-      ahoge: new Spring(55, 6),
-      brow: new Spring(170, 20),
-      /* 弹簧链：3 段串联，刚度递减，末端甩得最明显 */
-      hairSeg1X: new Spring(120, 14),
-      hairSeg1Y: new Spring(110, 13),
-      hairSeg2X: new Spring(80, 10),
-      hairSeg2Y: new Spring(75, 9),
-      hairSeg3X: new Spring(50, 7),
-      hairSeg3Y: new Spring(45, 6),
+      hairX: new Spring(1.5, 0.58),
+      hairY: new Spring(1.4, 0.57),
+      ahoge: new Spring(1.2, 0.40),
+      brow: new Spring(2.1, 0.77),
+      /* 头部姿态弹簧：比头发快一点（头比头发重），但仍然留一点滞后和过冲 */
+      headYaw: new Spring(1.6, 0.60),
+      headPitch: new Spring(1.5, 0.58),
+      headRoll: new Spring(1.4, 0.56),
+      bodyTilt: new Spring(1.3, 0.54),
+      bodyLean: new Spring(1.2, 0.52),
+      /* 眨眼弹簧：快。zeta 0.7 略欠阻尼，闭眼到位时有一点点"到位感"，
+       * 但绝不能低到会来回抖两下 —— 眼睛抖是恐怖谷，不是生动。 */
+      blinkL: new Spring(2.4, 0.70, 1),
+      blinkR: new Spring(2.4, 0.70, 1),
+      /* 呼吸时肩膀起伏：比身体快，肩膀比身体动得急 */
+      shoulder: new Spring(1.2, 0.52),
+      hairSeg1X: new Spring(1.7, 0.64),
+      hairSeg1Y: new Spring(1.7, 0.62),
+      hairSeg2X: new Spring(1.4, 0.56),
+      hairSeg2Y: new Spring(1.4, 0.52),
+      hairSeg3X: new Spring(1.1, 0.50),
+      hairSeg3Y: new Spring(1.1, 0.45),
+      /* 眼睑跟随眼球上下动的弹簧。眼睛上下看时上眼睑必须跟着压下来，
+       * 这是真实感的一大来源（lid saccade），见 draw() 里的注释。 */
+      lidY: new Spring(3.0, 0.85, 0),
     };
     /* 系统"减少动态效果"时把次级运动压下去，见 config/avatar.yaml */
     this.secondaryScale = 1;
@@ -178,8 +201,9 @@ export class SvgRig {
       skin: "#f6ddd2", shade: "#e8c3b4", hair: "#4a4256", hairHi: "#6b6079",
       // 眉毛比头发淡一档：和发色一样黑会把这张柔和的脸压得很凶
       brow: "#584d64",
-      blush: "#f0908a", lip: "#c96a63", mouthIn: "#8e3b3b", cloth: "#5b6bb5",
-      clothDark: "#46528c", eye: "#3b3348", glow: "#5aa7c9",
+      blush: "#f0908a", lip: "#c96a63", mouthIn: "#8e3b3b",
+      cloth: "#5b6bb5", clothDark: "#46528c", clothHi: "#c9cee7",
+      eye: "#3b3348", glow: "#5aa7c9",
       ...look,
     };
 
@@ -209,6 +233,7 @@ export class SvgRig {
 
     const n = this.nodes;
     el("ellipse", { cx: 210, cy: 210, rx: 190, ry: 186, fill: "url(#av-glow)" }, svg);
+    n.bgGlow = svg.querySelector('ellipse[fill="url(#av-glow)"]');
 
     const stage = el("g", { transform: "translate(210 212)" }, svg);
     n.stage = stage;
@@ -256,6 +281,21 @@ export class SvgRig {
          `C -30 ${COLLAR_TOP + 14} -60 ${COLLAR_TOP + 30} -70 ${COLLAR_BOT + 40} ` +
          `L -80 210 Z`,
       fill: L.clothDark, opacity: "0.35",
+    }, body);
+
+    /* 领口亮区。
+     * 深色衣服上必须有一块亮色，否则脸和肩膀在灰阶里糊成一团 ——
+     * VTuber 角色设计的固定检查项：把画面转成灰度，头发/衣服/皮肤
+     * 三块的边界要还认得出。对比度不够时的正确做法是拉明明度差
+     * （不是加饱和度，加饱和在暗背景上反而更糊）。
+     * 数据见 look.hair / look.cloth / look.cloth_hi 三者的 WCAG 对比度。 */
+    el("path", {
+      d: `M ${-COLLAR_X + 3} ${COLLAR_TOP + 2} ` +
+         `C ${-COLLAR_X + 14} ${COLLAR_TOP + 16} ${COLLAR_X - 14} ${COLLAR_TOP + 16} ` +
+         `${COLLAR_X - 3} ${COLLAR_TOP + 2} ` +
+         `C ${COLLAR_X - 14} ${COLLAR_TOP - 8} ${-COLLAR_X + 14} ${COLLAR_TOP - 8} ` +
+         `${-COLLAR_X + 3} ${COLLAR_TOP + 2} Z`,
+      fill: L.clothHi, opacity: "0.5",
     }, body);
 
     /* --- 头 --- */
@@ -388,9 +428,22 @@ export class SvgRig {
       el("ellipse", { cx: 0, cy: 4, rx: 13.5, ry: 21, fill: L.eye }, iris);
       el("ellipse", { cx: 0, cy: -1, rx: 11, ry: 17, fill: "#1b1626" }, iris);
       el("ellipse", { cx: 0, cy: 11, rx: 7, ry: 7.5, fill: L.eye, opacity: "0.8" }, iris);
-      el("ellipse", { cx: 0, cy: 3, rx: 6.5, ry: 10.5, fill: "#141018" }, iris);
-      /* 高光按同一光源：主高光在左上，副高光在右下 */
-      el("ellipse", { cx: -4.6, cy: -7, rx: 4.2, ry: 5.4, fill: "#ffffff" }, iris);
+      /* 瞳孔单独成组，才能独立于虹膜缩放。
+       *
+       * 生理上放大的是瞳孔，不是虹膜——虹膜（棕绿色那圈）大小基本不变，
+       * 变的是中间的瞳孔口径。把整只眼睛一起放大是常见的画错：
+       * 那样"瞳孔放大"会读成"眼睛瞪大了"，而瞪眼和瞳孔放大
+       * 表达的是完全不同的东西（一个是肌肉收缩，一个是虹膜括约肌）。
+       * 这条通道必须能独立变化，否则情绪的唤醒度就没地方体现。
+       *
+       * 缩放中心取瞳孔自己的圆心 (0,3) 而不是原点，
+       * 否则放大时瞳孔会连着位置一起跑，像眼球在往下滑。 */
+      const pupilG = el("g", {}, iris);
+      el("ellipse", { cx: 0, cy: 3, rx: 6.5, ry: 10.5, fill: "#141018" }, pupilG);
+      /* 主高光跟着瞳孔走：它反的是瞳孔表面的光，
+       * 瞳孔涨大它就跟着盖更大的面积，这正是"眼睛亮起来"的来源。 */
+      el("ellipse", { cx: -4.6, cy: -7, rx: 4.2, ry: 5.4, fill: "#ffffff" }, pupilG);
+      /* 副高光是角膜上的反光，不属于瞳孔，所以留在组外 */
       el("circle", { cx: 4.8, cy: 10, r: 2.2, fill: "#ffffff", opacity: "0.6" }, iris);
       const rim = el("ellipse", { cx: 0, cy: 4, rx: 13.5, ry: 21, fill: "none",
                                   stroke: "#241d2e", "stroke-width": "2",
@@ -408,7 +461,7 @@ export class SvgRig {
                                       "stroke-width": "4.6",
                                       "stroke-linecap": "round",
                                       opacity: "0" }, g);
-      n.eyes.push({ g, clipped, sclera, shade, iris, rim, lid, lower,
+      n.eyes.push({ g, clipped, sclera, shade, iris, pupilG, rim, lid, lower,
                     smileLine, clipPath, side });
     }
 
@@ -467,9 +520,24 @@ export class SvgRig {
     const n = this.nodes;
     if (!n.stage) return;
 
-    const yaw = clamp(p.ParamAngleX);
-    const pitch = clamp(p.ParamAngleY);
-    const rollA = clamp(p.ParamAngleZ);
+    /* --- 动态背景 ---
+     * 背景随情绪变化：激动时变亮，收敛时变暗。
+     * 用弹簧平滑过渡，避免突变。 */
+    const emotion = p.ParamCheek || 0;
+    const bgTarget = 0.30 + emotion * 0.25;
+    this.bgLevel = (this.bgLevel || 0.30) + (bgTarget - (this.bgLevel || 0.30)) * 0.05;
+    if (n.bgGlow) {
+      n.bgGlow.setAttribute("opacity", this.bgLevel.toFixed(3));
+    }
+
+    /* 头部姿态用弹簧平滑：刚度比头发高（头比头发重），
+       但比直接设置低，这样头部转动会有轻微滞后和过冲。 */
+    const rawYaw = clamp(p.ParamAngleX);
+    const rawPitch = clamp(p.ParamAngleY);
+    const rawRoll = clamp(p.ParamAngleZ);
+    const yaw = this.spring.headYaw.step(rawYaw, dt);
+    const pitch = this.spring.headPitch.step(rawPitch, dt);
+    const rollA = this.spring.headRoll.step(rawRoll, dt);
     const bob = clamp(p.ParamBodyAngleX) * 6;
 
     /* --- 次级运动 ---
@@ -541,19 +609,25 @@ export class SvgRig {
      *   2) 波形不是正弦。真人吸气快、顶上停一拍、呼气慢，
      *      正弦会让呼吸看起来像机械摆动。 */
     const b = breathShape(p.ParamBreath);
+    // 肩膀弹簧：刚度比身体高，肩膀比身体动得快
+    const sh = this.spring.shoulder.step(b, dt);
     n.stage.setAttribute("transform", "translate(210 212)");
 
     // 身体跟头，但幅度更小、更慢
     const bodyRot = clamp(p.ParamBodyAngleX + yaw * 0.28);
-    const bodyTilt = clamp(p.ParamBodyAngleZ + rollA * 0.3);
-    const lean = clamp(p.ParamBodyLeanX) * 16;
+    // 身体倾斜用弹簧平滑：刚度比头低，身体比头慢
+    const bodyTilt = this.spring.bodyTilt.step(clamp(p.ParamBodyAngleZ + rollA * 0.3), dt);
+    const lean = this.spring.bodyLean.step(clamp(p.ParamBodyLeanX), dt) * 16;
     n.body.setAttribute(
       "transform",
-      `translate(${lean.toFixed(2)} ${(-b * 1.1).toFixed(2)}) ` +
+      `translate(${lean.toFixed(2)} ${(-sh * 1.2).toFixed(2)}) ` +
       `rotate(${(bodyTilt * 0.6).toFixed(2)}) ` +
-      // 底边固定：scale 的三四参数是缩放原点。张开只发生在肩膀一侧
-      `scale(${(1 - Math.abs(bodyRot) * 0.05 + b * 0.030).toFixed(4)} ` +
-      `${(1 - b * 0.014).toFixed(4)} 0 210)`
+      // 底边固定：SVG 的 scale() 只收 1~2 个参数，没有缩放原点这一说，
+      // 所以要用 translate 前后包。这样张开只发生在肩膀一侧，
+      // 而衣服下摆钉在原地不动。
+      `translate(0 210) ` +
+      `scale(${(1 - Math.abs(bodyRot) * 0.05 + sh * 0.035).toFixed(4)} ` +
+      `${(1 - sh * 0.016).toFixed(4)}) translate(0 -210)`
     );
 
     const sx = 1 - Math.abs(yaw) * 0.13;
@@ -574,14 +648,27 @@ export class SvgRig {
     /* --- 眼睛 --- */
     const gx = clamp(p.ParamEyeBallX);
     const gy = clamp(p.ParamEyeBallY);
-    const openL = clamp01(p.ParamEyeLOpen);
-    const openR = clamp01(p.ParamEyeROpen);
+    /* 眼睑跟随眼球上下动。用一根偏临界阻尼的弹簧：眼睑要紧跟（否则
+     * 眼球已经看下面了、眼皮还没落下来，像是眼球在眼窝里滑），
+     * 但阻尼要高，不能有过冲回摆——眼皮抖两下比不跟还假。
+     * 跟随比例 0.72：跟满 100% 读成"眼皮拖着眼球"，反而不自然。 */
+    const lidOffset = this.spring.lidY.step(gy * 4.2 * 0.72, dt);
+    // 眨眼用弹簧平滑：刚度很高，眨眼是快速动作
+    const openL = this.spring.blinkL.step(clamp01(p.ParamEyeLOpen), dt);
+    const openR = this.spring.blinkR.step(clamp01(p.ParamEyeROpen), dt);
     const smileL = clamp01(p.ParamEyeLSmile);
     const smileR = clamp01(p.ParamEyeRSmile);
+    /* 虹膜缩放：Live2D 标准参数 ParamEyeBallForm。
+     * -1 收小、+1 放大。Animaze 的扩展集里它专门用来让虹膜配合
+     * 笑/皱眉改变眼睛轮廓 —— 只靠 ParamEyeLOpen 做不出"瞳孔缩起来"的
+     * 心虚感或"瞪大眼"的专注感，那是虹膜大小的事，不是开度的事。 */
+    const ballForm = clamp(p.ParamEyeBallForm);
+    const irisScale = 1 + ballForm * 0.34;
+    const irisShiftY = ballForm * -1.2;
     for (const eye of n.eyes) {
       const open = eye.side < 0 ? openL : openR;
       const smile = eye.side < 0 ? smileL : smileR;
-      const d = eyePath(open, EYE_W, EYE_TOP, EYE_BOT);
+      const d = eyePath(open, EYE_W, EYE_TOP, EYE_BOT, 0, lidOffset);
       eye.sclera.setAttribute("d", d);
       eye.shade.setAttribute("d", d);
       // 裁剪路径跟着眼裂走：闭眼时虹膜自然被裁没，不需要额外开关
@@ -591,8 +678,23 @@ export class SvgRig {
       eye.g.setAttribute("transform",
         `translate(${(eye.side * EYE_X).toFixed(2)} ${EYE_Y}) scale(${depth.toFixed(3)} 1)`);
       eye.iris.setAttribute("transform",
-        `translate(${(gx * 5.6).toFixed(2)} ${(gy * 4.2).toFixed(2)})`);
-      eye.lid.setAttribute("d", lidPath(open, EYE_W, EYE_TOP, EYE_BOT));
+        `translate(${(gx * 5.6).toFixed(2)} ${(gy * 4.2 + irisShiftY).toFixed(2)}) ` +
+        `scale(${irisScale.toFixed(3)} ${irisScale.toFixed(3)})`);
+      /* 瞳孔大小：唤醒度越高瞳孔越大。
+       *
+       * 这是一条独立于表情的生理通道。七个离散情绪标签最多只能表达七种状态，
+       * 而瞳孔大小是一条连续量——同一种情绪从轻微到强烈，
+       * 瞳孔是连续变化的，所以观感上"情绪有强弱"这件事才立得住。
+       *
+       * 真实瞳孔在放松时约 3~4mm，强光下收到 1.5mm 左右，
+       * 黑暗中放到 6~7mm。这里 ParamPupil 的中位是 1.0，
+       * 映射到 0.62~1.45 这个区间——比生理范围保守，
+       * 因为动漫眼睛的虹膜本来就画得比真人浅，
+       * 瞳孔再放大会显得像在瞪眼而不是在专注。 */
+      const pupil = Math.max(0.55, Math.min(1.5, p.ParamPupil ?? 1));
+      eye.pupilG.setAttribute("transform",
+        `translate(0 3) scale(${pupil.toFixed(3)} ${pupil.toFixed(3)}) translate(0 -3)`);
+      eye.lid.setAttribute("d", lidPath(open, EYE_W, EYE_TOP, EYE_BOT, lidOffset));
       eye.lid.setAttribute("opacity", open < 0.86 && smile < 0.12 ? "1" : "0");
       /* 笑眼：眼球淡出，换成一条向上弯的弧。
        两条曲线必须在同一条过渡带里互补，否则中间会出现
