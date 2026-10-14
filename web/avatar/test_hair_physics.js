@@ -13,7 +13,7 @@ function fixture({ model = 'Seed-san Daily Study', hair = true, enabled = true }
   rig.setHairPhysics(enabled, 1);
   const scene = new THREE.Scene(), root = new THREE.Group(); scene.add(root);
   const surface = new THREE.MeshBasicMaterial(); surface.name = 'body_bake';
-  const hair = new THREE.MeshBasicMaterial(); hair.name = 'hair';
+  const hairMaterial = new THREE.MeshBasicMaterial(); hairMaterial.name = 'hair';
   const geometry = new THREE.BufferGeometry();
   geometry.setAttribute('position', new THREE.Float32BufferAttribute([0,0,0, 1,0,0, 0,1,0], 3));
   geometry.setAttribute('normal', new THREE.Float32BufferAttribute([0,0,1, 0,0,1, 0,0,1], 3));
