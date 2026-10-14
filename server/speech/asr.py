@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import io
+import json
 import math
 import os
 import struct
@@ -63,11 +64,10 @@ def trim_silence(audio: np.ndarray, *, threshold_db: float = -42.0, keep_ms: int
 
 
 class Recognizer:
-    """faster-whisper wrapper. Model loads lazily on first use."""
+    """Transcription backend. faster-whisper locally, StepAudio over HTTP."""
 
     def __init__(self) -> None:
         self._model: Any = None
-        self._lock_name = "asr"
 
     def _ensure(self) -> Any:
         if self._model is None:
@@ -99,7 +99,8 @@ class Recognizer:
                 os.environ.pop("HF_ENDPOINT", None)
                 raise exc
 
-    async def transcribe(self, audio: np.ndarray, sample_rate: int) -> Transcript:
+    async def transcribe(self, audio: np.ndarray, sample_rate: int, *, language: str | None = None) -> Transcript:
+        language = settings.asr_language if language is None else language
         if sample_rate != settings.audio_sample_rate:
             duration = audio.size / sample_rate
             target_n = int(duration * settings.audio_sample_rate)
@@ -112,17 +113,24 @@ class Recognizer:
         if audio.size < int(0.2 * settings.audio_sample_rate):
             return Transcript("", "zh", int(audio.size / settings.audio_sample_rate * 1000), 0.0)
 
+        duration_ms = int(audio.size / settings.audio_sample_rate * 1000)
+        if settings.asr_engine == "stepaudio":
+            return await self._stepaudio(audio, duration_ms, language)
+        return await self._whisper(audio, duration_ms, language)
+
+    async def _whisper(self, audio: np.ndarray, duration_ms: int, language: str | None = None) -> Transcript:
+        language = settings.asr_language if language is None else language
         model = self._ensure()
         import anyio
 
         def _run() -> tuple[str, float]:
             segments, info = model.transcribe(
                 audio,
-                language=settings.asr_language or None,
+                language=language or None,
                 beam_size=5,
                 vad_filter=False,
                 condition_on_previous_text=False,
-                initial_prompt="以下是普通话的句子，请使用简体中文输出。" if settings.asr_language == "zh" else None,
+                initial_prompt="以下是普通话的句子，请使用简体中文输出。" if language == "zh" else None,
             )
             text = ""
             probs: list[float] = []
@@ -137,14 +145,83 @@ class Recognizer:
         text, confidence = await anyio.to_thread.run_sync(_run)
         return Transcript(
             text=text,
-            language=settings.asr_language or "zh",
-            duration_ms=int(audio.size / settings.audio_sample_rate * 1000),
+            language=language or "auto",
+            duration_ms=duration_ms,
             confidence=confidence,
         )
 
-    async def transcribe_wav(self, data: bytes) -> Transcript:
+    async def _stepaudio(self, audio: np.ndarray, duration_ms: int, language: str | None = None) -> Transcript:
+        """StepAudio 2.5 ASR over HTTP+SSE. One shot in, transcript events out."""
+        language = settings.asr_language if language is None else language
+        import base64
+
+        import httpx
+
+        from ..llm import llm
+
+        pcm = (np.clip(audio, -1, 1) * 32767).astype("<i2").tobytes()
+        payload = {
+            "audio": {
+                "data": base64.b64encode(pcm).decode("ascii"),
+                "input": {
+                    "transcription": {
+                        "model": settings.asr_model_id,
+                        "language": language,
+                        "enable_itn": True,
+                    },
+                    "format": {
+                        "type": "pcm",
+                        "codec": "pcm_s16le",
+                        "rate": settings.audio_sample_rate,
+                        "bits": 16,
+                        "channel": 1,
+                    },
+                },
+            }
+        }
+        client = await llm.client()
+        chunks: list[str] = []
+        final = ""
+        error: str | None = None
+        async with client.stream(
+            "POST",
+            f"{llm.base_url}/audio/asr/sse",
+            json=payload,
+            headers={"Accept": "text/event-stream"},
+        ) as resp:
+            if resp.status_code >= 400:
+                body = (await resp.aread()).decode("utf-8", "replace")
+                raise RuntimeError(f"asr {resp.status_code}: {body[:200]}")
+            async for line in resp.aiter_lines():
+                if not line.startswith("data:"):
+                    continue
+                body = line[5:].strip()
+                if not body or body == "[DONE]":
+                    continue
+                try:
+                    event = json.loads(body)
+                except json.JSONDecodeError:
+                    continue
+                kind = event.get("type")
+                if kind == "transcript.text.delta":
+                    chunks.append(event.get("delta") or "")
+                elif kind == "transcript.text.done":
+                    final = event.get("text") or ""
+                elif kind == "error":
+                    error = (event.get("message") or "asr error")[:200]
+        if error:
+            raise RuntimeError(error)
+        text = final or "".join(chunks)
+        return Transcript(
+            text=text.strip(),
+            language=language or "auto",
+            duration_ms=duration_ms,
+            confidence=0.0 if text.strip() else 0.0,
+        )
+
+    async def transcribe_wav(self, data: bytes, *, language: str | None = None) -> Transcript:
         audio, rate = decode_wav(data)
-        return await self.transcribe(audio, rate)
+        return await self.transcribe(audio, rate, language=language)
 
 
 def to_wav_bytes(audio: np.ndarray, sample_rate: int) -> bytes:

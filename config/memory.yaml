@@ -56,7 +56,9 @@ write:
 
 # ---------- 冲突处理 ----------
 conflict:
-  strategy: supersede         # 新信息覆盖旧信息，但旧信息保留在历史里
+  strategy: evidence_guarded  # 同主体/类型/属性；明确纠正才更新，歧义保留 conflict
+  # 有原话的有限偏好句型可按对象/时间限定并存；最爱与相反偏好仍需核对。
+  # 规则在 memory/preference.py 和最终写事务中执行，旧记录不猜补语义。
   keep_history: true
   on_user_correction: >
     用户说"我早就不玩 X 了"这类纠正时，直接标记旧记忆为 superseded，
@@ -64,6 +66,34 @@ conflict:
   on_contradiction_detected:
     - "在回复里承认：'你之前说过 X，现在看是不太一样了'"
     - "不要私自把旧记忆改掉成新值"
+  # 主题用于分类，属性用于事实身份。同主题的公司与岗位不能互相覆盖。
+  # 同义属性仍依赖抽取质量；下面词表只收敛主题，不证明两条是同一事实。
+  topic_vocabulary:
+    - 称呼
+    - 作息
+    - 饮食
+    - 运动
+    - 健康
+    - 兴趣
+    - 游戏
+    - 影视
+    - 音乐
+    - 旅行
+    - 学业
+    - 工作
+    - 项目
+    - 计划
+    - 人际
+    - 情感
+    - 消费
+    - 设备
+    - 偏好
+    - 禁忌
+    - 目标
+  topic_fallback: 其他
+  # 保留旧配置字段以兼容诊断工具；自动写入不再按主题合并。
+  one_active_value_per_topic: false
+  merge_kinds: []
 
 # ---------- 不确定怎么办 ----------
 uncertainty:

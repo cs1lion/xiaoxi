@@ -37,11 +37,14 @@ def _loose_json(text: str) -> Any:
 class LLM:
     """Thin async client. Provider is chosen by env, shape is OpenAI-compatible."""
 
-    def __init__(self) -> None:
-        self.provider = settings.llm_provider
-        self.base_url = settings.llm_base_url.rstrip("/")
-        self.api_key = settings.llm_api_key
-        self.model = settings.llm_model
+    def __init__(self, *, config: Any = None, request_timeout: float = 60.0, trust_env: bool = True) -> None:
+        self.settings = config or settings
+        self.provider = self.settings.llm_provider
+        self.base_url = self.settings.llm_base_url.rstrip("/")
+        self.api_key = self.settings.llm_api_key
+        self.model = self.settings.llm_model
+        self.request_timeout = request_timeout
+        self.trust_env = trust_env
         self.offline = self.provider == "mock" or not self.api_key
         self._client: httpx.AsyncClient | None = None
         self.last_usage: dict[str, Any] = {}
@@ -51,7 +54,7 @@ class LLM:
             headers = {"Content-Type": "application/json"}
             if self.api_key:
                 headers["Authorization"] = f"Bearer {self.api_key}"
-            self._client = httpx.AsyncClient(timeout=httpx.Timeout(60.0, connect=10.0), headers=headers)
+            self._client = httpx.AsyncClient(timeout=httpx.Timeout(self.request_timeout, connect=min(10.0, self.request_timeout)), headers=headers, trust_env=self.trust_env)
         return self._client
 
     async def aclose(self) -> None:
@@ -84,6 +87,7 @@ class LLM:
         json_mode: bool = False,
         model: str | None = None,
         reasoning_effort: str | None = None,
+        max_attempts: int = 3,
     ) -> dict[str, Any]:
         """Full result: text plus finish_reason / usage / reasoning.
 
@@ -95,37 +99,41 @@ class LLM:
         `model` exists so a slow-but-precise model can be used for bookkeeping
         while the fast role-playing one handles the conversation.
         """
+        if type(max_attempts) is not int or not 1 <= max_attempts <= 3:
+            raise ValueError("max_attempts_must_be_1_to_3")
         if self.offline:
             return {"text": self._mock(messages), "finish_reason": "stop", "usage": {}, "reasoning": ""}
         payload: dict[str, Any] = {
             "model": model or self.model,
             "messages": messages,
-            "temperature": settings.llm_temperature if temperature is None else temperature,
-            "max_tokens": max_tokens or settings.llm_max_tokens,
+            "temperature": self.settings.llm_temperature if temperature is None else temperature,
+            "max_tokens": max_tokens or self.settings.llm_max_tokens,
         }
         # 重复抑制。OpenAI 兼容接口普遍支持，但个别自建/代理网关会因未知字段
         # 直接 400，所以默认 0（不下发），要用再在 .env 里开。
         # 建议对话场景 frequency=0.2、presence=0.2；再高会让它不敢复用正常词。
-        if settings.llm_frequency_penalty:
-            payload["frequency_penalty"] = settings.llm_frequency_penalty
-        if settings.llm_presence_penalty:
-            payload["presence_penalty"] = settings.llm_presence_penalty
+        if self.settings.llm_frequency_penalty:
+            payload["frequency_penalty"] = self.settings.llm_frequency_penalty
+        if self.settings.llm_presence_penalty:
+            payload["presence_penalty"] = self.settings.llm_presence_penalty
         if json_mode:
             payload["response_format"] = {"type": "json_object"}
-        effort = reasoning_effort if reasoning_effort is not None else settings.llm_reasoning_effort
+        effort = reasoning_effort if reasoning_effort is not None else self.settings.llm_reasoning_effort
         if effort:
             payload["reasoning_effort"] = effort
 
         client = await self.client()
         last_error: Exception | None = None
-        for attempt in range(3):
+        for attempt in range(max_attempts):
             try:
                 resp = await client.post(f"{self.base_url}/chat/completions", json=payload)
                 if resp.status_code >= 400:
-                    last_error = LLMError(f"{resp.status_code}: {resp.text[:300]}")
+                    # Provider error bodies may echo credentials or request data.
+                    last_error = LLMError(f"HTTP {resp.status_code}")
                     if resp.status_code < 500:
                         break
-                    await asyncio.sleep(0.6 * (attempt + 1))
+                    if attempt + 1 < max_attempts:
+                        await asyncio.sleep(0.6 * (attempt + 1))
                     continue
                 data = resp.json()
                 choice = data["choices"][0]
@@ -139,8 +147,9 @@ class LLM:
                 }
             except (httpx.HTTPError, KeyError, IndexError) as exc:  # pragma: no cover - network
                 last_error = exc
-                await asyncio.sleep(0.6 * (attempt + 1))
-        raise LLMError(str(last_error))
+                if attempt + 1 < max_attempts:
+                    await asyncio.sleep(0.6 * (attempt + 1))
+        raise LLMError(str(last_error) if isinstance(last_error, LLMError) else f"request_failed:{type(last_error).__name__}")
 
     async def stream(
         self,

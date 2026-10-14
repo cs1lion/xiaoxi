@@ -12,4 +12,5 @@ setuptools<81            # ctranslate2 4.5.0 依赖 pkg_resources
 edge-tts>=6.1.10
 scikit-learn>=1.5
 python-multipart>=0.0.9
-websockets>=13.0         # 仅联调脚本需要
+tzdata>=2025.2           # Windows IANA 时区数据，供提醒设置使用
+websockets>=14.0         # 可选阶跃双向流式ASR客户端（asyncio/additional_headers）

@@ -23,6 +23,12 @@ server/dialogue/orchestrator.py
 FastAPI + WebSocket + 网页端   server/app.py  web/
 ```
 
+## 助手与主动提醒（新增）
+
+新增有限步数 Agent Loop、参数绑定人工确认、任务与单次提醒、持久化通知收件箱，以及分层上下文。侧栏「任务与提醒」面板可直接管理事项；自然语言执行复用现有 LLM 配置。所有模型提出的写操作先确认，首版提醒只在文字收件箱投递，服务关闭时不运行调度，不承诺网页关闭后的系统通知。
+
+机制、参考来源、测试方式与当前边界见 [Agent Runtime](docs/AGENT_RUNTIME.md)，产品整体提案见 [搭档设计](docs/COMPANION_ASSISTANT_DESIGN.md)。原记忆数据不自动转换成授权或提醒。
+
 ## 快速开始
 
 ```powershell
@@ -91,8 +97,11 @@ async def synthesize(self, text: str, emotion: str = "base") -> bytes:
     return await cosy_voice.infer(text, spk_id, prompt)
 ```
 
-打断（barge-in）：网页端播放时监测麦克风能量，你一开口立刻停播并开始新一轮。
-也可常驻监听模式。
+连续对话第一版：开启后本地检测开口与停顿，确认开口才上传（含预录），停顿约900ms自动收句；语音与文字新轮次会取消旧回复，过期转写、事件及解码结果不能复活旧音频。`done`只表示生成结束，播放完毕才结束该轮。
+
+保留按住说话与键盘操作。“停止回复”保留连续模式本地监听；关闭连续对话取消未提交的自动录音，释放麦克风（手动按住时需先松开）。断线、切后台、离开页面也会释放。前端29.5秒、服务端30秒录音上限。
+
+已深入到[全双工实验版](docs/FULL_DUPLEX.md)：AudioWorklet优先双路采集；疑似开口先压低回复音量、持续讲话才取消旧轮；播放参照回声判据；耳机/外放/快速策略；本地句内续播及指标。**不能可靠理解附和与打断语义，也不是专业DSP回声消除**，建议戴耳机；真实设备声学效果仍需验收。连续对话基础用法见[连续语音说明](docs/CONTINUOUS_VOICE.md)。
 
 ## 立绘（可选层）
 
@@ -105,14 +114,51 @@ async def synthesize(self, text: str, emotion: str = "base") -> bytes:
 ——服务端已经按句切分并在事件里带上对应文本，所以口型和声音是对齐的。
 加载失败只会移除立绘，不影响聊天。
 
-想换 Live2D / VRM 只需替换 `web/avatar/render/`，上层仍然只写 `Param*`。
+形象后端现支持 SVG 和 **VRM + MToon（3 渲 2 实验版）**，共用 `Param*` 驱动，VRM 通过适配层映射骨骼、视线和表情。
+
+### 3 渲 2 实验版
+
+启动现有 Python 服务后打开：
+
+- `http://127.0.0.1:8000/static/avatar_lab.html`：独立实验室，支持 SVG 对照、情绪/动作、减少动态效果、本地 VRM 导入（不上传）、静音口型与本地音频测试。
+- `http://127.0.0.1:8000/?avatar=vrm`：聊天页启用 3 渲 2；也可在侧栏“形象”手动切换。普通首页仍默认 SVG。
+
+依赖已以固定版本放在 `web/vendor/`，运行时不依赖 CDN。更新或重建依赖：
+
+```powershell
+npm ci
+npm run vendor:avatar
+npm run test:vrm
+# 浏览器回归需要已有服务运行在 127.0.0.1:8000
+npx playwright install chromium
+node scripts/test-avatar-browser.mjs
+```
+
+- 渲染器：`web/avatar/render/vrm.js`；纯参数映射：`web/avatar/render/vrm-mapping.js`。
+- 示例为 pixiv 官方 VRM1 Constraint Twist Sample（约 10.8 MB），不是最终角色；来源、固定 blob 与模型内嵌授权见 `web/models/README.md`。
+- 切换采用后台准备、成功后替换；加载失败保留当前形象，首次 VRM 失败时保留 SVG。不影响语音和对话。模型切换不持久化，本地模型只在实验室本次页面有效。
+- VRM 标准表情只能近似原本的挑眉、圆唇等行为；不支持的形状会降级。嘴型使用现有拼音时间轴，不代表强制对齐或完整中文音素识别。
+- 本版使用 WebGL；需浏览器支持 WebGL2。支持自包含的 VRM 0.x/1.x；外部纹理、压缩扩展、特殊模型尚未全面验证。
+- 浏览器测试覆盖加载、情绪、口型、打断、SVG/VRM 切换、失败保留、移动视口和聊天入口；截图输出到 `eval/avatar/`。自动化使用无头 Chromium，不等同于真实设备性能测试或人工美术验收。
 
 ## 验收
 
 ```powershell
-python scripts/test_core.py         # 34 项离线确定性检查（不需要网络/API key）
-python scripts/eval_scenarios.py    # 9 个场景回归，输出 eval/last_run.json
-python scripts/e2e_check.py         # 起服务后跑全链路：文字 + 语音 + 记忆 + 删除
+python scripts/test_core.py          # 34 项离线确定性检查（不需要网络/API key）
+python scripts/inspect_extract.py    # 单独看"记忆抽取"这一环：原文 -> 解析 -> 入库 -> 召回
+python scripts/eval_scenarios.py     # 9 个场景回归，输出 eval/last_run.json
+python scripts/e2e_check.py          # 起服务后跑全链路：文字 + 语音 + 记忆 + 删除
+```
+
+`inspect_extract.py` 是排查记忆问题的入口。它把抽取拆成四步打出来：
+模型原文 → 规则解析 → 实际入库 → 事后召回，并且区分三种"没抽到"：
+**模型调用失败** / **模型说没什么好记** / **抽到了但被规则挡下**（会打印挡下的理由）。
+以前这三种都表现为"记忆是空的"，没法区分。
+
+```
+python scripts/inspect_extract.py --dry      # 不调模型，只验证规则层（离线可用）
+python scripts/inspect_extract.py --text "我周五要面试"   # 单条试
+python scripts/inspect_extract.py --full     # 打印模型原始 JSON
 ```
 
 `eval/scenarios.json` 里的场景直接来自需求草案的"第二步"：
@@ -133,7 +179,36 @@ python scripts/e2e_check.py         # 起服务后跑全链路：文字 + 语音
 - `HF_ENDPOINT`：huggingface.co 不通时指向 hf-mirror.com。
 - `TTS_ENGINE=edge_tts|silent`。
 
-## 目录
+## 当前配置与实测
+
+```
+对话  step-3.7-flash      流式，情绪由模型自报 [情绪] 标签
+抽取  step-3.7-flash      后台异步，不在响应关键路径
+TTS   stepaudio-2.5-tts   instruction = 自然语言情绪指令
+ASR   stepaudio-2.5-asr  0.9s 转写 3.4s 音频
+```
+
+实测：场景回归 9/9，离线自检 38/38，短回复首音 ~3.5s、长回复首音 5.8s（全文 16s）。
+
+**为什么不用 stepaudio-2.5-chat 做对话**：它语气更活，但实测会无视「你没有任何相关记忆」的显式提示，
+去编造共同经历（"你问我有没有女朋友"）。flash 在同样的探针下 0/3 编造。
+性格改由 TTS 的 `instruction` 承载，音色固定、情绪变。
+
+### 两条不能省的提示词约束
+
+```python
+# 1. 检索为空时必须明说。留空 = 告诉模型"这里没约束"，它会自己编一段填上。
+"【关于这个问题，你没有任何相关记忆】不要使用「我记得」「我们之前」…"
+
+# 2. few-shot 必须每轮都带，且示例本身要带 [情绪] 标签。
+#    只在指令里要求而不演示，模型会照示例的格式学，从而忽略指令。
+```
+
+## 已知限制
+
+- 对话接口本身有 ~2s 首字延迟地板（空提示词也要 1.95s），提示词只占其中约 1s
+- 情绪命中率约 7/10，「收敛」有过用倾向——模型自己的判断，不是规则保证
+- 长回复的 TTS 按句串行合成，整段播完仍比文本长
 
 ```
 config/       三份契约（角色 / 记忆 / 节奏）+ avatar.yaml
@@ -146,6 +221,6 @@ server/
   app.py      REST + WebSocket + 静态页
 web/          网页端（录音、打断、字幕、记忆面板）+ avatar/ 立绘
 eval/         验收场景
-scripts/      run.py / test_core.py / eval_scenarios.py / e2e_check.py
+scripts/      run.py / test_core.py / inspect_extract.py / eval_scenarios.py / e2e_check.py
 docs/         REQUIREMENTS.md（需求草案）、system_prompt_sample.txt（提示词样例）
 ```

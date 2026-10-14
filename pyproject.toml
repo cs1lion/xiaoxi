@@ -17,6 +17,8 @@ dependencies = [
     "edge-tts>=6.1.10",
     "scikit-learn>=1.5",
     "python-multipart>=0.0.9",
+    "tzdata>=2025.2",
+    "websockets>=14.0",
 ]
 
 [tool.uv]

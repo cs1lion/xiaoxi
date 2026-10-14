@@ -47,7 +47,7 @@ def avatar_cfg() -> dict[str, Any]:
 
 
 DEFAULTS: dict[str, Any] = {
-    "db_path": str(DATA_DIR / "memory.db"),
+    "db_path": os.getenv("DB_PATH", str(DATA_DIR / "memory.db")),
     "llm_provider": os.getenv("LLM_PROVIDER", "openai"),
     "llm_base_url": os.getenv("LLM_BASE_URL", "https://api.deepseek.com/v1"),
     "llm_api_key": os.getenv("LLM_API_KEY", ""),
@@ -70,6 +70,13 @@ DEFAULTS: dict[str, Any] = {
     "asr_engine": os.getenv("ASR_ENGINE", "whisper"),
     "asr_model": os.getenv("ASR_MODEL", "small"),
     "asr_model_id": os.getenv("ASR_MODEL_ID", "stepaudio-2.5-asr"),
+    # Explicit opt-in: never reuse subscription/LLM credentials for paid ASR.
+    "asr_stream_url": os.getenv("ASR_STREAM_URL", ""),
+    "asr_stream_api_key": os.getenv("ASR_STREAM_API_KEY", ""),
+    "asr_stream_wire_format": os.getenv("ASR_STREAM_WIRE_FORMAT", "pcm"),
+    "music_enabled": os.getenv("MUSIC_ENABLED", "false").lower() in ("1", "true", "yes"),
+    "music_url": os.getenv("MUSIC_URL", ""),
+    "music_api_key": os.getenv("MUSIC_API_KEY", ""),
     "asr_device": os.getenv("ASR_DEVICE", "cpu"),
     "asr_compute_type": os.getenv("ASR_COMPUTE_TYPE", "int8"),
     "asr_language": os.getenv("ASR_LANGUAGE", "zh"),
