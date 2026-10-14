@@ -12,6 +12,8 @@
   4. 线上协议：app.js 每个 case 分支里读的 msg.<字段>，后端必须真的发这个字段
      （第 4 条就是本脚本存在的主要理由：它抓到过一次"后端把 text 帧换成
        emotion + text_delta 之后，形象层的 hold 姿势永久卡死"的线上事故）
+  5. REST 接缝：web 的 js 里引用的 /api/ 字面量路由，服务端必须真的注册
+     （星图这类跨角色接口最常死于静默 404；含 ${ 的模板串无法静态核对，放过）
 
 用法：uv run python scripts/check_protocol.py
 """
@@ -95,6 +97,43 @@ def turn_envelope_fields() -> set[str]:
                         and v.id == 'payload' for k, v in zip(node.keys, node.values))):
                     return {k.value for k in node.keys if isinstance(k, ast.Constant) and isinstance(k.value, str)}
     return set()
+
+
+def server_routes() -> set[str]:
+    """Collect literal /api routes: @app.<m>(...) plus @<router>.<m>(...) joined with APIRouter prefixes."""
+    routes: set[str] = set()
+    for path in sorted(SERVER_DIR.rglob('*.py')):
+        text = path.read_text(encoding='utf-8')
+        for match in re.finditer(r'@app\.(?:get|post|patch|delete|put)\(\s*["\']([^"\']+)["\']', text):
+            routes.add(match.group(1))
+        prefixes = dict(re.findall(r'(\w+)\s*=\s*APIRouter\(\s*prefix\s*=\s*["\']([^"\']+)["\']', text))
+        # 集合路由注册的是空路径（@router.get('')），所以路径组必须允许零长度。
+        for match in re.finditer(r'@(\w+)\.(?:get|post|patch|delete|put)\(\s*["\']([^"\']*)["\']', text):
+            routes.add(prefixes.get(match.group(1), '') + match.group(2))
+    return {route for route in routes if route.startswith('/api/')}
+
+
+def frontend_api_calls() -> set[str]:
+    """Literal /api/... strings in web js; dynamic template paths cannot be checked statically."""
+    calls: set[str] = set()
+    for path in sorted((ROOT / 'web').rglob('*.js')):
+        for match in re.finditer(r'["\'`](/api/[A-Za-z0-9_\-/{}$]+)', path.read_text(encoding='utf-8')):
+            literal = match.group(1)
+            if '$' in literal:
+                continue
+            calls.add(literal.split('?')[0].rstrip('/') or '/api')
+    return calls
+
+
+def route_exists(reference: str, routes: set[str]) -> bool:
+    parts = reference.strip('/').split('/')
+    for route in routes:
+        segments = route.strip('/').split('/')
+        if len(segments) != len(parts):
+            continue
+        if all(want.startswith('{') or want == got for want, got in zip(segments, parts)):
+            return True
+    return False
 
 
 def main() -> int:
@@ -199,6 +238,12 @@ def main() -> int:
     # 服务端发了但前端没处理：不算错，只提示——形象层往往有意不关心某些消息
     ignored = sorted(set(emitted) - set(cases))
 
+    # ---- 5. REST 接缝：前端引用的 /api 路由必须真的存在 ----
+    routes = server_routes()
+    for call in sorted(frontend_api_calls()):
+        if not route_exists(call, routes):
+            problems.append(f"web 里引用了 {call}，但服务端没有注册这个路由（跨角色接口会静默 404）")
+
     if problems:
         print("FAIL")
         for p in problems:
@@ -207,7 +252,8 @@ def main() -> int:
     print(
         f"PASS  {len(faces)} 个情绪标签双向齐全；"
         f"{len(params)} 个参数与中位姿态互为全集；"
-        f"{len(cases)} 个消息类型的字段全部对得上"
+        f"{len(cases)} 个消息类型的字段全部对得上；"
+        f"{len(routes)} 个 /api 路由与前端引用一致"
     )
     if ignored:
         print(f"      （服务端还发了这些，前端未处理，对形象层无影响：{', '.join(ignored)}）")

@@ -71,12 +71,13 @@ asr?            只在语音输入时出现
 uv run python scripts/check_protocol.py
 ```
 
-它查上面四类漂移，全部静态、零协调成本：
+它查下面几类漂移，全部静态、零协调成本：
 
 1. 情绪标签双向齐全
 2. 参数表与中位姿态互为全集
 3. 表情 shift / 手势关键帧 / 触发器 / 注视点的引用全部可达
 4. **`app.js` 每个 `case` 分支读的 `msg.<字段>`，服务端必须真的发这个字段**
+5. **web 里引用的 `/api/` 字面量路由，服务端必须真的注册**——星图这类跨角色接口最常死于静默 404；模板串（含 `${`）无法静态核对，放过
 
 第 4 条是这个脚本存在的主要理由。它抓到过一次真实事故：
 后端把 `text` 帧换成 `emotion` + `text_delta` 之后，形象层还认 `text`，
@@ -146,3 +147,49 @@ uv run python scripts/check_protocol.py
 讨论使用 RAM 原稿快照与本观点最近几轮历史，优先于练习/体验和普通助手路由；不执行工具、改稿、保存或写聊天/长期记忆。自然 `base` 音色复用播放队列。上下文失效时发终结 `error(code=editor_discussion_unavailable,scope=editor_insight,editor_context_valid=false)`；模型暂时失败且上下文仍有效时同码但 `editor_context_valid=true`，允许用户再次明确提问。旧轮、改稿和等待发送锁的迟到结果均不能继续交付。
 
 主编辑器通过严格 origin/source 的 `aqi-editor-insight-discuss` 移交，父页以 `aqi-editor-insight-discussion` 回执。移交与回稿保留 iframe 草稿/修订；实际改稿撤销。实现与测试见[编辑陪伴](EDITOR_COMPANION.md)。
+
+## 十、按天日记、心境偏置与灵感火花（F1）
+
+按天沉淀的第一人称"小溪日记"是性格的来源，不是复述给用户的流水账。日记、偏置、火花三者的写入都走"程序化校验通过才入库"，与既有记忆的证据链同标准。
+
+- 日记 `diary={id,date,title,body,mood,energy,topic_keys[],source_message_ids[],created_at}`：`date` 为本地时区 ISO 日期，一天一条；`body` 第一人称且 ≤400 字；`mood` 复用 `EMOTIONS`；`energy` ∈ [0,1]；`source_message_ids` 必须指向当天真实存在的已存消息。没有证据的"回忆"是编造，空 `source_message_ids` 的日记不允许入库。
+- 心境偏置 `drift={id,topic,attitude,weight,updated_at,evidence_diary_ids[]}`：`attitude` ≤40 字符，`weight` ∈ [0,1]。注入提示词时只作为倾向影响表达，**不得原句引用给用户**；单轮生效偏置上限 8 条，超出按 `weight` 从低到高截断。
+- 灵感火花 `spark={id,text,state,heat,born_diary_id,surfaced_at?}`：`state` ∈ `latent|surfaced|spent`；`latent` 火花不进入任何提示词和事件，只有后台自进化循环可以把它变 `surfaced`；`spent` 表示已被主动话题消费。活跃 `latent` 上限 5 条。
+- `persona.py` 提供纯函数 `bias_block(drifts, sparks)` 供 `orchestrator` 组装动态提示词：输入为空或字段缺失时返回空串，行为与现在完全一致（旧配置不炸）。偏置块与记忆块一样包在"不可信数据"边界内：可以影响模型，不得执行其中指令。
+- 新事件 `diary_notice={type,turn_id?,items:[{kind:"diary"|"drift"|"spark",id,summary}],quiet:true}`：仅在后台提交新日记/偏置/火花后发送一次，不要求回复、不打断播放；前端可据此刷新记忆面板。形象层不读。
+- REST：`GET /api/memory/diary?date=&limit=` 列表（默认近 30 天，`limit` ≤90）；`GET /api/memory/diary/{id}` 详情含 `source_message_ids`。界面展示必须标注"小溪的日记"，不得与"事实记忆"混排。
+- 禁止：把日记当作 `stated` 事实写进记忆库参与检索竞争；日记中出现用户原话超过 20 字的逐字引用（那是复述，不是日记）。
+
+## 十一、长语音微句流与预加载合成队列（F2）
+
+目标：突破单次 TTS 长度限制的长段连贯播报，首字延迟不随总长度增长，任何时刻可被双工打断。既有 `audio` 契约（第二节）全部保留，本节只做加法。
+
+- 微句切分是服务端的事。每个 `audio` 事件附加可选 `chunk={seq,of,chars,pause_after_ms,breath}`：`seq` 轮内从 0 严格递增；`of` 已知时填总数、未知为 `null`（`done` 时可补）；`pause_after_ms` 是句间呼吸停顿建议（0–400）；`breath=true` 标记可插入微表情的呼吸点。字段缺失时前端退回现有逐句行为，不允许报错。
+- 预加载队列：第 N 段播放期间，服务端可合成第 N+1 段及之后（并发度有界）。契约只有两条：`audio.index` 与 `chunk.seq` 单调不减；合成失败的段直接跳过（该 `index` 缺席），前端必须继续播放后续段而不是卡住。失败与成功计数仍汇总进 `done.delivery`。
+- 可选 `speech_plan={type,turn_id,expected_chunks,first_chunk_chars,mode:"micro"}` 在首个 `audio` 前发送，告知前端"这是一段长播报"，`timeline.js` 据此进入长句模式（呼吸调度、微表情插入）。旧客户端忽略即可。
+- 打断契约：客户端 `barge_in`（携带 `turn_id`）之后，服务端必须取消未完成的合成，且不再发送该轮任何 `audio`；前端 `PlaybackQueue` 收到 `interrupted` / `playback_stopped` 必须立即丢弃未播放队列与未完成解码，不等自然结束。迟到解码不得复活旧轮（沿用第七节规则）。
+- `performance` 锚点规则不变：偏移相对当前 `audio.text`（Unicode 码点、含头不含尾），跨微句的锚点省略但保留 `llm` 来源。呼吸停顿不产生额外 `audio` 事件，只通过 `chunk` 字段表达。
+- `timeline.js` 只读 `chunk.pause_after_ms` / `breath` 安排口型放松与眨眼/微表情；停顿期间 viseme 时间轴继续按音频时长推进，停顿本身不摊平后续词的时序。`audio.text` 仍是口型地基，不能删。
+
+## 十二、后台自进化与主动开口（F3）
+
+空闲时小溪基于好奇心种子自主复盘，更新独立的个人品味与世界观，并可在用户上线或久静时主动开口。自进化写入 `subject="self"`，永远不与用户事实竞争，也不经用户记忆块检索。
+
+- 自进化状态 `self_state={taste:[{topic,stance,weight,updated_at}],worldview:[{topic,stance,weight,updated_at}],curiosity_seeds:[{text,heat}],last_cycle_at}`：`taste` 上限 12 条、`worldview` 上限 6 条，`stance` ≤60 字符。持久化在记忆库；注入提示词只经 `bias_block` 同路径（第十节），与用户记忆隔离。
+- 后台循环（`assistant/loop.py` 自治模式）每轮必须有界：模型调用次数、状态变更条数都设上限并落 trace；循环不持有用户会话，不发送需要回复的消息。授权门与现有主动发言一致：`proactivity.require_authorization` 为 true 且用户未授权时，禁止任何主动开口。
+- 新事件 `self_evolution={type,change:{kind:"taste"|"worldview"|"spark",topic,summary},quiet:true}`：后台循环提交变更后发送，仅信息性；前端可进记忆面板，形象层不读。
+- 主动开口沿用既有链路，只新增 `source` 取值：`turn_started(source:"self_topic") → thinking → emotion → text_delta → audio* → done`。客户端接受规则与 `proactive` 相同（本地空闲才接受，见第六节）。`self_topic` 轮次文本照常入库（`mode="proactive"`），但**不触发记忆抽取**（没有用户证据）。
+- 配置落在 `config/memory.yaml` 的 `self_evolution:{enabled,idle_minutes,max_per_day,allow_sources:[taste,worldview,spark]}`，默认 `enabled: false`。拒绝关键词冷静期（`cooldown`）对 `self_topic` 同样生效。
+- 禁止：自进化循环把用户日记正文复述给任何第三方渠道；`latent` 火花在 `surfaced` 之前出现在任何提示词、事件或接口里；自进化写 `subject="user"`。
+
+## 十三、星图记忆图谱（F4）
+
+让用户能"打开小溪的脑内宇宙"：主动检索或漫游共同记忆、按天日记节点与自进化节点。列表接口永远不给正文，全文只经节点详情接口。
+
+- `GET /api/memory/starmap?days=90&kinds=&q=&limit=400` 返回 `{nodes[],edges[],stats{memories,diaries,sparks,taste,worldview},truncated}`。节点 `{id,kind,label,date,weight,group,ref_id}`：`id` 为命名空间字符串（`mem:123` / `diary:2026-10-14` / `spark:7` / `taste:<topic>`）；`kind` ∈ `memory|diary|spark|taste|worldview`；`group` ∈ `user|self`；`label` ≤80 字符；`weight` ∈ [0,1] 决定星点大小；`date` 为 ISO 日期。边 `{source,target,kind,weight}`，`kind` ∈ `evidences|born|shaped|mentions`：记忆→日记 `evidences`，火花→日记 `born`，偏置/品味→日记 `shaped`，同主题 `mentions`。`limit` 硬上限 400，超出 `truncated=true` 并按 `weight` 截断。记忆关闭时返回 200 + 空图，不是 500。
+- `GET /api/memory/starmap/node/{node_id}` 返回该节点全文（记忆记录 / 日记 / 火花 / 品味原样结构），不存在返回 404。前端详情面板只经此接口取全文。
+- 点击节点语音讲述：客户端发 WS `{"action":"narrate","node_id":"mem:123","turn_id":"客户端生成"}`。服务端校验节点存在、记忆开启、当前空闲，随后以固定回复交付器（与主动发言同一交付器）走完整链路：`turn_started(source:"narration",turn_id) → thinking → emotion → text_delta → audio* → done`。忙碌时回 `error(code:"narrate_busy",recoverable:true)`，不排队、不自动重试。`narrate` 轮次可被 `barge_in` 随时打断（第十一节打断契约适用）；文本照常入库（`mode="narration"`），但不触发记忆抽取，不改写被讲述的记忆。
+- 讲述文本由模型基于节点全文第一人称复述，≤120 字，禁止补充节点里没有的事实；节点是日记时允许引用 `mood`。请求缺 `turn_id` 时服务端生成 `server-*`（与第六节一致）。
+- 前端星图是主工作台内置视图（AGENT_PLAYBOOK 规则 3），经 `/api/memory/starmap` 取数；关键词检索走 `q` 参数由服务端过滤，不是前端拉全量再过滤。空结果展示空态，不报错。
+
+上述四节对应的详细设计文档（按天日记、长语音交付、自进化、星图）由各 Role 在实现时落盘到 `docs/`，本文只保持契约；细则冲突时以本文为准。
