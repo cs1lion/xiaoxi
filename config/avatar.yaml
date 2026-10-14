@@ -40,6 +40,13 @@ neutral:
   # "params.js 声明了但 neutral 没写"——检查存在就是为了防这种漂移。
   ParamEyeLSmile: 0.0
   ParamEyeRSmile: 0.0
+  # 下睑（眼睑下抬，"卧蚕"/笑眼的下半段）：0–1，中位 0。
+  # 和笑眼是两条独立通道——笑眼走横向弧线，下睑走纵向高度。
+  # 之前这两个键只存在于 params.js 里，neutral 没显式声明，
+  # check_protocol.py 每次都会报"params.js 声明了但 neutral 没写"。
+  # L/R 沿用角色解剖侧；UI / ROI / 截图命名用画面侧（正面画面左侧 = 参数 R）。
+  ParamEyeLLower: 0.0
+  ParamEyeRLower: 0.0
   ParamEyeBallX: 0.0
   ParamEyeBallY: 0.0
   # 虹膜整体缩放：Live2D 标准参数 ParamEyeBallForm，-1 收小 / +1 放大。
@@ -76,6 +83,8 @@ response:
   ParamEyeROpen: 0.028
   ParamEyeLSmile: 0.02
   ParamEyeRSmile: 0.02
+  ParamEyeLLower: 0.02
+  ParamEyeRLower: 0.02
   ParamEyeBallX: 0.07
   ParamEyeBallY: 0.07
   ParamEyeBallForm: 0.0

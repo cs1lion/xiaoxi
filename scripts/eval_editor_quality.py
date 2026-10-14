@@ -300,7 +300,11 @@ async def main(argv=None):
                       'fixtures': 'original_synthetic_not_user_drafts'}, ensure_ascii=False), flush=True)
     if not args.live:
         return 0
-    llm = LLM(request_timeout=25)
+    # The client timeout has to sit above the service ceiling, or the harness
+    # cuts a turn off before production would and reports a failure the author
+    # never sees. One live round lost a turn at 25s while the service was
+    # already allowed 45s.
+    llm = LLM(request_timeout=EditorInsightService.MODEL_TIMEOUT_SECONDS + 5)
     try:
         if llm.offline:
             raise RuntimeError('live_model_required')

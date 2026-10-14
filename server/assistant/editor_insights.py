@@ -95,6 +95,11 @@ REPLACEMENT_LABEL = '建议稿：'
 # Lead-ins a model uses when it writes the suggestion inline instead of in the
 # replacement field. They mark the same paragraph, so the field copy is a repeat.
 INLINE_SUGGESTION_LEADS = ('建议改为：', '可以改为：', '可改为：', '建议写成：')
+# A label the model writes itself, sometimes wrapped in 「」 or quotes. The
+# composer adds its own, so an unstripped copy makes the author read the label
+# twice.
+LEADING_LABEL = re.compile('^([「“"\']*)' + REPLACEMENT_LABEL)
+TRAILING_QUOTES = {'「': '」', '“': '”', '"': '"', "'": "'"}
 # Clauses that tell the author an action already happened. The service never
 # edits a draft, so any such claim is false however it is phrased, and the
 # author reads `text` verbatim.
@@ -378,6 +383,8 @@ class EditorInsightService:
             if not answer:
                 # Nothing but a claim that something was already done.
                 return None
+            if cls._cut_off(answer):
+                return None
             offered = answer
             if REPLACEMENT_LABEL not in offered:
                 return answer
@@ -391,9 +398,19 @@ class EditorInsightService:
                 or _text(replacement, len(replacement)) != replacement):
             return None
         replacement = replacement.strip()
-        if replacement.startswith(REPLACEMENT_LABEL):
-            # Live replies still write their own label; this composer adds one.
-            replacement = replacement[len(REPLACEMENT_LABEL):].strip()
+        # Live replies still write their own label, sometimes wrapped in 「」 or
+        # quotes; this composer adds one, so an unstripped copy shows the author
+        # the label twice.
+        match = LEADING_LABEL.match(replacement)
+        if match:
+            quote = match.group(1)[-1] if match.group(1) else ''
+            body = replacement[match.end():].strip()
+            if quote and body.endswith(TRAILING_QUOTES[quote]):
+                body = body[:-1].rstrip()
+            if not body:
+                # The field held nothing but the label.
+                return None
+            replacement = body
         if REPLACEMENT_LABEL in answer:
             # The model also labelled its own suggestion in the answer. Showing
             # the field text again would put the same paragraph on screen twice,
@@ -427,6 +444,11 @@ class EditorInsightService:
                 else REPLACEMENT_WITHHELD_NOTE
         labelled = REPLACEMENT_LABEL + replacement
         shown = (answer + '\n\n' + labelled).strip() if answer else labelled
+        if cls._cut_off(shown) or cls._cut_off(replacement):
+            # A live reply arrived with finish_reason=stop and JSON that parsed,
+            # yet its text stopped in the middle of a sentence. Handing that to
+            # the author reads as a broken answer, so treat it as unusable.
+            return None
         if requested is None:
             return shown
         low, high = requested
@@ -437,6 +459,33 @@ class EditorInsightService:
         note = ('（这段 %d 字，你要求的是 %d 到 %d 字。要按这个区间重写，说一声就行。）'
                 % (len(replacement), low, high))
         return shown + '\n\n' + note
+
+    @classmethod
+    def _strip_completion_claims(cls, answer):
+        """Drop lead-ins that claim the draft was already edited.
+
+        The service never touches a draft and `text` reaches the author
+        verbatim, so a clause such as 「已按您要求替换第三段，」 is false even when
+        the replacement itself is sound. Only leading clauses go; a sentence
+        that describes what the suggestion does stays.
+        """
+        while True:
+            stripped = COMPLETION_CLAUSE.sub('', answer, count=1)
+            if stripped == answer:
+                return answer
+            answer = stripped
+
+    @staticmethod
+    def _cut_off(text):
+        """True when a long reply stops where a sentence would not.
+
+        One live reply arrived with finish_reason=stop and JSON that parsed, yet
+        its text ended mid-sentence. The author would read that as a broken
+        answer, so it is better to fail the turn than to show it.
+        """
+        if not isinstance(text, str) or len(text) <= 40:
+            return False
+        return text[-1] not in '。！？；：」』”%)）.'
 
     @classmethod
     def _requested_length(cls, user_text):
@@ -471,21 +520,6 @@ class EditorInsightService:
                 section = section + CHINESE_DIGITS[ch] if unit_pending else CHINESE_DIGITS[ch]
                 unit_pending = False
         return total + section
-
-    @classmethod
-    def _strip_completion_claims(cls, answer):
-        """Drop lead-ins that claim the draft was already edited.
-
-        The service never touches a draft and `text` reaches the author
-        verbatim, so a clause such as 「已按您要求替换第三段，」 is false even when
-        the replacement itself is sound. Only leading clauses go; a sentence
-        that describes what the suggestion does stays.
-        """
-        while True:
-            stripped = COMPLETION_CLAUSE.sub('', answer, count=1)
-            if stripped == answer:
-                return answer
-            answer = stripped
 
     @classmethod
     def _validate_insight(cls, result, visible, body):

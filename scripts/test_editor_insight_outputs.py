@@ -95,7 +95,7 @@ class OutputTests(unittest.IsolatedAsyncioTestCase):
         result = await self.analyze(valid_insight('甲' * 240))
         self.assertEqual(result['status'], 'insight')
         self.assertEqual(len(result['insight']['point']), 240)
-        self.delegate.responses.append(raw({'text': '乙' * 800}))
+        self.delegate.responses.append(raw({'text': '乙' * 799 + '。'}))
         reply = await self.service.reply(result['insight']['id'], 'editor', 1, '那怎么改？')
         self.assertEqual(len(reply['text']), 800)
         for request in self.delegate.requests:
@@ -435,6 +435,61 @@ class OutputTests(unittest.IsolatedAsyncioTestCase):
         for text, expected in cases:
             with self.subTest(text=text):
                 self.assertEqual(EditorInsightService._chinese_number(text), expected)
+
+    async def test_reply_that_stops_mid_sentence_is_rejected(self):
+        broken = ('建议在正文前标注「建议稿：」，并将第三段替换为以下内容（约81字）：'
+                  '明确试放期两个月，巡查志愿者核对登记；赔偿暂无约定时先暂停借用，'
+                  '由物业确认后续规则。删除原稿中')
+        cases = [
+            ('answer_only', {'text': broken}),
+            ('replacement_only', {'text': '可以这样改。', 'replacement': broken}),
+        ]
+        for name, resolved in cases:
+            with self.subTest(name=name):
+                insight = await self.insight(session=name)
+                self.delegate.responses.append(raw(resolved))
+                with self.assertRaises(InsightDiscussionError) as caught:
+                    await self.service.reply(insight['id'], name, 1, '只替换第三段。')
+                self.assertEqual(caught.exception.reason, 'insight_discussion_invalid_reply')
+                self.assertEqual(self.service._insights[insight['id']]['discussion_history'], [])
+
+    async def test_label_written_inside_brackets_is_not_shown_twice(self):
+
+        suggestion = '九月用水量比八月多近四成，同时新增六名同事、多一台饮水机。'
+
+        insight = await self.insight(session='bracketed_label')
+
+        self.delegate.responses.append(raw({
+
+            'text': '可以这样写。',
+
+            'replacement': '「' + REPLACEMENT_LABEL + suggestion + '」'}))
+
+        reply = await self.service.reply(
+
+            insight['id'], 'bracketed_label', 1, '只替换这一句。')
+
+        self.assertEqual(reply['text'], '可以这样写。' + '\n\n' + REPLACEMENT_LABEL + suggestion)
+
+
+
+    async def test_replacement_that_is_only_a_label_is_rejected(self):
+
+        insight = await self.insight(session='label_only')
+
+        self.delegate.responses.append(raw({
+
+            'text': '可以这样写。',
+
+            'replacement': REPLACEMENT_LABEL}))
+
+        with self.assertRaises(InsightDiscussionError) as caught:
+
+            await self.service.reply(
+
+                insight['id'], 'label_only', 1, '只替换这一句。')
+
+        self.assertEqual(caught.exception.reason, 'insight_discussion_invalid_reply')
 
     async def test_sensitive_draft_remains_local_quiet_without_a_provider_call(self):
         self.service.state('editor', 1, True)
