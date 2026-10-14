@@ -1,0 +1,60 @@
+import {chromium} from '@playwright/test';
+import {mkdir,writeFile} from 'node:fs/promises';
+const browser=await chromium.launch({headless:true});
+const checks=[];const assert=(ok,label)=>{if(!ok)throw Error(label);checks.push(label);};
+try{
+ const page=await browser.newPage({viewport:{width:1280,height:1000}});const errors=[];
+ page.on('pageerror',e=>errors.push(e.message));
+ let task={id:'task-fixture',title:'准备周末出行',description:'先确定一个可执行的小动作',status:'open',version:1,next_action:''};let reminders=[];let fail=false;
+ await page.routeWebSocket('**/ws',socket=>socket.onMessage(()=>{}));
+ await page.route('**/api/preferences/proactivity',r=>r.fulfill({json:{timezone:'UTC',reminder_enabled:false}}));
+ await page.route('**/api/notifications',r=>r.fulfill({json:{items:[]}}));
+ await page.route('**/api/tasks',r=>r.fulfill({json:{items:[task]}}));
+ await page.route('**/api/tasks/task-fixture',async r=>{
+  const body=r.request().postDataJSON();
+  if(fail||body.version!==task.version)return r.fulfill({status:400,json:{detail:'task version conflict'}});
+  const {version,...changes}=body;task={...task,...changes,version:task.version+1};
+  if(task.status==='done')reminders=reminders.map(x=>({...x,status:'cancelled'}));
+  await r.fulfill({json:task});
+ });
+ await page.route('**/api/reminders',async r=>{
+  if(r.request().method()==='POST'){
+   const body=r.request().postDataJSON();assert(body.task_id===task.id,'Reminder carries task linkage');
+   assert(!!body.request_id,'Reminder uses idempotency key');reminders.push({...body,id:'reminder-fixture',status:'scheduled'});return r.fulfill({json:reminders.at(-1)});
+  }return r.fulfill({json:{items:reminders}});
+ });
+ await page.goto('http://127.0.0.1:8000/');
+ await page.locator('#avatarStage svg, #avatarStage canvas').waitFor();
+ await page.getByText('任务与提醒',{exact:true}).click();
+ const card=page.locator('.task-progress-card');await card.waitFor();
+ await card.locator('.task-editor summary').first().click();
+ await card.getByRole('textbox',{name:'下一步：准备周末出行'}).fill('列出两个目的地');
+ await card.getByRole('button',{name:'保存下一步'}).click();
+ await page.waitForFunction(()=>document.querySelector('.task-editor summary')?.textContent.includes('列出两个目的地'));
+ assert(task.next_action==='列出两个目的地','Next action persisted by versioned PATCH');
+ await card.getByRole('button',{name:'开始做'}).click();
+ await page.waitForFunction(()=>document.querySelector('.task-status')?.textContent==='进行中');
+ assert(task.status==='in_progress','Start changes real task status');
+ await card.getByText('给这件事设提醒',{exact:true}).click();
+ const date=new Date(Date.now()+3600000);const local=new Date(date.getTime()-date.getTimezoneOffset()*60000).toISOString().slice(0,16);
+ await card.locator('input[type=datetime-local]').fill(local);
+ await card.getByRole('button',{name:'保存关联提醒'}).click();
+ await card.locator('.task-reminder-list').waitFor();
+ assert(reminders[0].content==='列出两个目的地','Reminder uses next action instead of vague task title');
+ await mkdir('eval/ui/tasks',{recursive:true});await page.screenshot({path:'eval/ui/tasks/progress-card.png',fullPage:true});
+ await card.getByRole('button',{name:'完成',exact:true}).click();
+ await page.waitForFunction(()=>document.querySelector('.task-status')?.textContent==='已完成');
+ assert(reminders[0].status==='cancelled','Completion contract cancels pending linked reminder');
+ await card.getByRole('button',{name:'重新打开'}).click();
+ await page.waitForFunction(()=>document.querySelector('.task-status')?.textContent==='未开始');
+ assert(task.status==='open','Completed task can be reopened');
+ await card.locator('.task-editor summary').first().click();
+ await card.getByRole('textbox',{name:'下一步：准备周末出行'}).fill('保留未保存草稿');fail=true;
+ await card.getByRole('button',{name:'保存下一步'}).click();
+ await page.waitForFunction(()=>document.querySelector('.task-feedback')?.textContent.includes('其他窗口'));
+ assert(await card.getByRole('textbox',{name:'下一步：准备周末出行'}).inputValue()==='保留未保存草稿','Conflict retains draft and explains recovery');
+ assert(task.next_action==='列出两个目的地','Conflict never overwrites persisted next action');
+ assert(errors.length===0,'No browser errors');
+ await writeFile('eval/ui/tasks/results.json',JSON.stringify({checks,errors,scope:'Stateful API fixtures, not live service E2E'},null,2));
+ console.log(`PASS ${checks.length} task card checks`);
+}finally{await browser.close();}

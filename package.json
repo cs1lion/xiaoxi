@@ -1,0 +1,37 @@
+{
+  "name": "neurosama-avatar-web",
+  "private": true,
+  "scripts": {
+    "test:voice": "node web/voice/voice.test.mjs && node web/voice/playback.test.mjs && node web/voice/duplex.test.mjs && node web/voice/capture.test.mjs && node web/voice/checkpoint.test.mjs && node web/voice/baseline.test.mjs",
+    "test:voice:worklet": "node scripts/test-duplex-worklet-browser.mjs",
+    "test:voice:browser": "node scripts/test-voice-browser.mjs",
+    "test:voice:baseline:browser": "node scripts/test-voice-baseline-browser.mjs",
+    "test:assistant:confirm": "node scripts/test-assistant-confirm-browser.mjs",
+    "test:activity:browser": "node scripts/test-notes-selection-browser.mjs && node scripts/test-activity-api-browser.mjs",
+    "test:vrm": "node web/avatar/test_vrm.js",
+    "test:eyes": "node --experimental-default-type=module --test web/avatar/test_eye_params.js web/avatar/test_eye_expression.js web/avatar/test_eye_morph.js web/avatar/test_eye_lids.js web/avatar/test_gaze.js web/avatar/test_vrm.js",
+    "test:eyes:browser": "node scripts/test-eye-browser.mjs",
+    "test:calibration": "node --experimental-default-type=module --test web/avatar/test_calibration.js",
+    "test:calibration:browser": "node scripts/test-calibration-browser.mjs",
+    "calibrate:eyes": "node scripts/sync-eye-calibration.mjs && node scripts/capture-eye-calibration.mjs",
+    "calibrate:eyes:v2": "node scripts/sync-eye-calibration.mjs && node scripts/capture-eye-calibration.mjs --manifest config/avatar-eye-calibration-v2.json --url http://127.0.0.1:8000/static/avatar_lab.html?model=daily-eyes",
+    "test:performance-probe": "node --experimental-default-type=module --test web/avatar/test_performance_probe.js",
+    "test:performance-probe:browser": "node scripts/test-performance-probe-browser.mjs d3d11",
+    "test:eyes:upgrade:browser": "node scripts/test-eye-upgrade-browser.mjs",
+    "test:eyes:lids:browser": "node scripts/test-eye-lids-browser.mjs",
+    "test:dialogue-gaze": "node --experimental-default-type=module --test web/avatar/test_dialogue_gaze.js web/avatar/test_dialogue_expression.js web/avatar/test_dialogue_intent.js web/avatar/test_dialogue_review.js web/avatar/test_dialogue_gaze_integration.js",
+    "test:dialogue-gaze:browser": "node scripts/test-dialogue-gaze-browser.mjs",
+    "test:dialogue-gaze:v2:browser": "node scripts/test-dialogue-gaze-v2-browser.mjs",
+    "test:dialogue-gaze:v3:browser": "node scripts/test-dialogue-intent-review-browser.mjs",
+    "test:dialogue-gaze:regressions": "node scripts/test-dialogue-gaze-regressions.mjs",
+    "calibrate:eyes:v3": "node scripts/sync-eye-calibration.mjs && node scripts/capture-eye-calibration.mjs --manifest config/avatar-eye-calibration-v3.json --url http://127.0.0.1:8000/static/avatar_lab.html?model=daily-lids",
+    "vendor:avatar": "node scripts/vendor-avatar.mjs"
+  },
+  "dependencies": {
+    "@pixiv/three-vrm": "3.5.5",
+    "three": "0.180.0"
+  },
+  "devDependencies": {
+    "@playwright/test": "1.61.1"
+  }
+}

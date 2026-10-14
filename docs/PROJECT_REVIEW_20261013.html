@@ -1,0 +1,204 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>neurosama（阿栖）项目进度 Review — 2026-10-13</title>
+<style>
+  :root {
+    --accent: #b45309;
+    --accent-soft: #fef3e2;
+    --ink: #1c1917;
+    --ink-2: #57534e;
+    --ink-3: #8a8580;
+    --line: #e7e5e4;
+    --bg: #ffffff;
+    --panel: #fafaf9;
+    --red: #b91c1c;
+    --red-bg: #fef2f2;
+    --amber: #a16207;
+    --amber-bg: #fefce8;
+    --green: #15803d;
+    --green-bg: #f0fdf4;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--bg); color: var(--ink);
+    font-family: -apple-system, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
+    font-size: 15px; line-height: 1.75;
+  }
+  .wrap { max-width: 880px; margin: 0 auto; padding: 48px 32px 80px; }
+  .mono { font-family: "Cascadia Code", "JetBrains Mono", Consolas, monospace; }
+  h1 { font-size: 26px; margin: 0 0 4px; letter-spacing: .5px; }
+  h2 {
+    font-size: 19px; margin: 44px 0 14px; padding-bottom: 8px;
+    border-bottom: 2px solid var(--line);
+  }
+  h2 .no { color: var(--accent); font-family: Consolas, monospace; margin-right: 8px; }
+  h3 { font-size: 16px; margin: 24px 0 8px; }
+  p { margin: 10px 0; }
+  .meta { color: var(--ink-3); font-size: 13px; margin-bottom: 28px; }
+  .tldr {
+    background: var(--accent-soft); border-left: 4px solid var(--accent);
+    padding: 14px 18px; border-radius: 0 8px 8px 0; margin: 20px 0 8px;
+    font-size: 15.5px;
+  }
+  .tldr b { color: var(--accent); }
+  table {
+    width: 100%; border-collapse: collapse; margin: 14px 0; font-size: 13.5px;
+  }
+  th, td { border: 1px solid var(--line); padding: 7px 10px; text-align: left; vertical-align: top; }
+  th { background: var(--panel); font-weight: 600; white-space: nowrap; }
+  tr:nth-child(even) td { background: #fcfcfc; }
+  td.num, th.num { white-space: nowrap; font-family: Consolas, monospace; }
+  .tag {
+    display: inline-block; padding: 0 8px; border-radius: 4px; font-size: 12px;
+    font-weight: 600; line-height: 20px; white-space: nowrap;
+  }
+  .t-ok { background: var(--green-bg); color: var(--green); }
+  .t-wip { background: var(--amber-bg); color: var(--amber); }
+  .t-gap { background: var(--red-bg); color: var(--red); }
+  .t-info { background: #eff6ff; color: #1d4ed8; }
+  .p0 { background: var(--red-bg); color: var(--red); }
+  .p1 { background: var(--amber-bg); color: var(--amber); }
+  .p2 { background: #f5f5f4; color: var(--ink-2); }
+  ul, ol { padding-left: 22px; margin: 8px 0; }
+  li { margin: 4px 0; }
+  code {
+    background: var(--panel); border: 1px solid var(--line); border-radius: 4px;
+    padding: 0 5px; font-size: 13px; font-family: Consolas, monospace;
+  }
+  .kpi { display: flex; flex-wrap: wrap; gap: 12px; margin: 18px 0; }
+  .kpi .card {
+    flex: 1 1 150px; background: var(--panel); border: 1px solid var(--line);
+    border-radius: 8px; padding: 12px 14px;
+  }
+  .kpi .v { font-size: 22px; font-weight: 700; font-family: Consolas, monospace; color: var(--accent); }
+  .kpi .k { font-size: 12px; color: var(--ink-2); margin-top: 2px; }
+  .note { font-size: 13px; color: var(--ink-2); background: var(--panel); border: 1px dashed var(--line); border-radius: 8px; padding: 10px 14px; margin: 14px 0; }
+  .bar { height: 8px; background: var(--line); border-radius: 4px; overflow: hidden; min-width: 90px; }
+  .bar i { display: block; height: 100%; background: var(--accent); border-radius: 4px; }
+  .foot { margin-top: 56px; padding-top: 14px; border-top: 1px solid var(--line); font-size: 12px; color: var(--ink-3); }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<h1>neurosama（阿栖）项目进度 Review</h1>
+<div class="meta">日期：2026-10-13 · 依据：当前工作区源码、git 历史、35 份工程文档、运行中服务的 /api/health · 性质：只读 review，未修改代码、未读用户数据库内容</div>
+
+<div class="tldr">
+<b>一句话结论：</b>三天内从零建成 3.8 万行、覆盖「语音 + 记忆 + 角色 + Agent 执行」全链路的个人语音搭档系统，测试纪律与文档诚实度达到准生产级——作为求职作品集是强素材，作为产品缺真实使用基线；同等系统手写约需 1 名资深全栈 <b>12–18 个月</b>（2–3 人团队 6–9 个月，含研究与试错则 14–22 个月）。
+</div>
+
+<div class="kpi">
+  <div class="card"><div class="v">3 天</div><div class="k">项目年龄（10-11 需求草案 → 10-13 至今）</div></div>
+  <div class="card"><div class="v">≈37.7k</div><div class="k">第一方代码行（Python 21.1k + JS/CSS 16.6k，不含 vendor）</div></div>
+  <div class="card"><div class="v">~60</div><div class="k">测试脚本；194 + 54 + 103 项断言通过</div></div>
+  <div class="card"><div class="v">35 份</div><div class="k">工程文档 / 3.2k 行，含探针与研究记录</div></div>
+</div>
+
+<h2><span class="no">1</span>项目是什么</h2>
+<p><b>阿栖</b>：一个有性格、有记忆的中文语音聊天角色。README 开宗明义——不是"做一个有记忆的 agent"，而是<b>做一个能在长期互动里保持角色一致、理解共同经历、并以合适方式参与对话的角色系统</b>。代码按五层契约组织：角色契约 → 记忆契约 → 节奏契约 → 语音 → 验收场景。</p>
+<p>三条用户路径：一起聊（角色连续性）/ 一起做（任务执行与回执）/ 一起学（字幕片段解释与练习）。技术栈：FastAPI + SQLite + 原生 JS 前端 + faster-whisper/edge-tts/StepAudio 语音 + SVG/VRM 形象。当前为<b>单用户、本机、单进程</b>定位。</p>
+
+<h2><span class="no">2</span>近期进度时间线</h2>
+<table>
+  <tr><th style="width:90px">日期</th><th>完成内容</th><th style="width:110px">证据</th></tr>
+  <tr><td class="num">10-11 上午</td><td>需求草案、系统提示词样例；git 初始化（初始提交 48 文件 / 8,466 行，已含完整聊天系统骨架）</td><td>git log</td></tr>
+  <tr><td class="num">10-11 全天</td><td>形象层一天连发 6 提交：次级运动、眼神注视、表情随声切换、Motion Magic 程序化动作、眼球跟随鼠标</td><td>7 个 commit</td></tr>
+  <tr><td class="num">10-12</td><td>交互域展开：共同事项、笔记、偏好、话题授权、协议机器可检（修一次正在发生的漂移）</td><td>13 个改动文件</td></tr>
+  <tr><td class="num">10-13（今天）</td><td><b>密集交付日</b>：① 事实记忆证据链落地（103 项新契约测试）② 有声行动 + 澄清续答（194 项 Python / 54 项 Node 通过）③ 共同事项持久化 ④ 台词动作意图 + PerformanceDirector 时间轴 ⑤ 音乐体验 ⑥ 眼部表情研究+实现</td><td>202 个改动文件 + 6 份当日文档</td></tr>
+</table>
+<div class="note">git 卫生提醒：最近一次提交是 10-11 20:28，此后 <b>245 个文件处于 modified/untracked</b>——两天的高密度工作全部未提交。当前服务仍在运行（/api/health 返回 ok，step-3.7-flash + stepaudio TTS/ASR）。</div>
+
+<h2><span class="no">3</span>能力盘点（按 README 架构 + 当日文档）</h2>
+<table>
+  <tr><th>模块</th><th class="num">规模</th><th>已落地能力</th><th>状态</th></tr>
+  <tr><td><b>角色契约</b></td><td class="num">263 py<br>289 yaml</td><td>四层性格（身份/倾向/互动/可变状态），每条带正反例边界；"性格与事实冲突时准确性优先"写死；情绪→音色映射</td><td><span class="tag t-ok">已运行</span></td></tr>
+  <tr><td><b>记忆层</b></td><td class="num">1,246 py</td><td>四类记忆 × 三档确定性；证据链（原消息→候选→ADD/NOOP/UPDATE/CONFLICT 决策）；schema v1→v2 增量迁移；按 key 真删除；重启写水位保护</td><td><span class="tag t-ok">103 项测试</span><br><span class="tag t-wip">探针 6/8</span></td></tr>
+  <tr><td><b>对话编排</b></td><td class="num">1,181 py</td><td>节奏后处理、追问抑制、主动发言授权、逐轮策略 broker；检索为空时强制模型明说"没有相关记忆"</td><td><span class="tag t-ok">9/9 场景</span></td></tr>
+  <tr><td><b>语音链路</b></td><td class="num">2,220 py</td><td>ASR（faster-whisper / StepAudio 流式）、TTS（edge-tts / StepAudio 情绪 instruction）、连续对话 VAD 收句、全双工实验（AudioWorklet 双路采集）、分句流式合成、可取消播放队列 + 预解码</td><td><span class="tag t-ok">基础可用</span><br><span class="tag t-gap">双工不可靠</span></td></tr>
+  <tr><td><b>Agent Runtime</b></td><td class="num">1,555 py</td><td>有限步数 Loop（4 决策 / 3 工具 / 30s 预算）、工具白名单 + 严格参数校验、确认绑定参数 hash 单次消费、SQLite checkpoint、任务/提醒/通知收件箱、clarify→waiting_input 续答</td><td><span class="tag t-ok">隔离测试全过</span><br><span class="tag t-wip">真实模型未验收</span></td></tr>
+  <tr><td><b>交互/共同事项</b></td><td class="num">1,379 py</td><td>共同事项选择持久化、笔记便笺、字幕学习（选句解释+练习）、自然语言候选确认、统一可取消交付器</td><td><span class="tag t-ok">当日落地</span></td></tr>
+  <tr><td><b>形象层</b></td><td class="num">3,925 js</td><td>SVG 装配 + VRM/MToon 3 渲 2；拼音音素时间轴口型（RMS 调幅）；眼神注视/次级运动/Motion Magic；台词动作意图（锚点校验 + 码点偏移 + 播放时钟对齐）</td><td><span class="tag t-ok">浏览器回归过</span><br><span class="tag t-wip">美术待校准</span></td></tr>
+  <tr><td><b>前端整体</b></td><td class="num">9.2k js/css</td><td>app.js 41k / experience.js 24k / companion.js 18k / interpret.js 15k / threads.js 14k / assistant.js 11k 等；连续语音、打断、记忆面板、任务面板</td><td><span class="tag t-ok">Playwright 27+3 组</span></td></tr>
+  <tr><td><b>测试体系</b></td><td class="num">~16k 行</td><td>约 60 个测试脚本：Python 194 项、Node 54 项、记忆契约 103 项、离线核心 38 项、隔离浏览器回归（真实 DOM + 假音频/假模型）</td><td><span class="tag t-ok">全绿</span></td></tr>
+</table>
+
+<h2><span class="no">4</span>质量信号（这个项目真正值钱的地方）</h2>
+<ul>
+  <li><b>文档诚实度罕见</b>：每份文档严格区分「设计 / 源码 / 离线验证 / 真实验收」四种状态；明确写下"接口返回 200 只说明入口可访问，不证明最新源码已部署"、"fake 模型通过不等于真实模型不谎报"、"原话存在不等于候选含义正确"。这种自我约束比代码更难写。</li>
+  <li><b>测试是真测试</b>：用真实 ASGI 应用装配、临时数据库、只读 SQLite 逻辑指纹验证真实库不被污染；发现过"以为隔离了实际没隔离"的测试事故并如实记录（含记忆库被清空、无备份、不声称恢复）。</li>
+  <li><b>契约驱动</b>：性格/记忆/节奏三份 YAML 即产品规格；把"协议约定变成机器可检"（check_protocol.py），并真的抓住过一次协议漂移。</li>
+  <li><b>记忆证据链是深度工程</b>：原消息 ID → 候选引用 → 身份 (kind, subject, key) → 写入决策 → 晚到守卫 → 删除代代际。这正是 AI Agent 岗（长期记忆 / Tool Use）面试最硬的素材。</li>
+</ul>
+
+<h2><span class="no">5</span>风险与缺口</h2>
+<table>
+  <tr><th style="width:64px">级别</th><th>问题</th><th style="width:230px">影响与建议</th></tr>
+  <tr><td><span class="tag p0">P0</span></td><td><b>245 个文件两天未提交</b>；且记忆库曾在测试事故中被 delete_all 清空（health 显示 memories: 0，无备份、未恢复）</td><td>一次误操作即损失两天全部工作；历史记忆不可重建。立刻 commit + 建立备份轮转</td></tr>
+  <tr><td><span class="tag p0">P0</span></td><td><b>全部验收停留在隔离/离线层</b>：真实模型抽取、真实麦克风声学、真机延迟基线均未测；首音 ~3.5s 中 ~2s 是接口地板</td><td>"能跑"和"好用"之间差整个 A 阶段。按 PROJECT_DIRECTION 先取真机基线再扩功能</td></tr>
+  <tr><td><span class="tag p1">P1</span></td><td>记忆契约探针 6/8（"详细解释并举例"覆盖、省略语言名的脚本识别两个策略缺口）；推测/第三人过滤仍是词法门限</td><td>语义蕴含验证未做，漏收与误收并存</td></tr>
+  <tr><td><span class="tag p1">P1</span></td><td>全双工实验版不可靠（混响、长回声、持续噪声误抢话、弱近端漏检）；明确"不是专业 DSP AEC"</td><td>耳机主场景可用，外放需按键降级；不宜对外演示双工</td></tr>
+  <tr><td><span class="tag p1">P1</span></td><td>单进程单用户：无认证、无多 worker、服务关闭即不调度；确认窗口存在"已消费→副作用→回执落盘"崩溃缝隙</td><td>个人用可接受，产品化前需操作 ID + 恢复查询</td></tr>
+  <tr><td><span class="tag p2">P2</span></td><td>35 份文档部分过期（REQUIREMENTS 仍写"不做 VRM"）；多份记录旧进程 404</td><td>按 PROJECT_DIRECTION 建议收敛为一份短能力状态表</td></tr>
+  <tr><td><span class="tag p2">P2</span></td><td>情绪命中率 ~7/10；TTS 按句串行，长回复整段播完比文本长</td><td>体验瑕疵，非架构问题</td></tr>
+</table>
+
+<h2><span class="no">6</span>前景评价</h2>
+<table>
+  <tr><th style="width:150px">维度</th><th>判断</th><th style="width:120px">评级</th></tr>
+  <tr><td><b>求职作品集</b><br>（对口 AI Agent 岗）</td><td>记忆证据链、有限步数 Agent Loop + 工具白名单 + 参数绑定确认、可取消交付协议、语音全链路、194/54/103 项测试——几乎覆盖 RLHF / Tool Use / Agent 0-1 岗位描述的全部关键词，且有"诚实标注验证边界"的工程素养证明。这是三个项目里<b>最能讲深度的一个</b>。</td><td><span class="tag t-ok">高价值</span></td></tr>
+  <tr><td><b>个人产品</b></td><td>角色一致性 + 记忆可信度的产品判断真实且稀缺（对比：市面陪聊应用普遍存在"编造共同经历"问题，本项目专门用提示词约束 + 探针去解决它）。但单用户本机定位、无增长机制、情感陪伴商业化路径窄，适合自用而非创业。</td><td><span class="tag t-wip">自用优秀</span></td></tr>
+  <tr><td><b>技术方向</b></td><td>"有证据的长期记忆 + 有限自治执行 + 多模态身体"是 2026 年 Agent 赛道的主线之一；项目已在正确的瓶颈上（事实可信度、执行回执、跨日接续），没有沉迷堆功能。下一步按 A→B→C→D 阶段走即可。</td><td><span class="tag t-ok">方向正确</span></td></tr>
+  <tr><td><b>与另外两个项目的关系</b></td><td>piagent-glm 展示多 Agent 编排与交付，ai-agent 展示 MCP/ Rust 工程，neurosama 展示<b>记忆可信度与角色工程的深度</b>。三者叙事互补，不冲突。</td><td><span class="tag t-info">互补</span></td></tr>
+</table>
+
+<h2><span class="no">7</span>如果手写开发要多久</h2>
+<p>前提定义："手写" = 无 AI 辅助、1 名资深全栈工程师（前后端 + 能调语音管线）、含测试与文档、达到当前同等验证深度。三种方法交叉验证：</p>
+
+<h3>方法 A：按代码行折算</h3>
+<p>第一方代码 37.7k 行（其中测试约 16k 行）。含调试与迭代的复杂系统，行业有效产出约 <b>25–50 行/人天</b>（取 40）→ <span class="mono">37,700 ÷ 40 ≈ 940 人天 ≈ 3.8 人年</span>。该方法偏保守上限，适合作为天花板参考。</p>
+
+<h3>方法 B：按模块自下而上（主估算）</h3>
+<table>
+  <tr><th>模块</th><th class="num">规模</th><th class="num">单人估算</th><th>关键成本项</th></tr>
+  <tr><td>角色契约 + 提示词组装</td><td class="num">0.6k py</td><td class="num">2–3 周</td><td>性格规则的正反例设计、few-shot 格式实验</td></tr>
+  <tr><td>记忆层 + 证据链 + 迁移</td><td class="num">1.2k py</td><td class="num">6–10 周</td><td>冲突/覆盖语义、schema 迁移、晚到守卫——最容易返工的一块</td></tr>
+  <tr><td>对话编排</td><td class="num">1.2k py</td><td class="num">3–5 周</td><td>追问抑制、节奏后处理的调参</td></tr>
+  <tr><td>语音全链路</td><td class="num">2.2k py</td><td class="num">8–12 周</td><td>VAD 收句、流式 ASR 适配、分句 TTS 队列、全双工实验</td></tr>
+  <tr><td>Agent Runtime</td><td class="num">1.6k py</td><td class="num">5–8 周</td><td>有限循环、确认绑定、checkpoint 恢复、崩溃一致性</td></tr>
+  <tr><td>交互 / 共同事项 / 笔记</td><td class="num">1.4k py</td><td class="num">6–10 周</td><td>多域状态归属、跨重启接续</td></tr>
+  <tr><td>前端整体（含形象 3.9k）</td><td class="num">13.1k js/css</td><td class="num">10–16 周</td><td>连续录音/打断/字幕/记忆面板 + SVG/VRM 双渲染 + 拼音口型时间轴</td></tr>
+  <tr><td>测试体系</td><td class="num">~16k 行</td><td class="num">6–10 周</td><td>隔离 fixture、真实装配、浏览器回归</td></tr>
+  <tr><td>文档 + 研究 + 探针</td><td class="num">35 份</td><td class="num">3–5 周</td><td>契约设计、探针题库、公开实现核验</td></tr>
+  <tr><td><b>合计</b></td><td class="num"></td><td class="num"><b>49–79 周</b></td><td><b>≈ 12–19 个月（单人全职）</b></td></tr>
+</table>
+
+<h3>方法 C：加研究与试错系数</h3>
+<p>上述不含"探针→发现缺口→改契约→再测"的迭代轮次和试错。按 1.2–1.3 系数上浮：</p>
+<table>
+  <tr><th>团队配置</th><th class="num">手写工期估算</th><th>说明</th></tr>
+  <tr><td>1 名资深全栈</td><td class="num"><b>14–22 个月</b></td><td>串行推进，记忆与语音两块是长关键路径</td></tr>
+  <tr><td>2–3 人小团队（后端 / 前端 / 语音）</td><td class="num"><b>7–11 个月</b></td><td>可并行，但接口契约需先冻结，否则集成成本反弹</td></tr>
+</table>
+
+<h3>对照组：本项目实际用时</h3>
+<p>从需求草案（10-11 10:49）到当前（10-13 18:45）= <b>3 天</b>。AI 协作相对手写的加速约 <b>两个数量级</b>，且质量未塌方（测试与文档同步产出）——这是面试可直接复用的一句话：<i>"这套系统手写要一年起；我用 AI 协作三天完成第一版，把省下的时间全部投进记忆证据链和测试契约这类深度工程。"</i></p>
+<div class="note">估算诚实边界：区间宽是因为"手写"定义差异大（是否含美术资源、是否含语音模型选型试错、是否含真实用户验收轮次）。方法 B 与 C 的区间重叠度高，可作为对外表述的安全范围。</div>
+
+<h2><span class="no">8</span>建议的下一步（按优先级）</h2>
+<ol>
+  <li><b>今天：commit + 备份</b>（P0）。245 个未提交文件先入库，建立 data/ 自动备份轮转——两天工作量不值得赌。</li>
+  <li><b>A 阶段收尾</b>：真实语音基线（末字到首声 p50/p95、误抢话）+ 小规模真实记忆抽取验证。这是把"隔离全绿"升级为"真实可用"的唯一通道，也是面试叙事的转折点。</li>
+  <li><b>补两个记忆策略缺口</b>（"详细解释并举例"覆盖、脚本语言识别），把探针推到 8/8，作为可展示的量化成果。</li>
+  <li><b>作品集化</b>：选 1 个贯穿场景（如"准备一次项目演示：讨论→确认→执行→重启→接续"）录制成 3 分钟演示 + 一页架构图，直接对标 AI Agent 岗 JD。</li>
+  <li>暂缓：多角色声音、原创音乐、桌面外壳、多用户化——PROJECT_DIRECTION 的判断是对的，主闭环未证明前不扩。</li>
+</ol>
+
+<div class="foot">本 review 为只读分析：未修改任何代码、未读取用户数据库内容、未调用付费接口。数据来源：git 历史（8 commits）、工作区文件统计、35 份 docs、运行中服务的 /api/health。工期估算为工程判断，非承诺。</div>
+
+</div>
+</body>
+</html>

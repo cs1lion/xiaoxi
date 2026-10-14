@@ -1,0 +1,44 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>阿栖 · 一起推进</title>
+  <link rel="stylesheet" href="/static/threads.css">
+  <script type="module" src="/static/threads.js"></script>
+</head>
+<body>
+<main>
+  <header><div><p class="eyebrow">阿栖 / 陪伴项目</p><h1>一起推进</h1><p class="muted">把决定、疑问和下一步，放在一个清楚的地方。</p></div><a href="/">← 返回阿栖</a></header>
+  <section class="selection-bar" aria-label="当前对话关联"><div><strong id="selection-label">正在读取关联…</strong><p>这是本地单用户应用的全局选择，用于关联之后的对话与助手运行。选择项目不代表授权行动，也不代表会记住所有内容。</p></div><button id="clear-selection" type="button">取消关联</button></section>
+  <p id="notice" role="status" aria-live="polite"></p>
+  <div class="workspace">
+    <aside class="panel"><div class="section-heading"><h2>我的项目</h2><button id="refresh" type="button" class="quiet">刷新</button></div>
+      <form id="create-form"><label for="new-title">新项目名称</label><div class="create-row"><input id="new-title" required maxlength="160" placeholder="例如：准备一个小作品"><button type="submit">新建</button></div></form>
+      <nav id="thread-list" aria-label="项目列表"></nav>
+    </aside>
+    <section class="panel detail-panel">
+      <div id="empty" class="empty"><span aria-hidden="true">✧</span><h2>从一件想推进的事开始</h2><p>新建项目，或从左侧打开一个项目。打开详情不会自动关联对话。</p></div>
+      <div id="detail" hidden>
+        <div class="section-heading"><div><p class="eyebrow" id="revision"></p><h2 id="detail-heading"></h2></div><button id="select-thread" type="button">关联之后的对话</button></div>
+        <form id="details-form"><fieldset><legend class="sr-only">项目设置</legend>
+          <label for="title">项目名称</label><input id="title" required maxlength="160">
+          <label for="thread-status">目前状态</label><select id="thread-status"><option value="discussing">讨论中</option><option value="waiting">等待中</option><option value="active">推进中</option><option value="done">已完成</option><option value="paused">已暂停</option></select>
+          <label for="next-step">下一步</label><textarea id="next-step" rows="2" maxlength="4000" placeholder="先做哪一件小事？"></textarea>
+          <label class="check"><input type="checkbox" id="allow-callbacks"><span>允许在相关对话中回顾</span></label><p class="hint">默认关闭。仅允许在相关对话中回顾项目，不会主动推送通知，也不授权执行任务或表示同意开玩笑。</p>
+          <button type="submit">保存项目设置</button>
+        </fieldset></form>
+        <section class="thread-materials" aria-labelledby="materials-heading"><h3 id="materials-heading">本事项资料</h3><p class="hint">从已有笔记选择一个保存版本，并明确关联到本事项。笔记更新不会自动替换关联版本；用途由你指定，成果不表示工具核验或事项完成。解除关联只清除关联，不删除笔记。</p><div id="materials"></div>
+          <form id="material-search-form"><label for="material-query">查找已有笔记</label><div class="create-row"><input id="material-query" maxlength="200" placeholder="按标题或内容关键词查找"><button type="submit">查找笔记</button></div></form><p class="hint">最多显示 50 条搜索结果；选中后可查看最近保存版本。</p><div id="material-search-results"></div>
+          <form id="material-link-form" hidden><fieldset><legend>确认关联资料</legend><p id="material-note-title"></p><label for="material-version">固定保存版本</label><select id="material-version" required></select><label for="material-purpose">在本事项中的用途</label><select id="material-purpose"><option value="reference">参考资料</option><option value="draft">当前稿</option><option value="artifact">成果</option></select><div id="material-preview"></div><p class="hint">每事项最多 12 条资料、一个当前稿。同一笔记版本只指定一个用途；已有当前稿时，先调整旧稿用途或解除旧稿关联。</p><div class="actions"><button id="link-material" type="submit">关联到本事项</button><button id="cancel-material" class="quiet" type="button">取消资料选择</button></div></fieldset></form>
+        </section>
+        <form id="proposal-form"><fieldset><legend>用一句话提出记录候选</legend><label for="proposal-utterance">明确说出想保留什么</label><textarea id="proposal-utterance" required maxlength="4000" rows="2" placeholder="记个决定：保留文字入口"></textarea><p class="hint">例如：记个决定：保留文字入口。这里只生成候选预览，确认保存后才会写入共同记录。</p><button type="submit">生成候选预览</button></fieldset></form>
+        <section aria-labelledby="proposals-heading"><h3 id="proposals-heading">待确认候选</h3><p class="hint">原话和预览分别显示。修改草稿后请先更新预览，再明确确认保存；拒绝不会写入记录。</p><div id="proposals"></div></section>
+        <section class="timeline"><h3>共同记录</h3><p class="hint">用户自述不等于已核验事实。展开记录可查看保存依据与修订历史；同一事项的记录可跨对话接续。工具回执仅供查看，不能在这里修改。</p><div id="events"></div></section>
+        <form id="event-edit-form" hidden><fieldset><legend>更正用户自述</legend><label for="edit-text">更正内容</label><textarea id="edit-text" required maxlength="4000" rows="3"></textarea><div class="actions"><button type="submit">保存更正</button><button id="cancel-edit" type="button" class="quiet">取消更正</button></div></fieldset></form>
+        <form id="event-form"><fieldset><legend>补充一条记录</legend><label for="event-kind">记录类型</label><select id="event-kind"><option value="progress">进展</option><option value="decision">决定</option><option value="question">疑问</option></select><label for="event-text">内容（用户自述，未经核验）</label><textarea id="event-text" required maxlength="4000" rows="3" placeholder="写下这次想保留的内容…"></textarea><button type="submit">添加记录</button></fieldset></form>
+        <footer class="danger-zone"><p>删除只清除陪伴项目记录，不会删除来源任务、运行或聊天。</p><button id="delete-thread" type="button" class="danger">删除项目记录</button></footer>
+      </div>
+    </section>
+  </div>
+</main>
+</body></html>

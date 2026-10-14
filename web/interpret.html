@@ -1,0 +1,32 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>英语 → 中文 · 短段滚动翻译</title>
+  <link rel="stylesheet" href="/static/interpret.css">
+  <script type="module" src="/static/interpret.js"></script>
+</head>
+<body>
+  <main>
+    <header><a href="/">← 返回主页</a><span class="badge">English → 中文</span></header>
+    <h1>英语 → 中文 · 音频翻译</h1>
+    <p class="intro">默认按短暂停顿切成 1–4 秒音频段，再识别英语、翻译中文；段落不重叠，可能切断句子。实验流式模式：流式原文，确认后翻译；目前不提供临时中文或稳定部分的提前翻译。</p>
+    <section class="controls" aria-label="音频控制">
+      <label for="backend">识别后端</label>
+      <select id="backend"><option value="segmented" selected>短段识别（默认）</option><option value="streaming">流式识别（实验）</option></select>
+      <label for="source">音频来源</label>
+      <select id="source"><option value="mic">麦克风</option><option value="display">共享标签页 / 屏幕音频</option></select>
+      <button id="start" type="button">开始翻译</button>
+      <button id="stop" type="button" disabled>停止</button>
+      <button id="clear" type="button">清空字幕</button>
+    </section>
+    <p class="notice">共享时必须勾选「共享音频」。浏览器与操作系统不一定支持系统音频；优先选择有声音的浏览器标签页。共享请求包含视频轨，但本页只处理音频，不录制或存储视频。</p>
+    <div class="status-line"><strong id="status" role="status">未开始</strong><span id="latency">服务端延迟：—</span></div>
+    <p class="notice">流式识别需要单独配置 ASR 凭据与服务访问权限；未配置时会明确报错，不会静默退回短段模式。流式模式连续上传音频（包含静音，由服务端判断停顿），不确定的识别暂存内容单独显示，不拼接为原文。</p>
+    <p class="privacy">字幕仅留在当前页面，最多显示 100 段，不写入本地存储。不启用角色扮演、记忆、工具或语音播报。短段模式队列满时整段跳过并显示缺口；流式模式网络缓冲过满会停止，不静默丢弃音频，每会话最多 256 个条目。停止会丢弃未提交的尾段与待返回结果。</p>
+    <section id="rows" aria-label="英语原文与中文字幕" aria-live="polite" aria-relevant="additions text"></section>
+    <p id="empty">开始后，已识别原文与完成的译文会按片段编号显示在这里。</p>
+  </main>
+</body>
+</html>

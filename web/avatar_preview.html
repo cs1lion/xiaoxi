@@ -1,0 +1,101 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<title>形象预览</title>
+<style>
+  body { margin: 0; background: #0e1014; color: #e6e9ef;
+         font: 13px/1.5 "PingFang SC","Microsoft YaHei",system-ui,sans-serif; }
+  .grid { display: grid; grid-template-columns: repeat(5, 200px); gap: 8px; padding: 12px; }
+  .cell { background: #161a21; border: 1px solid #232a34; border-radius: 10px; overflow: hidden; }
+  .cell h3 { margin: 0; padding: 6px 10px; font-size: 12px; color: #8b95a5; font-weight: 600; }
+  .cell .stage { width: 200px; height: 220px; }
+  .cell .stage svg { width: 100%; height: 100%; display: block; }
+  .dark { background: #05060a; }
+  .light { background: #f2f4f8; }
+  .light h3 { color: #5b6472; }
+  .fail { outline: 2px solid #e0574c; }
+  .note { padding: 10px 12px; color: #7d8798; font-size: 12px; grid-column: 1 / -1; }
+</style>
+</head>
+<body>
+<div class="grid" id="grid"></div>
+<script type="module">
+import { ParamStore, Rigger } from "/static/avatar/params.js";
+import { SvgRig } from "/static/avatar/render/svg.js";
+import { EmotionDriver } from "/static/avatar/drivers/emotion.js";
+
+const cfg = await (await fetch("/api/avatar")).json();
+const emoKeys = Object.keys(cfg.emotions || {});
+
+function renderOnce(container, { emotion, pose, settled = true }) {
+  const store = new ParamStore(cfg.neutral || {}, cfg.response || {});
+  const rig = new Rigger(cfg.neutral || {});
+  rig.register("emotion", 20);
+  rig.register("preview", 99);
+  // begin() 会清空所有图层，必须在写值之前调
+  rig.begin();
+  if (emotion) {
+    const ed = new EmotionDriver(cfg.emotions || {});
+    ed.set(emotion);
+    if (settled) for (let i = 0; i < 120; i++) ed.update(1 / 60);
+    for (const [k, v] of Object.entries(ed.shift())) rig.set("emotion", k, v);
+  }
+  for (const [k, v] of Object.entries(pose || {})) rig.set("preview", k, v);
+  rig.commit(store);
+  store.blend(1e6);
+  for (let i = 0; i < 200; i++) store.blend(1 / 60);
+
+  const svg = new SvgRig();
+  svg.mount(container, cfg.look || {});
+  svg.draw(store.current, 1 / 60);
+}
+
+const POSES = [
+  ["中性 neutral", {}],
+  ...emoKeys.map((k) => [`情绪 ${k}`, { emotion: k }]),
+  ["虹膜放大", { pose: { ParamEyeBallForm: 1 } }],
+  ["虹膜收小", { pose: { ParamEyeBallForm: -1 } }],
+  ["虹膜放大+瞳孔放大", { pose: { ParamEyeBallForm: 0.8, ParamPupil: 1.4 } }],
+  ["浅色底", {}, "light"],
+  ["深色底", {}, "dark"],
+];
+
+const grid = document.getElementById("grid");
+const errors = [];
+const only = new URLSearchParams(location.search).get("only");
+
+if (only === "emotions") {
+  grid.classList.add("big");
+  grid.style.gridTemplateColumns = "repeat(4, 330px)";
+  POSES.length = 0;
+  POSES.push(...emoKeys.map((k) => [`情绪 ${k}`, { emotion: k }]));
+  POSES.push(["中性（无情绪层）", { pose: {}, emotion: null }]);
+}
+
+for (const [label, spec, bg] of POSES) {
+  const cell = document.createElement("div");
+  cell.className = "cell" + (bg ? " " + bg : "");
+  cell.innerHTML = `<h3>${label}</h3><div class="stage"></div>`;
+  grid.appendChild(cell);
+  try {
+    renderOnce(cell.querySelector(".stage"), spec);
+  } catch (e) {
+    cell.classList.add("fail");
+    errors.push(label + ": " + (e && e.stack));
+  }
+}
+
+const note = document.createElement("div");
+note.className = "note";
+note.textContent =
+  errors.length ? `渲染错误 ${errors.length} 处：` + errors.join(" | ")
+    : `本次：ParamEyeBallForm（虹膜缩放，Live2D 标准参数）+ 领口亮区 + 头发/衣服明度差 `
+    + `（WCAG 1.49 → 3.35）`;
+grid.appendChild(note);
+
+window.__errors = errors;
+window.__ready = true;
+</script>
+</body>
+</html>

@@ -1,0 +1,17 @@
+<!doctype html>
+<html lang="zh-CN">
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>原创音乐 · Neurosama</title><link rel="stylesheet" href="/static/music.css"></head>
+<body><main>
+<a href="/">← 返回对话</a><h1>原创音乐</h1>
+<p>独立的异步原创歌曲生成，不是实时合唱、翻唱或语音合成。不会自动生成；仅使用你提供的描述和原创歌词。</p>
+<p id="capability" role="status">正在检查音乐服务配置…</p>
+<form id="musicForm">
+<label for="caption">音乐描述（最多 2000 字符）</label><textarea id="caption" maxlength="2000" rows="4" required placeholder="例如：温暖的城市流行乐，轻快的吉他与柔和女声"></textarea>
+<label for="lyrics">原创歌词（可选，最多 8000 字符）</label><textarea id="lyrics" maxlength="8000" rows="9" placeholder="仅填写你原创或拥有使用权的歌词；留空不会调用其他模型自动写词。"></textarea>
+<label class="permission"><input id="permission" type="checkbox">我确认描述与歌词为原创或有权使用，并同意本次调用可能产生费用。</label>
+<div class="actions"><button id="create" type="submit" disabled>生成原创音乐</button><button id="stop" type="button" disabled>停止等待</button></div>
+</form>
+<p class="warning">停止等待只会中止浏览器请求，不能取消已提交给服务商的任务；任务可能继续完成并产生费用。请勿立即重复提交。</p>
+<p id="status" role="status" aria-live="polite"></p>
+<section id="result" hidden><h2>本次生成结果</h2><audio id="audio" controls preload="metadata"></audio><button id="delete" type="button">关闭并删除本地音频</button><p>音频只保留在本页内存中，不保存到服务器；关闭本页会释放。</p></section>
+</main><script type="module" src="/static/music.js"></script></body></html>

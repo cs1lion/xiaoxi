@@ -1,0 +1,10 @@
+import assert from 'node:assert/strict';
+import {interactionState} from '../web/voice/interaction-state.js';
+assert.equal(interactionState({queued:true,turn:true}).id,'preparing');
+assert.equal(interactionState({playing:true,queued:true}).id,'speaking');
+assert.equal(interactionState({recording:true,playing:true}).id,'listening');
+assert.equal(interactionState({ducked:true,playing:true}).id,'yielding');
+assert.equal(interactionState({turn:true}).id,'thinking');
+assert.equal(interactionState({continuous:true}).id,'monitoring');
+assert.equal(interactionState({}).id,'idle');
+console.log('PASS 7 interaction state priority checks');

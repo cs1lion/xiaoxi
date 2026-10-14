@@ -1,0 +1,10 @@
+/* Optional polished glaze over the unchanged ceramic geometry. */
+.card{border-color:#ffffff;border-bottom-color:#bbc9b5;background:linear-gradient(165deg,#fffffff5 0%,#ffffffc9 36%,#e9eee1 100%);box-shadow:inset 0 2px 1px #fff,inset 0 -3px 3px #70836228,0 2px 0 #bbc8ae,0 5px 6px #34493213,0 21px 36px -16px #34493242}
+.card:before{background:radial-gradient(ellipse at 92% 3%,var(--light,#e9ebdc),transparent 73%);opacity:.95}
+.card:after{content:'';position:absolute;inset:0;z-index:-1;pointer-events:none;border-radius:inherit;background:linear-gradient(123deg,transparent 0 16%,#ffffffd9 17%,#ffffff70 26%,transparent 39%),linear-gradient(180deg,#ffffffbf,transparent 37%,transparent 75%,#afbf9b17);box-shadow:inset 1px 1px #fff,inset -1px -1px #a6b49833}
+.peach{--light:#efbc86}.sage{--light:#bcd6a1}.lilac{--light:#cfb8e4}
+.icon{background:linear-gradient(150deg,#ffffffed 0%,#ffffffa1 46%,#d9e2cb70 100%);border-color:#fff;box-shadow:inset 0 2px 1px #fff,inset 0 -2px 2px #70836224,0 2px 0 #b6c3a953,0 5px 9px #52634318}
+.invitation:hover{box-shadow:inset 0 2px 1px #fff,inset 0 -3px 3px #70836228,0 2px 0 #bbc8ae,0 7px 10px #34493218,0 28px 42px -16px #3449324d}
+.invitation.selected{border-color:#78916a;box-shadow:0 0 0 3px #78916a16,inset 0 2px #fff,inset 0 -3px 3px #70836228,0 2px 0 #bbc8ae,0 20px 32px -16px #34493242}
+.input-shell{background:linear-gradient(155deg,#fff 0%,#ffffffc9 45%,#eaf0e2 100%);box-shadow:inset 0 2px #fff,inset 0 -2px 2px #70836218,0 2px 0 #c2ceba,0 13px 28px -14px #34493235}
+.input-shell button{background:linear-gradient(150deg,#89a47c 0%,#65865d 35%,#3e6146 80%);box-shadow:inset 0 2px 1px #ffffff68,inset 0 -2px 2px #19391e44,0 2px 0 #314d37,0 5px 9px #35503b24}

@@ -1,0 +1,20 @@
+/* A dedicated writing view uses the original editor document and draft. */
+.writing-header{display:flex;align-items:center;justify-content:space-between;gap:16px;border-bottom:1px solid var(--line);padding:0 2px 12px;margin-bottom:12px}
+.writing-header h2{font-size:20px;margin:0;color:var(--text)}
+.writing-header p{font-size:12px;color:var(--muted);margin:5px 0 0}
+.writing-header button{white-space:nowrap;min-height:44px}
+body.is-writing .side{display:block!important;position:fixed;inset:76px 0 0;width:auto;padding:20px 24px;background:var(--bg);border:0;box-shadow:none;overflow:visible;z-index:6}
+body.is-writing .side>*:not(.shared-workspace){display:none!important}
+body.is-writing .shared-workspace{width:min(1100px,100%);height:100%;margin:0 auto;display:flex;flex-direction:column;min-height:0;padding:18px 24px;background:#fffefa;box-shadow:0 8px 34px #394d2a08}
+body.is-writing .shared-workspace>[role=tablist],body.is-writing #work-feedback,body.is-writing #work-note-draft{display:none!important}
+body.is-writing #work-notes{flex:1;min-height:0}
+body.is-writing .shared-workspace iframe{height:100%;border-radius:0}
+body.is-writing .stage>:not(.topbar){visibility:hidden}
+body.is-writing .stage{grid-column:1/-1}
+body.is-writing #writingToggle{color:var(--accent);background:#e5ecdf}
+@media(max-width:760px){body.is-writing .side{inset:68px 0 0;padding:0}body.is-writing .shared-workspace{border-radius:0;border:0;padding:12px}.writing-header{gap:8px}.writing-header h2{font-size:18px}.writing-header p{font-size:11px}}
+@media(max-width:420px){.topbar .connection{display:none}.topbar #writingToggle{min-height:44px}}
+.editor-discussion{margin:0 0 8px;padding:10px 12px;border:1px solid var(--line);border-radius:12px;background:#edf3e6;color:var(--text)}
+.editor-discussion[hidden]{display:none!important}.editor-discussion p{margin:0 0 7px;font-size:12px;line-height:1.5;overflow-wrap:anywhere}.editor-discussion small{display:block;font-size:11px;color:var(--muted);margin-bottom:7px}.editor-discussion-actions{display:flex;gap:8px;flex-wrap:wrap}.editor-discussion-actions button{font-size:11px;padding:6px 10px;min-height:32px}.editor-discussion.is-invalid{background:#f6f2e8}
+.editor-discussion p{max-height:4.5em;overflow-y:auto;scrollbar-width:thin}
+@media(max-height:600px){body.has-editor-discussion .room-label,body.has-editor-discussion #interactionState,body.has-editor-discussion #companionMount,body.has-editor-discussion .composer-foot{display:none}body.has-editor-discussion .chat{padding-block:12px}}

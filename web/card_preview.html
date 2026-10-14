@@ -1,0 +1,24 @@
+<!doctype html>
+<html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>阿栖 · 柔光陶瓷卡片探索</title><link rel="stylesheet" href="/static/card_preview.css"></head>
+<body><script>
+if(new URLSearchParams(location.search).get('finish')==='gloss'){
+ const sheet=document.createElement('link');sheet.rel='stylesheet';sheet.href='/static/card_gloss.css';document.head.append(sheet);
+ document.addEventListener('DOMContentLoaded',()=>{document.querySelector('.demo').textContent='DESIGN STUDY 02 · 演示数据';document.querySelector('.material-note>span').textContent='02 / POLISHED GLAZE';document.querySelector('.composer-foot span:last-child').textContent='釉面光泽 / 斜向反光 / 实体厚度';});
+}
+</script><main class="workspace"><header><a href="/">栖<span>阿栖 · 你的日常伙伴</span></a><span class="demo">DESIGN STUDY 01 · 演示数据</span></header>
+<section class="intro"><div><span class="eyebrow">A QUIET MOMENT, WITH A LITTLE DELIGHT</span><h1>今天的心事，<br>有个地方<span>轻轻放下。</span></h1><p>聊聊日常，记住小事。把生活一点点理顺。</p></div><div class="material-note"><span>01 / SOFT CERAMIC</span><p>一点温度<br>一点光<br>一点刚刚好的回应</p></div></section>
+<div class="section-heading"><h2>从你想聊的开始</h2><span>选择一张卡片，准备草稿</span></div>
+<section class="invitations" aria-label="聊天邀请">
+<button class="card invitation peach" data-draft="今天有件开心的小事想和你分享。"><span class="icon">☀</span><span class="card-kicker">分享 · SHARE</span><strong>今天，有件小事</strong><span class="description">开心的、烦恼的，或者还没想好怎么说的。</span><span class="card-bottom">说给阿栖听 <span>↗</span></span></button>
+<button class="card invitation sage" data-draft="陪我放空一会儿吧，不急着解决问题。"><span class="icon">☕</span><span class="card-kicker">陪伴 · STAY</span><strong>先休息一会儿</strong><span class="description">不用急着解决什么。安静待着，也很好。</span><span class="card-bottom">给自己留点时间 <span>↗</span></span></button>
+<button class="card invitation lilac" data-draft="帮我理一理今天要做的事情。"><span class="icon">✳</span><span class="card-kicker">整理 · SORT</span><strong>把今天理清楚</strong><span class="description">把脑袋里的待办放下来，一次做一件。</span><span class="card-bottom">从一件事开始 <span>↗</span></span></button>
+</section>
+<section class="objects"><article class="card memory"><div class="object-top"><span class="card-kicker">一张关于你的便笺</span><span class="badge">记忆 · 演示</span></div><h2>你喜欢傍晚散步</h2><p>“走一小段路，脑袋就没那么挤了。”</p><footer><span>你说过的 · 只在此页演示</span><button id="forget">从预览中忘掉</button></footer></article><article class="card task"><div class="object-top"><span class="card-kicker">不用一次做完</span><span class="badge">待办 · 演示</span></div><h2>给自己留 20 分钟</h2><p>合上屏幕，喝点水，或者什么都不做。</p><footer><span id="taskState">今天 · 不赶时间</span><button id="complete" aria-pressed="false">✓ 标记完成</button></footer></article></section>
+<section class="composer"><div class="input-shell"><span class="mini-brand" aria-hidden="true">栖</span><input id="draft" aria-label="演示草稿" placeholder="想到什么，就从这里开始…"><button id="send">预览发送 ↑</button></div><div class="composer-foot"><span id="feedback" role="status">独立设计预览，不连接聊天、记忆或任务服务。</span><span>柔光 / 实体表面 / 轻交互</span></div></section>
+</main><script>
+const input=document.querySelector('#draft'),feedback=document.querySelector('#feedback');
+document.querySelectorAll('[data-draft]').forEach(card=>card.onclick=()=>{document.querySelectorAll('[data-draft]').forEach(c=>c.classList.toggle('selected',c===card));input.value=card.dataset.draft;feedback.textContent='已准备草稿，可以修改。这是演示，不会自动发送。';input.focus();});
+document.querySelector('#complete').onclick=function(){const done=this.getAttribute('aria-pressed')!=='true';this.setAttribute('aria-pressed',String(done));this.textContent=done?'↶ 撤销完成':'✓ 标记完成';document.querySelector('#taskState').textContent=done?'已完成 · 仅此页演示':'今天 · 不赶时间';this.closest('.task').classList.toggle('done',done);};
+document.querySelector('#forget').onclick=function(){this.closest('.memory').querySelector('h2').textContent='已从预览中忘掉';this.disabled=true;feedback.textContent='仅更改演示卡片，没有删除真实记忆。';};
+document.querySelector('#send').onclick=()=>{feedback.textContent=input.value.trim()?'已预览发送反馈，没有请求模型。':'先写一句话，或者选一张邀请卡。';};
+</script></body></html>
