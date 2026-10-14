@@ -57,6 +57,77 @@ def split_for_speech(text: str, max_chars: int = 60) -> list[str]:
     return [p for p in pieces if p]
 
 
+_MICRO_WEAK = "，,、；;：:"
+_MICRO_STRONG = "。！？!?…"
+_MICRO_CLOSERS = "”’\"』」）)》"
+
+
+def split_for_speech_micro(text: str, target_chars: int = 20, max_chars: int = 60) -> list[str]:
+    """Lossless micro-sentence split for long-voice streaming (F2).
+
+    Unlike ``split_for_speech`` (which drops the comma at a cut and strips
+    whitespace), this never removes a character: the pieces concatenate back to
+    the exact input. That lets the caller keep Unicode-codepoint offsets so
+    ``slice_performance`` rebases motion anchors exactly, and so ``"".join(pieces)
+    == text`` stays true. It prefers clause/sentence boundaries near
+    ``target_chars`` and only hard-cuts at ``max_chars`` when no boundary is in
+    range. Old callers keep using ``split_for_speech`` unchanged.
+    """
+    text = text or ""
+    n = len(text)
+    if n == 0:
+        return []
+    target = max(1, int(target_chars))
+    cap = max(target, int(max_chars))
+    pieces: list[str] = []
+    i = 0
+    while i < n:
+        if n - i <= target:
+            pieces.append(text[i:])
+            break
+        window_end = min(i + cap, n)
+        target_end = i + target
+        best = -1
+        last_boundary = -1
+        for k in range(i + 1, window_end + 1):
+            prev = text[k - 1]
+            if prev in _MICRO_STRONG or prev in _MICRO_WEAK:
+                end = k
+                while end < n and end < i + cap and text[end] in _MICRO_CLOSERS:
+                    end += 1
+                if k <= target_end:
+                    best = end
+                last_boundary = end
+        if best > i:
+            pieces.append(text[i:best])
+            i = best
+        elif last_boundary > i:
+            pieces.append(text[i:last_boundary])
+            i = last_boundary
+        else:
+            cut = min(i + cap, n)
+            pieces.append(text[i:cut])
+            i = cut
+    return [p for p in pieces if p]
+
+
+def micro_pause(piece: str, *, clause_ms: int = 120, sentence_ms: int = 260,
+                max_ms: int = 400) -> tuple[int, bool]:
+    """Breath-pause suggestion (pause_after_ms, breath) from a micro-sentence's
+    trailing boundary. Sentence-final punctuation is a natural breath point;
+    clause punctuation is a shorter micro-pause; a hard-cut continuation has none.
+    """
+    for ch in reversed(piece or ""):
+        if ch in _MICRO_STRONG:
+            return min(max_ms, max(0, sentence_ms)), True
+        if ch in _MICRO_WEAK:
+            return min(max_ms, max(0, clause_ms)), False
+        if ch in _MICRO_CLOSERS:
+            continue
+        break
+    return 0, False
+
+
 class TTSEngine:
     """Pluggable TTS. Every engine answers the same question:
     (text, emotion) -> audio bytes. Personality lives in two places -- the

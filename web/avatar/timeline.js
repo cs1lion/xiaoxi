@@ -110,6 +110,38 @@ function restSegment(a0, t0, t1, a1) {
   };
 }
 
+/* F2 长语音：把 audio.chunk 的呼吸停顿/呼吸点叠到口型时间轴上。
+ *
+ * 只有 opts.chunk 存在时才动它；缺失时原样返回，行为与现状逐字节一致。
+ * viseme 段完全不动——词时序仍由 audio.text + 解码时长决定；停顿只是追加
+ * 一段尾部静止（嘴放松），落在下一段之前，不摊平后续词的时序（后续词在下一段
+ * 自己的时间轴里）。"停顿多久再播下一段"由播放调度决定，这里只把
+ * pause_after_ms / breath 暴露出来供其消费。 */
+function withBreathPause(timeline, opts) {
+  const chunk = opts && typeof opts === "object" ? opts.chunk : null;
+  if (!chunk || typeof chunk !== "object") return timeline;
+  const raw = Number.isFinite(chunk.pause_after_ms) ? chunk.pause_after_ms : 0;
+  const pauseMs = Math.min(400, Math.max(0, raw));
+  const breath = !!chunk.breath;
+  timeline.chunk = {
+    seq: Number.isInteger(chunk.seq) ? chunk.seq : null,
+    of: chunk.of ?? null,
+    chars: Number.isFinite(chunk.chars) ? chunk.chars : null,
+    breath,
+    pause_after_ms: pauseMs,
+  };
+  timeline.breath = breath;
+  timeline.pauseAfterSec = pauseMs / 1000;
+  if (breath) timeline.breathAt = timeline.duration;
+  if (pauseMs > 0) {
+    const base = timeline.duration;
+    const end = base + pauseMs / 1000;
+    timeline.segments.push(restSegment(base, base, end, end));
+    timeline.duration = end;
+  }
+  return timeline;
+}
+
 export function buildTimeline(text, durationSec, opts = {}) {
   const co = { ...COARTICULATION, ...(opts.coarticulation || {}) };
   const spans = [];
@@ -139,7 +171,7 @@ export function buildTimeline(text, durationSec, opts = {}) {
   };
   if (!spans.length || total <= 0) {
     // 整句没有可发音的内容（纯标点/空白）：嘴全程静止。
-    return { segments: [restSegment(0, 0, duration, duration)], ...tail };
+    return withBreathPause({ segments: [restSegment(0, 0, duration, duration)], ...tail }, opts);
   }
 
   const usable = duration * (1 - HEAD_TRIM - TAIL_TRIM);
@@ -164,7 +196,7 @@ export function buildTimeline(text, durationSec, opts = {}) {
   }
 
   if (!segments.length) {
-    return { segments: [restSegment(0, 0, duration, duration)], ...tail };
+    return withBreathPause({ segments: [restSegment(0, 0, duration, duration)], ...tail }, opts);
   }
 
   // 把每段的提前/保持窗口算好，采样时就不用反复乘
@@ -208,7 +240,7 @@ export function buildTimeline(text, durationSec, opts = {}) {
   const tailT0 = Math.min(last.a1, duration);
   segments.push(restSegment(tailA0, tailT0, duration, duration));
 
-  return { segments, ...tail };
+  return withBreathPause({ segments, ...tail }, opts);
 }
 
 function shapeOf(span) {

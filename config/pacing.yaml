@@ -60,6 +60,22 @@ voice:
   play_queue_max: 6
   send_text_before_audio: true
 
+# ---------- 长语音微句流（F2） ----------
+# 默认关闭。enabled=false 时 orchestrator 走既有 60 字窗口 + 顺序合成，
+# audio 事件不带 chunk、不发 speech_plan，与现状逐字节一致。
+# 打开后：微句切分（子句边界优先）+ 有界预加载并发 + chunk 呼吸停顿字段。
+speech:
+  enabled: false
+  micro_chunk:
+    target_chars: 20          # 微句目标长度（子句边界优先，落在 12-25 区间）
+    max_chars: 60             # 无边界时的硬顶
+  preload:
+    concurrency: 2            # 播放中并发合成后续段的度（有界）
+  pause:
+    clause_ms: 120            # 子句边界（，、；：）后的呼吸停顿
+    sentence_ms: 260          # 句末（。！？…）后的呼吸停顿
+    max_ms: 400               # 停顿上限（协议 0-400）
+
 # ---------- 安全与边界 ----------
 safety:
   refuse_sexual_minors: true

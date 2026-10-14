@@ -7,11 +7,11 @@ import time
 from dataclasses import dataclass, field
 from typing import Any, AsyncIterator
 
-from ..config import pacing_cfg, settings
+from ..config import memory_cfg, pacing_cfg, settings
 from ..llm import llm
 from ..memory.manager import manager
 from ..persona import build_messages, dynamic_prompt, static_system_prompt
-from ..speech.tts import tts
+from ..speech.tts import micro_pause, split_for_speech_micro, tts
 from .performance import (MOTION_INSTRUCTION, MotionMetadataFilter,
                           performance_plan, slice_performance, strip_motion_metadata)
 
@@ -34,6 +34,7 @@ class TurnResult:
     latency_ms: int = 0
     proactive: bool = False
     context_usage: dict[str, Any] = field(default_factory=dict)
+    spark_id: int | None = None
 
 
 def sanitize(text: str, *, preserve_brackets: bool = False) -> str:
@@ -214,9 +215,18 @@ class Orchestrator:
         messages = [{'role': 'system', 'content': self.composer.render(data['response_policy'])}]
         memory = data['long_term_memory']
         state = data['state']
+        # F1 mood bias (protocol section 10): read-only call, only when memory is
+        # on. Empty input yields "", so the dynamic prompt stays byte-identical
+        # to the old behavior when memory is off or there is nothing to inject.
+        bias = ""
+        if manager.enabled:
+            from ..memory.diary import active_drifts, surfaced_sparks
+            from ..persona import bias_block
+            bias = bias_block(active_drifts(), surfaced_sparks())
         dynamic = dynamic_prompt(memory_found=memory['status'] in ('found', 'disabled', 'omitted_by_budget'),
             current_state=state['current_state'], user_state_note=state['user_state_note'],
-            proactivity=state['proactivity'], emotion_instruction=EMOTION_INSTRUCTION)
+            proactivity=state['proactivity'], emotion_instruction=EMOTION_INSTRUCTION,
+            bias_block=bias)
         if dynamic:
             if memory['status'] == 'omitted_by_budget':
                 dynamic += '\n本轮检索记忆因补充上下文预算省略；不能据此断言经历没有发生，也不能补写缺失内容。'
@@ -334,10 +344,23 @@ class Orchestrator:
         policy = session.get("response_policy") or {}
         limit = hard if policy.get("length") == "detailed" else min(hard, self._length_target(user_text))
         suppress_questions = self._question_ratio_exceeded()
+        # F2 long-voice micro-streaming. Feature-off (the default) keeps the
+        # legacy 60-char window plus strictly sequential synthesis, so audio
+        # events stay byte-identical to before: no chunk, no speech_plan.
+        speech_cfg = self.pacing.get("speech") or {}
+        micro = bool(speech_cfg.get("enabled", False))
+        micro_cfg = speech_cfg.get("micro_chunk") or {}
+        micro_target = max(1, int(micro_cfg.get("target_chars", 20)))
+        micro_cap = max(micro_target, int(micro_cfg.get("max_chars", 60)))
+        pause_cfg = speech_cfg.get("pause") or {}
+        preload_concurrency = max(1, int((speech_cfg.get("preload") or {}).get("concurrency", 2)))
+        if not micro:
+            preload_concurrency = 1
         holder = {"emotion": "", "text": "", "first_audio_at": None,
                   "limit_reached": False, "generation_failed": False,
-                  "audio_failed": 0, "audio_succeeded": 0}
+                  "audio_failed": 0, "audio_succeeded": 0, "plan_sent": False}
         sentence_annotations: list[Any] = []
+        seq_counter = [0]
 
         def deliver(raw: str) -> bool:
             """Commit once: display, speech and persistence share this exact text.
@@ -367,11 +390,36 @@ class Orchestrator:
                 performance = performance_plan(text, annotations)
                 holder["text"] += text
                 events.put_nowait({"type": "text_delta", "delta": text})
-                # Lossless slicing: split_for_speech drops commas/whitespace.
-                # Queue the tail here too, so a single worker owns every index.
-                for start in range(0, len(text), 60):
-                    audio_jobs.put_nowait((text[start:start + 60], holder["emotion"],
-                                          slice_performance(performance, start, start + 60)))
+                # F2: micro-sentence streaming uses a lossless, offset-tracking
+                # slice (split_for_speech would drop commas and break anchors).
+                # Feature-off keeps the legacy 60-char window, unchanged.
+                if micro:
+                    offset = 0
+                    for piece in split_for_speech_micro(text, micro_target, micro_cap):
+                        seq = seq_counter[0]
+                        pause_ms, breath = micro_pause(
+                            piece, clause_ms=int(pause_cfg.get("clause_ms", 120)),
+                            sentence_ms=int(pause_cfg.get("sentence_ms", 260)),
+                            max_ms=int(pause_cfg.get("max_ms", 400)))
+                        chunk_field = {"seq": seq, "of": None, "chars": len(piece),
+                                       "pause_after_ms": pause_ms, "breath": breath}
+                        if not holder["plan_sent"]:
+                            holder["plan_sent"] = True
+                            events.put_nowait({"type": "speech_plan", "mode": "micro",
+                                               "expected_chunks": None,
+                                               "first_chunk_chars": len(piece)})
+                        audio_jobs.put_nowait((piece, holder["emotion"],
+                                               slice_performance(performance, offset, offset + len(piece)),
+                                               seq, True, chunk_field))
+                        seq_counter[0] += 1
+                        offset += len(piece)
+                else:
+                    for start in range(0, len(text), 60):
+                        seq = seq_counter[0]
+                        audio_jobs.put_nowait((text[start:start + 60], holder["emotion"],
+                                               slice_performance(performance, start, start + 60),
+                                               seq, False, None))
+                        seq_counter[0] += 1
             if len(holder['text']) >= limit:
                 holder['limit_reached'] = True
             return exhausted or len(holder["text"]) >= limit
@@ -492,36 +540,85 @@ class Orchestrator:
 
         async def _pump_audio() -> None:
             index = 0
+            next_seq = 0
+            inflight: dict[int, asyncio.Future] = {}
+            resolved: dict[int, Any] = {}
+            exhausted = False
+
+            async def _synth(job):
+                chunk, emotion, performance, seq, is_micro, chunk_field = job
+                try:
+                    audio = await asyncio.wait_for(
+                        tts.synthesize(chunk, voice_emotion or emotion), timeout=30)
+                except Exception:
+                    return seq, None
+                return seq, (audio, chunk, emotion, performance, is_micro, chunk_field)
+
+            def _emit(seq: int, payload: Any) -> None:
+                nonlocal index
+                if payload is None:
+                    # Speech is best effort; a failed segment is skipped, never
+                    # stalled. Text stays the authoritative delivery, and the
+                    # failure still counts into done.delivery.
+                    holder['audio_failed'] += 1
+                    events.put_nowait({"type": "error", "recoverable": True, "message": "部分语音合成失败，文字仍可阅读。"})
+                    return
+                audio, chunk, emotion, performance, is_micro, chunk_field = payload
+                if holder["first_audio_at"] is None:
+                    holder["first_audio_at"] = time.perf_counter()
+                event = {
+                    "type": "audio", "index": index, "text": chunk,
+                    "emotion": emotion, "audio": audio,
+                    "performance": performance,
+                }
+                if is_micro and chunk_field is not None:
+                    event["chunk"] = chunk_field
+                timing_lookup = getattr(tts, "word_timings", None)
+                if timing_lookup is not None:
+                    word_timings = timing_lookup(chunk, voice_emotion or emotion)
+                    if word_timings:
+                        event["word_timings"] = word_timings
+                events.put_nowait(event)
+                index += 1
+                holder['audio_succeeded'] += 1
+
             try:
                 while True:
-                    job = await audio_jobs.get()
-                    if job is sentinel:
-                        break
-                    chunk, emotion, performance = job
-                    try:
-                        audio = await asyncio.wait_for(tts.synthesize(chunk, voice_emotion or emotion), timeout=30)
-                    except Exception as exc:
-                        # Speech is best effort; text remains the authoritative
-                        # delivery. A failed job must not strand the event loop.
-                        holder['audio_failed'] += 1
-                        events.put_nowait({"type": "error", "recoverable": True, "message": "部分语音合成失败，文字仍可阅读。"})
+                    # Top up the bounded in-flight window without blocking so the
+                    # next segment synthesizes while the current one is emitted.
+                    while not exhausted and len(inflight) < preload_concurrency:
+                        try:
+                            job = audio_jobs.get_nowait()
+                        except asyncio.QueueEmpty:
+                            break
+                        if job is sentinel:
+                            exhausted = True
+                            break
+                        inflight[job[3]] = asyncio.ensure_future(_synth(job))
+                    if not inflight:
+                        if exhausted:
+                            break
+                        job = await audio_jobs.get()
+                        if job is sentinel:
+                            break
+                        inflight[job[3]] = asyncio.ensure_future(_synth(job))
                         continue
-                    if holder["first_audio_at"] is None:
-                        holder["first_audio_at"] = time.perf_counter()
-                    event = {
-                        "type": "audio", "index": index, "text": chunk,
-                        "emotion": emotion, "audio": audio,
-                        "performance": performance,
-                    }
-                    timing_lookup = getattr(tts, "word_timings", None)
-                    if timing_lookup is not None:
-                        word_timings = timing_lookup(chunk, voice_emotion or emotion)
-                        if word_timings:
-                            event["word_timings"] = word_timings
-                    events.put_nowait(event)
-                    index += 1
-                    holder['audio_succeeded'] += 1
+                    done, _pending = await asyncio.wait(
+                        set(inflight.values()), return_when=asyncio.FIRST_COMPLETED)
+                    for fut in done:
+                        seq, payload = fut.result()
+                        inflight.pop(seq, None)
+                        resolved[seq] = payload
+                    # Emit strictly in seq order so audio.index and chunk.seq stay
+                    # monotonic even though synthesis finished out of order.
+                    while next_seq in resolved:
+                        _emit(next_seq, resolved.pop(next_seq))
+                        next_seq += 1
             finally:
+                for fut in inflight.values():
+                    fut.cancel()
+                if inflight:
+                    await asyncio.gather(*inflight.values(), return_exceptions=True)
                 events.put_nowait({"type": "_audio_done"})
 
         tasks = [asyncio.create_task(_pump_llm()), asyncio.create_task(_pump_audio())]
@@ -727,6 +824,52 @@ class Orchestrator:
         self.state["proactive_count_today"] += 1
         store_message(session_id, "assistant", text, "proactive")
         return TurnResult(text=text, emotion=detect_emotion(text), proactive=True)
+
+    async def self_topic_turn(self, *, session_id: str, idle_seconds: float) -> TurnResult | None:
+        """F3: open a topic from the character's own taste / worldview / sparks.
+
+        Reuses proactive_turn's authorization and pacing gates and additionally
+        requires config/memory.yaml ``self_evolution.enabled`` (missing = off).
+        The opening is grounded only in the self state plus a surfaced spark,
+        surfacing the oldest latent one when none is surfaced yet. The used spark
+        id rides on ``TurnResult.spark_id`` so the caller can spend it after a
+        successful delivery; persistence stays with the caller (app.py).
+        """
+        cfg = self.pacing["proactivity"]
+        if not manager.enabled:
+            return None
+        now = time.time()
+        if not cfg.get("default_enabled") and not self.state["proactivity_enabled"]:
+            return None
+        if now < float(self.state["proactive_suppressed_until"]):
+            return None
+        if now - float(self.state["last_proactive_at"]) < float(cfg["min_interval_seconds"]):
+            return None
+        if idle_seconds < float(cfg["only_when_user_recently_idle_seconds"]):
+            return None
+        if self.state["proactive_count_today"] >= int(cfg["max_per_day"]):
+            return None
+        if not (memory_cfg().get("self_evolution") or {}).get("enabled", False):
+            return None
+        from ..memory.diary import surfaced_sparks, surface_next_spark
+        from ..memory.evolution import load_self_state, self_topic_opening
+        sparks = surfaced_sparks()
+        if sparks:
+            spark_id = sparks[0].get("id")
+        else:
+            surfaced = surface_next_spark()
+            if not surfaced:
+                return None
+            sparks = [surfaced]
+            spark_id = surfaced.get("id")
+        text = await self_topic_opening(load_self_state(), sparks, provider=llm)
+        text = text.strip() if isinstance(text, str) else ""
+        if not text:
+            return None
+        self.state["last_proactive_at"] = now
+        self.state["proactive_count_today"] += 1
+        return TurnResult(text=text, emotion=detect_emotion(text), proactive=True,
+                          spark_id=spark_id if isinstance(spark_id, int) else None)
 
     def set_proactivity(self, enabled: bool) -> None:
         self.state["proactivity_enabled"] = enabled
