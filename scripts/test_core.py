@@ -13,10 +13,16 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 
+# This suite deletes memories: force isolation before importing any singleton.
+import os
+os.environ['DB_PATH'] = ':memory:'
+from server.config import settings
+settings.db_path = ':memory:'
+
 from server.dialogue.orchestrator import Orchestrator, detect_emotion, sanitize  # noqa: E402
 from server.memory.manager import manager  # noqa: E402
 from server.memory.store import store  # noqa: E402
-from server.persona import build_system_prompt, demo_turns  # noqa: E402
+from server.persona import build_messages, demo_turns, static_system_prompt  # noqa: E402
 from server.speech.tts import split_for_speech, voice_profile  # noqa: E402
 
 passed, failed = 0, []
@@ -96,20 +102,31 @@ def test_memory_tiers() -> None:
     store.delete_all()
     store.upsert(kind="fact", subject="user", key="a:1", value="用户明确说过喜欢咖啡", source="stated")
     store.upsert(kind="fact", subject="user", key="a:2", value="用户可能喜欢咖啡因饮料", source="inferred")
-    store.upsert(kind="fact", subject="user", key="a:3", value="用户好像不喝牛奶", source="uncertain")
+    store.upsert(kind="fact", subject="user", key="a:3", value="用户好像不喝加牛奶的咖啡", source="uncertain")
     block = manager.context_for("咖啡")
-    check("三档分别注入", "【你明确说过的】" in block and "【我的推测，不一定对】" in block and "【我不确定的】" in block, block)
-    check("不确定项被标注", "不太确定" in block)
+    check("三档分别注入", '"source":"stated"' in block and '"source":"inferred"' in block and '"source":"uncertain"' in block
+          and "【手动保存的】" in block and "【我的推测】" in block and "【我不确定的】" in block, block)
+    check("不确定项被标注", '"provenance":"【我不确定的】需确认"' in block)
     store.delete_all()
 
 
 def test_prompt() -> None:
     print("[prompt]")
-    prompt = build_system_prompt(memory_block="【你明确说过的】\n- 关于你：用户说周五有一场面试")
+    marker = "用户说周五有一场面试"
+    messages = build_messages(memory_block=f"【你明确说过的】\n- 关于你：{marker}")
+    prompt = "\n".join(m["content"] for m in messages)
+    empty = "\n".join(m["content"] for m in build_messages(memory_found=False))
+    static = static_system_prompt()
     for needle in ("绝对不要做的事", "记忆使用规则", "安全底线", "边界", "【你明确说过的】"):
         check(f"提示词包含 {needle}", needle in prompt)
     check("有 few-shot", len(demo_turns()) >= 4)
-    check("长度可控", len(prompt) < 6000, f"len={len(prompt)}")
+    check("长度可控", len(prompt) < 9000, f"len={len(prompt)}")
+    check("无记忆时给出否定信号", "没有任何相关记忆" in empty)
+    check("静态前缀在最前", messages[0]["role"] == "system" and messages[0]["content"] == static)
+    check("注入的记忆不进静态前缀", marker not in static)
+    idx_memory = next((i for i, m in enumerate(messages) if marker in m["content"]), -1)
+    idx_demo = next(i for i, m in enumerate(messages) if m["role"] == "assistant")
+    check("记忆块排在 few-shot 之后（保住缓存前缀）", idx_memory > idx_demo, f"{idx_memory} vs {idx_demo}")
 
 
 def test_tts_split() -> None:

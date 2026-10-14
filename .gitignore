@@ -22,3 +22,20 @@ node_modules/
 .idea/
 .DS_Store
 Thumbs.db
+# Runtime / generated artifacts
+.workbuddy/
+assistant-test-*/
+data/
+*.png
+config/avatar-eye-calibration*.json
+config/*eye-calibration*.json
+web/avatar/*eye-calibration*.json
+web/avatar/*-calibration*.json
+calibration.json
+web/vendor/three/
+web/vendor/three-vrm/
+web/models/
+__pycache__/
+*.pyc
+.ruff_cache/
+

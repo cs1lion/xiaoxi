@@ -62,15 +62,26 @@ async def run_scenario(scenario: dict[str, Any], verbose: bool) -> dict[str, Any
                     manager.forget(row.id)
 
     result = await orchestrator.respond(session_id=session_id, user_text=scenario["user"])
+    await orchestrator.drain()  # 抽取在后台跑，不等它就没有记忆可验
     ok, problems = check(scenario, result.text)
 
     after = scenario.get("checks", {}).get("expect_memory_after")
     if after:
-        rows = [m for m in manager.snapshot() if m["key"] == after["key"]]
-        if not rows:
-            ok, _ = False, problems + ["记忆没有被更新"]
-        elif not any(any(token in rows[0]["value"] for token in after["contains"]) for _ in [0]):
-            ok, _ = False, problems + [f"记忆未纠正: {rows[0]['value']}"]
+        # key 会随归一化变化（游戏:偏好 -> 游戏:文明6），所以按主题和状态查，
+        # 不按字面 key 查——那是在测实现细节，不是在测行为。
+        topic = after["key"].split(":", 1)[0]
+        active = [m for m in manager.snapshot() if m["key"].startswith(topic + ":")]
+        if not active:
+            ok, problems = False, problems + [f"没有主题为「{topic}」的活跃记忆"]
+        elif not any(
+            any(token in row["value"] for token in after["contains"]) for row in active
+        ):
+            ok, problems = False, problems + [f"记忆未纠正: {[r['value'] for r in active]}"]
+        if after.get("old_key_superseded"):
+            old = [m for m in store.list_memories(include_history=True)
+                   if m.key == after["old_key_superseded"]]
+            if not old or old[0].status != "superseded":
+                ok, problems = False, problems + ["旧记忆没有被标记为 superseded"]
 
     if verbose:
         print(f"\n[{scenario['id']}] {scenario['name']}")

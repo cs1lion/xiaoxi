@@ -107,7 +107,8 @@ FAKE_PAYLOADS: dict[str, dict] = {
         "memories": [
             {"kind": "fact", "subject": "user", "key": "称呼",
              "value": "用户希望被叫作老王", "source": "stated", "importance": 0.9},
-        ]
+        ],
+        "expect_key_prefix": "偏好:",
     },
     "一次情绪（不该记）": {
         "memories": [
@@ -115,12 +116,14 @@ FAKE_PAYLOADS: dict[str, dict] = {
              "value": "用户今天很烦躁", "source": "inferred", "importance": 0.3},
             {"kind": "fact", "subject": "user", "key": "噪音:1",
              "value": "好的", "source": "stated", "importance": 0.1},
+            {"kind": "fact", "subject": "user", "key": "噪音:2",
+             "value": "在吗", "source": "stated", "importance": 0.6},
         ]
     },
     "寒暄（不该记）": {
         "memories": [
             {"kind": "episode", "subject": "user", "key": "寒暄",
-             "value": "在吗", "source": "stated", "importance": 0.1},
+             "value": "你好", "source": "stated", "importance": 0.6},
         ]
     },
     "纠正旧信息（应产生覆盖）": {
@@ -197,6 +200,7 @@ async def run_case(case: dict, *, show_raw: bool, dry: bool) -> dict:
             dump("✗ 被规则丢弃", drops)
     else:
         items = await extract_memories(case["user"], case["assistant"], trace=trace)
+        drops = trace.get("drops") or []
 
         if trace.get("error"):
             print(f"\n  ✗ 模型调用失败：{trace['error']}")
@@ -204,8 +208,8 @@ async def run_case(case: dict, *, show_raw: bool, dry: bool) -> dict:
         if show_raw:
             print("\n    原始 JSON:", json.dumps(trace.get("payload"), ensure_ascii=False)[:800])
         dump("② 规则解析后（要入库的候选）", items)
-        if trace.get("dropped"):
-            print(f"    ⚠ 另有 {trace['dropped']} 条被规则丢弃（超类上限/重复key/寒暄/过长）")
+        if drops:
+            dump("✗ 被规则丢弃（不是模型没抽到，是规则挡下的）", drops)
         print(f"    耗时 {trace.get('elapsed_ms')} ms")
 
     saved = []
@@ -236,6 +240,10 @@ async def run_case(case: dict, *, show_raw: bool, dry: bool) -> dict:
         for needle in case.get("expect_keys", []):
             if not any(needle in (i["key"] + i["value"]) for i in items):
                 problems.append(f"没提到「{needle}」")
+        prefix = case.get("expect_key_prefix")
+        if prefix and not any(i["key"].startswith(prefix) for i in items):
+            got = [i["key"] for i in items] or "(空)"
+            problems.append(f"key 前缀应为 {prefix}，实际 {got}")
         if case.get("expect_supersede"):
             old = store.history_for_key("游戏:偏好")
             if sum(1 for m in old if m.status == "superseded") < 1:

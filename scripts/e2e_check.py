@@ -26,16 +26,26 @@ WS_URL = "ws://127.0.0.1:8000/ws"
 PHRASE = "我昨天说的那个面试，今天下午就要开始了。"
 
 
-async def collect(ws, timeout: float = 90.0) -> list[dict]:
+async def collect(ws, timeout: float = 90.0) -> tuple[list[dict], str]:
+    """Drain events until `done`. Returns (events, full text assembled from deltas)."""
     events: list[dict] = []
+    text = ""
     try:
         while True:
             raw = await asyncio.wait_for(ws.recv(), timeout=timeout)
-            events.append(json.loads(raw))
-            if events[-1]["type"] in ("done", "error", "interrupted"):
-                return events
+            event = json.loads(raw)
+            events.append(event)
+            kind = event["type"]
+            if kind == "text_delta":
+                text += event.get("delta", "")
+            elif kind == "text":
+                text = event.get("text", text)
+            elif kind in ("done", "error", "interrupted"):
+                if kind == "done" and event.get("text"):
+                    text = event["text"]
+                return events, text
     except asyncio.TimeoutError:
-        return events
+        return events, text
 
 
 async def main() -> int:
@@ -71,11 +81,11 @@ async def main() -> int:
             print("ready:", hello["persona"], hello["session_id"])
 
             await ws.send(json.dumps({"type": "text", "text": "我面试完了。"}))
-            events = await collect(ws)
-            reply = next((e for e in events if e["type"] == "text"), None)
+            events, reply_text = await collect(ws)
             audio = [e for e in events if e["type"] == "audio"]
-            print(f"text reply: {reply['text'] if reply else None!r} emotion={reply and reply['emotion']} audio_chunks={len(audio)}")
-            if not reply or not reply["text"]:
+            emotion = next((e["emotion"] for e in events if e["type"] == "emotion"), None)
+            print(f"text reply: {reply_text!r} emotion={emotion} audio_chunks={len(audio)}")
+            if not reply_text:
                 problems.append("文本回复为空")
             if not audio:
                 problems.append("没有返回音频")
@@ -111,17 +121,32 @@ async def main() -> int:
                     await ws.send(pcm[i : i + 3200])
                     await asyncio.sleep(0.01)
                 await ws.send(json.dumps({"type": "audio_end"}))
-                events = await collect(ws)
+                events, reply_text = await collect(ws)
                 asr = next((e for e in events if e["type"] == "asr"), None)
-                reply = next((e for e in events if e["type"] == "text"), None)
                 print(f"asr: {asr and asr['text']!r} ({asr and asr['duration_ms']}ms)")
-                print(f"voice reply: {reply and reply['text']!r}")
+                print(f"voice reply: {reply_text!r}")
                 if not asr or not asr["text"]:
                     problems.append("语音识别为空")
                 elif "面试" not in asr["text"]:
                     problems.append(f"识别内容不对: {asr['text']}")
-                if not args.skip_memory_recall and "面试" not in (reply and reply["text"] or ""):
-                    problems.append("没有接上之前的记忆")
+                if not reply_text:
+                    problems.append("语音回复为空")
+                # 模型"有没有接上记忆"是采样行为，属于 eval 层（eval/scenarios.json 的 S2），
+                # 不能放在集成测试里：同一句话每次用词都不同，关键词断言会
+                #   假失败 —— 召回成功、回复也确实接了话头，只是换了个说法；
+                #   假通过 —— 召回失败，但回复里碰巧出现"面试"二字。
+                # 所以这里只断言确定性契约：这条记忆对这句问话必须召回得到。
+                # 断言的是检索/组装这一层，不碰模型生成，同输入必然同结果。
+                if not args.skip_memory_recall:
+                    from server.memory.retriever import retriever as _rt
+                    hits = _rt.search(PHRASE, subject="user")
+                    keys = {m.key for m, _ in hits}
+                    print("recall:", [(m.key, round(sc, 3)) for m, sc in hits])
+                    if "计划:周五面试" not in keys:
+                        problems.append(
+                            "记忆召回失败：问句 %r 未召回 key=计划:周五面试，实际 %r"
+                            % (PHRASE, sorted(keys) or [])
+                        )
 
         # 删除是硬删除：查不到、也搜不到
         deleted = await client.delete(f"/api/memories/{memory_id}")
