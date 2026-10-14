@@ -73,6 +73,14 @@ function faceShadingStatus() {
     : value.enabled ? '适度降低脸部亮度，保留暖光；可关闭查看原版鼻嘴细节。'
     : '原版脸部亮度 · 开启后可对照鼻子和嘴部细节。';
 }
+function hairPhysicsStatus() {
+  const value = avatar.svg.getHairPhysics?.();
+  $('hair-physics').disabled = !value?.available;
+  $('hair-physics-strength').disabled = !value?.available;
+  $('hair-physics-status').textContent = !value?.available ? '当前模型没有适配头发弹簧骨。'
+    : !value.enabled ? '头发弹簧骨已关闭 · 开启后观察前发与短束跟随。'
+    : `前发与短束随动作轻微跟随 · 当前幅度 ${Math.round(value.strength * 100)}%。`;
+}
 function gestureCalibrationStatus() {
   const value = avatar.svg.getGestureCalibration?.();
   $('gestureCalibration').disabled = !value?.available;
@@ -134,6 +142,7 @@ async function switchRenderer() {
     await avatar.setRenderer(select.value, modelUrl);
     avatar.svg.setPresentation?.($('presentation').checked);
     avatar.svg.setFaceShading?.($('face-shading').checked);
+    avatar.svg.setHairPhysics?.($('hair-physics').checked, Number($('hair-physics-strength').value) / 100);
     avatar.svg.setEyeFocus?.($('eyeFocus').checked);
     avatar.svg.setPerformanceTransitions?.($('poseTransitions').checked);
     avatar.svg.setGestureCalibration?.($('gestureCalibration').checked);
@@ -141,6 +150,7 @@ async function switchRenderer() {
     avatar.svg.setFingerRelaxation?.($('fingerRelaxation').checked);
     avatar.svg.setBodyCoordination?.($('bodyCoordination').checked);
     faceShadingStatus();
+    hairPhysicsStatus();
     gestureCalibrationStatus();
     gesturePathStatus();
     fingerRelaxationStatus();
@@ -507,6 +517,15 @@ try {
   async function audioContext() { ctx ||= new AudioContext(); await ctx.resume(); return ctx; }
   $('presentation').onchange = () => avatar.svg.setPresentation?.($('presentation').checked);
   $('face-shading').onchange = () => { avatar.svg.setFaceShading?.($('face-shading').checked); faceShadingStatus(); };
+  $('hair-physics').onchange = () => {
+    avatar.svg.setHairPhysics?.($('hair-physics').checked, Number($('hair-physics-strength').value) / 100);
+    hairPhysicsStatus();
+  };
+  $('hair-physics-strength').oninput = () => {
+    $('hair-physics-strength-value').value = $('hair-physics-strength').value + '%';
+    if ($('hair-physics').checked) avatar.svg.setHairPhysics?.(true, Number($('hair-physics-strength').value) / 100);
+    hairPhysicsStatus();
+  };
   for (const [id,name] of [['gestureWave','wave'],['gesturePalm','palm'],['gestureDeny','deny'],['gestureSelf','self']]) {
     $(id).onclick = async () => { if (transitionDemo) stopScenario(); avatar.svg.setHandPosePreview?.(null); await audioContext(); $('eyeFocus').checked = false; avatar.svg.setEyeFocus?.(false); avatar.performance.preview(name,ctx); };
   }

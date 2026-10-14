@@ -53,6 +53,8 @@ export class VrmRig {
     this.handPosePreview = null;
     this.bodyCoordinationEnabled = true;
     this.faceShadingEnabled = true;
+    this.hairPhysicsEnabled = true;
+    this.hairPhysicsStrength = 1;
     this.poseTransition = new PoseTransition();
     this._generation = 0;
     this._state = null;
@@ -197,6 +199,7 @@ export class VrmRig {
           state.springBones.push({ node: joint.bone, rest: joint.bone.quaternion.clone() });
         }
       }
+      this._captureHairPhysics(state);
       resize();
       this.draw({}, 0);
       return this;
@@ -270,6 +273,46 @@ export class VrmRig {
   getFaceShading() {
     const available = !!this._state?.faceShading?.length;
     return { available, enabled: available && this.faceShadingEnabled };
+  }
+
+  // Front/side hair spring bones are the only hair chains in the hair candidate.
+  // Keep their loaded settings as originals and always recompute from them.
+  _captureHairPhysics(state) {
+    state.hairPhysics = [];
+    for (const joint of state.vrm?.springBoneManager?.springBones || []) {
+      if (!joint?.bone?.name?.includes('hair') || !joint.settings) continue;
+      state.hairPhysics.push({ joint, settings: {
+        stiffness: joint.settings.stiffness,
+        gravityPower: joint.settings.gravityPower,
+        dragForce: joint.settings.dragForce,
+        hitRadius: joint.settings.hitRadius,
+      } });
+    }
+    this._applyHairPhysics(state);
+  }
+
+  _applyHairPhysics(state) {
+    const strength = this.hairPhysicsEnabled ? this.hairPhysicsStrength : 0;
+    for (const { joint, settings } of state?.hairPhysics || []) {
+      // Disabled means rigid: a very large stiffness pins the bone to its rest
+      // axis and zero gravity removes the droop, matching the pre-physics look.
+      joint.settings.stiffness = strength > 0 ? settings.stiffness * strength : 1e6;
+      joint.settings.gravityPower = settings.gravityPower * strength;
+      joint.settings.dragForce = settings.dragForce;
+      joint.settings.hitRadius = settings.hitRadius;
+    }
+  }
+
+  setHairPhysics(enabled, strength) {
+    this.hairPhysicsEnabled = !!enabled;
+    if (Number.isFinite(strength)) this.hairPhysicsStrength = Math.max(0, Math.min(2, strength));
+    this._applyHairPhysics(this._state);
+  }
+
+  getHairPhysics() {
+    const available = !!this._state?.hairPhysics?.length;
+    return { available, enabled: available && this.hairPhysicsEnabled,
+      strength: available && this.hairPhysicsEnabled ? this.hairPhysicsStrength : 0 };
   }
 
   // Multiplicative tint, not replacement textures; only the licensed Seed-san asset.

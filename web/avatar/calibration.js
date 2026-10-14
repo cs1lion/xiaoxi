@@ -62,6 +62,7 @@ function appearance(rig) {
   });
   return { presentation: !!s?.presentation, eyeFocus: !!s?.eyeFocus, palette: s?.palette || 'original',
     faceShading: rig?.getFaceShading?.() || null,
+    hairPhysics: rig?.getHairPhysics?.() || null,
     lights: ['ambient', 'key', 'fill'].map(name => ({ name, intensity: rounded(s?.[name]?.intensity),
       color: array(s?.[name]?.color), position: array(s?.[name]?.position) })),
     materials: [...materials.values()], svgLook: rig?.look ? jsonCopy(rig.look) : null };
@@ -191,7 +192,7 @@ export class AvatarCalibration {
       running: !!a._raf, eyeFrame: a.eyeFrame, storeObject: a.store, store: saveFields(a.store), drivers,
       avatar: Object.fromEntries(['clock', 'gazeMode', 'eyeHighlight', '_eyeBlinkTime', '_lookAroundTime', '_lookAroundIndex',
         'reducedMotion', 'gestureScale', 'dialogueIntentMode', 'dialogueFrame', 'dialogueExpressionFrame'].map(key => [key, a[key]])),
-      renderer: Object.fromEntries(['performance', 'reduceGestures', 'performanceTransitionsEnabled', 'gestureCalibrationEnabled', 'gesturePathsEnabled', 'fingerRelaxationEnabled', 'handPosePreview', 'bodyCoordinationEnabled', 'faceShadingEnabled', 'eyeBrowMode', 'eyeLidMode', 'secondaryScale', 'secondary', 'bgLevel', 'hairT'].map(key => [key,
+      renderer: Object.fromEntries(['performance', 'reduceGestures', 'performanceTransitionsEnabled', 'gestureCalibrationEnabled', 'gesturePathsEnabled', 'fingerRelaxationEnabled', 'handPosePreview', 'bodyCoordinationEnabled', 'faceShadingEnabled', 'hairPhysicsEnabled', 'hairPhysicsStrength', 'eyeBrowMode', 'eyeLidMode', 'secondaryScale', 'secondary', 'bgLevel', 'hairT'].map(key => [key,
         { present: own(rig, key), value: rig[key] }])),
       poseTransition: rig.poseTransition ? { object: rig.poseTransition, fields: {
         ...saveFields(rig.poseTransition),
@@ -207,6 +208,7 @@ export class AvatarCalibration {
       expressions: nativeSnapshot(rig).expressionWeights,
       faceMaterials: (s?.faceShading || []).map(({ material }) => ({ material,
         color: material.color.clone(), shadeColorFactor: material.shadeColorFactor.clone() })),
+      hairPhysics: (s?.hairPhysics || []).map(({ joint, settings }) => ({ joint, settings: { ...settings } })),
       presentation: s?.presentation, eyeFocus: s?.eyeFocus,
       lights: ['ambient', 'key', 'fill'].map(key => ({ key, object: s?.[key], intensity: s?.[key]?.intensity,
         color: s?.[key]?.color?.clone(), position: s?.[key]?.position?.clone() })) };
@@ -322,6 +324,12 @@ export class AvatarCalibration {
       }
       for (const { material, color, shadeColorFactor } of saved.faceMaterials) {
         material.color.copy(color); material.shadeColorFactor.copy(shadeColorFactor);
+      }
+      for (const { joint, settings } of saved.hairPhysics) {
+        joint.settings.stiffness = settings.stiffness;
+        joint.settings.gravityPower = settings.gravityPower;
+        joint.settings.dragForce = settings.dragForce;
+        joint.settings.hitRadius = settings.hitRadius;
       }
       const camera = cameraOf(rig);
       if (camera && saved.camera) {
