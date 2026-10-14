@@ -54,7 +54,7 @@ sequenceDiagram
     O->>S: interrupted（此后该轮零 audio）
     S->>C: interrupted / playback_stopped
     C->>C: 立即丢弃未播放队列与未完成解码
-    O->>S: done（delivery 计数口径不变）
+    Note over O,C: 被打断的轮次以 interrupted 终止，不再发 done；<br/>只有自然收尾的轮次才发 done（delivery 计数口径不变）
 ```
 
 客户端播放队列状态机：
