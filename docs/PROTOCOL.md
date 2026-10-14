@@ -100,6 +100,7 @@ uv run python scripts/check_protocol.py
 - `audio_end` / `barge_in` 携带所作用的ID；旧ID不能取消新录音。二进制帧属于当前录音，WS保持顺序，重复 `audio_end` 不重复识别。
 - `recording/asr/thinking/emotion/text_delta/audio/done/error/interrupted/playback_stopped/assistant_result/memory_notice` 均以捕获的轮次标记发送。前端在调用形象层之前过滤过期ID。`ready/config_ack` 为连接级事件。
 - 主动检查仅在服务端空闲启动，先发 `turn_started`（服务端ID、`source: proactive`）；客户端仅本地也空闲时接受。
+- **主动搭话心跳（打磨轮 2026-10-14）**：前端在 `/ws` 连接打开后启动约 45 秒一轮的心跳，本地空闲（页面可见、未录音、无活动轮次、播放队列空、麦克风挂起为假）且用户已授权主动发言时发送 `{"type":"proactive_check"}`；断开时清除。服务端 `proactive_check` 分支的守卫（忙碌、practice/experience 关闭）不变，仍是最终门。没有这条心跳线，主动发言与自进化均不可达。
 - ASR在独立任务中等待，WS接收循环仍可处理新start/取消。空输入或空转写使用 `asr` 空文本加 `done`；错误终结该轮。
 - `done` 表示生成结束，不表示浏览器播放完成。客户端预解码下一段但按序播放，仍需等待播放队列idle，静默TTS则直接完成。
 - 服务端拒绝超过30秒的PCM16单声道输入并清空缓存，发 `error` / `code: audio_too_long`；前端上限29.5秒含预录。
@@ -170,6 +171,14 @@ uv run python scripts/check_protocol.py
 - 打断契约：客户端 `barge_in`（携带 `turn_id`）之后，服务端必须取消未完成的合成，且不再发送该轮任何 `audio`；前端 `PlaybackQueue` 收到 `interrupted` / `playback_stopped` 必须立即丢弃未播放队列与未完成解码，不等自然结束。迟到解码不得复活旧轮（沿用第七节规则）。
 - `performance` 锚点规则不变：偏移相对当前 `audio.text`（Unicode 码点、含头不含尾），跨微句的锚点省略但保留 `llm` 来源。呼吸停顿不产生额外 `audio` 事件，只通过 `chunk` 字段表达。
 - `timeline.js` 只读 `chunk.pause_after_ms` / `breath` 安排口型放松与眨眼/微表情；停顿期间 viseme 时间轴继续按音频时长推进，停顿本身不摊平后续词的时序。`audio.text` 仍是口型地基，不能删。
+
+### 首包提速与默认值（打磨轮 2026-10-14）
+
+- **首句激进切分（Fast First-Chunk）**：每轮回复的第 1 个微句采用激进策略（满 6~12 字且遇到逗号/句号/语气词即切），确保用户说完后最快听到首包音频；第 2 个微句起恢复正常目标长度（12–35 字）。`chunk.seq` 仍从 0 起算，`of` 语义不变。
+- **思考期预演（Thinking Pre-Act）**：`thinking` 到首个 `audio` 之间，前端应播放自然的思考微表情（轻眨眼 + 视线微移/轻微歪头），消除干等的木偶感。纯前端行为，无新事件；`thinking` 必须先于首包 `audio` 的时序不变。
+- **段间停顿由播放调度消费**：`chunk.pause_after_ms` / `breath` 的权威消费方是播放队列（段间停顿 + 停顿期间口型放松 + breath 点轻眨眼），`timeline.js` 只负责把字段暴露出来。前端未消费时不得卡播。
+- **固定回复交付器微句化**：`deliver_reply`（主动搭话、星图讲述 `narrate`、助手结果）与流式路径使用同一微句切分与 `chunk` 字段； narrate/self_topic 因此同样获得呼吸停顿。`done.delivery` 计数口径不变。
+- **默认值**：`config/pacing.yaml` 的 `speech.enabled` 与 `config/memory.yaml` 的 `self_evolution.enabled` 默认 `true`；任一关闭时对应行为回到打磨前状态（60 字顺序合成 / 无自进化）。
 
 ## 十二、后台自进化与主动开口（F3）
 

@@ -66,6 +66,12 @@ change is verified before it is called done.
 - If two roles need the same file, the earlier committed task keeps ownership and
   the later one goes through Role 0.
 
+## 打磨轮临时授权（2026-10-14 起，至 v0.7 打标止）
+
+- **Role 2 临时获得 `web/avatar/**` 全量写权限**（含 `drivers/`、`render/`、`timeline.js`、`index.js`、测试），以及 `web/voice/playback.js` 与其测试 `web/voice/playback.test.mjs`（微句段间停顿调度的权威位置）、`config/avatar.yaml`（舞台打光与材质参数）。`web/avatar/drivers/` 平时的"无主"状态在此期间归 Role 2。`web/voice/` 其余文件仍归 Role 3。
+- **Role 3 临时获得 `web/app.js` 与 `web/index.html` 写权限**，用于界面大瘦身与胶囊输入框重构；提交前必须经 Role 0 做 Integration Check（检查点：协议字段读取不漂移、既有 WS case 不回归、check_protocol 第四类通过）。Role 0 已于打磨启动前在 app.js 落入主动搭话心跳与两个默认开关，Role 3 从该状态基础上改。
+- 临时授权到期或打标 `v0.7` 后自动收回，白名单恢复本文上方正文。越权编写按 Global Rules 第 2 条处理。
+
 ## 协作流程（三个仪式，缺一不可）
 
 ### 1. 开工前协议红线确认（Protocol Red-Line Check）
