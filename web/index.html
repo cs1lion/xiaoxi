@@ -76,10 +76,12 @@
       <div class="connection" role="status"><span id="statusDot" class="dot"></span><span id="status">连接中</span></div>
       <span class="spacer"></span>
       <button class="ghost" id="writingToggle" aria-expanded="false" aria-controls="work-notes">一起写</button>
+      <button class="ghost" id="starmapToggle" aria-expanded="false" aria-controls="starmapMount">星图</button>
       <button class="ghost" id="bargeToggle" aria-pressed="false" title="开启后检测开口与停顿；确认开口才上传音频。建议戴耳机。">连续对话：关</button>
       <button class="ghost" id="stopBtn" title="停止当前录音与回复；连续模式仍在本地监听，关闭连续对话可释放麦克风。不会撤销已执行的操作。">停止回复</button>
       <button class="ghost" id="resumeSpeechBtn" hidden title="只续播刚被打断的当前句剩余音频，不重做任务；90秒内有效。">续播被打断句</button>
     </header>
+    <section id="starmapMount" class="starmap-mount" hidden aria-label="星图记忆"></section>
     <div class="room-label"><span class="room-line"></span> 一段只属于你的时间 <span aria-hidden="true">✧</span></div>
     <div class="avatar-stage" id="avatarStage" aria-hidden="true"></div>
     <p id="interactionState" class="interaction-state">正在连接…</p>

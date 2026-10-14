@@ -20,6 +20,7 @@ import { mountEditorInsightVoice } from './voice/editor-insight.js';
 import { mountEditorDiscussion } from './voice/editor-discussion.js';
 import { bootAssistant, showAssistantResult } from "./assistant.js";
 import { bootCompanion } from './companion.js';
+import { mountStarmap } from './starmap/index.js';
 import { mountExperience } from './experience.js';
 import { appendContextUsage } from './context-usage.js';
 bootAssistant().catch(error => console.warn('助手面板启动失败', error));
@@ -251,6 +252,7 @@ const playback = new PlaybackQueue({
         // Audio-only continuation intentionally does not replay prior gestures.
         performance: item.resumed ? { version: 1, source: 'llm', cues: [] } : item.performance,
         wordTimings: item.resumed ? undefined : item.word_timings,
+        chunk: item.resumed ? undefined : item.chunk,
       });
       idleStatus();
     } catch (error) { cleanup(); try { source.stop(); } catch (_) {} throw error; }
@@ -291,6 +293,11 @@ editorInsightVoice = mountEditorInsightVoice({
     resetDuplex(); idleStatus();
   },
   retireServerTurn: id => turns.retire(id),
+});
+const starmap = mountStarmap(el('starmapMount'), {
+  send,
+  stopTurn: () => cancelTurn(),
+  isIdle: () => !turns.id && !playback.busy && !recording,
 });
 const discussionBanner = document.createElement('section');
 discussionBanner.id = 'editorDiscussion'; discussionBanner.className = 'editor-discussion';
@@ -629,8 +636,9 @@ ws.onmessage = async (event) => {
   }
   if (!msg || typeof msg !== "object" || typeof msg.type !== "string") return;
   if (editorInsightVoice?.blocksServer(msg)) return;
+  starmap?.onMessage?.(msg);
   if (!turns.accept(msg, !recording && !manualHeld && !microphone.pending && !playback.busy)) return;
-  if (msg.type === 'turn_started' && !baselineTurns.has(msg.turn_id)) registerBaselineTurn(msg.turn_id, 'proactive');
+  if (msg.type === 'turn_started' && !baselineTurns.has(msg.turn_id)) registerBaselineTurn(msg.turn_id, msg.source === 'narration' ? 'narration' : 'proactive');
   dialogueReview?.event({ ...msg, meta: msg.type === 'done' ? { textStatus: msg.delivery?.text_status, audioStatus: msg.delivery?.audio_status } : undefined });
   avatar.onMessage(msg);
   switch (msg.type) {

@@ -47,6 +47,9 @@ from .assistant.editor_insights import EditorInsightService
 from .assistant.editor_insights_api import create_editor_insights_router
 editor_insights = EditorInsightService(llm, enabled=lambda: manager.enabled)
 app.include_router(create_editor_insights_router(editor_insights, tts))
+from .memory.api import create_diary_router, create_starmap_router
+app.include_router(create_diary_router(manager))
+app.include_router(create_starmap_router(manager))
 _scheduler_task: asyncio.Task | None = None
 
 
@@ -406,6 +409,77 @@ async def _confirm_action(conn: Connection, turn: VoiceTurn, event: dict[str, An
                                 'terminal': True})
 
 
+async def _narrate_turn(conn: Connection, turn: VoiceTurn, node_id: str) -> None:
+    """Star-map narration: one bounded retelling of a memory node (protocol section 13)."""
+    from .dialogue.orchestrator import detect_emotion, store_message
+    from .memory.starmap import narrate_opening, starmap_node
+    try:
+        if not conn.current(turn):
+            return
+        if not manager.enabled:
+            await conn.finish(turn, {"type": "error", "code": "narrate_unavailable",
+                                     "message": "记忆已关闭，打开记忆后就能听小溪讲了。", "terminal": True})
+            return
+        record = starmap_node(manager, node_id)
+        if record is None:
+            await conn.finish(turn, {"type": "error", "code": "narrate_unavailable",
+                                     "message": "这条记忆已经不在了。", "terminal": True})
+            return
+        await conn.send_turn(turn, {"type": "turn_started", "source": "narration"})
+        await conn.send_turn(turn, {"type": "thinking"})
+        text = await narrate_opening(record, llm)
+        if not conn.current(turn):
+            return
+        if not text:
+            await conn.finish(turn, {"type": "error", "code": "narrate_unavailable",
+                                     "message": "这条记忆暂时讲不出来。", "terminal": True})
+            return
+        store_message(conn.session_id, "assistant", text, "narration")
+        await _present_reply(conn, turn, text, detect_emotion(text))
+    except asyncio.CancelledError:
+        await conn.finish(turn, {"type": "interrupted"})
+        raise
+    except Exception as exc:
+        await conn.finish(turn, {"type": "error", "message": str(exc), "terminal": True})
+
+
+async def _maybe_diary(conn: Connection) -> None:
+    """Background episodic diary synthesis (protocol section 10); never blocks a turn."""
+    if not manager.enabled:
+        return
+    try:
+        from .memory.diary import diary_notice_payload, synthesize_diary
+        result = await synthesize_diary(provider=llm)
+        if result is None or conn.closed:
+            return
+        payload = diary_notice_payload(result.get("notice_items"))
+        if payload is not None:
+            await conn.send(payload)
+    except asyncio.CancelledError:
+        raise
+    except Exception:
+        return
+
+
+async def _maybe_self_evolution(conn: Connection) -> None:
+    """One bounded idle self-evolution cycle; events are quiet and connection-level."""
+    try:
+        from .assistant.loop import SelfEvolutionCycle
+        from .memory.evolution import self_evolution_cfg, self_evolution_payload
+        if not self_evolution_cfg().get("enabled"):
+            return
+        outcome = await SelfEvolutionCycle(provider=llm).run(
+            idle_seconds=time.time() - conn.last_spoke_at)
+        for change in outcome.get("events") or []:
+            payload = self_evolution_payload(change)
+            if payload is not None and not conn.closed:
+                await conn.send(payload)
+    except asyncio.CancelledError:
+        raise
+    except Exception:
+        return
+
+
 async def _run_turn(conn: Connection, text: str, mode: str, turn: VoiceTurn | None = None) -> None:
     if turn is None:
         turn = await conn.begin()
@@ -525,9 +599,11 @@ async def _run_turn(conn: Connection, text: str, mode: str, turn: VoiceTurn | No
                     payload.setdefault("message", "error")
                     payload["terminal"] = True
                 await conn.finish(turn, payload)
+                conn.spawn(_maybe_diary(conn))
                 return
             await conn.send_turn(turn, payload)
         # A provider that ends without a terminal event must not leave a live turn.
+        conn.spawn(_maybe_diary(conn))
         await conn.finish(turn, {"type": "done", "text": "", "latency_ms": 0})
     except asyncio.CancelledError:
         await conn.finish(turn, {"type": "interrupted"})
@@ -569,16 +645,29 @@ async def _transcribe_turn(conn: Connection, turn: VoiceTurn, data: bytes) -> No
 
 async def _proactive_check(conn: Connection, revision: int) -> None:
     try:
+        await _maybe_self_evolution(conn)
         result = await orchestrator.proactive_turn(
             session_id=conn.session_id, idle_seconds=time.time() - conn.last_spoke_at,
         )
+        source = "proactive"
+        self_topic_turn = getattr(orchestrator, "self_topic_turn", None)
+        if result is None and self_topic_turn is not None:
+            result = await self_topic_turn(
+                session_id=conn.session_id, idle_seconds=time.time() - conn.last_spoke_at,
+            )
+            source = "self_topic"
         # busy includes this check itself; revision fences even a user turn that
         # has already finished or was cancelled while the provider ignored cancel.
         if conn.closed or conn.revision != revision or not result:
             return
         turn = await conn.begin()
-        await conn.send_turn(turn, {"type": "turn_started", "source": "proactive"})
+        await conn.send_turn(turn, {"type": "turn_started", "source": source})
         await _run_turn(conn, result.text, "proactive", turn)
+        if source == "self_topic":
+            spark_id = getattr(result, "spark_id", None)
+            if spark_id:
+                from .memory.diary import spend_spark
+                spend_spark(store, spark_id)
     except asyncio.CancelledError:
         raise
     except Exception:
@@ -654,6 +743,17 @@ async def websocket_endpoint(ws: WebSocket) -> None:
             elif kind == "barge_in":
                 if conn.matches(event) or (conn.turn is None and event.get("turn_id") is None):
                     await conn.cancel(playback=True)
+            elif kind == "narrate":
+                node_id = event.get("node_id")
+                if not isinstance(node_id, str) or not 0 < len(node_id) <= 100:
+                    continue
+                if conn.busy:
+                    # 连接级错误，不回显 turn_id：客户端挂在 TurnGate 之前消费（协议第十三节）
+                    await conn.send({"type": "error", "code": "narrate_busy", "recoverable": True,
+                                     "message": "小溪正在讲别的，稍等一下再点。"})
+                    continue
+                turn = await conn.begin(event.get("turn_id"))
+                conn.spawn(_narrate_turn(conn, turn, node_id))
             elif kind == 'assistant_confirm':
                 if (type(event.get('approve')) is not bool
                         or any(not isinstance(event.get(key), str) or not 0 < len(event[key]) <= 100

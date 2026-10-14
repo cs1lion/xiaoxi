@@ -66,7 +66,11 @@ async def noop(*args, **kwargs):
 def load_ws():
     path = Path(__file__).resolve().parents[1] / "server" / "app.py"
     tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
-    names = {"VoiceTurn", "Connection", "_present_reply", "_confirm_action", "_run_turn", "_transcribe_turn", "_proactive_check", "websocket_endpoint", "proactive_socket"}
+    # _maybe_diary / _maybe_self_evolution / _narrate_turn 是 F1/F3/F4 集成新增的
+    # 后台函数，被 _run_turn / _proactive_check / websocket_endpoint 引用；编译进来
+    # 后它们在隔离环境里经自有 try/except 自然降级（懒导入失败即返回），否则调用处
+    # 会 NameError 并被 _proactive_check 的 except 吞掉，proactive 流程静默中止。
+    names = {"VoiceTurn", "Connection", "_present_reply", "_confirm_action", "_run_turn", "_transcribe_turn", "_proactive_check", "websocket_endpoint", "proactive_socket", "_maybe_diary", "_maybe_self_evolution", "_narrate_turn"}
     nodes = []
     for node in tree.body:
         if isinstance(node, (ast.ClassDef, ast.AsyncFunctionDef)) and node.name in names:
