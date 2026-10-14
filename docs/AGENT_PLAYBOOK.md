@@ -66,6 +66,36 @@ change is verified before it is called done.
 - If two roles need the same file, the earlier committed task keeps ownership and
   the later one goes through Role 0.
 
+## 协作流程（三个仪式，缺一不可）
+
+### 1. 开工前协议红线确认（Protocol Red-Line Check）
+
+派单后、写第一行业务代码前，执行 Agent 必须在自己的第一条回复里回答：
+
+- 现有 `docs/PROTOCOL.md` 契约（对应章节列在派单 Prompt 里）对本次任务**够不够用**？
+- 如果需要新字段 / 新事件 / 新路由，逐个写出来，并说明为什么现有契约装不下。
+
+结论只有两种：**契约够用**（附上你将用到的字段清单）或 **需要补充**（输出
+`[PROTOCOL_REQUEST]` 并停工等 Role 0）。Role 0 未确认前不动业务代码。这一步拦
+ 掉绝大多数"前端捏造字段、后端另起炉灶"的接口不匹配。
+
+### 2. 局部集成前的对齐演练（Integration Check）
+
+完成后**不直接提交**。把对接面交给 Role 0 与对方角色对一遍，字段名、类型、
+取值集合全部对上才允许合并：
+
+| 对接面 | 产出方 | 消费方 | 核对内容 |
+|---|---|---|---|
+| `bias_block()` 签名与返回 | Role 1 | Role 2 | 空输入行为、上限、边界包裹 |
+| `/api/memory/starmap` 请求/响应 | Role 1 | Role 3 | query 参数、nodes/edges 字段、404/空图行为 |
+| `audio.chunk` 字段与 narrate 链路 | Role 2 | Role 3 | seq/index 单调、打断后零 audio、`narrate_busy` |
+
+### 3. 里程碑打标（Milestone Tagging）
+
+每个 F 目标测试全绿并通过集成对齐后，Role 0 **立即**打小 tag（`v0.6-phase2-diary`
+/ `v0.6-phase2-speech-chunking` / `v0.6-phase2-self-evolution` / `v0.6-phase2-starmap`），
+并在 `docs/TASKS.md` 勾选对应条目。演进必须是阶梯式上升，不是混沌式叠加。
+
 ## Definition of done (every role)
 
 1. Code complete within owned files only.
@@ -75,4 +105,8 @@ change is verified before it is called done.
    before merge.
 5. Commit message references the phase-2 feature id (F1 diary / F2 long voice /
    F3 self-evolution / F4 star-map).
+6. 开工前完成了协议红线确认，结论记录在汇报里。
+7. `docs/TESTING.md` 里属于自己角色的黄金命令全部跑通，结果附在汇报里。
+8. 对接面 payload / 类型签名写进汇报，供 Role 0 做 Integration Check。
+9. 状态变更（进行中 / 完成 / 阻塞）报告给 Role 0，由 Role 0 更新 `docs/TASKS.md`。
 
