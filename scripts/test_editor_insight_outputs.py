@@ -102,7 +102,7 @@ class OutputTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(request['options']['max_tokens'], 6144)
             self.assertEqual(request['options']['max_attempts'], 1)
             self.assertIs(request['options']['json_mode'], True)
-        self.assertEqual(self.service.MODEL_TIMEOUT_SECONDS, 25)
+        self.assertEqual(self.service.MODEL_TIMEOUT_SECONDS, 45)
         self.assertEqual(self.service.MAX_DISCUSSION_REPLY, 800)
 
     async def test_medium_reasoning_is_explicit_only_for_exact_step_flash_model(self):
@@ -126,7 +126,7 @@ class OutputTests(unittest.IsolatedAsyncioTestCase):
                         self.assertNotIn('reasoning_effort', options)
                     self.assertEqual(options['max_tokens'], 6144)
                     self.assertEqual(options['max_attempts'], 1)
-                self.assertEqual(self.service.MODEL_TIMEOUT_SECONDS, 25)
+                self.assertEqual(self.service.MODEL_TIMEOUT_SECONDS, 45)
 
     async def test_replacement_field_is_labelled_by_the_service(self):
         insight = await self.insight()
@@ -407,6 +407,34 @@ class OutputTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(reply['text'].startswith('问题在归属：'))
         self.assertTrue(reply['text'].endswith(REPLACEMENT_LABEL + suggestion))
         self.assertEqual(reply['text'].count(REPLACEMENT_LABEL), 1)
+
+    async def test_requested_length_is_checked_and_reported(self):
+        suggestion = '这两个月不新增现金，养护轮值已有安排，超出范围先暂停确认。'
+        cases = [
+            ('digits_short', '只替换第三段，给100到150字的建议稿。', suggestion),
+            ('chinese_long', '篇幅控制在一百到一百五十字。', suggestion * 6),
+            ('in_range', '只替换第三段，给20到40字的建议稿。', suggestion),
+            ('no_range', '只替换第三段。', suggestion),
+            ('reversed_range', '从100字砍到50字。', suggestion),
+        ]
+        for name, user_text, replacement in cases:
+            with self.subTest(name=name):
+                insight = await self.insight(session=name)
+                self.delegate.responses.append(raw({'text': '可以这样改。', 'replacement': replacement}))
+                reply = await self.service.reply(insight['id'], name, 1, user_text)
+                self.assertIn(REPLACEMENT_LABEL + replacement, reply['text'])
+                if name in ('digits_short', 'chinese_long'):
+                    self.assertIn('你要求的是', reply['text'])
+                    self.assertIn('%d 字' % len(replacement), reply['text'])
+                else:
+                    self.assertNotIn('你要求的是', reply['text'])
+
+    async def test_chinese_numeral_lengths_are_read_correctly(self):
+        cases = [('一百五十', 150), ('九十', 90), ('十五', 15), ('九十五', 95),
+                 ('两百', 200), ('一百三十', 130), ('一千', None), ('xyz', None)]
+        for text, expected in cases:
+            with self.subTest(text=text):
+                self.assertEqual(EditorInsightService._chinese_number(text), expected)
 
     async def test_sensitive_draft_remains_local_quiet_without_a_provider_call(self):
         self.service.state('editor', 1, True)

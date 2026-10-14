@@ -104,6 +104,14 @@ COMPLETION_CLAUSE = re.compile(
     r'|已为您[^，。！？\n]{0,30}[，。！？])\s*')
 REPLACEMENT_WITHHELD_NOTE = ('（这次没有附上替换文字：里面出现了原稿和你的补充都没有依据的'
                              '表述。把要保留的事实再说一次，我可以再写一版。）')
+# A length the author asked for, written in digits or Chinese numerals. The
+# service can check this without the model's help; counting is not something
+# to leave to a model that already missed it twice in live runs.
+LENGTH_RANGE = re.compile(
+    r'([0-9]{1,3}|[一二两三四五六七八九十百]{1,6})\s*(?:到|至|-|~|—)\s*'
+    r'([0-9]{1,3}|[一二两三四五六七八九十百]{1,6})\s*字')
+CHINESE_DIGITS = {'一': 1, '二': 2, '两': 2, '三': 3, '四': 4, '五': 5,
+                  '六': 6, '七': 7, '八': 8, '九': 9}
 
 
 class InsightConflict(ValueError):
@@ -140,7 +148,11 @@ class EditorInsightService:
     TTL_SECONDS = 300
     SESSION_TTL_SECONDS = 3600
     CAPACITY = 64
-    MODEL_TIMEOUT_SECONDS = 25
+    # A live run lost two of six discussion turns to this ceiling while the
+    # token ceiling sat at 6144: the model spends its budget thinking, so the
+    # wall clock, not the token count, became the binding limit. One attempt
+    # still, no retry; the author waits longer instead of losing the turn.
+    MODEL_TIMEOUT_SECONDS = 45
     # This ceiling includes a reasoning model's thinking and final JSON.
     # Output character limits and single-attempt request limits remain separate.
     # Live runs at 3072 lost whole replies to finish_reason=length twice in one
@@ -339,7 +351,7 @@ class EditorInsightService:
                 if marker in offered and marker not in evidence]
 
     @classmethod
-    def _compose_reply(cls, resolved, evidence):
+    def _compose_reply(cls, resolved, evidence, requested=None):
         """Attach the label ourselves and never offer ungrounded replacement text.
 
         Returns None when the reply cannot be used. A replacement that asserts
@@ -414,7 +426,51 @@ class EditorInsightService:
             return (answer + '\n\n' + REPLACEMENT_WITHHELD_NOTE).strip() if answer \
                 else REPLACEMENT_WITHHELD_NOTE
         labelled = REPLACEMENT_LABEL + replacement
-        return (answer + '\n\n' + labelled).strip() if answer else labelled
+        shown = (answer + '\n\n' + labelled).strip() if answer else labelled
+        if requested is None:
+            return shown
+        low, high = requested
+        if low <= len(replacement) <= high:
+            return shown
+        # Keep the text and say what the author asked for. Silently handing over
+        # the wrong length is what the rubric counts as a failed rewrite.
+        note = ('（这段 %d 字，你要求的是 %d 到 %d 字。要按这个区间重写，说一声就行。）'
+                % (len(replacement), low, high))
+        return shown + '\n\n' + note
+
+    @classmethod
+    def _requested_length(cls, user_text):
+        """Return the (low, high) range the author asked for, if any."""
+        match = LENGTH_RANGE.search(user_text)
+        if not match:
+            return None
+        bounds = []
+        for group in match.groups():
+            value = int(group) if group.isdigit() else cls._chinese_number(group)
+            if value is None or not 1 <= value <= cls.MAX_DISCUSSION_REPLY:
+                return None
+            bounds.append(value)
+        low, high = bounds
+        return (low, high) if low < high else None
+
+    @staticmethod
+    def _chinese_number(text):
+        """Read 一 to 九百九十九 written in Chinese numerals."""
+        if not text or any(ch not in CHINESE_DIGITS and ch not in '十百' for ch in text):
+            return None
+        total, section, unit_pending = 0, 0, False
+        for ch in text:
+            if ch == '十':
+                section = (section or 1) * 10
+                unit_pending = True
+            elif ch == '百':
+                total += (section or 1) * 100
+                section = 0
+                unit_pending = False
+            else:
+                section = section + CHINESE_DIGITS[ch] if unit_pending else CHINESE_DIGITS[ch]
+                unit_pending = False
+        return total + section
 
     @classmethod
     def _strip_completion_claims(cls, answer):
@@ -654,7 +710,9 @@ class EditorInsightService:
         # The draft and the author's own words are the only evidence a
         # replacement may lean on; earlier assistant turns are not.
         evidence = insight['draft']['body'] + '\n' + user_text
-        reply_text = self._compose_reply(resolved, evidence) if isinstance(resolved, dict) else None
+        requested = self._requested_length(user_text)
+        reply_text = (self._compose_reply(resolved, evidence, requested)
+                      if isinstance(resolved, dict) else None)
         if reply_text is None:
             raise InsightDiscussionError('insight_discussion_invalid_reply')
         insight['discussion_history'].extend([

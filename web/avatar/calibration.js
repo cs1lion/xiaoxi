@@ -208,7 +208,9 @@ export class AvatarCalibration {
       expressions: nativeSnapshot(rig).expressionWeights,
       faceMaterials: (s?.faceShading || []).map(({ material }) => ({ material,
         color: material.color.clone(), shadeColorFactor: material.shadeColorFactor.clone() })),
-      hairPhysics: (s?.hairPhysics || []).map(({ joint, settings }) => ({ joint, settings: { ...settings } })),
+      hairPhysics: (s?.hairPhysics || []).map(({ joint }) => ({ joint, settings: {
+        stiffness: joint.settings.stiffness, gravityPower: joint.settings.gravityPower,
+        dragForce: joint.settings.dragForce, hitRadius: joint.settings.hitRadius } })),
       presentation: s?.presentation, eyeFocus: s?.eyeFocus,
       lights: ['ambient', 'key', 'fill'].map(key => ({ key, object: s?.[key], intensity: s?.[key]?.intensity,
         color: s?.[key]?.color?.clone(), position: s?.[key]?.position?.clone() })) };
