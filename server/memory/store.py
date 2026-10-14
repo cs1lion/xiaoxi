@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import sqlite3
 import json
+import math
 import threading
 import time
 import uuid
@@ -11,10 +12,15 @@ from typing import Any, Iterable
 
 from ..config import settings
 
+SPARK_STATES = ("latent", "surfaced", "spent")
+SPARK_TRANSITIONS = {("latent", "surfaced"), ("surfaced", "spent")}
+MAX_ACTIVE_LATENT_SPARKS = 5
+
 KINDS = ("fact", "episode", "todo", "self_state")
 SOURCES = ("stated", "inferred", "uncertain")
 STATUSES = ("active", "superseded", "done", "conflict")
-SCHEMA_VERSION = 3
+SCHEMA_VERSION = 3  # Additive tables below keep this: older files gain empty
+# tables on open, so the "newer schema" guard still means a real future schema.
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS memories (
@@ -72,7 +78,75 @@ CREATE TABLE IF NOT EXISTS memory_control (
     write_floor INTEGER NOT NULL DEFAULT 0
 );
 INSERT OR IGNORE INTO memory_control(id, write_epoch, write_floor) VALUES (1, 0, 0);
+
+CREATE TABLE IF NOT EXISTS diaries (
+    id            INTEGER PRIMARY KEY AUTOINCREMENT,
+    date          TEXT NOT NULL,
+    title         TEXT NOT NULL,
+    body          TEXT NOT NULL,
+    mood          TEXT NOT NULL,
+    energy        REAL NOT NULL,
+    topic_keys    TEXT NOT NULL DEFAULT '[]',
+    source_message_ids TEXT NOT NULL DEFAULT '[]',
+    created_at    REAL NOT NULL
+);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_diary_date ON diaries(date);
+
+CREATE TABLE IF NOT EXISTS drifts (
+    id            INTEGER PRIMARY KEY AUTOINCREMENT,
+    topic         TEXT NOT NULL,
+    attitude      TEXT NOT NULL,
+    weight        REAL NOT NULL,
+    evidence_diary_ids TEXT NOT NULL DEFAULT '[]',
+    created_at    REAL NOT NULL,
+    updated_at    REAL NOT NULL
+);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_drift_topic ON drifts(topic);
+
+CREATE TABLE IF NOT EXISTS sparks (
+    id            INTEGER PRIMARY KEY AUTOINCREMENT,
+    text          TEXT NOT NULL,
+    state         TEXT NOT NULL DEFAULT 'latent',
+    heat          REAL NOT NULL,
+    born_diary_id INTEGER,
+    surfaced_at   REAL,
+    created_at    REAL NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_spark_state ON sparks(state);
+
+CREATE TABLE IF NOT EXISTS self_state (
+    id INTEGER PRIMARY KEY CHECK(id = 1),
+    taste TEXT NOT NULL DEFAULT '[]',
+    worldview TEXT NOT NULL DEFAULT '[]',
+    curiosity_seeds TEXT NOT NULL DEFAULT '[]',
+    last_cycle_at REAL,
+    cycles_today INTEGER NOT NULL DEFAULT 0,
+    cycles_on TEXT
+);
+INSERT OR IGNORE INTO self_state(id) VALUES (1);
 """
+
+
+def _json_list(value: Any) -> list[Any]:
+    """Decode a stored JSON array; corruption degrades to empty, never raises."""
+    try:
+        decoded = json.loads(value) if isinstance(value, str) else value
+    except (TypeError, ValueError):
+        return []
+    return decoded if isinstance(decoded, list) else []
+
+
+def _diary_row(row: sqlite3.Row) -> dict[str, Any]:
+    record = dict(row)
+    record["topic_keys"] = _json_list(record.get("topic_keys"))
+    record["source_message_ids"] = _json_list(record.get("source_message_ids"))
+    return record
+
+
+def _drift_row(row: sqlite3.Row) -> dict[str, Any]:
+    record = dict(row)
+    record["evidence_diary_ids"] = _json_list(record.get("evidence_diary_ids"))
+    return record
 
 
 @dataclass(slots=True)
@@ -545,6 +619,212 @@ class MemoryStore:
     def link_supersedes(self, new_id: int, old_id: int) -> None:
         """New value wins, old row stays queryable via history_for_key()."""
         self._write("UPDATE memories SET supersedes = ? WHERE id = ?", (old_id, new_id))
+
+    # ---------- diary / drift / spark / self_state ----------
+    # Protocol sections 10 and 12. Policy (mood vocabulary, quote rules, caps on
+    # what one diary may derive) lives in memory/diary.py; this layer only
+    # guards argument shape and keeps writes atomic.
+    def add_diary(self, *, date: str, title: str, body: str, mood: str, energy: float,
+                  topic_keys: list[str], source_message_ids: list[int]) -> int | None:
+        """One diary per local date; a second synthesis for the same day is a no-op."""
+        if not isinstance(date, str) or not date.strip():
+            raise ValueError("diary date required")
+        for field in (title, body, mood):
+            if not isinstance(field, str) or not field.strip():
+                raise ValueError("diary text fields required")
+        if (not isinstance(energy, (int, float)) or isinstance(energy, bool)
+                or not math.isfinite(float(energy)) or not 0 <= float(energy) <= 1):
+            raise ValueError("diary energy must be within [0, 1]")
+        if (not isinstance(topic_keys, list)
+                or not all(isinstance(key, str) and key.strip() for key in topic_keys)
+                or not isinstance(source_message_ids, list) or not source_message_ids
+                or not all(type(i) is int and i > 0 for i in source_message_ids)):
+            raise ValueError("diary topic keys and source message ids required")
+        now = time.time()
+        with self._transaction(track_write=True) as db:
+            if db.execute("SELECT 1 FROM diaries WHERE date = ?", (date,)).fetchone() is not None:
+                return None
+            cursor = db.execute(
+                """INSERT INTO diaries (date, title, body, mood, energy, topic_keys,
+                                        source_message_ids, created_at)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
+                (date, title, body, mood, float(energy),
+                 json.dumps(topic_keys, ensure_ascii=False, separators=(",", ":")),
+                 json.dumps(source_message_ids, ensure_ascii=False, separators=(",", ":")), now))
+            return int(cursor.lastrowid)
+
+    def get_diary(self, diary_id: int) -> dict[str, Any] | None:
+        rows = self._query("SELECT * FROM diaries WHERE id = ?", (diary_id,))
+        return _diary_row(rows[0]) if rows else None
+
+    def diary_for_date(self, date: str) -> dict[str, Any] | None:
+        rows = self._query("SELECT * FROM diaries WHERE date = ?", (date,))
+        return _diary_row(rows[0]) if rows else None
+
+    def list_diaries(self, *, since_date: str | None = None, until_date: str | None = None,
+                     limit: int = 90) -> list[dict[str, Any]]:
+        sql = "SELECT * FROM diaries WHERE 1 = 1"
+        params: list[Any] = []
+        if since_date is not None:
+            sql += " AND date >= ?"
+            params.append(since_date)
+        if until_date is not None:
+            sql += " AND date <= ?"
+            params.append(until_date)
+        sql += " ORDER BY date DESC LIMIT ?"
+        params.append(max(1, int(limit)))
+        return [_diary_row(row) for row in self._query(sql, params)]
+
+    def messages_between(self, start_ts: float, end_ts: float) -> list[dict[str, Any]]:
+        rows = self._query(
+            """SELECT id, session_id, role, text, mode, created_at FROM messages
+               WHERE created_at >= ? AND created_at < ? ORDER BY id ASC""", (start_ts, end_ts))
+        return [dict(row) for row in rows]
+
+    def upsert_drift(self, *, topic: str, attitude: str, weight: float,
+                     evidence_diary_id: int) -> int:
+        """One row per topic; repeated evidence appends instead of duplicating."""
+        if not isinstance(topic, str) or not topic.strip():
+            raise ValueError("drift topic required")
+        if not isinstance(attitude, str) or not attitude.strip():
+            raise ValueError("drift attitude required")
+        if (not isinstance(weight, (int, float)) or isinstance(weight, bool)
+                or not math.isfinite(float(weight)) or not 0 <= float(weight) <= 1):
+            raise ValueError("drift weight must be within [0, 1]")
+        if type(evidence_diary_id) is not int or evidence_diary_id <= 0:
+            raise ValueError("drift evidence diary id required")
+        now = time.time()
+        with self._transaction(track_write=True) as db:
+            row = db.execute("SELECT * FROM drifts WHERE topic = ?", (topic.strip(),)).fetchone()
+            if row is None:
+                cursor = db.execute(
+                    """INSERT INTO drifts (topic, attitude, weight, evidence_diary_ids,
+                                          created_at, updated_at)
+                       VALUES (?, ?, ?, ?, ?, ?)""",
+                    (topic.strip(), attitude.strip(), float(weight),
+                     json.dumps([evidence_diary_id], ensure_ascii=False), now, now))
+                return int(cursor.lastrowid)
+            evidence = _json_list(row["evidence_diary_ids"])
+            if evidence_diary_id not in evidence:
+                evidence.append(evidence_diary_id)
+            db.execute(
+                """UPDATE drifts SET attitude = ?, weight = ?, evidence_diary_ids = ?,
+                   updated_at = ? WHERE id = ?""",
+                (attitude.strip(), float(weight),
+                 json.dumps(evidence, ensure_ascii=False, separators=(",", ":")), now, row["id"]))
+            return int(row["id"])
+
+    def list_drifts(self) -> list[dict[str, Any]]:
+        return [_drift_row(row) for row in
+                self._query("SELECT * FROM drifts ORDER BY weight DESC, id ASC")]
+
+    def add_spark(self, *, text: str, heat: float, born_diary_id: int,
+                  state: str = "latent") -> int | None:
+        """New sparks are born latent; the latent cap is enforced here atomically."""
+        if not isinstance(text, str) or not text.strip():
+            raise ValueError("spark text required")
+        if (not isinstance(heat, (int, float)) or isinstance(heat, bool)
+                or not math.isfinite(float(heat))):
+            raise ValueError("spark heat must be finite")
+        if type(born_diary_id) is not int or born_diary_id <= 0:
+            raise ValueError("spark must name the diary it was born from")
+        if state not in SPARK_STATES:
+            raise ValueError("invalid spark state")
+        now = time.time()
+        with self._transaction(track_write=True) as db:
+            if state == "latent" and int(db.execute(
+                    "SELECT COUNT(*) FROM sparks WHERE state = 'latent'").fetchone()[0]) >= MAX_ACTIVE_LATENT_SPARKS:
+                return None
+            cursor = db.execute(
+                """INSERT INTO sparks (text, state, heat, born_diary_id, surfaced_at, created_at)
+                   VALUES (?, ?, ?, ?, ?, ?)""",
+                (text.strip(), state, min(1.0, max(0.0, float(heat))), born_diary_id,
+                 now if state == "surfaced" else None, now))
+            return int(cursor.lastrowid)
+
+    def get_spark(self, spark_id: int) -> dict[str, Any] | None:
+        rows = self._query("SELECT * FROM sparks WHERE id = ?", (spark_id,))
+        return dict(rows[0]) if rows else None
+
+    def list_sparks(self, *, states: tuple[str, ...] | None = None) -> list[dict[str, Any]]:
+        sql = "SELECT * FROM sparks"
+        params: list[Any] = []
+        if states:
+            for state in states:
+                if state not in SPARK_STATES:
+                    raise ValueError("invalid spark state")
+            sql += " WHERE state IN (" + ",".join("?" for _ in states) + ")"
+            params.extend(states)
+        sql += " ORDER BY created_at ASC, id ASC"
+        return [dict(row) for row in self._query(sql, params)]
+
+    def count_sparks(self, state: str) -> int:
+        if state not in SPARK_STATES:
+            raise ValueError("invalid spark state")
+        return int(self._query("SELECT COUNT(*) FROM sparks WHERE state = ?", (state,))[0][0])
+
+    def update_spark_state(self, spark_id: int, state: str,
+                           *, surfaced_at: float | None = None) -> bool:
+        """Forward-only machine: latent -> surfaced -> spent. Anything else is a no-op."""
+        if state not in SPARK_STATES:
+            raise ValueError("invalid spark state")
+        now = time.time()
+        with self._transaction(track_write=True) as db:
+            row = db.execute("SELECT state FROM sparks WHERE id = ?", (spark_id,)).fetchone()
+            if row is None or (row["state"], state) not in SPARK_TRANSITIONS:
+                return False
+            if state == "surfaced":
+                db.execute(
+                    "UPDATE sparks SET state = 'surfaced', surfaced_at = COALESCE(?, ?) WHERE id = ?",
+                    (surfaced_at, now, spark_id))
+            else:
+                db.execute("UPDATE sparks SET state = ? WHERE id = ?", (state, spark_id))
+            return True
+
+    def get_self_state(self) -> dict[str, Any]:
+        rows = self._query("SELECT * FROM self_state WHERE id = 1")
+        if not rows:
+            return {"taste": [], "worldview": [], "curiosity_seeds": [],
+                    "last_cycle_at": None, "cycles_today": 0, "cycles_on": None}
+        record = dict(rows[0])
+        return {
+            "taste": _json_list(record.get("taste")),
+            "worldview": _json_list(record.get("worldview")),
+            "curiosity_seeds": _json_list(record.get("curiosity_seeds")),
+            "last_cycle_at": record.get("last_cycle_at"),
+            "cycles_today": int(record.get("cycles_today") or 0),
+            "cycles_on": record.get("cycles_on"),
+        }
+
+    def save_self_state(self, *, taste: list[dict[str, Any]], worldview: list[dict[str, Any]],
+                        curiosity_seeds: list[dict[str, Any]], last_cycle_at: float | None = None,
+                        cycles_today: int | None = None, cycles_on: str | None = None) -> None:
+        for entries in (taste, worldview):
+            if not isinstance(entries, list) or not all(
+                    isinstance(entry, dict) and isinstance(entry.get("topic"), str) and entry["topic"].strip()
+                    and isinstance(entry.get("stance"), str) and entry["stance"].strip()
+                    and isinstance(entry.get("weight"), (int, float)) and not isinstance(entry.get("weight"), bool)
+                    for entry in entries):
+                raise ValueError("invalid taste or worldview entries")
+        if not isinstance(curiosity_seeds, list) or not all(
+                isinstance(seed, dict) and isinstance(seed.get("text"), str) and seed["text"].strip()
+                and isinstance(seed.get("heat"), (int, float)) and not isinstance(seed.get("heat"), bool)
+                for seed in curiosity_seeds):
+            raise ValueError("invalid curiosity seeds")
+        payload = (
+            json.dumps(taste, ensure_ascii=False, separators=(",", ":")),
+            json.dumps(worldview, ensure_ascii=False, separators=(",", ":")),
+            json.dumps(curiosity_seeds, ensure_ascii=False, separators=(",", ":")),
+            last_cycle_at, 0 if cycles_today is None else int(cycles_today), cycles_on,
+        )
+        with self._transaction(track_write=True) as db:
+            cursor = db.execute(
+                """UPDATE self_state SET taste = ?, worldview = ?, curiosity_seeds = ?,
+                   last_cycle_at = ?, cycles_today = ?, cycles_on = ? WHERE id = 1""", payload)
+            if cursor.rowcount == 0:
+                db.execute(
+                    """INSERT INTO self_state (id, taste, worldview, curiosity_seeds,
+                       last_cycle_at, cycles_today, cycles_on) VALUES (1, ?, ?, ?, ?, ?, ?)""", payload)
 
     # ---------- sessions / messages ----------
     def start_session(self, session_id: str | None = None) -> str:
