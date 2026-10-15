@@ -66,15 +66,46 @@ voice:
 # 打开后：微句切分（子句边界优先）+ 有界预加载并发 + chunk 呼吸停顿字段。
 speech:
   enabled: true             # 默认开启微句流（首包提速 + 呼吸停顿）；false 时回到 60 字顺序合成
+  # ---- V2 灵魂注入基线（docs/AUTONOMOUS_MIND_V2.md §7.1）----
+  # rate/pitch 是“交付层”的全局语音微调，作为每个人物情绪 profile 之上的偏移；
+  # 具体叠加方式由 Role 2 在 voice_profile 应用处决定，默认不得盖过 persona.yaml 的情绪音色。
   micro_chunk:
-    target_chars: 20          # 微句目标长度（子句边界优先，落在 12-25 区间）
+    target_chars: 26          # V2 chunk_target_chars：微句目标长度（子句边界优先）
     max_chars: 60             # 无边界时的硬顶
+  first_chunk:               # 首包激进切分（协议第十一节"首包提速与默认值"）
+    enabled: true            # 每轮第一个微句提前切；false 时所有微句共用同一目标长度
+    min_chars: 8             # V2 first_chunk_min_chars：不满 8 字不提前切（短句等自然边界更好听）
+    max_chars: 12            # 超过 12 字还没遇到标点/语气词，就交还正常目标长度
   preload:
     concurrency: 2            # 播放中并发合成后续段的度（有界）
   pause:
-    clause_ms: 120            # 子句边界（，、；：）后的呼吸停顿
-    sentence_ms: 260          # 句末（。！？…）后的呼吸停顿
+    clause_ms: 140            # V2 pause_comma_ms：子句边界（，、；：）后的呼吸停顿
+    sentence_ms: 320          # V2 pause_period_ms：句末（。！？…）后的呼吸停顿
     max_ms: 400               # 停顿上限（协议 0-400）
+    thinking_ms: 480          # V2 pause_thinking_ms：思考期预演结束、正式起话前的停顿
+
+# ---------- 语音交付微调（V2 灵魂注入 §7.1） ----------
+# 全局语速/音高 Hint，叠加在 persona.yaml.tts_emotions 的每个人物情绪 profile 之上。
+# 只影响“怎么读”，不影响“读什么”；性格内容仍由 persona.py 的叙事注入决定。
+voice_delivery:
+  rate: 1.08                  # 全局语速倍率（相对各情绪 profile 的 offset/multiplier，由 Role 2 定）
+  pitch: 1.02                 # 全局音高倍率
+
+# ---------- 三梯度非侵入式主动在场（V2 §6 / PROTOCOL.md §16） ----------
+# 主动 ≠ 持续说话。按用户空闲时长逐级选择渠道：micro_act → mumble → proactive。
+# 后台自进化与前台演出解耦：后台产出思想，前台决定何时、以何种方式呈现。
+ambient:
+  enabled: true               # 总开关；false 时三梯度全部静默（等价打磨前）
+  micro_act_seconds: 20       # 梯度1：连续空闲 20s → 无声微动作（micro_act）
+  mumble_seconds: 45          # 梯度2：连续空闲 45s → 轻声碎碎念（mumble，可忽略/可接话）
+  proactive_seconds: 90       # 梯度3：连续空闲 90s 或离开后返回 → 有真实内容价值的主动（proactive）
+  dedupe_window_seconds: 300  # 同一空闲周期内同类事件去重窗口，防刷屏
+  respect_typing: true        # 用户正在输入/播放媒体/关键操作时，抑制高打扰度行为
+  quiet_mode_default: false   # 安静模式默认关；开启后只保留 micro_act
+  require_authorization: true # 复用 proactivity.require_authorization：未授权不主动出声
+  # mumble 是否经 deliver_reply 语音链路播出。false（默认）= 只显示微光气泡、不出声，
+  # 是可验证的降级表现；true = 用现有语音链路播出（沿用普通音色，不额外伪造“轻声音量/音调”）。
+  mumble_voice: false
 
 # ---------- 安全与边界 ----------
 safety:

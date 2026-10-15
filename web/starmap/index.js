@@ -124,6 +124,7 @@ export function mountStarmap(container, deps = {}) {
   const detailTitle = el("h3", "starmap-detail-title");
   const detailBody = el("p", "starmap-detail-body");
   const detailExtra = el("p", "hint starmap-detail-extra");
+  const detailEdges = el("div", "starmap-detail-edges");
   const narrateWrap = el("div", "starmap-narrate");
   const narrateBtn = el("button", "starmap-narrate-btn", "让小溪讲这个");
   narrateBtn.type = "button";
@@ -134,7 +135,7 @@ export function mountStarmap(container, deps = {}) {
   narrateNote.setAttribute("role", "status");
   narrateNote.setAttribute("aria-live", "polite");
   narrateWrap.append(narrateBtn, narrateStop, narrateNote);
-  detail.append(detailHead, detailTitle, detailBody, detailExtra, narrateWrap);
+  detail.append(detailHead, detailTitle, detailBody, detailExtra, detailEdges, narrateWrap);
   body.append(canvas, detail);
 
   const empty = el("div", "starmap-empty");
@@ -262,6 +263,7 @@ export function mountStarmap(container, deps = {}) {
     detailTitle.textContent = node?.label || id;
     detailBody.textContent = "正在读取…";
     detailExtra.textContent = "";
+    detailEdges.replaceChildren();
     detail.hidden = false;
     syncNarrate();
     try {
@@ -278,11 +280,30 @@ export function mountStarmap(container, deps = {}) {
       detailBody.textContent = nodeText(full) || "这条节点没有可展示的正文。";
       const meta = detailMeta(full);
       detailExtra.textContent = meta.join("　");
+      renderDetailEdges(id);
     } catch (error) {
       if (selectedId !== id) return;
       detailBody.textContent = error?.message || "节点读取失败。";
     }
     syncNarrate();
+  }
+
+  function renderDetailEdges(id) {
+    detailEdges.replaceChildren();
+    const edges = (model?.edges || []).filter((e) => e.source === id || e.target === id);
+    if (!edges.length) return;
+    detailEdges.append(el("p", "hint", "关联："));
+    for (const edge of edges) {
+      const otherId = edge.source === id ? edge.target : edge.source;
+      const other = model.byId.get(otherId);
+      const row = el("div", "starmap-detail-edge");
+      row.append(el("span", `tag edge-${edge.kind}`, EDGE_LABELS[edge.kind] || edge.kind),
+        el("span", "starmap-detail-edge-target", other?.label || otherId));
+      if (typeof edge.reason === "string" && edge.reason.trim()) {
+        row.append(el("span", "starmap-detail-edge-reason", edge.reason));
+      }
+      detailEdges.append(row);
+    }
   }
 
   function syncNarrate() {

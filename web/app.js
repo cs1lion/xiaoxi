@@ -23,6 +23,12 @@ import { bootCompanion } from './companion.js';
 import { mountStarmap } from './starmap/index.js';
 import { mountExperience } from './experience.js';
 import { appendContextUsage } from './context-usage.js';
+import { mountModeStrip } from './mode-strip.js';
+import { mountWorkDrawer } from './drawer.js';
+import { mountExternalModel } from './external-model.js';
+import { mountContextBudget } from './context-budget.js';
+import { AmbientDriver } from "./avatar/drivers/ambient.js";
+import { createGlimmer } from "./glimmer_bubble.js";
 bootAssistant().catch(error => console.warn('助手面板启动失败', error));
 bootCompanion().catch(error => console.warn('共同事项启动失败', error));
 
@@ -121,6 +127,103 @@ const experienceUI = mountExperience({
 });
 experienceUI.importSelection();
 
+/* ---------------- 模式状态条 / 工作台抽屉 / 设置面板（打磨轮 U-1~U-5） ---------------- */
+const EXPERIENCE_LABELS = { listen: "听懂原句", expression: "表达练习", theatre: "虚构小剧场",
+  focus: "专注陪伴", walk: "散步陪伴", winddown: "睡前放松", vent: "倾诉", discuss: "一起讨论" };
+const PRACTICE_LABELS = { free: "英语自由聊", cafe: "咖啡店点单", interview: "面试练习" };
+let microFlow = false;          // 本轮回复走了微句流（audio.chunk / speech_plan）
+let narrationActive = false;    // 星图讲述轮
+let proactiveActive = false;    // 主动开口 / 自进化话题轮
+let selfEvolutionUntil = 0;
+let selfEvolutionTimer = null;
+let modeSignature = "";
+const modeStrip = mountModeStrip(el("modeStrip"));
+const contextBudget = mountContextBudget(el("contextBudgetStatus"));
+
+function syncModeStrip() {
+  if (!modeStrip) return;
+  const stopActive = recording || manualHeld || !!turns.id || playback.busy;
+  const signature = JSON.stringify([alwaysListen, experienceMode, practiceMode, microFlow,
+    narrationActive, proactiveActive, Date.now() < selfEvolutionUntil, stopActive]);
+  if (signature === modeSignature) return;
+  modeSignature = signature;
+  modeStrip.update({
+    continuous: alwaysListen,
+    experience: experienceMode !== "off" ? (EXPERIENCE_LABELS[experienceMode] || experienceMode) : "",
+    practice: practiceMode !== "off" ? (PRACTICE_LABELS[practiceMode] || practiceMode) : "",
+    micro: microFlow,
+    starmap: narrationActive,
+    self: proactiveActive ? "主动开口" : (Date.now() < selfEvolutionUntil ? "自进化" : ""),
+  });
+  const stop = el("stopBtn");
+  if (stop) stop.classList.toggle("is-active", stopActive);
+}
+
+function noteSelfEvolution() {
+  selfEvolutionUntil = Date.now() + 20000;
+  if (selfEvolutionTimer !== null) clearTimeout(selfEvolutionTimer);
+  selfEvolutionTimer = setTimeout(() => { selfEvolutionTimer = null; syncModeStrip(); }, 20000);
+  syncModeStrip();
+}
+
+const settingsPanel = el("settingsPanel");
+if (settingsPanel) {
+  settingsPanel.addEventListener("toggle", () => {
+    if (!settingsPanel.open) return;
+    drawer?.close(false);
+    const side = el("sidePanel");
+    if (side?.classList.contains("is-open")) el("sidebarToggle")?.click();
+    const taste = el("voiceTasteFrame");
+    if (taste && !taste.getAttribute("src")) taste.src = taste.dataset.src;
+  });
+  document.addEventListener("keydown", (event) => {
+    if (settingsPanel.open && event.key === "Escape" && !event.isComposing) {
+      event.preventDefault();
+      settingsPanel.open = false;
+      el("settingsToggle")?.focus({ preventScroll: true });
+    }
+  });
+  // 全屏视图（一起写 / 星图）接管舞台时收起设置面板，避免遮住宽屏编辑器。
+  window.addEventListener("aqi-fullview", () => {
+    if (settingsPanel.open) settingsPanel.open = false;
+  });
+}
+
+const drawer = mountWorkDrawer(el("workDrawer"), {
+  onWriting: () => el("writingToggle")?.click(),
+  onCompanion: () => {
+    const mount = el("companionMount");
+    if (!mount) return;
+    mount.scrollIntoView({ behavior: "smooth", block: "nearest" });
+    mount.tabIndex = -1;
+    mount.focus({ preventScroll: true });
+  },
+  onPractice: () => {
+    const section = el("practiceSection");
+    if (settingsPanel && !settingsPanel.open) settingsPanel.open = true;
+    section?.scrollIntoView({ block: "nearest" });
+    el("practiceMode")?.focus({ preventScroll: true });
+  },
+});
+
+let selectedExternalModel = "";
+const externalModel = mountExternalModel({
+  input: el("externalModelUrl"),
+  button: el("externalModelLoad"),
+  status: el("externalModelStatus"),
+  load: async (url) => {
+    await avatar.setRenderer("vrm", url);
+    const select = el("avatarRenderer");
+    if (select && !select.querySelector('option[value="external"]')) {
+      select.add(new Option("外部 .vrm（自定义）", "external"));
+    }
+    if (select) select.value = "external";
+    selectedExternalModel = url;
+    const status = el("avatarRendererStatus");
+    if (status) status.textContent = "外部 .vrm 已启用；失败时会自动回到上一个形象。";
+  },
+});
+
 /* ---------------- 文本气泡 ---------------- */
 function addBubble(role, text) {
   const node = document.createElement("div");
@@ -197,6 +300,7 @@ function idleStatus() {
   updateResume();
   const state = currentInteraction();
   setStatus(state.text, state.tone, state.id);
+  syncModeStrip();
 }
 function finishTurn() {
   if (!turns.done || playback.busy || recording) return;
@@ -299,6 +403,79 @@ const starmap = mountStarmap(el('starmapMount'), {
   stopTurn: () => cancelTurn(),
   isIdle: () => !turns.id && !playback.busy && !recording,
 });
+
+/* ---------------- V2 三梯度主动在场：micro_act / mumble / 微光气泡（协议 §16） ---------------- */
+const AMBIENT_SAMPLES = window.__PERSONA_SAMPLES__ || { stage_samples: {} };
+let mumbleActive = false;
+
+function applyMicroAct(descriptor) {
+  // 复用真实 Avatar 动作：眨眼 / idle 微动层唤醒；未知或缺失 descriptor 安静降级，不伪造效果。
+  if (!descriptor) return;
+  (window.__microActLog = window.__microActLog || []).push(descriptor.kind);
+  try {
+    if (descriptor.kind === "blink") avatar.blinkEyes();
+    else avatar.idle?.wake(Math.min(1, 0.4 + (Number(descriptor.duration) || 0.5) * 0.4));
+  } catch (_) { /* 舞台降级：不影响页面其余部分 */ }
+}
+
+const glimmerEl = document.createElement("div");
+glimmerEl.className = "glimmer-bubble";
+glimmerEl.setAttribute("role", "status");
+glimmerEl.hidden = true;
+document.body.append(glimmerEl);
+
+function renderGlimmer() {
+  const current = glimmer.current;
+  if (!current || glimmer.status === "hidden") { glimmerEl.hidden = true; glimmerEl.textContent = ""; return; }
+  glimmerEl.hidden = false;
+  glimmerEl.textContent = "";
+  const text = document.createElement("span");
+  text.className = "glimmer-text";
+  text.textContent = current.text;
+  const close = document.createElement("button");
+  close.type = "button";
+  close.className = "glimmer-close";
+  close.textContent = "×";
+  close.setAttribute("aria-label", "关闭这个念头");
+  close.addEventListener("click", (event) => { event.stopPropagation(); glimmer.dismiss(); renderGlimmer(); });
+  glimmerEl.append(text, close);
+}
+
+const glimmer = createGlimmer({
+  onExpand: (ctx) => {
+    // 把真实上下文带进普通对话：经既有输入框发起一轮，让阿栖接着这个念头讲。
+    try { el("textInput").value = ctx.text; el("sendBtn").click(); } catch (_) {}
+  },
+  onDismiss: () => renderGlimmer(),
+  onExpire: () => renderGlimmer(),
+});
+glimmerEl.addEventListener("click", () => { if (glimmer.expand()) renderGlimmer(); });
+
+const ambientDriver = new AmbientDriver({ applyMicroAct, samples: AMBIENT_SAMPLES });
+
+function handleAmbient(msg) {
+  if (!proactiveLocallyIdle()) return;   // 用户在用时不打扰
+  if (msg.type === "micro_act") ambientDriver.handleEvent(msg);
+  else if (msg.type === "mumble") {
+    // 服务端 expires_at 是服务端 epoch 秒，不能直接和 Date.now() 比；这里转成本端相对过期。
+    const ttl = (msg.bubble && typeof msg.bubble.ttl_ms === "number") ? msg.bubble.ttl_ms : 12000;
+    if (glimmer.show({ ...msg, expires_at: Date.now() + ttl })) renderGlimmer();
+  }
+}
+
+// 微光气泡自然消散：只在可见时轮询，避免常驻开销。
+setInterval(() => { if (glimmer.status !== "hidden") { glimmer.poll(Date.now()); renderGlimmer(); } }, 1000);
+
+if (!document.getElementById("glimmer-style")) {
+  const style = document.createElement("style");
+  style.id = "glimmer-style";
+  style.textContent = ".glimmer-bubble{position:fixed;right:20px;bottom:112px;z-index:60;max-width:min(20rem,72vw);display:flex;gap:8px;align-items:flex-start;padding:10px 12px;border-radius:12px;background:rgba(24,28,24,.85);color:#eef1ea;font-size:13px;line-height:1.5;box-shadow:0 6px 24px rgba(0,0,0,.3);cursor:pointer}"
+    + ".glimmer-bubble[hidden]{display:none!important}"
+    + ".glimmer-text{flex:1;white-space:pre-wrap}"
+    + ".glimmer-close{flex:none;border:0;background:transparent;color:#9cc7a9;font-size:16px;line-height:1;cursor:pointer;padding:0 2px}"
+    + ".glimmer-close:hover{color:#eef1ea}";
+  document.head.append(style);
+}
 const discussionBanner = document.createElement('section');
 discussionBanner.id = 'editorDiscussion'; discussionBanner.className = 'editor-discussion';
 discussionBanner.hidden = true; discussionBanner.setAttribute('aria-label', '围绕稿件观点继续讨论');
@@ -405,6 +582,8 @@ function beginTurn(type, extra = {}, baselineInput = type === 'text' ? 'text' : 
     try { editorContext = editorDiscussion?.requestContext(); }
     catch (error) { subtitle.textContent = error.message; return null; }
   }
+  microFlow = false; narrationActive = false; proactiveActive = false; mumbleActive = false;
+  syncModeStrip();
   const interrupted = !!turns.id || playback.busy;
   cancelTurn(true);
   if (interrupted) avatar.onBargeIn();
@@ -439,7 +618,10 @@ function confirmAssistant(result, approve) {
 /* ---------------- 麦克风：静音监听不上传 ---------------- */
 function recordingUi() {
   micBtn.classList.toggle("recording", recording);
-  micBtn.textContent = recordingMode === "manual" ? "松开结束" : "按住说话";
+  const label = recordingMode === "manual" ? "松开结束" : "按住说话";
+  const micLabel = micBtn.querySelector(".mic-label");
+  if (micLabel) micLabel.textContent = label;
+  micBtn.title = recording ? label : "按住说话；键盘可按住空格";
   micBtn.setAttribute("aria-pressed", String(recording));
 }
 function startUtterance(mode) {
@@ -652,6 +834,11 @@ ws.onmessage = async (event) => {
   if (!msg || typeof msg !== "object" || typeof msg.type !== "string") return;
   if (editorInsightVoice?.blocksServer(msg)) return;
   starmap?.onMessage?.(msg);
+  /* 连接级提示先于 TurnGate 消费：speech_plan / self_evolution 不带 turn_id，
+   * 只会用来点亮模式状态条（U-5），不改变任何轮次行为。 */
+  if (msg.type === "speech_plan") { microFlow = true; syncModeStrip(); }
+  else if (msg.type === "self_evolution") noteSelfEvolution();
+  else if (msg.type === "micro_act" || msg.type === "mumble") handleAmbient(msg);
   if (!turns.accept(msg, !recording && !manualHeld && !microphone.pending && !playback.busy)) return;
   if (msg.type === 'turn_started' && !baselineTurns.has(msg.turn_id)) registerBaselineTurn(msg.turn_id, msg.source === 'narration' ? 'narration' : 'proactive');
   dialogueReview?.event({ ...msg, meta: msg.type === 'done' ? { textStatus: msg.delivery?.text_status, audioStatus: msg.delivery?.audio_status } : undefined });
@@ -684,8 +871,15 @@ ws.onmessage = async (event) => {
         ? (practiceMode === 'off' ? 900 : Number(el('practicePause').value))
         : (experienceMode === 'expression' ? Number(el('practicePause').value) : 1200);
       baseline.setContext({ activity: experienceMode !== 'off' ? experienceMode : practiceMode, endpointWaitMs: vad.pauseMs });
+      syncModeStrip();
       break;
     case "turn_started":
+      narrationActive = msg.source === "narration";
+      proactiveActive = msg.source === "proactive" || msg.source === "self_topic";
+      mumbleActive = msg.source === "mumble";
+      if (mumbleActive) { glimmer.dismiss(); renderGlimmer(); }
+      microFlow = false;
+      syncModeStrip();
       idleStatus();
       break;
     case "ready":
@@ -701,8 +895,7 @@ ws.onmessage = async (event) => {
       break;
     case "thinking":
       pendingText = "";
-      currentBubble = addBubble("bot", "…");
-      currentBubble.classList.add("thinking");
+      if (!mumbleActive) { currentBubble = addBubble("bot", "…"); currentBubble.classList.add("thinking"); }
       setStatus("在想…", "busy", "thinking");
       break;
     case "emotion":
@@ -726,6 +919,7 @@ ws.onmessage = async (event) => {
       if (typeof msg.data === "string" && msg.data.length <= 12 * 1024 * 1024) {
         recordBaselineTurn('audio_received', msg.turn_id, { source: 'ws' });
         const item = { ...msg, _baselineToken: baselineTurns.get(msg.turn_id)?.token, _baselineChunk: ++baselineChunk };
+        if (item.chunk) { microFlow = true; syncModeStrip(); }
         if (!playback.enqueue(item)) recordBaselineTurn('queue_rejected', msg.turn_id);
         idleStatus();
       }
@@ -749,6 +943,8 @@ ws.onmessage = async (event) => {
         }
       }
       if (currentBubble) appendContextUsage(currentBubble, msg.context_usage);
+      contextBudget?.note(msg.context_usage);
+      microFlow = false; narrationActive = false; proactiveActive = false; mumbleActive = false; syncModeStrip();
       turns.done = true;
       finishTurn();
       break;
@@ -757,6 +953,7 @@ ws.onmessage = async (event) => {
       rejectConfirmation('播报已打断，请查看任务面板中的实际结果；不会自动重试操作。');
       cancelRecording(); stopPlayback(); dialogueReview?.endTurn(turns.id, 'interrupted'); turns.clear(); resetDuplex(); vad.reset();
       if (!alwaysListen) teardownMic();
+      microFlow = false; narrationActive = false; proactiveActive = false; mumbleActive = false; syncModeStrip();
       idleStatus();
       break;
     case "assistant_result":
@@ -764,6 +961,7 @@ ws.onmessage = async (event) => {
         const pending = pendingConfirmation; pendingConfirmation = null;
         clearTimeout(pending.timer); pending.resolve(msg.result);
       } else showAssistantResult(msg.result, { confirm: confirmAssistant });
+      contextBudget?.note(msg.result?.context_usage);
       break;
     case "memory_notice":
       if (msg.items) {
@@ -1003,6 +1201,7 @@ el('practiceApply').onclick = () => {
   ws.send(JSON.stringify({type:'config',practice:{mode:practiceMode,level:el('practiceLevel').value,correction:el('practiceCorrection').value}}));
   el('practiceReview').disabled = practiceMode === 'off';
   el('practiceStatus').textContent = practiceMode === 'off' ? '已回到普通陪聊。' : '练习已开启：可以用英语打招呼，卡住时用中文求助。收句后回复；不执行任务，不写长期记忆。';
+  syncModeStrip();
 };
 el('practicePause').onchange = () => {
   baseline.invalidate('mode_changed');
@@ -1087,6 +1286,7 @@ el("memClear").onclick = async () => {
 function updateContinuousVoice() {
   el("bargeToggle").textContent = `连续对话：${alwaysListen ? "开" : "关"}`;
   el("bargeToggle").setAttribute("aria-pressed", String(alwaysListen));
+  syncModeStrip();
 }
 function disableContinuousVoice() {
   alwaysListen = false;
@@ -1243,8 +1443,28 @@ boot().then(() => {
   if (!select.querySelector('option[value="seed-daily-eyes"]')) select.add(new Option("日常造型 · 眉眼升级", "seed-daily-eyes"));
   if (!select.querySelector('option[value="seed-daily-lids"]')) select.add(new Option("日常造型 · 细腻笑眼", "seed-daily-lids"));
   if (!select.querySelector('option[value="seed-daily-hair"]')) select.add(new Option("日常造型 · 发丝物理", "seed-daily-hair"));
+  if (!select.querySelector('option[value="external"]')) select.add(new Option("外部 .vrm（自定义）", "external"));
   let selectedModel = "svg";
   select.onchange = async () => {
+    if (select.value === "external") {
+      // 外部模型由设置面板的加载控件负责；这里只做一次兜底重载。
+      if (!selectedExternalModel) {
+        select.value = selectedModel;
+        status.textContent = "还没有加载过外部 .vrm；请先在上方填写地址并点击加载。";
+        return;
+      }
+      select.disabled = true;
+      status.textContent = "正在加载外部形象，聊天和语音不受影响…";
+      try {
+        await avatar.setRenderer("vrm", selectedExternalModel);
+        selectedModel = "external";
+        status.textContent = "外部 .vrm 已启用；失败时会自动回到上一个形象。";
+      } catch (error) {
+        select.value = selectedModel;
+        status.textContent = `加载失败，保留当前形象：${error.message}`;
+      } finally { select.disabled = false; }
+      return;
+    }
     select.disabled = true;
     status.textContent = "正在加载形象，聊天和语音不受影响…";
     try {
@@ -1280,4 +1500,15 @@ boot().then(() => {
   el("avatarRenderer").disabled = true;
   el("avatarRendererStatus").textContent = `形象启动失败：${err.message}`;
   document.getElementById("avatarStage")?.remove();
+});
+// 微光气泡自然消散：只在可见时轮询，避免常驻开销。
+setInterval(() => { if (glimmer.status !== "hidden") { glimmer.poll(Date.now()); renderGlimmer(); } }, 1000);
+
+// 触摸 head/face：把真实触摸事件交给服务端选台词样本并走语音链路（遵循授权/静音/去重/打断）。
+window.addEventListener("aqi-touch", (event) => {
+  const region = event.detail?.region;
+  if (region !== "head" && region !== "face") return;
+  if (!el("proactiveToggle")?.checked) return;   // 未授权/静音时不主动出声
+  if (!proactiveLocallyIdle()) return;
+  send({ type: "touch", region });
 });

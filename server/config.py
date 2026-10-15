@@ -26,24 +26,62 @@ def _load_yaml(name: str) -> dict[str, Any]:
         return yaml.safe_load(fh) or {}
 
 
+def _deep_merge(base: dict[str, Any], override: dict[str, Any]) -> dict[str, Any]:
+    """Recursive merge; override wins. Non-dict override replaces wholesale."""
+    result = dict(base)
+    for key, value in (override or {}).items():
+        if isinstance(value, dict) and isinstance(result.get(key), dict):
+            result[key] = _deep_merge(result[key], value)
+        else:
+            result[key] = value
+    return result
+
+
+def _live(name: str, base_loader: Any) -> dict[str, Any]:
+    """Return the hot snapshot when a local overlay is active, else the base.
+
+    With no overlay the lru-cached base is returned, so behavior is byte-identical
+    to a plain startup load until config_hot installs a snapshot.
+    """
+    from . import config_hot  # lazy: avoids an import cycle at module load
+    snapshot = config_hot.snapshot(name)
+    return base_loader() if snapshot is None else snapshot
+
+
 @lru_cache(maxsize=1)
-def persona_cfg() -> dict[str, Any]:
+def _persona_base() -> dict[str, Any]:
     return _load_yaml("persona.yaml")
 
 
+def persona_cfg() -> dict[str, Any]:
+    return _live("persona.yaml", _persona_base)
+
+
 @lru_cache(maxsize=1)
-def memory_cfg() -> dict[str, Any]:
+def _memory_base() -> dict[str, Any]:
     return _load_yaml("memory.yaml")
 
 
+def memory_cfg() -> dict[str, Any]:
+    return _live("memory.yaml", _memory_base)
+
+
 @lru_cache(maxsize=1)
-def pacing_cfg() -> dict[str, Any]:
+def _pacing_base() -> dict[str, Any]:
     return _load_yaml("pacing.yaml")
 
 
+def pacing_cfg() -> dict[str, Any]:
+    return _live("pacing.yaml", _pacing_base)
+
+
 @lru_cache(maxsize=1)
-def avatar_cfg() -> dict[str, Any]:
+def _avatar_base() -> dict[str, Any]:
     return _load_yaml("avatar.yaml")
+
+
+def avatar_cfg() -> dict[str, Any]:
+    return _live("avatar.yaml", _avatar_base)
 
 
 DEFAULTS: dict[str, Any] = {

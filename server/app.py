@@ -468,8 +468,15 @@ async def _maybe_self_evolution(conn: Connection) -> None:
         from .memory.evolution import self_evolution_cfg, self_evolution_payload
         if not self_evolution_cfg().get("enabled"):
             return
-        outcome = await SelfEvolutionCycle(provider=llm).run(
-            idle_seconds=time.time() - conn.last_spoke_at)
+        idle_seconds = time.time() - conn.last_spoke_at
+        cycle = SelfEvolutionCycle(provider=llm)
+        # V2 thought engine first: reflect on a seed and fork children. It shares the
+        # idle/daily gate with the legacy cycle, so only one runs per window. When it
+        # cannot produce a valid reflection this tick, fall back to the legacy
+        # ledger/spark cycle so the existing self-evolution keeps working.
+        outcome = await cycle.reflect(idle_seconds=idle_seconds)
+        if outcome.get("status") in ("skipped", "failed"):
+            outcome = await cycle.run(idle_seconds=idle_seconds)
         for change in outcome.get("events") or []:
             payload = self_evolution_payload(change)
             if payload is not None and not conn.closed:
@@ -658,20 +665,63 @@ async def _proactive_check(conn: Connection, revision: int) -> None:
             source = "self_topic"
         # busy includes this check itself; revision fences even a user turn that
         # has already finished or was cancelled while the provider ignored cancel.
-        if conn.closed or conn.revision != revision or not result:
+        if conn.closed or conn.revision != revision:
             return
-        turn = await conn.begin()
-        await conn.send_turn(turn, {"type": "turn_started", "source": source})
-        await _run_turn(conn, result.text, "proactive", turn)
-        if source == "self_topic":
-            spark_id = getattr(result, "spark_id", None)
-            if spark_id:
-                from .memory.diary import spend_spark
-                spend_spark(store, spark_id)
+        if result:
+            turn = await conn.begin()
+            await conn.send_turn(turn, {"type": "turn_started", "source": source})
+            await _run_turn(conn, result.text, "proactive", turn)
+            if source == "self_topic":
+                spark_id = getattr(result, "spark_id", None)
+                if spark_id:
+                    from .memory.diary import spend_spark
+                    spend_spark(store, spark_id)
+            return
+        # No voiced proactive this tick: surface an ambient tier (§16).
+        event = orchestrator.ambient_event(idle_seconds=time.time() - conn.last_spoke_at)
+        if event and not conn.closed and conn.revision == revision:
+            if event.get("type") == "mumble" and event.get("voice"):
+                # Real mumble through the shared voice path (deliver_reply); the frontend
+                # renders a "mumble" turn as an ambient subtitle, not a chat bubble. Reuses
+                # barge-in / interruption and the existing turn fence.
+                turn = await conn.begin()
+                if turn is not None and conn.revision == revision:
+                    from .dialogue.orchestrator import detect_emotion, store_message
+                    text = event.get("text") or ""
+                    await conn.send_turn(turn, {"type": "turn_started", "source": "mumble"})
+                    store_message(conn.session_id, "assistant", text, "mumble")
+                    await _present_reply(conn, turn, text, detect_emotion(text))
+            else:
+                await conn.send(event)  # micro_act (silent) or non-voiced mumble bubble
     except asyncio.CancelledError:
         raise
     except Exception:
         # There is no announced turn to fail when a background idle check fails.
+        return
+
+
+async def _touch_reply(conn: Connection, revision: int, region: str) -> None:
+    """Touch head/face: speak a real persona sample (§7.2) through the shared voice path.
+
+    Reuses deliver_reply (barge-in / interruption / turn fence). Only fires when the
+    connection is idle; the sample text is real config, never fabricated.
+    """
+    try:
+        if conn.closed or conn.revision != revision:
+            return
+        from .dialogue.orchestrator import detect_emotion, store_message, touch_sample_line
+        line = touch_sample_line(region)
+        if not line:
+            return
+        turn = await conn.begin()
+        if turn is None or conn.revision != revision:
+            return
+        await conn.send_turn(turn, {"type": "turn_started", "source": "touch"})
+        store_message(conn.session_id, "assistant", line, "touch")
+        await _present_reply(conn, turn, line, detect_emotion(line))
+    except asyncio.CancelledError:
+        raise
+    except Exception:
         return
 
 
@@ -849,6 +899,10 @@ async def websocket_endpoint(ws: WebSocket) -> None:
                         and (getattr(conn, 'practice', None) is None or conn.practice.mode == 'off')
                         and (getattr(conn, 'experience', None) is None or conn.experience.mode == 'off')):
                     conn.spawn(_proactive_check(conn, conn.revision))
+            elif kind == "touch":
+                region = event.get("region")
+                if region in ("head", "face") and not conn.busy:
+                    conn.spawn(_touch_reply(conn, conn.revision, region))
     except WebSocketDisconnect:
         pass
     finally:

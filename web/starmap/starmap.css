@@ -89,6 +89,9 @@
 .star-edge.kind-born { stroke-opacity: .45; stroke-dasharray: 5 3; }
 .star-edge.kind-shaped { stroke-opacity: .4; stroke-dasharray: 1 3; }
 .star-edge.kind-mentions { stroke-opacity: .16; }
+.star-edge.kind-parent_child { stroke-opacity: .55; }
+.star-edge.kind-related_memory { stroke-opacity: .22; stroke-dasharray: 2 4; }
+.star-edge.kind-epiphany { stroke: #e8c26a; stroke-opacity: .95; filter: drop-shadow(0 0 3px rgba(232, 194, 106, .65)); }
 
 .star-node { cursor: pointer; }
 .star-node .star-dot { transition: r 140ms ease; }
@@ -108,6 +111,8 @@
 .star-node.group-self .star-dot { fill: #9cc7a9; }
 .star-node.kind-diary .star-dot { fill: none; stroke: currentColor; stroke-width: 2; }
 .star-node.kind-spark .star-dot { stroke: currentColor; stroke-width: 1.5; stroke-dasharray: 2 2; }
+.star-node.kind-seed .star-dot { fill: currentColor; stroke: currentColor; stroke-width: 1.5; }
+.star-node.kind-reflection .star-dot { fill: none; stroke: currentColor; stroke-width: 2; stroke-dasharray: 3 2; }
 .star-node:hover .star-dot,
 .star-node:focus-visible .star-dot { filter: brightness(1.25); }
 .star-node:hover .star-halo,
@@ -229,6 +234,17 @@
 .swatch.edge-born { width: 14px; height: 0; border-radius: 0; border-top: 2px dashed #8a9a8d; }
 .swatch.edge-shaped { width: 14px; height: 0; border-radius: 0; border-top: 2px dotted #8a9a8d; }
 .swatch.edge-mentions { width: 14px; height: 0; border-radius: 0; border-top: 2px solid #8a9a8d66; }
+.swatch.kind-seed { background: #5fb8a8; }
+.swatch.kind-reflection { background: none; border: 2px solid #c7b06a; }
+.swatch.edge-parent_child { width: 14px; height: 0; border-radius: 0; border-top: 2px solid #9cc7a9; }
+.swatch.edge-related_memory { width: 14px; height: 0; border-radius: 0; border-top: 2px dotted #8a9a8d; }
+.swatch.edge-epiphany { width: 14px; height: 0; border-radius: 0; border-top: 2px solid #e8c26a; }
+.starmap-detail-edges { margin-top: 10px; display: flex; flex-direction: column; gap: 5px; }
+.starmap-detail-edge { display: flex; flex-wrap: wrap; gap: 6px; align-items: baseline; font-size: 12px; }
+.starmap-detail-edge-target { color: #eef1ea; }
+.starmap-detail-edge-reason { flex-basis: 100%; color: #b9c6b9; line-height: 1.45; }
+.starmap-detail .tag.edge-epiphany { border-color: #e8c26a; color: #e8c26a; }
+.starmap-detail .tag.edge-parent_child { border-color: #9cc7a9; color: #9cc7a9; }
 .starmap-truncated { margin: 0; flex-basis: 100%; font-size: 11px; }
 .starmap-truncated[hidden] { display: none; }
 

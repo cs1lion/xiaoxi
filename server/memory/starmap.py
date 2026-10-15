@@ -18,7 +18,7 @@ from .evolution import MAX_OPENING_CHARS, load_self_state, unwrap_json_text
 if TYPE_CHECKING:  # Annotation-only: importing this module must not open the database.
     from .store import MemoryStore
 
-STARMAP_KINDS = ("memory", "diary", "spark", "taste", "worldview")
+STARMAP_KINDS = ("memory", "diary", "spark", "taste", "worldview", "seed", "reflection")
 STARMAP_LIMIT = 400       # 协议第十三节硬上限
 LABEL_MAX_CHARS = 80      # 协议第十三节：label 上限
 MAX_DAYS = 3650
@@ -92,6 +92,34 @@ def _stance_node(kind: str, entry: dict[str, Any]) -> dict[str, Any]:
     return {"id": f"{kind}:{entry.get('topic', '')}", "kind": kind, "label": _label(entry.get("topic")),
             "date": _iso_date(entry.get("updated_at")), "weight": _clamp01(entry.get("weight")),
             "group": "self", "ref_id": entry.get("topic", "")}
+
+
+def _seed_node(seed: dict[str, Any]) -> dict[str, Any]:
+    created = seed.get("created_at")
+    return {"id": f"seed:{seed['id']}", "kind": "seed",
+            "label": _label(seed.get("title") or seed.get("question")),
+            "date": created if isinstance(created, str) else _iso_date(created),
+            "weight": _clamp01(seed.get("heat")), "group": "self", "ref_id": seed["id"]}
+
+
+def _reflection_node(reflection: dict[str, Any]) -> dict[str, Any]:
+    return {"id": f"reflection:{reflection['id']}", "kind": "reflection",
+            "label": _label(reflection.get("discovery")),
+            "date": _iso_date(reflection.get("created_at")), "weight": 0.6,
+            "group": "self", "ref_id": reflection["id"]}
+
+
+def _persisted_edges(nodes: list[dict[str, Any]], store: MemoryStore) -> list[dict[str, Any]]:
+    """Persisted parent_child / related_memory / epiphany edges (§18.2), kept only
+    when both endpoints survive as nodes so the graph never dangles."""
+    present = {node["id"] for node in nodes}
+    edges: list[dict[str, Any]] = []
+    for edge in store.list_edges(limit=2000):
+        if edge["source"] in present and edge["target"] in present:
+            edges.append({"source": edge["source"], "target": edge["target"], "kind": edge["kind"],
+                          "weight": _clamp01(edge.get("weight")), "reason": edge.get("reason", ""),
+                          "created_at": edge.get("created_at")})
+    return edges
 
 
 def _node_topics(node: dict[str, Any], store: MemoryStore,
@@ -203,6 +231,10 @@ def starmap_graph(manager: Any, *, days: int = 90, kinds: Any = None, q: str = "
         if kind in wanted:
             nodes.extend(_stance_node(kind, entry) for entry in (state.get(kind) or [])
                          if isinstance(entry, dict) and entry.get("topic"))
+    if "seed" in wanted:
+        nodes.extend(_seed_node(seed) for seed in store.list_seeds(limit=limit))
+    if "reflection" in wanted:
+        nodes.extend(_reflection_node(reflection) for reflection in store.list_reflections(limit=limit))
 
     keyword = (q or "").strip().lower() if isinstance(q, str) else ""
     if keyword:
@@ -214,6 +246,7 @@ def starmap_graph(manager: Any, *, days: int = 90, kinds: Any = None, q: str = "
     diary_records = {node["ref_id"]: store.get_diary(node["ref_id"])
                      for node in nodes if node["kind"] == "diary"}
     edges = _edges(nodes, store, diary_records)
+    edges.extend(_persisted_edges(nodes, store))
     stats = {
         "memories": sum(1 for node in nodes if node["kind"] == "memory"),
         "diaries": sum(1 for node in nodes if node["kind"] == "diary"),
@@ -248,6 +281,10 @@ def starmap_node(manager: Any, node_id: Any) -> dict[str, Any] | None:
             if isinstance(entry, dict) and entry.get("topic") == identifier:
                 return {"kind": prefix, **entry}
         return None
+    if prefix == "seed":
+        return store.get_seed(identifier)
+    if prefix == "reflection":
+        return store.get_reflection(identifier)
     return None
 
 

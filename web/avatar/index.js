@@ -9,7 +9,7 @@
  * 对外只暴露几个事件式方法，app.js 那边不需要知道内部有四个驱动。
  */
 
-import { ParamStore, Rigger, clamp, clamp01, lerp } from "./params.js";
+import { ParamStore, Rigger, clamp, clamp01, lerp, softLimitStack } from "./params.js";
 import { buildTimeline } from "./timeline.js";
 import { IdleDriver } from "./drivers/idle.js";
 import { LipDriver } from "./drivers/lip.js";
@@ -26,6 +26,8 @@ import { composeGesture } from "./drivers/primitives.js";
 import { EyeExpressionDriver, combineEyeOpen } from "./drivers/eye-expression.js";
 import { DialogueGazeDirector } from "./drivers/dialogue-gaze.js";
 import { DialogueExpressionDriver } from "./drivers/dialogue-expression.js";
+import { ThinkingPreactDriver } from "./drivers/thinking-pre-act.js";
+import { TouchZones, svgRegionHit } from "./drivers/touch-zones.js";
 import { DIALOGUE_INTENT_PROFILES, resolveDialogueIntent } from "./drivers/dialogue-intent.js";
 
 const LAYERS = [
@@ -36,6 +38,35 @@ const LAYERS = [
   ["lip", 40],
 ];
 
+/* 外部 .vrm 一键加载契约（A-5，交给 Role 3 的设置面板）：
+ * 只接受 http / https / blob 与站内相对路径。跨域地址需要目标服务器开
+ * CORS，否则 GLTFLoader 的抓取必然失败——那会走加载失败路径，当前形象
+ * 保持不动，聊天和语音不受影响。 */
+const VRM_URL_SCHEMES = new Set(["http:", "https:", "blob:"]);
+
+export function validateVrmUrl(url) {
+  if (typeof url !== "string" || !url.trim()) {
+    throw new Error("avatar_renderer_url_invalid: 模型地址不能为空");
+  }
+  const value = url.trim();
+  let parsed = null;
+  try { parsed = new URL(value, globalThis.location?.href); } catch (_) { parsed = null; }
+  if (parsed && !VRM_URL_SCHEMES.has(parsed.protocol)) {
+    throw new Error(`avatar_renderer_url_invalid: 不支持的地址协议 ${parsed.protocol}`);
+  }
+  return value;
+}
+
+/* 失败路径统一成带错误码的消息；设置面板展示 message 即可。 */
+export function normalizeRendererError(error) {
+  const message = error instanceof Error ? error.message : String(error);
+  if (message.startsWith("avatar_renderer_")) {
+    return error instanceof Error ? error : new Error(message);
+  }
+  if (/humanoid/i.test(message)) return new Error(`avatar_renderer_not_humanoid: ${message}`);
+  return new Error(`avatar_renderer_load_failed: ${message}`);
+}
+
 export class Avatar {
   constructor() {
     this.cfg = null;
@@ -45,6 +76,15 @@ export class Avatar {
     this.performance = new PerformanceDirector();
     this.dialogueGaze = new DialogueGazeDirector();
     this.dialogueExpression = new DialogueExpressionDriver();
+    this.thinkingPreact = new ThinkingPreactDriver();
+    this.touchZones = null;
+    this.modelInfo = null;
+    this._breathBlinkAt = null;
+    this._touchPreviewUntil = null;
+    this._touchPreviewName = null;
+    this._facePokes = 0;
+    // idle 层叠加软限幅（A-3）：膝值以下恒等，正常演出逐字节不变。
+    this.stackLimit = { enabled: true, knee: 0.45, ceiling: 0.75 };
     this.dialogueIntentMode = 'auto';
     this.dialogueReview = null;
     this.rendererKind = "svg";
@@ -85,6 +125,17 @@ this.idle = new IdleDriver({ ...this.cfg.idle, gaze: this.cfg.gaze });
     this.gesture.setTriggers(this.cfg.triggers || {});
 this.face = new FaceDriver();
     this.beat = new BeatDriver();
+    // A-3 叠加软限幅参数来自 config/avatar.yaml 的 idle.stack_limit；
+    // 缺省即代码里的软膝（0.45 / 0.75），与打磨前的观感一致。
+    const limit = this.cfg.idle?.stack_limit;
+    if (limit && typeof limit === "object") {
+      this.stackLimit = {
+        enabled: limit.enabled !== false,
+        knee: Number.isFinite(limit.knee) ? limit.knee : 0.45,
+        ceiling: Number.isFinite(limit.ceiling) ? limit.ceiling : 0.75,
+      };
+    }
+    this.thinkingPreact.configure(this.cfg.idle?.thinking_preact || {});
     this.motion = new MotionMagic();
     this.motion.setComponents(getMotionProfile("base"));
     this.discourseGesture = new DiscourseGestureGenerator();
@@ -139,18 +190,46 @@ this.face = new FaceDriver();
   mount(container) {
     this.container = container;
     this.svg.mount(container, this.cfg?.look || {});
+    this._mountTouchZones(container);
     if (!this._raf) this._start();
     return this;
+  }
+
+  /* A-4 触控热区：自包含挂在容器上。enabled:false 时完全退出，
+   * 不留任何监听（设置面板可关）。 */
+  _mountTouchZones(container) {
+    this._disposeTouchZones();
+    const touch = this.cfg?.touch;
+    if (!touch || touch.enabled === false) return;
+    this.touchZones = new TouchZones(container, {
+      slop: touch.tap_slop, tapMs: touch.tap_ms,
+      region: (clientX, clientY, x, y) => this._touchRegion(clientX, clientY, x, y),
+      onRegion: (region, point) => this.onTouchRegion(region, point),
+      onDrag: (x, y) => this.onUserInteraction("mousemove", x, y),
+    });
+  }
+
+  _disposeTouchZones() {
+    this.touchZones?.dispose();
+    this.touchZones = null;
+  }
+
+  /* 命中判定按渲染器分流：VRM 投影真实骨骼，SVG 用归一化矩形热区。 */
+  _touchRegion(clientX, clientY, x, y) {
+    if (this.rendererKind === "vrm") return this.svg.hitRegion?.(clientX, clientY) || null;
+    return svgRegionHit(this.cfg?.touch?.svg, x, y);
   }
 
   /* Prepare asynchronously offscreen: loading or failure never stops speech/SVG. */
   async setRenderer(kind, url = "/static/models/sample.vrm") {
     if (!this.container) throw new Error("Avatar must be mounted first");
     if (!["svg", "vrm", "original"].includes(kind)) throw new Error("Unknown renderer");
+    if (kind === "vrm") url = validateVrmUrl(url);
     this.dialogueReview?.stop('model-switch');
     const request = ++this._rendererRequest;
     const host = document.createElement("div");
-    host.style.cssText = "position:absolute;inset:0;width:100%;height:100%;visibility:hidden";
+    // 宿主层对指针透明：触控热区的目标是容器本身（见 drivers/touch-zones.js）。
+    host.style.cssText = "position:absolute;inset:0;width:100%;height:100%;visibility:hidden;pointer-events:none";
     this.container.appendChild(host);
     let next;
     try {
@@ -161,7 +240,8 @@ this.face = new FaceDriver();
       } else if (kind === "vrm") {
         const { VrmRig } = await import("./render/vrm.js");
         next = new VrmRig();
-        await next.mount(host, this.cfg?.look || {}, { url });
+        await next.mount(host, this.cfg?.look || {},
+          { url, stage: this.cfg?.stage, touch: this.cfg?.touch });
       } else {
         next = new SvgRig();
         next.mount(host, this.cfg?.look || {});
@@ -175,20 +255,32 @@ this.face = new FaceDriver();
       host.style.visibility = "visible";
       this.svg = next;
       this.rendererKind = kind;
+      this.modelInfo = next.getModelInfo?.() || null;
       this.eyeExpression.setProfile(next.getEyeCapabilities?.().profile);
       return true;
     } catch (error) {
       next?.dispose?.();
       host.remove();
       if (request !== this._rendererRequest) return false;
-      throw error;
+      throw normalizeRendererError(error);
     }
+  }
+
+  /* 设置面板（Role 3）读这个展示当前模型与许可提示位。 */
+  getRendererInfo() {
+    return { kind: this.rendererKind, model: this.modelInfo };
+  }
+
+  getModelInfo() {
+    return this.modelInfo;
   }
 
   dispose() {
     ++this._rendererRequest;
     cancelAnimationFrame(this._raf);
     this._raf = 0;
+    this.thinkingPreact.stop({ immediate: true });
+    this._disposeTouchZones();
     this.face?.stop();
     this.dialogueGaze.stop('dispose');
     this.dialogueExpression.stop({ immediate: true });
@@ -251,6 +343,44 @@ this.face = new FaceDriver();
     this.setGazeMode(enabled ? "follow" : "natural");
   }
 
+  /* A-4 区域互动反馈：摸头/戳脸/轻触三种差异化反应。
+   * 表情走既有眉眼预览通道，挥手臂走 PerformanceDirector 的预览动作
+   * （VRM 的手臂姿势只由它驱动），不新造协议外的动作。被连戳第三次会从
+   * "惊讶"升级成"微嗔"——戳多了会不好意思。 */
+  onTouchRegion(region, point) {
+    if (!region) return;
+    this.idle?.wake(1);
+    const now = this.clock;
+    if (region === "head") {
+      this._playTouchPreview("happy", now + 2.2);
+      this.gesture.play("nod", now);
+    } else if (region === "face") {
+      this._facePokes += 1;
+      const pout = this._facePokes % 3 === 0;
+      this._playTouchPreview(pout ? "tsundere" : "surprised", now + (pout ? 2.6 : 1.6));
+      this.gesture.play(pout ? "shake" : "surprise", now);
+    } else if (region === "hand") {
+      this._playTouchPreview("happy", now + 1.8);
+      this.performance.preview("wave", this._previewClock());
+    }
+    // 通知宿主层发生了一次真实触摸（head/face/hand），供台词样本走语音链路；附加、不改既有反馈。
+    try { window.dispatchEvent(new CustomEvent("aqi-touch", { detail: { region } })); } catch (_) {}
+  }
+
+  _playTouchPreview(name, until) {
+    this.setEyeExpression(name);
+    this._touchPreviewName = name;
+    this._touchPreviewUntil = until;
+  }
+
+  /* 预览动作要时钟：播放中用真实音频时钟（和语音手势同一时间域），
+   * 静默时退回帧时钟，否则挥手会永远停在半空。 */
+  _previewClock() {
+    const ctx = this.audioCtx;
+    if (ctx && ctx.state === "running" && Number.isFinite(ctx.currentTime)) return ctx;
+    return { currentTime: this.clock };
+  }
+
   setGazeMode(mode) {
     if (!["natural", "follow", "auto", "forward"].includes(mode)) throw new RangeError("Unknown gaze mode");
     this.gazeMode = mode;
@@ -303,6 +433,27 @@ this.face = new FaceDriver();
     return 0;
   }
 
+  /* 呼吸点眨眼（协议第十一节）：音频时钟走到段末停顿的那一刻补一次轻眨眼。
+   * 只在没有眨眼正在进行时发起，否则会把一次眨眼切成两次。 */
+  _tickBreathBlink() {
+    if (this._breathBlinkAt === null) return;
+    const now = this.audioCtx?.currentTime;
+    if (!Number.isFinite(now) || now < this._breathBlinkAt) return;
+    this._breathBlinkAt = null;
+    if (this._eyeBlinkTime === null) this._eyeBlinkTime = 0;
+  }
+
+  /* 触控反馈的眉眼预览到点收回。只收回自己设的那一个，
+   * 不抢设置面板/实验室可能挂着的预览。 */
+  _releaseTouchPreview({ force = false } = {}) {
+    if (this._touchPreviewUntil === null) return;
+    if (!force && this.clock < this._touchPreviewUntil) return;
+    this._touchPreviewUntil = null;
+    const name = this._touchPreviewName;
+    this._touchPreviewName = null;
+    if (name && this.eyeExpression?.name === name) this.setEyeExpression(null);
+  }
+
   /* 没有 analyser（静音 TTS、测试驱动）时返回 null——"没有包络数据"
    和"包络为零"是两回事，不能当成同一件事。 */
   _readRms() {
@@ -325,7 +476,16 @@ this.face = new FaceDriver();
       this._pending.push({ text, startedAt, duration: durationSec, options });
       return;
     }
-    this.lip.speak(buildTimeline(text, durationSec, this.timelineOpts(options)), startedAt);
+    const timeline = buildTimeline(text, durationSec, this.timelineOpts(options));
+    this.lip.speak(timeline, startedAt);
+    /* F2 呼吸点（协议第十一节）：chunk.breath 为真时，在这段音频结束、
+     * 段间停顿开始的那一刻补一次轻眨眼。走既有手动眨眼通道，与 idle 自发
+     * 眨眼取 max 合成，不会双重闭合。 */
+    this._breathBlinkAt = timeline.breath
+      ? startedAt + (Number.isFinite(timeline.breathAt) ? timeline.breathAt : durationSec)
+      : null;
+    // 首包音频到达：思考期预演收尾（协议：首个 audio 结束等待演出）。
+    this.thinkingPreact.stop();
     this.dialogueGaze.startSpeech(this.audioCtx, startedAt, durationSec);
     this.performance.speak(text, this.audioCtx, startedAt, durationSec, options);
     // Legacy head/body text tracks follow playback too. An explicit semantic
@@ -338,6 +498,7 @@ this.face = new FaceDriver();
   stopSpeaking({ turnPending = false, preserveDialogue = false } = {}) {
     // A stop before initialization must also invalidate deferred mouth animation.
     this._pending.length = 0;
+    this._breathBlinkAt = null;
     this.performance?.stop();
     this.lip?.stop();
     if (!preserveDialogue) this.dialogueGaze.endSpeech({ turnPending });
@@ -378,6 +539,9 @@ this.face = new FaceDriver();
         msg.type === "interrupted" || msg.type === "playback_stopped") {
       this.speechPlan = null; // 新轮次开始或被打断：长播报预告随之过期
       this.stopSpeaking({ preserveDialogue: true });
+      // A-2 思考期预演：thinking 起、新轮次/打断收。
+      if (msg.type === "thinking") this.thinkingPreact.start();
+      else this.thinkingPreact.stop();
     }
     this.performance.onEvent(msg);
     this.dialogueGaze.onEvent(msg);
@@ -409,8 +573,11 @@ case "emotion":
         this.gesture.stop(t.on_thinking);
         this.gesture.stop(t.on_user_speech);
         break;
-case "text_delta":
       case "done":
+        // 没有音频的收尾（静默 TTS / 纯文字轮）也要收起思考预演。
+        this.thinkingPreact.stop();
+        break;
+      case "text_delta":
         // Generated text may lead audible speech by several sentences. Only
         // speak(), at the actual playback boundary, schedules speech gestures.
         break;
@@ -440,6 +607,8 @@ case "text_delta":
     this.face?.setMimicryMode(false);
     this.dialogueGaze.stop('interrupted');
     this.dialogueExpression.stop({ immediate: true });
+    this.thinkingPreact.stop({ immediate: true });
+    this._releaseTouchPreview({ force: true });
   }
 
   /* ---- 每帧 ---- */
@@ -496,7 +665,13 @@ const rms = this._readRms();
       }
     }
     const idleOut = this.idle.update(dt, { speaking, rms: rms || 0 });
-    const blink = Math.max(idleOut.blink, this._manualEyeBlink(dt));
+    this._tickBreathBlink();
+    const preact = this.thinkingPreact.update(dt, { reducedMotion: this.reducedMotion });
+    // 眨眼三源取 max 合成：idle 自发、手动（blinkEyes / 呼吸点）、思考预演。
+    // 相加会双重闭合（眼睑被拉过 0 再钳回来），取 max 保证任何时刻只有一条
+    // 在真正闭眼。
+    const blink = Math.max(idleOut.blink, this._manualEyeBlink(dt), preact?.blink || 0);
+    this._releaseTouchPreview();
 
     // 语篇感知手势生成器更新（含 backchannel）
     const discourseOut = this.discourseGesture.update(rms || 0, dt, {
@@ -531,9 +706,21 @@ const rms = this._readRms();
     // Compose automatic blink after expression openness, rather than adding
     // two full-strength closing shapes to the same eyelid.
     rig.set("idle", "ParamBreath", idleOut.breath * idleOut.breathDepth);
-    rig.add("idle", "ParamAngleX", idleOut.swayX);
-    rig.add("idle", "ParamAngleY", idleOut.swayY);
-    rig.add("idle", "ParamAngleZ", idleOut.bob);
+    /* ---- idle 层微动累加 + 软限幅（A-3）----
+     * sway / 说话律动 / Motion Magic / beat / 思考预演都是相加进同一个
+     * ParamAngle* 的小偏移。相位对齐时总和会冲到单源幅度的两三倍，读起来
+     * 就是"头突然抖一下"。先把这一帧的微动源求和，再过软膝压缩：膝值以下
+     * 恒等（正常演出逐字节不变），膝值以上平滑压向天花板（C1 连续，不会
+     * 在膝盖处引入新的速度折角）。注视带出的转头、犯困垂头、呼吸不参与
+     * 限幅——它们是意图明确的姿态，不是噪声源。 */
+    const micro = {};
+    const microAdd = (key, value) => {
+      const n = Number(value);
+      if (Number.isFinite(n)) micro[key] = (micro[key] || 0) + n;
+    };
+    microAdd("ParamAngleX", idleOut.swayX);
+    microAdd("ParamAngleY", idleOut.swayY);
+    microAdd("ParamAngleZ", idleOut.bob);
     /* 眼-头协调：注视点带出来的转头。
      * 与上面的 sway 是两回事——sway 是与注视无关的底层噪声，
      * 这里是把"她在看哪"真的反映到头的朝向上。
@@ -552,15 +739,21 @@ const rms = this._readRms();
     const motionOut = this.motion.update(dt);
     if (motionOut) {
       for (const [key, value] of Object.entries(motionOut)) {
-        rig.add("idle", key, value);
+        microAdd(key, value);
       }
     }
 
     // 节拍同步：音频节拍驱动弹跳
     const beatOut = this.beat.update(this.outAnalyser, dt);
     if (beatOut.pulse > 0.01) {
-      rig.add("idle", "ParamAngleY", beatOut.pulse * 0.12);
-      rig.add("idle", "ParamBodyAngleX", beatOut.pulse * 0.08);
+      microAdd("ParamAngleY", beatOut.pulse * 0.12);
+      microAdd("ParamBodyAngleX", beatOut.pulse * 0.08);
+    }
+    if (preact) {
+      for (const [key, value] of Object.entries(preact.values)) microAdd(key, value);
+    }
+    for (const [key, value] of Object.entries(micro)) {
+      rig.add("idle", key, this.stackLimit.enabled ? softLimitStack(key, value, this.stackLimit) : value);
     }
 
     // --- 记忆驱动表情/动作 ---

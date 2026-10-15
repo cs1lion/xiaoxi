@@ -14,10 +14,12 @@ const TAP_SLOP = 5;
 
 export const KIND_LABELS = {
   memory: "记忆", diary: "日记", spark: "灵感火花", taste: "品味", worldview: "世界观",
+  seed: "好奇心种子", reflection: "一次反思",
 };
 export const GROUP_LABELS = { user: "关于你", self: "小溪自己" };
 export const EDGE_LABELS = {
   evidences: "记忆印证日记", born: "火花诞生自", shaped: "心境塑造", mentions: "同主题",
+  parent_child: "裂变出", related_memory: "选材关联", epiphany: "跨界顿悟",
 };
 
 const SVG_NS = "http://www.w3.org/2000/svg";

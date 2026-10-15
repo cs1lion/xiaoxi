@@ -8,10 +8,44 @@ from dataclasses import dataclass, field
 from typing import Any, AsyncIterator
 
 from ..config import memory_cfg, pacing_cfg, settings
+
+# V2 三梯度梯度1（micro_act）可用的无声舞台微动作；前端 ambient.js 安全降级未知项。
+_MICRO_ACTIONS = ("glance_away", "tilt_head", "stretch", "fidget", "thoughtful", "soft_blink")
+_TOUCH_RECENT: dict[str, list[str]] = {}
+
+
+def touch_sample_line(region: str) -> str:
+    """Pick a real touch_head/touch_face persona sample (§7.2), rotating to avoid repeats.
+
+    Reads config/response_examples.json stage_samples; returns "" when absent so the
+    caller stays silent instead of fabricating a reaction.
+    """
+    if region not in ("head", "face"):
+        return ""
+    try:
+        import json
+        from ..config import ROOT
+        data = json.loads((ROOT / "config" / "response_examples.json").read_text(encoding="utf-8"))
+        lines = ((data.get("stage_samples") or {}).get(f"touch_{region}") or [])
+    except Exception:
+        return ""
+    lines = [line.strip() for line in lines if isinstance(line, str) and line.strip()]
+    if not lines:
+        return ""
+    recent = _TOUCH_RECENT.setdefault(region, [])
+    fresh = [line for line in lines if line not in recent] or lines
+    pick = fresh[0]
+    recent.append(pick)
+    if len(recent) >= len(lines):
+        recent.clear()
+    return pick
 from ..llm import llm
 from ..memory.manager import manager
 from ..persona import build_messages, dynamic_prompt, static_system_prompt
 from ..speech.tts import micro_pause, split_for_speech_micro, tts
+
+# V2 三梯度梯度1（micro_act）可用的无声舞台微动作；前端 ambient.js 安全降级未知项。
+_MICRO_ACTIONS = ("glance_away", "tilt_head", "stretch", "fidget", "thoughtful", "soft_blink")
 from .performance import (MOTION_INSTRUCTION, MotionMetadataFilter,
                           performance_plan, slice_performance, strip_motion_metadata)
 
@@ -162,6 +196,9 @@ class Orchestrator:
             "proactive_suppressed_until": 0.0,
             "last_proactive_at": 0.0,
             "proactive_count_today": 0,
+            "last_ambient_tier": None,
+            "last_ambient_at": 0.0,
+            "ambient_seq": 0,
             "day_stamp": time.strftime("%Y-%m-%d"),
             "recent_reopens": 0,
         }
@@ -352,13 +389,19 @@ class Orchestrator:
         micro_cfg = speech_cfg.get("micro_chunk") or {}
         micro_target = max(1, int(micro_cfg.get("target_chars", 20)))
         micro_cap = max(micro_target, int(micro_cfg.get("max_chars", 60)))
+        first_cfg = speech_cfg.get("first_chunk") or {}
+        first_aggressive = bool(first_cfg.get("enabled", True))
+        first_min = max(1, int(first_cfg.get("min_chars", 6)))
+        first_max = max(first_min, int(first_cfg.get("max_chars", 12)))
         pause_cfg = speech_cfg.get("pause") or {}
         preload_concurrency = max(1, int((speech_cfg.get("preload") or {}).get("concurrency", 2)))
         if not micro:
             preload_concurrency = 1
         holder = {"emotion": "", "text": "", "first_audio_at": None,
                   "limit_reached": False, "generation_failed": False,
-                  "audio_failed": 0, "audio_succeeded": 0, "plan_sent": False}
+                  "audio_failed": 0, "audio_succeeded": 0, "plan_sent": False,
+                  # 首包激进切分只作用于每轮第一个微句，之后恢复 12-35 字目标。
+                  "first_chunk_pending": True}
         sentence_annotations: list[Any] = []
         seq_counter = [0]
 
@@ -395,7 +438,14 @@ class Orchestrator:
                 # Feature-off keeps the legacy 60-char window, unchanged.
                 if micro:
                     offset = 0
-                    for piece in split_for_speech_micro(text, micro_target, micro_cap):
+                    # 首包激进切分（协议第十一节）：本轮第一个微句满 6~12 字
+                    # 遇标点/语气词即切，让用户在模型还在写的时候就听到声音。
+                    # 窗口内没有边界时 split_for_speech_micro 自动退回正常目标
+                    # 长度，切分仍是无损的，performance 锚点偏移不受影响。
+                    aggressive = first_aggressive and holder["first_chunk_pending"]
+                    for piece in split_for_speech_micro(
+                            text, micro_target, micro_cap, aggressive_first=aggressive,
+                            first_min=first_min, first_max=first_max):
                         seq = seq_counter[0]
                         pause_ms, breath = micro_pause(
                             piece, clause_ms=int(pause_cfg.get("clause_ms", 120)),
@@ -413,6 +463,7 @@ class Orchestrator:
                                                seq, True, chunk_field))
                         seq_counter[0] += 1
                         offset += len(piece)
+                    holder["first_chunk_pending"] = False
                 else:
                     for start in range(0, len(text), 60):
                         seq = seq_counter[0]
@@ -870,6 +921,73 @@ class Orchestrator:
         self.state["proactive_count_today"] += 1
         return TurnResult(text=text, emotion=detect_emotion(text), proactive=True,
                           spark_id=spark_id if isinstance(spark_id, int) else None)
+
+    def ambient_event(self, *, idle_seconds: float, now: float | None = None) -> dict[str, Any] | None:
+        """V2 three-tier non-voiced presence (§16): micro_act / mumble from real content.
+
+        Returns a connection-level event dict or None. The voiced proactive tier is
+        handled by self_topic_turn; this covers the silent micro_act and the soft
+        mumble bubble. It never fabricates: with no real mood/reflection/spark it
+        stays silent rather than claiming a reflection that did not happen.
+        """
+        from . import ambient
+        cfg = ambient.ambient_cfg()
+        if not cfg.get("enabled") or not manager.enabled:
+            return None
+        now = time.time() if now is None else now
+        proactivity = self.pacing["proactivity"]
+        if not proactivity.get("default_enabled") and not self.state["proactivity_enabled"]:
+            return None
+        if now < float(self.state["proactive_suppressed_until"]):
+            return None
+        tier = ambient.select_tier(idle_seconds, cfg, quiet_mode=bool(cfg.get("quiet_mode_default")))
+        if tier is None or tier == "proactive":
+            return None  # the voiced tier is delivered by self_topic_turn
+        # Dedup within an idle cycle: only escalate (micro_act -> mumble), or re-emit
+        # the same/lower tier after the dedupe window; never spam one cycle.
+        order = {"micro_act": 1, "mumble": 2}
+        last_tier = self.state.get("last_ambient_tier")
+        last_at = float(self.state.get("last_ambient_at") or 0)
+        window = float(cfg.get("dedupe_window_seconds") or 300)
+        if last_tier in order and now - last_at < window and order[tier] <= order[last_tier]:
+            return None
+        if tier == "micro_act":
+            seq = int(self.state.get("ambient_seq") or 0)
+            action = _MICRO_ACTIONS[seq % len(_MICRO_ACTIONS)]
+            self.state["ambient_seq"] = seq + 1
+            self.state["last_ambient_tier"] = "micro_act"
+            self.state["last_ambient_at"] = now
+            return ambient.build_micro_act(action=action, reason=f"idle_{int(idle_seconds)}s", now=now)
+        discovery = mood = spark = None
+        try:
+            recent = manager.store.list_reflections(limit=1)
+            if recent:
+                record = recent[0]
+                discovery = {"text": record.get("discovery", ""),
+                             "source_refs": [f"reflection:{record['id']}", f"seed:{record.get('seed_id', '')}"]}
+        except Exception:
+            discovery = None
+        try:
+            current = manager.store.get_mood()
+            expires = current.get("expires_at")
+            if current.get("state") in ("active", "easing") and (expires is None or now < float(expires)):
+                mood = {"narrative": current.get("narrative", ""), "source_refs": current.get("source_refs") or []}
+        except Exception:
+            mood = None
+        try:
+            sparks = manager.store.list_sparks(states=("surfaced",))
+            if sparks:
+                spark = {"text": sparks[0].get("text", "")}
+        except Exception:
+            spark = None
+        text, refs = ambient.choose_content(discovery=discovery, mood=mood, spark=spark)
+        if not text:
+            return None  # nothing real to murmur; stay silent
+        self.state["last_ambient_tier"] = "mumble"
+        self.state["last_ambient_at"] = now
+        return ambient.build_mumble(text=text, reason=f"idle_{int(idle_seconds)}s",
+                                    voice=bool(cfg.get("mumble_voice", False)),
+                                    bubble=text, source_refs=refs, now=now)
 
     def set_proactivity(self, enabled: bool) -> None:
         self.state["proactivity_enabled"] = enabled

@@ -314,8 +314,38 @@ def spend_spark(store: MemoryStore, spark_id: int) -> dict[str, Any] | None:
     return None
 
 
+def decay_mood(store: MemoryStore, *, now: float | None = None,
+               easing_seconds: float = 1800.0) -> dict[str, Any]:
+    """Naturally fade a mood after its TTL (§15.1): active -> easing -> resolved.
+
+    The expiry is only a valve; the narrative eases over a second window and then
+    clears, so the persona never snaps to an opposite personality. Idempotent and
+    never raises; returns the current (possibly updated) mood record.
+    """
+    now = time.time() if now is None else now
+    mood = store.get_mood()
+    if not mood or not mood.get("narrative"):
+        return mood
+    expires = mood.get("expires_at")
+    state = mood.get("state")
+    if expires is None:
+        return mood
+    if state == "active" and now >= float(expires):
+        store.save_mood(narrative=mood["narrative"], reason=mood.get("reason", ""),
+                        source_refs=mood.get("source_refs") or [],
+                        influence_note=mood.get("influence_note", ""),
+                        related_summary=mood.get("related_summary", ""),
+                        state="easing", expires_at=now + easing_seconds)
+        return store.get_mood()
+    if state == "easing" and now >= float(expires):
+        store.save_mood(narrative="", reason="", source_refs=[], influence_note="",
+                        related_summary="", state="resolved", expires_at=None)
+        return store.get_mood()
+    return mood
+
+
 __all__ = [
-    "MAX_TURN_DRIFTS", "active_drifts", "diary_notice_payload",
+    "MAX_TURN_DRIFTS", "active_drifts", "decay_mood", "diary_notice_payload",
     "local_date", "spend_spark", "surface_next_spark", "surfaced_sparks", "synthesize_diary",
     "validate_diary_payload", "validate_drift_proposal", "validate_spark_proposal",
 ]

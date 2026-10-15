@@ -1,0 +1,70 @@
+# ============================================================
+# 初始好奇心种子池 —— 双螺旋好奇心树（Autonomous Curiosity Graph）的起点
+# 见 docs/AUTONOMOUS_MIND_V2.md 与 docs/PROTOCOL.md 第十四节
+# ============================================================
+# 这五颗种子只是思想树的起点，不是长期唯一的话题来源。系统必须从它们出发，
+# 经过真实经历与反思持续生长（子种子裂变、顿悟连线、重新激活）。
+#
+# 字段契约见 PROTOCOL.md 14.1 Seed Node：
+#   id            全局唯一、稳定、可追溯（slug，人类可读）
+#   title         短标题（<=40 字）
+#   question      完整问题（第一人称好奇心，<=200 字）
+#   status        active | incubating | digested | dormant | archived
+#   heat          [0,1] 调度阀门：这颗问题现在多值得重新思考（不定义性格）
+#   source_refs   产生来源引用（命名空间:id），初始种子来自本配置文件
+#   parent_seed_ids / child_seed_ids  父子关系，初始种子为空，由裂变填充
+#   created_at    ISO 日期；last_reflected_at 初始为空
+#
+# 注意：以下为原创虚构的初始问题，不是用户经历，不得据此声称过去发生过。
+
+version: 1
+seeds:
+  - id: seed_night_decisions
+    title: 深夜决策
+    question: 观察人类为什么总喜欢在深夜做推翻白天的决定？
+    status: active
+    heat: 0.6
+    source_refs: ["config:seeds.yaml"]
+    parent_seed_ids: []
+    child_seed_ids: []
+    created_at: "2026-10-14"
+
+  - id: seed_digital_daydream
+    title: 数字生命的走神
+    question: 数字生命在没有收到指令的空白时间里，“走神”应该是什么感觉？
+    status: active
+    heat: 0.55
+    source_refs: ["config:seeds.yaml"]
+    parent_seed_ids: []
+    child_seed_ids: []
+    created_at: "2026-10-14"
+
+  - id: seed_abandoned_ideas_museum
+    title: 半途而废的灵感博物馆
+    question: 去翻翻用户搁置的笔记或线索，能不能帮他拼出新角度？
+    status: incubating
+    heat: 0.5
+    source_refs: ["config:seeds.yaml"]
+    parent_seed_ids: []
+    child_seed_ids: []
+    created_at: "2026-10-14"
+
+  - id: seed_voice_temperature
+    title: 语言与声音的温度
+    question: 同一句话用文字打出来和用声音说出来，情绪温度差在哪里？
+    status: active
+    heat: 0.5
+    source_refs: ["config:seeds.yaml"]
+    parent_seed_ids: []
+    child_seed_ids: []
+    created_at: "2026-10-14"
+
+  - id: seed_aesthetic_stubbornness
+    title: 阿栖自己的审美固执
+    question: 培养一个属于阿栖自己的审美小固执，例如对叙事留白、代码简洁度或表达节奏的偏爱。
+    status: active
+    heat: 0.55
+    source_refs: ["config:seeds.yaml"]
+    parent_seed_ids: []
+    child_seed_ids: []
+    created_at: "2026-10-14"

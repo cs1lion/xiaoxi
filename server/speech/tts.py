@@ -8,7 +8,7 @@ import re
 from dataclasses import dataclass
 from typing import Any, AsyncIterator
 
-from ..config import persona_cfg, settings
+from ..config import pacing_cfg, persona_cfg, settings
 
 _SENT_SPLIT = re.compile(r"(?<=[。！？!?…])|(?<=\n)")
 
@@ -19,11 +19,50 @@ class SpeechChunk:
     audio: bytes
     emotion: str
     index: int
+    # 协议第十一节的可选 chunk={seq,of,chars,pause_after_ms,breath}。
+    # 旧调用方忽略它即可；缺失时前端退回现有逐句行为。
+    chunk: dict[str, Any] | None = None
 
 
 def voice_profile(emotion: str) -> dict[str, Any]:
     voices = persona_cfg()["tts_emotions"]
     return voices.get(emotion) or voices.get(settings.tts_default_emotion) or voices["base"]
+
+
+def _bump_offset(value: Any, delta: float, unit: str) -> Any:
+    """Add delta to an edge_tts-style signed offset (\"+10%\" / \"+8Hz\")."""
+    if not isinstance(value, str):
+        return value
+    match = re.match(r"\s*([+-]?\d+(?:\.\d+)?)", value)
+    if not match:
+        return value
+    number = float(match.group(1)) + delta
+    return f"{'+' if number >= 0 else ''}{number:g}{unit}"
+
+
+def _delivery_factor(value: Any) -> float | None:
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return None
+    return float(value)
+
+
+def apply_voice_delivery(profile: dict[str, Any]) -> dict[str, Any]:
+    """Layer the global voice_delivery rate/pitch (pacing.yaml §7.1) over a persona
+    emotion profile. rate/pitch are additive offsets on top of the per-emotion
+    values, so a 1.0/1.0 (or absent) config is a byte-for-byte no-op. stepaudio
+    ignores rate/pitch (it is instruction-driven), which this leaves untouched.
+    """
+    delivery = pacing_cfg().get("voice_delivery") or {}
+    rate_f = _delivery_factor(delivery.get("rate"))
+    pitch_f = _delivery_factor(delivery.get("pitch"))
+    if rate_f is None and pitch_f is None:
+        return profile
+    result = dict(profile)
+    if rate_f is not None and rate_f != 1.0:
+        result["rate"] = _bump_offset(profile.get("rate", "+0%"), (rate_f - 1.0) * 100, "%")
+    if pitch_f is not None and pitch_f != 1.0:
+        result["pitch"] = _bump_offset(profile.get("pitch", "+0Hz"), (pitch_f - 1.0) * 100, "Hz")
+    return result
 
 
 def pick_emotion(text: str, hint: str | None = None) -> str:
@@ -59,10 +98,35 @@ def split_for_speech(text: str, max_chars: int = 60) -> list[str]:
 
 _MICRO_WEAK = "，,、；;：:"
 _MICRO_STRONG = "。！？!?…"
+_MICRO_PARTICLES = "吧呀啊哦呢嘛哈哟欸诶呐咯啦哇嘻"
+
+
+def first_chunk_cut(text: str, min_chars: int = 6, max_chars: int = 12) -> int:
+    """首包激进切分的切点长度；不适用时返回 0。
+
+    在 [min_chars, max_chars] 里找最早的标点/语气词边界，切点含其后紧跟的
+    闭合引号。窗口内没有边界（或全文短于窗口）时返回 0，调用方退回正常目标
+    长度切分——激进模式只允许把首包提前，不允许把句子切碎。
+    """
+    text = text or ""
+    low = max(1, int(min_chars))
+    high = max(low, int(max_chars))
+    for length in range(low, min(high, len(text)) + 1):
+        if (text[length - 1] in _MICRO_WEAK or text[length - 1] in _MICRO_STRONG
+                or text[length - 1] in _MICRO_PARTICLES):
+            end = length
+            while end < len(text) and text[end] in _MICRO_CLOSERS:
+                end += 1
+            return end
+    return 0
+
+
 _MICRO_CLOSERS = "”’\"』」）)》"
 
 
-def split_for_speech_micro(text: str, target_chars: int = 20, max_chars: int = 60) -> list[str]:
+def split_for_speech_micro(text: str, target_chars: int = 20, max_chars: int = 60, *,
+                           aggressive_first: bool = False, first_min: int = 6,
+                           first_max: int = 12) -> list[str]:
     """Lossless micro-sentence split for long-voice streaming (F2).
 
     Unlike ``split_for_speech`` (which drops the comma at a cut and strips
@@ -72,6 +136,17 @@ def split_for_speech_micro(text: str, target_chars: int = 20, max_chars: int = 6
     == text`` stays true. It prefers clause/sentence boundaries near
     ``target_chars`` and only hard-cuts at ``max_chars`` when no boundary is in
     range. Old callers keep using ``split_for_speech`` unchanged.
+
+    ``aggressive_first`` implements the fast first-chunk strategy (protocol
+    section 11): the first piece ends at the earliest punctuation or modal
+    particle once the reply has 6..12 characters, so the user hears audio while
+    the model is still writing. When the window holds no boundary the whole
+    split degrades to the normal target-length behaviour, and a reply that
+    already fits in a single micro-sentence is never split at all: there is no
+    second sentence to race ahead of, so an extra breath pause would only make
+    one short line choppy. The lossless invariant is what keeps this safe for
+    performance anchors: offsets keep accumulating over the same text either
+    way.
     """
     text = text or ""
     n = len(text)
@@ -81,6 +156,11 @@ def split_for_speech_micro(text: str, target_chars: int = 20, max_chars: int = 6
     cap = max(target, int(max_chars))
     pieces: list[str] = []
     i = 0
+    if aggressive_first:
+        cut = first_chunk_cut(text, first_min, first_max) if n > target else 0
+        if cut > 0:
+            pieces.append(text[:cut])
+            i = cut
     while i < n:
         if n - i <= target:
             pieces.append(text[i:])
@@ -128,6 +208,57 @@ def micro_pause(piece: str, *, clause_ms: int = 120, sentence_ms: int = 260,
     return 0, False
 
 
+def speech_micro_cfg() -> dict[str, Any] | None:
+    """Micro-chunk parameters from pacing.yaml, or None when the feature is off.
+
+    ``speech.enabled`` is the single switch (protocol section 11): off restores
+    the legacy 60-character sequential synthesis byte for byte.
+    """
+    speech = pacing_cfg().get("speech") or {}
+    if not speech.get("enabled", False):
+        return None
+    micro = speech.get("micro_chunk") or {}
+    first = speech.get("first_chunk") or {}
+    pause = speech.get("pause") or {}
+    target = max(1, int(micro.get("target_chars", 20)))
+    return {
+        "target_chars": target,
+        "max_chars": max(target, int(micro.get("max_chars", 60))),
+        "aggressive_first": bool(first.get("enabled", True)),
+        "first_min": max(1, int(first.get("min_chars", 6))),
+        "first_max": max(1, int(first.get("max_chars", 12))),
+        "clause_ms": int(pause.get("clause_ms", 120)),
+        "sentence_ms": int(pause.get("sentence_ms", 260)),
+        "max_ms": int(pause.get("max_ms", 400)),
+    }
+
+
+def iter_micro_chunks(text: str, *, total_known: bool = False, **options: Any):
+    """Yield protocol-11 chunk envelopes for one already complete reply.
+
+    Shared by the streaming orchestrator (total unknown while the model writes)
+    and the fixed-reply deliverer (total known), so both paths split, count and
+    pause identically. Each item is ``{"seq", "of", "chars", "text",
+    "pause_after_ms", "breath"}``; ``of`` stays None until the total is known.
+    """
+    pieces = split_for_speech_micro(
+        text,
+        options.get("target_chars", 20),
+        options.get("max_chars", 60),
+        aggressive_first=bool(options.get("aggressive_first", False)),
+        first_min=options.get("first_min", 6),
+        first_max=options.get("first_max", 12))
+    total = len(pieces)
+    for seq, piece in enumerate(pieces):
+        pause_ms, breath = micro_pause(
+            piece,
+            clause_ms=int(options.get("clause_ms", 120)),
+            sentence_ms=int(options.get("sentence_ms", 260)),
+            max_ms=int(options.get("max_ms", 400)))
+        yield {"seq": seq, "of": total if total_known else None, "chars": len(piece),
+               "text": piece, "pause_after_ms": pause_ms, "breath": breath}
+
+
 class TTSEngine:
     """Pluggable TTS. Every engine answers the same question:
     (text, emotion) -> audio bytes. Personality lives in two places -- the
@@ -146,7 +277,7 @@ class TTSEngine:
         text = re.sub(r"\s+", " ", (text or "").strip())
         if not text:
             return b""
-        return await self.synthesize_profile(text, self.profile(emotion))
+        return await self.synthesize_profile(text, apply_voice_delivery(self.profile(emotion)))
 
     async def synthesize_profile(self, text: str, profile: dict[str, Any]) -> bytes:
         """Explicit per-call profile; never mutates persona or engine defaults."""
@@ -186,7 +317,8 @@ class TTSEngine:
         text = re.sub(r"\s+", " ", (text or "").strip())
         if not text:
             return []
-        key = self._cache_key(text, profile if profile is not None else self.profile(emotion))
+        resolved = profile if profile is not None else apply_voice_delivery(self.profile(emotion))
+        key = self._cache_key(text, resolved)
         return [dict(item) for item in self._word_timings.get(key, [])]
 
     async def _stepaudio(self, text: str, profile: dict[str, Any]) -> bytes:
@@ -246,10 +378,26 @@ class TTSEngine:
         return bytes(buffer)
 
     async def speak(self, text: str, emotion: str = "base") -> AsyncIterator[SpeechChunk]:
-        pieces = split_for_speech(text)
-        for index, piece in enumerate(pieces):
-            audio = await self.synthesize(piece, emotion)
-            yield SpeechChunk(text=piece, audio=audio, emotion=emotion, index=index)
+        """Yield audio per micro-sentence, carrying the protocol-11 chunk field.
+
+        Fixed replies (proactive chatter, star-map narration, assistant results)
+        share the streaming path's split, so they get the same fast first chunk
+        and the same breath pauses. The chunk envelope rides on each
+        ``SpeechChunk``; providers and callers that ignore it keep the legacy
+        per-sentence behaviour. Feature-off keeps the old 60-character windows.
+        """
+        micro = speech_micro_cfg()
+        if micro is None:
+            for index, piece in enumerate(split_for_speech(text)):
+                audio = await self.synthesize(piece, emotion)
+                yield SpeechChunk(text=piece, audio=audio, emotion=emotion, index=index)
+                await asyncio.sleep(0)
+            return
+        for index, item in enumerate(iter_micro_chunks(text, total_known=True, **micro)):
+            audio = await self.synthesize(item["text"], emotion)
+            yield SpeechChunk(text=item["text"], audio=audio, emotion=emotion, index=index,
+                              chunk={"seq": item["seq"], "of": item["of"], "chars": item["chars"],
+                                     "pause_after_ms": item["pause_after_ms"], "breath": item["breath"]})
             await asyncio.sleep(0)
 
 

@@ -3,8 +3,8 @@
  * node 单测经 data: URL 以 ESM 加载（package.json 没有 type:module），
  * 相对导入会解析失败，所以这一层必须自给自足。 */
 
-export const NODE_KINDS = ["memory", "diary", "spark", "taste", "worldview"];
-export const EDGE_KINDS = ["evidences", "born", "shaped", "mentions"];
+export const NODE_KINDS = ["memory", "diary", "spark", "taste", "worldview", "seed", "reflection"];
+export const EDGE_KINDS = ["evidences", "born", "shaped", "mentions", "parent_child", "related_memory", "epiphany"];
 export const LIST_LIMIT = 400;
 
 const clamp01 = (value) => Math.min(1, Math.max(0, value));
@@ -38,6 +38,8 @@ function normalizeEdge(raw, byId) {
     target,
     kind: typeof raw.kind === "string" && raw.kind ? raw.kind : "mentions",
     weight: Number.isFinite(raw.weight) ? clamp01(raw.weight) : 0.5,
+    reason: typeof raw.reason === "string" ? raw.reason : "",
+    createdAt: raw.created_at == null ? null : raw.created_at,
   };
 }
 

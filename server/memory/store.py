@@ -15,6 +15,9 @@ from ..config import settings
 SPARK_STATES = ("latent", "surfaced", "spent")
 SPARK_TRANSITIONS = {("latent", "surfaced"), ("surfaced", "spent")}
 MAX_ACTIVE_LATENT_SPARKS = 5
+SEED_STATES = ("active", "incubating", "digested", "dormant", "archived")
+MOOD_STATES = ("active", "easing", "resolved")
+PERSISTED_EDGE_KINDS = ("parent_child", "related_memory", "epiphany")
 
 KINDS = ("fact", "episode", "todo", "self_state")
 SOURCES = ("stated", "inferred", "uncertain")
@@ -124,6 +127,64 @@ CREATE TABLE IF NOT EXISTS self_state (
     cycles_on TEXT
 );
 INSERT OR IGNORE INTO self_state(id) VALUES (1);
+
+CREATE TABLE IF NOT EXISTS seeds (
+    id TEXT PRIMARY KEY,
+    title TEXT NOT NULL,
+    question TEXT NOT NULL,
+    status TEXT NOT NULL DEFAULT 'active',
+    heat REAL NOT NULL DEFAULT 0.5,
+    cooldown REAL NOT NULL DEFAULT 0,
+    parent_seed_ids TEXT NOT NULL DEFAULT '[]',
+    child_seed_ids TEXT NOT NULL DEFAULT '[]',
+    source_refs TEXT NOT NULL DEFAULT '[]',
+    related_refs TEXT NOT NULL DEFAULT '[]',
+    reflections TEXT NOT NULL DEFAULT '[]',
+    created_at TEXT NOT NULL,
+    last_reflected_at REAL,
+    version INTEGER NOT NULL DEFAULT 1,
+    updated_at REAL NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_seed_status ON seeds(status);
+
+CREATE TABLE IF NOT EXISTS reflections (
+    id TEXT PRIMARY KEY,
+    seed_id TEXT NOT NULL,
+    narrative TEXT NOT NULL,
+    discovery TEXT NOT NULL,
+    source_refs TEXT NOT NULL DEFAULT '[]',
+    child_seed_ids TEXT NOT NULL DEFAULT '[]',
+    status_changes TEXT NOT NULL DEFAULT '[]',
+    epiphany_edges TEXT NOT NULL DEFAULT '[]',
+    processed INTEGER NOT NULL DEFAULT 0,
+    created_at REAL NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_reflection_seed ON reflections(seed_id);
+
+CREATE TABLE IF NOT EXISTS graph_edges (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    source TEXT NOT NULL,
+    target TEXT NOT NULL,
+    kind TEXT NOT NULL,
+    weight REAL NOT NULL DEFAULT 0.5,
+    reason TEXT NOT NULL DEFAULT '',
+    created_at REAL NOT NULL
+);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_edge_unique ON graph_edges(source, target, kind);
+CREATE INDEX IF NOT EXISTS idx_edge_kind ON graph_edges(kind);
+
+CREATE TABLE IF NOT EXISTS mood_state (
+    id INTEGER PRIMARY KEY CHECK(id = 1),
+    narrative TEXT NOT NULL DEFAULT '',
+    reason TEXT NOT NULL DEFAULT '',
+    source_refs TEXT NOT NULL DEFAULT '[]',
+    influence_note TEXT NOT NULL DEFAULT '',
+    related_summary TEXT NOT NULL DEFAULT '',
+    state TEXT NOT NULL DEFAULT 'active',
+    created_at REAL,
+    expires_at REAL
+);
+INSERT OR IGNORE INTO mood_state(id) VALUES (1);
 """
 
 
@@ -146,6 +207,31 @@ def _diary_row(row: sqlite3.Row) -> dict[str, Any]:
 def _drift_row(row: sqlite3.Row) -> dict[str, Any]:
     record = dict(row)
     record["evidence_diary_ids"] = _json_list(record.get("evidence_diary_ids"))
+    return record
+
+
+def _seed_row(row: sqlite3.Row) -> dict[str, Any]:
+    record = dict(row)
+    for key in ("parent_seed_ids", "child_seed_ids", "source_refs", "related_refs", "reflections"):
+        record[key] = _json_list(record.get(key))
+    return record
+
+
+def _reflection_row(row: sqlite3.Row) -> dict[str, Any]:
+    record = dict(row)
+    for key in ("source_refs", "child_seed_ids", "status_changes", "epiphany_edges"):
+        record[key] = _json_list(record.get(key))
+    record["processed"] = bool(record.get("processed"))
+    return record
+
+
+def _edge_row(row: sqlite3.Row) -> dict[str, Any]:
+    return dict(row)
+
+
+def _mood_row(row: sqlite3.Row) -> dict[str, Any]:
+    record = dict(row)
+    record["source_refs"] = _json_list(record.get("source_refs"))
     return record
 
 
@@ -825,6 +911,195 @@ class MemoryStore:
                 db.execute(
                     """INSERT INTO self_state (id, taste, worldview, curiosity_seeds,
                        last_cycle_at, cycles_today, cycles_on) VALUES (1, ?, ?, ?, ?, ?, ?)""", payload)
+
+    # ---------- seeds / reflections / graph_edges / mood_state (V2 §14-16) ----------
+    # The curiosity graph. This layer only guards argument shape and keeps writes
+    # atomic; lifecycle, forking and dedup policy live in memory/seeds.py.
+    def upsert_seed(self, *, id: str, title: str, question: str, status: str = "active",
+                    heat: float = 0.5, cooldown: float = 0.0, parent_seed_ids: list[str] | None = None,
+                    child_seed_ids: list[str] | None = None, source_refs: list[str] | None = None,
+                    related_refs: list[str] | None = None, reflections: list[str] | None = None,
+                    created_at: str, last_reflected_at: float | None = None,
+                    version: int = 1) -> None:
+        if not isinstance(id, str) or not id.strip():
+            raise ValueError("seed id required")
+        if not isinstance(title, str) or not title.strip() or len(title.strip()) > 40:
+            raise ValueError("seed title required and <= 40 chars")
+        if not isinstance(question, str) or not question.strip() or len(question.strip()) > 200:
+            raise ValueError("seed question required and <= 200 chars")
+        if status not in SEED_STATES:
+            raise ValueError("invalid seed status")
+        for name, value in (("heat", heat), ("cooldown", cooldown)):
+            if (not isinstance(value, (int, float)) or isinstance(value, bool)
+                    or not math.isfinite(float(value)) or not 0 <= float(value) <= 1):
+                raise ValueError(f"seed {name} must be within [0, 1]")
+        for name, value in (("parent_seed_ids", parent_seed_ids), ("child_seed_ids", child_seed_ids),
+                            ("source_refs", source_refs), ("related_refs", related_refs),
+                            ("reflections", reflections)):
+            if value is not None and (not isinstance(value, list)
+                    or not all(isinstance(item, str) for item in value)):
+                raise ValueError(f"seed {name} must be a list of strings")
+        if not isinstance(created_at, str) or not created_at.strip():
+            raise ValueError("seed created_at required")
+        now = time.time()
+        payload = (title.strip(), question.strip(), status, float(heat), float(cooldown),
+                   json.dumps(parent_seed_ids or [], ensure_ascii=False, separators=(",", ":")),
+                   json.dumps(child_seed_ids or [], ensure_ascii=False, separators=(",", ":")),
+                   json.dumps(source_refs or [], ensure_ascii=False, separators=(",", ":")),
+                   json.dumps(related_refs or [], ensure_ascii=False, separators=(",", ":")),
+                   json.dumps(reflections or [], ensure_ascii=False, separators=(",", ":")),
+                   created_at.strip(), last_reflected_at, int(version), now, id.strip())
+        with self._transaction(track_write=True) as db:
+            cursor = db.execute(
+                """UPDATE seeds SET title = ?, question = ?, status = ?, heat = ?, cooldown = ?,
+                   parent_seed_ids = ?, child_seed_ids = ?, source_refs = ?, related_refs = ?,
+                   reflections = ?, created_at = ?, last_reflected_at = ?, version = ?, updated_at = ?
+                   WHERE id = ?""", payload)
+            if cursor.rowcount == 0:
+                db.execute(
+                    """INSERT INTO seeds (title, question, status, heat, cooldown, parent_seed_ids,
+                       child_seed_ids, source_refs, related_refs, reflections, created_at,
+                       last_reflected_at, version, updated_at, id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                    payload)
+
+    def get_seed(self, seed_id: str) -> dict[str, Any] | None:
+        if not isinstance(seed_id, str) or not seed_id.strip():
+            return None
+        rows = self._query("SELECT * FROM seeds WHERE id = ?", (seed_id.strip(),))
+        return _seed_row(rows[0]) if rows else None
+
+    def list_seeds(self, *, status: str | None = None, limit: int = 200) -> list[dict[str, Any]]:
+        sql = "SELECT * FROM seeds"
+        params: list[Any] = []
+        if status is not None:
+            if status not in SEED_STATES:
+                raise ValueError("invalid seed status filter")
+            sql += " WHERE status = ?"
+            params.append(status)
+        sql += " ORDER BY heat DESC, updated_at DESC LIMIT ?"
+        params.append(max(1, int(limit)))
+        return [_seed_row(row) for row in self._query(sql, params)]
+
+    def count_seeds(self) -> int:
+        return int(self._query("SELECT COUNT(*) FROM seeds")[0][0])
+
+    def add_reflection(self, *, id: str, seed_id: str, narrative: str, discovery: str,
+                       source_refs: list[str] | None = None, child_seed_ids: list[str] | None = None,
+                       status_changes: list[dict[str, Any]] | None = None,
+                       epiphany_edges: list[dict[str, Any]] | None = None,
+                       processed: bool = False) -> None:
+        if not isinstance(id, str) or not id.strip():
+            raise ValueError("reflection id required")
+        if not isinstance(seed_id, str) or not seed_id.strip():
+            raise ValueError("reflection seed_id required")
+        if not isinstance(narrative, str) or not narrative.strip():
+            raise ValueError("reflection narrative required")
+        if not isinstance(discovery, str) or not discovery.strip():
+            raise ValueError("reflection discovery required")
+        for name, value in (("source_refs", source_refs), ("child_seed_ids", child_seed_ids)):
+            if value is not None and (not isinstance(value, list)
+                    or not all(isinstance(item, str) for item in value)):
+                raise ValueError(f"reflection {name} must be a list of strings")
+        for name, value in (("status_changes", status_changes), ("epiphany_edges", epiphany_edges)):
+            if value is not None and not isinstance(value, list):
+                raise ValueError(f"reflection {name} must be a list")
+        now = time.time()
+        with self._transaction(track_write=True) as db:
+            db.execute(
+                """INSERT OR REPLACE INTO reflections (id, seed_id, narrative, discovery, source_refs,
+                   child_seed_ids, status_changes, epiphany_edges, processed, created_at)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                (id.strip(), seed_id.strip(), narrative, discovery,
+                 json.dumps(source_refs or [], ensure_ascii=False, separators=(",", ":")),
+                 json.dumps(child_seed_ids or [], ensure_ascii=False, separators=(",", ":")),
+                 json.dumps(status_changes or [], ensure_ascii=False, separators=(",", ":")),
+                 json.dumps(epiphany_edges or [], ensure_ascii=False, separators=(",", ":")),
+                 1 if processed else 0, now))
+
+    def get_reflection(self, reflection_id: str) -> dict[str, Any] | None:
+        if not isinstance(reflection_id, str) or not reflection_id.strip():
+            return None
+        rows = self._query("SELECT * FROM reflections WHERE id = ?", (reflection_id.strip(),))
+        return _reflection_row(rows[0]) if rows else None
+
+    def list_reflections(self, *, seed_id: str | None = None,
+                         processed: bool | None = None, limit: int = 100) -> list[dict[str, Any]]:
+        sql = "SELECT * FROM reflections WHERE 1 = 1"
+        params: list[Any] = []
+        if seed_id is not None:
+            sql += " AND seed_id = ?"
+            params.append(seed_id)
+        if processed is not None:
+            sql += " AND processed = ?"
+            params.append(1 if processed else 0)
+        sql += " ORDER BY created_at DESC LIMIT ?"
+        params.append(max(1, int(limit)))
+        return [_reflection_row(row) for row in self._query(sql, params)]
+
+    def set_reflection_processed(self, reflection_id: str, *, processed: bool = True) -> bool:
+        if not isinstance(reflection_id, str) or not reflection_id.strip():
+            return False
+        with self._transaction(track_write=True) as db:
+            cursor = db.execute("UPDATE reflections SET processed = ? WHERE id = ?",
+                                (1 if processed else 0, reflection_id.strip()))
+            return cursor.rowcount > 0
+
+    def add_edge(self, *, source: str, target: str, kind: str, weight: float = 0.5,
+                 reason: str = "") -> bool:
+        """Persist a semantic edge; a duplicate (source, target, kind) is a no-op."""
+        if not isinstance(source, str) or not source.strip() or not isinstance(target, str) or not target.strip():
+            raise ValueError("edge source and target required")
+        if source == target:
+            return False
+        if kind not in PERSISTED_EDGE_KINDS:
+            raise ValueError("invalid persisted edge kind")
+        if (not isinstance(weight, (int, float)) or isinstance(weight, bool)
+                or not math.isfinite(float(weight)) or not 0 <= float(weight) <= 1):
+            raise ValueError("edge weight must be within [0, 1]")
+        if not isinstance(reason, str):
+            raise ValueError("edge reason must be a string")
+        now = time.time()
+        with self._transaction(track_write=True) as db:
+            cursor = db.execute(
+                """INSERT OR IGNORE INTO graph_edges (source, target, kind, weight, reason, created_at)
+                   VALUES (?, ?, ?, ?, ?, ?)""",
+                (source.strip(), target.strip(), kind, float(weight), reason.strip()[:200], now))
+            return cursor.rowcount > 0
+
+    def list_edges(self, *, kind: str | None = None, limit: int = 2000) -> list[dict[str, Any]]:
+        sql = "SELECT * FROM graph_edges"
+        params: list[Any] = []
+        if kind is not None:
+            if kind not in PERSISTED_EDGE_KINDS:
+                raise ValueError("invalid edge kind filter")
+            sql += " WHERE kind = ?"
+            params.append(kind)
+        sql += " ORDER BY created_at DESC, id DESC LIMIT ?"
+        params.append(max(1, int(limit)))
+        return [_edge_row(row) for row in self._query(sql, params)]
+
+    def get_mood(self) -> dict[str, Any]:
+        rows = self._query("SELECT * FROM mood_state WHERE id = 1")
+        return _mood_row(rows[0]) if rows else {"narrative": "", "state": "active", "source_refs": []}
+
+    def save_mood(self, *, narrative: str, reason: str = "", source_refs: list[str] | None = None,
+                  influence_note: str = "", related_summary: str = "", state: str = "active",
+                  expires_at: float | None = None) -> None:
+        if not isinstance(narrative, str):
+            raise ValueError("mood narrative must be a string")
+        if state not in MOOD_STATES:
+            raise ValueError("invalid mood state")
+        if source_refs is not None and (not isinstance(source_refs, list)
+                or not all(isinstance(item, str) for item in source_refs)):
+            raise ValueError("mood source_refs must be a list of strings")
+        now = time.time()
+        with self._transaction(track_write=True) as db:
+            db.execute(
+                """UPDATE mood_state SET narrative = ?, reason = ?, source_refs = ?, influence_note = ?,
+                   related_summary = ?, state = ?, created_at = ?, expires_at = ? WHERE id = 1""",
+                (narrative, reason,
+                 json.dumps(source_refs or [], ensure_ascii=False, separators=(",", ":")),
+                 influence_note, related_summary, state, now, expires_at))
 
     # ---------- sessions / messages ----------
     def start_session(self, session_id: str | None = None) -> str:

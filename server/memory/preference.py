@@ -207,3 +207,36 @@ def preference_change_allowed(quote: str, *, level: str,
         preceding = [m.group().strip() for m in _CLAUSE.finditer(quote[:start])]
         return bool(preceding and _CORRECTION.fullmatch(preceding[-1]))
     return False
+
+
+VIEWPOINT_STEP = 0.15
+VIEWPOINT_MAX_CONFIDENCE = 0.9
+VIEWPOINT_MIN_EVIDENCE = 2
+
+
+def consider_viewpoint(ledger: Any, *, topic: str, stance: str, now: float,
+                       prior_signals: int = 0, step: float = VIEWPOINT_STEP,
+                       max_confidence: float = VIEWPOINT_MAX_CONFIDENCE,
+                       min_evidence: int = VIEWPOINT_MIN_EVIDENCE) -> tuple[list[dict[str, Any]], str]:
+    """Persona viewpoint learning policy (§8.2). Pure; returns (new_ledger, action).
+
+    A single signal never creates or permanently shifts a viewpoint: a brand-new
+    topic needs ``min_evidence`` corroborations before a candidate is added, and an
+    existing viewpoint's confidence moves by a bounded ``step`` and is capped. This
+    keeps background learning unobtrusive and prevents one-off remarks from
+    rewriting the persona.
+    """
+    entries = [entry for entry in (ledger or []) if isinstance(entry, dict)]
+    existing = next((entry for entry in entries if entry.get("topic") == topic), None)
+    if existing is not None:
+        updated = dict(existing)
+        updated["confidence"] = round(min(max_confidence, float(existing.get("confidence", 0.0)) + step), 3)
+        updated["support"] = int(existing.get("support", 0)) + 1
+        updated["reviewed_at"] = now
+        return [updated if entry is existing else entry for entry in entries], "bumped"
+    if prior_signals + 1 >= min_evidence:
+        candidate = {"topic": topic, "stance": stance, "confidence": round(step, 3),
+                     "support": prior_signals + 1, "status": "candidate",
+                     "created_at": now, "reviewed_at": now, "counterexamples": [], "history": []}
+        return entries + [candidate], "added"
+    return entries, "ignored"

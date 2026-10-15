@@ -133,3 +133,17 @@ self_evolution:
   idle_minutes: 60           # 距上轮对话/上次复盘至少这么久才允许一轮（打磨期调敏：1 小时）
   max_per_day: 3             # 每天最多复盘轮数
   allow_sources: [taste, worldview, spark]  # 允许产出并注入的变更类型
+  # ---- V2 双螺旋好奇心树 / 心境惯性 / 昼夜节律（PROTOCOL.md §14-16，Role 0 已批准）----
+  # 每次成功反思必须派生 1~2 个有效子种子；缺子种子/格式错/重复 → 校验与有限重试，
+  # 不得把空结果标为成功。模型故障或持久化失败时保留待处理任务，绝不记为已消化。
+  seed_fork_min: 1           # 子种子派生下限
+  seed_fork_max: 2           # 子种子派生上限
+  max_reflection_inputs: 12  # Workspace Osmosis 单轮选取相关材料条数上限（控成本）
+  max_model_calls_per_cycle: 2  # 单轮自进化模型调用上限（反思 + 可选审美整理）
+  max_retries: 2             # 反思失败的重试上限；超过则该轮记为 failed，不消化种子
+  similarity_dedupe: 0.86    # 子种子与既有种子相似度阈值，超过判重跳过（防近义繁殖）
+  mood:
+    enabled: true            # 心境惯性状态机（PROTOCOL.md §15）
+    default_ttl_minutes: 30  # 心境余温默认有效期；只作控制阀门，表达仍靠自然语言叙事
+  circadian:
+    timezone: "Asia/Shanghai"  # 真实时间用配置时区；不得把服务器时区直接当用户时区
