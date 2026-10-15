@@ -2,6 +2,7 @@
   "name": "neurosama-avatar-web",
   "private": true,
   "scripts": {
+    "test": "npm run test:voice && npm run test:calibration && npm run test:vrm && npm run test:performance-probe && npm run test:dialogue-gaze && node web/starmap/test_starmap.mjs",
     "test:voice": "node web/voice/voice.test.mjs && node web/voice/playback.test.mjs && node web/voice/duplex.test.mjs && node web/voice/capture.test.mjs && node web/voice/checkpoint.test.mjs && node web/voice/baseline.test.mjs",
     "test:voice:worklet": "node scripts/test-duplex-worklet-browser.mjs",
     "test:voice:browser": "node scripts/test-voice-browser.mjs",

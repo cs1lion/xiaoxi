@@ -1,0 +1,67 @@
+# 轻量守卫（Lightweight PR/Push Guard）——拉代码 → 装依赖 → 跑契约与单测。
+#
+# 范围刻意收窄（克制原则）：只跑"零外部依赖"层——
+#   1. scripts/check_protocol.py   协议契约静态校验（字段/路由/引用漂移）
+#   2. scripts/test_*.py           逐脚本运行；缺夹具/缺可选依赖的测试按设计优雅跳过（exit 0）
+#   3. npm test                    Node 单测（无浏览器、无 GPU、不读模型文件）
+#
+# 明确不在 CI 跑的层（按 docs/TESTING.md 在本地执行）：
+#   - 浏览器回归 scripts/test-*.browser.mjs：需要 Playwright + 本地服务 + gitignore 的 VRM 资产
+#   - npm run test:eyes 中的模型夹具测试（test_eye_morph/test_eye_lids 读 web/models/*.vrm）
+#   - scripts/eval_*.py --live：需要真实模型供应商凭据与预算
+name: Aqi Mind CI
+
+on:
+  push:
+    branches: ["main", "master", "v3-executive-secretary"]
+  pull_request:
+    branches: ["main", "master"]
+
+jobs:
+  guard:
+    name: 轻量守卫（契约 + 单测 + 核心回归）
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: 'pip'
+
+      - name: Install Python dependencies
+        run: |
+          # sounddevice 仅有源码包，Linux 上需要 PortAudio 开发头才能编译
+          sudo apt-get update
+          sudo apt-get install -y libportaudio-dev
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          # 测试专用依赖（如 pytest/pillow）可选存在，不强制
+          if [ -f requirements-dev.txt ]; then pip install -r requirements-dev.txt; fi
+
+      - name: 协议契约检查（静态，零依赖）
+        run: python scripts/check_protocol.py
+
+      - name: Python 测试（逐脚本运行，跳过计通过）
+        run: |
+          failed=0
+          for f in scripts/test_*.py; do
+            echo "::group::$f"
+            if ! python "$f"; then failed=1; fi
+            echo "::endgroup::"
+          done
+          exit $failed
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: 'npm'
+
+      - name: Install Node dependencies
+        run: npm ci
+
+      - name: Node 单测（无浏览器 / 无模型依赖）
+        run: npm test
