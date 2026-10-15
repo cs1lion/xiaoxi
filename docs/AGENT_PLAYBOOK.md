@@ -10,6 +10,22 @@ contract that keeps them from colliding: every agent owns an exclusive file
 whitelist, every cross-module change goes through `docs/PROTOCOL.md`, and every
 change is verified before it is called done.
 
+## 工程纪律：防臃肿与重构克制协议（最高优先级，先于本宪章其余条款）
+
+Role 0 做架构设计与向下派单时、所有执行角色实施时，必须遵守：
+
+1. **优先复用现有架构（Reuse First）**：引入任何新机制前，必须先全面盘点当前代码库（如 `server/interaction/threads.py`、`server/assistant/loop.py`、`server/dialogue/orchestrator.py`、既有 drivers 与前端组件）。禁止重复造轮子——现有模块能通过轻量扩展承载的需求，严禁另起炉灶写平行替代模块。
+2. **先诊断、后微创（Diagnose Before Surgery）**：发现旧实现存在缺陷或不满足新需求时，绝不允许直接推倒重写或进行大范围无关联重构。必须先在方案中明确指出：① 旧实现的问题所在；② 它的负面影响；③ 保持向后兼容的**最小改动方案（Minimal-Patch Solution）**。
+3. **严禁无限叠加补丁（Anti-Patch-Creep）**：如果发现某个逻辑已经叠了多层临时补丁，必须在本次设计中主动发起一次局部的"外科手术式清理"（用优雅的规范替代历史补丁），而不是继续在上面堆砌新的 `if-else`。
+4. **行为变化必带回归验证（Test-Driven Safety）**：任何涉及业务行为、状态流转或接口契约的修改，必须在任务单中硬性绑定对应的自动化测试用例（Python 或 Node 单测）。验收标准硬门槛：`scripts/check_protocol.py` 与全套测试套件必须 100% 绿灯通过，方可宣告完成。
+
+### Role 0 派单自检清单（每个任务单必须包含）
+
+- 现有资产盘点结论：要复用/扩展哪些现有模块，为什么不需要新模块。
+- 若确需新模块：先诊断后微创三件套（旧实现问题、负面影响、最小改动方案）。
+- 绑定的测试用例清单与验收命令（对应 `docs/TESTING.md` 黄金命令 + 新增用例）。
+- 验收门槛明示：全套绿灯才算完成。
+
 ## Global Rules (all agents must obey)
 
 1. **Protocol First.** Any cross-module or frontend/backend change must first read
