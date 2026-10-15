@@ -13,8 +13,13 @@ from build_seed_eye_expression import build, DEFAULT_SOURCE, DEFAULT_OUTPUT, TAR
 from validate_seed_daily import Model
 from validate_seed_eye_expression import validate
 
+ASSET_MISSING = "web/models/ 下的 VRM 夹具被 gitignore，未检出；这类素材测试按设计跳过，不留红灯"
 
+
+@unittest.skipUnless(DEFAULT_SOURCE.exists() and DEFAULT_OUTPUT.exists(), ASSET_MISSING)
 class BrowAssetContract(unittest.TestCase):
+
+
     @classmethod
     def setUpClass(cls):
         cls.reference = Model(DEFAULT_SOURCE)

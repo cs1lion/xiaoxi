@@ -11,8 +11,13 @@ from build_seed_eye_lids import build, SOURCE, OUTPUT, TARGETS
 from validate_seed_daily import Model
 from validate_seed_eye_lids import validate
 
+ASSET_MISSING = "web/models/ 下的 VRM 夹具被 gitignore，未检出；这类素材测试按设计跳过，不留红灯"
 
+
+@unittest.skipUnless(SOURCE.exists() and OUTPUT.exists(), ASSET_MISSING)
 class LocalEyelidContract(unittest.TestCase):
+
+
     @classmethod
     def setUpClass(cls):
         cls.source = Model(SOURCE)

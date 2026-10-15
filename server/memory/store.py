@@ -8,6 +8,7 @@ import time
 import uuid
 from contextlib import contextmanager
 from dataclasses import dataclass, asdict
+from pathlib import Path
 from typing import Any, Iterable
 
 from ..config import settings
@@ -273,6 +274,12 @@ class MemoryStore:
         self.db_path = db_path or settings.db_path
         self._lock = threading.RLock()
         self._closed = False
+        # 与 AssistantStore 一致：父目录不存在就建出来。否则全新检出（data/ 被
+        # gitignore）时，模块级 store = MemoryStore() 会在 ensure_dirs() 之前炸，
+        # 报一句和真实原因无关的 "unable to open database file"。
+        parent = Path(self.db_path).parent
+        if str(parent) not in ("", "."):
+            parent.mkdir(parents=True, exist_ok=True)
         self._conn = sqlite3.connect(self.db_path, check_same_thread=False, isolation_level=None)
         self._conn.row_factory = sqlite3.Row
         self._conn.execute("PRAGMA foreign_keys = ON")

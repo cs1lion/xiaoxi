@@ -33,11 +33,12 @@ jobs:
 
       - name: Install Python dependencies
         run: |
-          # sounddevice 仅有源码包，Linux 上需要 PortAudio 开发头才能编译
-          sudo apt-get update
-          sudo apt-get install -y libportaudio-dev
           python -m pip install --upgrade pip
-          pip install -r requirements.txt
+          # 只装"零外部依赖"层用得到的包。音频栈（sounddevice / faster-whisper /
+          # ctranslate2 / edge-tts）不在 CI 范围内：要么没人 import，要么是函数内
+          # 懒加载。曾经用 requirements.txt 全量安装，卡在 libportaudio-dev 在
+          # ubuntu-noble 上没有安装候选，导致任何测试都没跑就红。
+          pip install -r requirements-ci.txt
           # 测试专用依赖（如 pytest/pillow）可选存在，不强制
           if [ -f requirements-dev.txt ]; then pip install -r requirements-dev.txt; fi
 
