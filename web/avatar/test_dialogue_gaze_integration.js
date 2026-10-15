@@ -2,14 +2,16 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import { Avatar } from './index.js';
 import { ALL_PARAMS } from './params.js';
+import { softLimitStack } from './params.js';
 import { IdleDriver } from './drivers/idle.js';
 import { AvatarCalibration } from './calibration.js';
 
-function fixture({ emotions = {}, gestures = {}, triggers = {}, profile = 'native' } = {}) {
+function fixture({ emotions = {}, gestures = {}, triggers = {}, profile = 'native', touch = TOUCH_FIXTURE } = {}) {
   const a = new Avatar();
   a.configure({response:Object.fromEntries(ALL_PARAMS.map(key=>[key,0])),
-    emotions:{base:{shift:{}},...emotions},gestures,triggers});
-  a.svg = {draw(params) { this.params=params; }, getEyeCapabilities() { return {profile}; }};
+    emotions:{base:{shift:{}},...emotions},gestures,triggers,touch});
+  a.svg = {draw(params) { this.params=params; }, getEyeCapabilities() { return {profile}; },
+    setSecondaryMotion() {}};
   a.memoryInterval=Infinity;
   a.idle.nextBlink=Infinity;
   a.audioCtx={currentTime:0,state:'running'};
@@ -19,6 +21,42 @@ function advance(a, duration) {
   for (let t=0;t<duration-1e-9;t+=1/60) { a.clock+=1/60; a._frame(1/60); }
 }
 const close=(value,wanted)=>assert.ok(Math.abs(value-wanted)<1e-7,`${value} != ${wanted}`);
+
+/* A-4 触控热区的最小 DOM 桩：只需要 addEventListener / style / 矩形 / 指针捕获。 */
+class FakeStage {
+  constructor() {
+    this.style = {}; this.listeners = new Map(); this.captured = [];
+    this.rect = { left: 0, top: 0, width: 200, height: 200 };
+  }
+  addEventListener(type, fn) {
+    if (!this.listeners.has(type)) this.listeners.set(type, []);
+    this.listeners.get(type).push(fn);
+  }
+  removeEventListener(type, fn) {
+    const list = this.listeners.get(type) || [];
+    const index = list.indexOf(fn);
+    if (index >= 0) list.splice(index, 1);
+  }
+  getBoundingClientRect() { return this.rect; }
+  setPointerCapture(id) { this.captured.push(id); }
+  releasePointerCapture(id) {
+    const index = this.captured.indexOf(id);
+    if (index >= 0) this.captured.splice(index, 1);
+  }
+  emit(type, event) {
+    for (const fn of this.listeners.get(type) || []) fn({ pointerId: 1, timeStamp: 0, ...event });
+  }
+}
+
+const TOUCH_FIXTURE = { svg: {
+  head: [0.2, 0.0, 0.8, 0.4],
+  face: [0.3, 0.1, 0.7, 0.5],
+  hands: [[0.0, 0.5, 0.3, 1.0], [0.7, 0.5, 1.0, 1.0]],
+} };
+
+const sampleFrames = (a, seconds, visit) => {
+  for (let t = 0; t < seconds - 1e-9; t += 1 / 60) { a.clock += 1 / 60; a._frame(1 / 60); visit?.(a); }
+};
 
 test('turning off chat pointer following restores viewer gaze while idle',()=>{
   const a=fixture();
@@ -117,6 +155,145 @@ test('eye previews, full blink and speech retain their respective ownership',()=
   a.blinkEyes(); advance(a,.1);
   close(a.svg.params.ParamEyeLOpen,0); close(a.svg.params.ParamEyeROpen,0);
   assert.ok(a.svg.params.ParamMouthOpenY>0);
+});
+
+// ---- A-2 thinking pre-act ----
+
+test('thinking pre-act adds micro tilt and one light blink without touching gaze',()=>{
+  const a=fixture({triggers:{on_thinking:'think'},gestures:{think:{hold:true,keys:[
+    {at:0,dur:.1,params:{ParamAngleZ:-0.26}},
+  ]}}});
+  a.onMessage({type:'thinking',turn_id:'one'});
+  assert.equal(a.thinkingPreact.running,true);
+  const frame=a.thinkingPreact.update(1/60,{reducedMotion:false});
+  assert.ok(Math.abs(frame.values.ParamAngleZ)<=.05+1e-9,'tilt stays a micro motion');
+  assert.ok(!('ParamEyeBallX' in frame.values)&&!('ParamEyeBallY' in frame.values),
+    'gaze stays with the dialogue schedule; the pre-act never writes eye coordinates');
+  let minOpen=1;
+  sampleFrames(a,1.4,avatar=>{minOpen=Math.min(minOpen,avatar.svg.params.ParamEyeLOpen);});
+  assert.equal(minOpen,0,'exactly one full blink happens during the wait');
+  assert.equal(a.dialogueFrame.owner,'dialogue','the thinking gaze schedule keeps ownership');
+  // 预演落在 idle 层：think 手势的歪头仍在，上面多了一层微动
+  assert.ok(Math.abs(a.store.target.ParamAngleZ+0.26)>1e-4,'micro motion rides over the thinking pose');
+});
+
+test('thinking pre-act retires on first audio, done, interruption and a new turn',()=>{
+  const retire=(event)=>{const a=fixture();a.onMessage({type:'thinking',turn_id:'one'});
+    assert.equal(a.thinkingPreact.running,true);a.onMessage(event);
+    assert.equal(a.thinkingPreact.running,false,`${event.type} must retire the pre-act`);};
+  retire({type:'done',turn_id:'one',text:'x'});
+  retire({type:'interrupted',turn_id:'one'});
+  retire({type:'playback_stopped',turn_id:'one'});
+  retire({type:'recording',state:true,turn_id:'two'});
+  const a=fixture();
+  a.onMessage({type:'thinking',turn_id:'one'});
+  a.speak('你好',a.audioCtx,1,2);
+  assert.equal(a.thinkingPreact.running,false,'first audio retires the pre-act');
+});
+
+test('reduced motion degrades the thinking pre-act to a static wait',()=>{
+  const a=fixture();
+  a.setReducedMotion(true);
+  a.onMessage({type:'thinking',turn_id:'one'});
+  sampleFrames(a,1.2);
+  assert.equal(a.thinkingPreact.running,true);
+  assert.equal(a.thinkingPreact.update(1/60,{reducedMotion:true}),null);
+  assert.ok(a.svg.params.ParamEyeLOpen>.9,'no added blink under reduced motion');
+});
+
+// ---- A-1 breath point consumption ----
+
+test('a breath chunk blinks once at the pause and keeps the mouth relaxed through it',()=>{
+  const a=fixture();
+  a.onMessage({type:'thinking',turn_id:'one'});
+  a.onMessage({type:'emotion',emotion:'base',turn_id:'one'});
+  a.speak('你好呀，',a.audioCtx,1,.5,{chunk:{seq:0,of:2,chars:4,pause_after_ms:260,breath:true}});
+  close(a._breathBlinkAt,1.5,'the breath point is where the audio ends');
+  a.audioCtx.currentTime=1.2;
+  let minOpen=1;
+  sampleFrames(a,.2,avatar=>{minOpen=Math.min(minOpen,avatar.svg.params.ParamEyeLOpen);});
+  // 张大嘴时的共发音眯眼会把眼睛压窄，但永远不会闭合——只有眨眼会。
+  assert.ok(minOpen>.5,'no blink before the breath point');
+  a.audioCtx.currentTime=1.6;
+  minOpen=1;
+  sampleFrames(a,.2,avatar=>{minOpen=Math.min(minOpen,avatar.svg.params.ParamEyeLOpen);});
+  assert.equal(minOpen,0,'the breath point triggers exactly one light blink');
+  assert.equal(a._breathBlinkAt,null);
+  a.audioCtx.currentTime=1.7;
+  sampleFrames(a,.05);
+  assert.ok(a.lip.speaking,'the mouth timeline spans the breath pause');
+  assert.ok(a.svg.params.ParamMouthOpenY<=.08,'and the mouth holds its relaxed rest shape');
+  a.stopSpeaking();
+  assert.equal(a._breathBlinkAt,null,'stopping invalidates a pending breath blink');
+});
+
+// ---- A-3 idle-layer soft limiting ----
+
+test('idle micro-motion stacking is soft-limited above the knee and identical below it',()=>{
+  const opts={knee:.45,ceiling:.75};
+  assert.equal(softLimitStack('ParamAngleY',.3,opts),.3,'below the knee: identity');
+  assert.equal(softLimitStack('ParamAngleY',.45,opts),.45,'at the knee: identity');
+  assert.equal(softLimitStack('ParamEyeLOpen',5,opts),5,'non-angle channels pass through');
+  const high=softLimitStack('ParamAngleY',3,opts);
+  assert.ok(high>.74&&high<.75,'above the knee: compressed toward the ceiling');
+  assert.ok(softLimitStack('ParamAngleY',-3,opts)>-.75&&softLimitStack('ParamAngleY',-3,opts)<-.74,'symmetric');
+  const slope=(softLimitStack('ParamAngleY',.46,opts)-softLimitStack('ParamAngleY',.45,opts));
+  assert.ok(Math.abs(slope-.01)<.005,'C1 at the knee: no new velocity kink');
+
+  const a=fixture();
+  a.beat.pulse.kick(50);
+  a.motion.setComponents([{target:'ParamAngleY',freq:1,amp:1,phase:0}]);
+  let peak=0;
+  sampleFrames(a,1.2,avatar=>{peak=Math.max(peak,Math.abs(avatar.store.target.ParamAngleY));});
+  assert.ok(peak>.45,'the sources really did stack above the knee');
+  assert.ok(peak<=.75+1e-9,'and the accumulated idle contribution stays under the ceiling');
+});
+
+// ---- A-4 touch zones ----
+
+test('pointer taps trigger region feedback while drags gaze and pinches pass through',()=>{
+  const a=fixture();
+  const stage=new FakeStage();
+  a._mountTouchZones(stage);
+  assert.equal(stage.style.pointerEvents,'auto','the stage becomes hit-testable');
+  assert.equal(stage.style.touchAction,'pinch-zoom','two fingers still zoom the page');
+  stage.emit('pointerdown',{pointerId:1,clientX:100,clientY:10,timeStamp:0});
+  stage.emit('pointerup',{pointerId:1,clientX:100,clientY:10,timeStamp:120});
+  assert.equal(a.eyeExpression.name,'happy','a tap on the head is a pat');
+  stage.emit('pointerdown',{pointerId:2,clientX:100,clientY:60,timeStamp:200});
+  stage.emit('pointerup',{pointerId:2,clientX:100,clientY:60,timeStamp:320});
+  assert.equal(a.eyeExpression.name,'surprised','a tap on the face is a poke');
+  a.setGazeMode('follow');
+  stage.emit('pointerdown',{pointerId:3,clientX:100,clientY:60,timeStamp:400});
+  stage.emit('pointermove',{pointerId:3,clientX:160,clientY:120,timeStamp:460});
+  stage.emit('pointerup',{pointerId:3,clientX:160,clientY:120,timeStamp:500});
+  assert.equal(a.idle.targetName,'custom','a drag gazes instead of poking');
+  assert.equal(a.eyeExpression.name,'surprised','a drag never retriggers a reaction');
+  stage.emit('pointerdown',{pointerId:4,clientX:60,clientY:10,timeStamp:600});
+  stage.emit('pointerdown',{pointerId:5,clientX:140,clientY:10,timeStamp:620});
+  stage.emit('pointerup',{pointerId:4,clientX:60,clientY:10,timeStamp:660});
+  stage.emit('pointerup',{pointerId:5,clientX:140,clientY:10,timeStamp:660});
+  assert.equal(a.eyeExpression.name,'surprised','a two-finger pinch is not a tap');
+  a._disposeTouchZones();
+  assert.equal(stage.listeners.get('pointerdown').length,0,'dispose removes every listener');
+});
+
+test('touch feedback retires its own preview and pokes escalate to a pout',()=>{
+  const a=fixture();
+  a.onTouchRegion('hand',{x:.1,y:.8});
+  assert.equal(a.performance.sample().name,'wave');
+  assert.equal(a.performance.sample().source,'preview','a hand touch waves through the preview channel');
+  a.onTouchRegion('head',{x:.5,y:.1});
+  assert.equal(a._touchPreviewName,'happy');
+  sampleFrames(a,2.4);
+  assert.equal(a.eyeExpression.name,null,'the preview retires itself');
+  a.onTouchRegion('face',{x:.5,y:.3});
+  a.onTouchRegion('face',{x:.5,y:.3});
+  assert.equal(a.eyeExpression.name,'surprised');
+  a.onTouchRegion('face',{x:.5,y:.3});
+  assert.equal(a.eyeExpression.name,'tsundere','a third consecutive poke turns into a pout');
+  a.onBargeIn();
+  assert.equal(a.eyeExpression.name,null,'interruption clears the touch preview');
 });
 
 test('attention micro context is bounded and reset restores the configured idle context',()=>{

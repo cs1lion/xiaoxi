@@ -96,8 +96,17 @@ async def deliver_reply(
                     raise ValueError("Audio text must be a string")
                 if not audio:
                     continue
-                yield {"type": "audio", "audio": audio, "index": succeeded,
-                       "text": chunk.text, "emotion": emotion}
+                event = {"type": "audio", "audio": audio, "index": succeeded,
+                         "text": chunk.text, "emotion": emotion}
+                # 协议第十一节：固定回复与流式路径共用同一微句切分，chunk 字段
+                # 由 provider 的 SpeechChunk 带上。没有该字段（旧 provider）时
+                # 事件与打磨前逐字节一致。
+                envelope = getattr(chunk, "chunk", None)
+                if isinstance(envelope, dict):
+                    event["chunk"] = {key: envelope[key] for key in
+                                      ("seq", "of", "chars", "pause_after_ms", "breath")
+                                      if key in envelope}
+                yield event
                 succeeded += 1
     except Exception:
         failed = 1

@@ -65,6 +65,32 @@ export function smoothstep(t) {
   return x * x * (3 - 2 * x);
 }
 
+/* idle 层微动叠加的软限幅（打磨轮 A-3）。
+ *
+ * sway / 说话律动 / Motion Magic / beat 四源各自都是有界的小偏移，但它们
+ * **相加**进同一个 ParamAngle*：相位偶然对齐时总和会冲到单源幅度的两三倍，
+ * 读起来就是"头突然抖一下"。直接 clamp 到硬上限会切出速度断点（那是新的
+ * 抽搐源），按比例整体缩小又会把正常演出一起压僵。
+ *
+ * 软膝压缩：膝值以下恒等，正常演出与现状逐字节一致；膝值以上用 tanh 平滑
+ * 压向天花板。tanh 在膝点处一阶导为 1，所以压缩是 C1 连续的，不会在膝盖
+ * 处引入新的速度折角；渐近趋于天花板而永不超出，叠加再猛也不越界。
+ *
+ * 只覆盖头部与身体的角度通道：dialogueExpression 写的眉眼/腮红通道不产生
+ * 角度累加，其自身量级（<=0.075）也远低于任何膝值。 */
+const STACK_LIMIT_KEYS = new Set([
+  "ParamAngleX", "ParamAngleY", "ParamAngleZ", "ParamBodyAngleX", "ParamBodyAngleZ",
+]);
+export function softLimitStack(key, value, { knee = 0.45, ceiling = 0.75 } = {}) {
+  const x = Number(value);
+  if (!Number.isFinite(x)) return 0;
+  if (!STACK_LIMIT_KEYS.has(key)) return x;
+  const magnitude = Math.abs(x);
+  if (magnitude <= knee) return x;
+  const span = Math.max(1e-6, ceiling - knee);
+  return Math.sign(x) * (knee + span * Math.tanh((magnitude - knee) / span));
+}
+
 /* 指数趋近：与帧率无关的"一阶低通"。
  * tau = 达到 63% 差距所需秒数。dt 大时也不会过冲。 */
 export function approach(current, target, tau, dt) {

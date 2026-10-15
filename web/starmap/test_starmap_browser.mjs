@@ -155,7 +155,13 @@ await page.evaluate(async () => {
 await page.evaluate((b64) => { window.__wav = b64; }, wav(0.5));
 
 const view = page.locator("#starmapMount");
-await page.locator("#starmapToggle").click();
+/* 打磨轮后星图入口迁到工作台抽屉内；抽屉关闭时先打开抽屉再点入口。 */
+const starmapEntry = async () => {
+  const toggle = page.locator("#starmapToggle");
+  if (!(await toggle.isVisible())) await page.locator("#drawerToggle").click();
+  return toggle;
+};
+await (await starmapEntry()).click();
 assert.equal(await view.evaluate((el) => el.hidden), false, "视图切换入口打开星图");
 await page.locator(".star-node").first().waitFor();
 pass("视图切换入口与挂载点工作，星图渲染");
@@ -288,8 +294,9 @@ assert.ok(detailBox.width <= 390 && detailBox.y + detailBox.height <= 845, "移�
 pass("移动视口：星图可用、详情面板为底栏、无横向溢出");
 await page.screenshot({ path: `${out}/mobile-detail.png` });
 
-/* 真实接线下实例句柄在 app.js 闭包里，统一用入口按钮收尾（两种状态都成立） */
-await page.locator("#starmapToggle").click();
+/* 真实接线下实例句柄在 app.js 闭包里。星图全屏时底部输入区按既有规则收起，
+ * 收尾走视图自带关闭路径，再核对入口按钮状态是否同步。 */
+await page.locator(".starmap-close").click();
 assert.equal(await page.locator("#starmapMount").evaluate((el) => el.hidden), true, "关闭后视图隐藏");
 assert.equal(await page.locator("#starmapToggle").getAttribute("aria-expanded"), "false", "入口按钮状态同步");
 

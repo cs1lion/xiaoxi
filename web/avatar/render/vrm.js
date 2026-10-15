@@ -60,9 +60,10 @@ export class VrmRig {
     this._state = null;
   }
 
-  async mount(container, look = {}, { url } = {}) {
+  async mount(container, look = {}, options = {}) {
     this.dispose();
     if (!container?.appendChild) throw new TypeError('VrmRig requires a DOM container');
+    const url = options.url;
     if (typeof url !== 'string' || !url.trim()) throw new TypeError('VrmRig.mount requires {url}');
     const generation = this._generation;
     const state = { container, roots: [], bones: {}, expressions: {}, springBones: [] };
@@ -87,6 +88,17 @@ export class VrmRig {
       state.fill = new THREE.DirectionalLight(0xbadce8, 0);
       state.fill.position.set(-2, 1, 2);
       state.scene.add(state.fill);
+      // A-5 柔和边缘光：冷色轮廓灯从后侧上方扫过，把肩线和发丝从背景里
+      // 剥出来。强度低、角度偏，只勾边，不改整体明暗关系。参数来自
+      // config/avatar.yaml 的 stage.lights，缺省即这里的常量。
+      const lights = (options && options.stage && options.stage.lights) || {};
+      const rimAt = lights.rim_position || [-1.6, 2.4, -2.2];
+      state.rim = new THREE.DirectionalLight(
+        new THREE.Color(lights.rim_color || "#bfd8ff"),
+        Number.isFinite(lights.rim_intensity) ? lights.rim_intensity : 0.9);
+      state.rim.position.set(rimAt[0] ?? -1.6, rimAt[1] ?? 2.4, rimAt[2] ?? -2.2);
+      state.rimBase = state.rim.intensity;
+      state.scene.add(state.rim);
       state.target = new THREE.Object3D();
       state.scene.add(state.target);
       const resize = () => {
@@ -167,15 +179,24 @@ export class VrmRig {
       // Daily's face brightness is reversible; retain its textures, normals,
       // toon shadow thresholds and all other materials.
       this._captureFaceShading(state);
+      const stageCfg = (options && options.stage && typeof options.stage === "object") ? options.stage : {};
+      state.stage = stageCfg;
+      state.touch = (options && options.touch && typeof options.touch === "object") ? options.touch : {};
       const bounds = new THREE.Box3().setFromObject(vrm.scene);
       const head = state.bones.head.node.getWorldPosition(new THREE.Vector3());
       const size = bounds.getSize(new THREE.Vector3());
       const height = Number.isFinite(size.y) && size.y > 0 ? size.y : 1.7;
-      const top = Math.max(head.y + height * 0.12, bounds.max.y);
-      const bottom = head.y - height * 0.43;
+      // A-5 舞台镜头构图：头顶留白与构图下沿都可配（stage.framing），
+      // 缺省值与原构图逐字节一致——默认造型换头发也不改变取景。
+      const framing = stageCfg.framing || {};
+      const headroom = Number.isFinite(framing.headroom) ? framing.headroom : 0.12;
+      const chest = Number.isFinite(framing.chest) ? framing.chest : 0.43;
+      const zoom = Number.isFinite(framing.zoom) ? framing.zoom : 1.08;
+      const top = Math.max(head.y + height * headroom, bounds.max.y);
+      const bottom = head.y - height * chest;
       state.framing = {
         center: new THREE.Vector3(head.x, (top + bottom) / 2, head.z),
-        height: Math.max(height * 0.35, top - bottom) * 1.08,
+        height: Math.max(height * 0.35, top - bottom) * zoom,
         width: Math.max(height * 0.40, Math.min(size.x, height * 0.85)),
         depth: Math.max(height * 0.15, size.z || 0),
       };
@@ -183,12 +204,12 @@ export class VrmRig {
       state.eyeFraming = {
         // Humanoid head pivots sit below the eyes on these models. Raise the
         // portrait center to the upper face to keep the crown above the eyes.
-        center: new THREE.Vector3(head.x, head.y + height * 0.05, head.z),
-        height: height * 0.23,
-        width: height * 0.22,
+        center: new THREE.Vector3(head.x, head.y + height * (Number.isFinite(framing.eye_raise) ? framing.eye_raise : 0.05), head.z),
+        height: height * (Number.isFinite(framing.eye_height) ? framing.eye_height : 0.23),
+        width: height * (Number.isFinite(framing.eye_width) ? framing.eye_width : 0.22),
         // Whole-model depth can include equipment extending behind the torso.
         // The face closeup needs only a small allowance for nose/hair depth.
-        depth: height * 0.04,
+        depth: height * (Number.isFinite(framing.eye_depth) ? framing.eye_depth : 0.04),
       };
       const joints = vrm.springBoneManager?.joints;
       if (joints && typeof joints[Symbol.iterator] === 'function') {
@@ -223,6 +244,8 @@ export class VrmRig {
       camera.near = Math.max(0.001, distance / 1000);
       camera.far = Math.max(100, distance * 10);
       camera.lookAt(focus);
+      // 呼吸景深在这条基准光轴上做极缓慢的推拉（见 draw）。
+      state.dolly = { focus: focus.clone(), distance };
     }
     camera.updateProjectionMatrix();
   }
@@ -237,6 +260,8 @@ export class VrmRig {
     s.key.color.set(enabled ? 0xffe5d1 : 0xffffff);
     s.key.position.set(enabled ? -2 : 1, 2, 3);
     s.fill.intensity = enabled ? 0.65 : 0;
+    // 边缘光在演出模式下加强一档（舞台打光），其余模式回到配置基准。
+    if (s.rim) s.rim.intensity = enabled ? s.rimBase * 1.33 : s.rimBase;
     this._frameCamera(s);
   }
 
@@ -495,6 +520,65 @@ export class VrmRig {
     return this._state?.eyeAdapter?.capabilities || { available: false, profile: 'unmounted', channels: {}, degraded: [] };
   }
 
+  /* A-4 触控热区：把头部与双手的骨骼位置投影到画布坐标做命中判定。
+   * 屏幕空间才跟得上"手真的在那"——模型转身或镜头推拉之后，视图盒里的
+   * 固定矩形就不准了。没有对应骨骼时返回 null（调用方退回其它热区）。 */
+  hitRegion(clientX, clientY) {
+    const s = this._state;
+    const canvas = s?.renderer?.domElement;
+    if (!s?.camera || !canvas?.getBoundingClientRect) return null;
+    const rect = canvas.getBoundingClientRect();
+    if (!rect.width || !rect.height) return null;
+    const x = (clientX - rect.left) / rect.width;
+    const y = (clientY - rect.top) / rect.height;
+    if (x < 0 || x > 1 || y < 0 || y > 1) return null;
+    const project = node => {
+      const p = node.getWorldPosition(new THREE.Vector3()).project(s.camera);
+      return { x: (p.x + 1) / 2, y: (1 - p.y) / 2 };
+    };
+    const near = (point, rx, ry) => Math.abs(point.x - x) <= rx && Math.abs(point.y - y) <= ry;
+    // 命中半径来自 config/avatar.yaml 的 touch.vrm，缺省用下面的常量。
+    const radii = s.touch?.vrm || {};
+    const pick = (key, fallback) => {
+      const value = Array.isArray(radii[key]) ? radii[key] : [];
+      return [Number.isFinite(value[0]) ? value[0] : fallback[0],
+              Number.isFinite(value[1]) ? value[1] : fallback[1]];
+    };
+    const handR = pick("hand", [0.1, 0.13]);
+    const faceR = pick("face", [0.075, 0.07]);
+    const headR = pick("head", [0.13, 0.15]);
+    for (const name of ['leftHand', 'rightHand']) {
+      const node = s.arms?.[name]?.node;
+      if (node && near(project(node), handR[0], handR[1])) return 'hand';
+    }
+    const head = s.bones?.head?.node;
+    if (head) {
+      const point = project(head);
+      // 脸是头内偏上的区域，其余头部算"摸头"。
+      if (near({ x: point.x, y: point.y - 0.02 }, faceR[0], faceR[1])) return 'face';
+      if (near(point, headR[0], headR[1])) return 'head';
+    }
+    return null;
+  }
+
+  /* 模型信息与许可提示位（A-5）：设置面板据此展示"当前模型 / 作者 / 许可"。 */
+  getModelInfo() {
+    const meta = this._state?.vrm?.meta;
+    if (!meta) return null;
+    return {
+      name: meta.name || null,
+      version: meta.version || null,
+      authors: Array.isArray(meta.authors) ? meta.authors.slice(0, 8) : [],
+      licenseUrl: meta.licenseUrl || null,
+      avatarPermission: meta.avatarPermission || null,
+      commercialUsage: meta.commercialUsage || null,
+      allowRedistribution: meta.allowRedistribution || null,
+      modification: meta.modification || null,
+      creditNotation: meta.creditNotation || null,
+      otherLicenseUrl: meta.otherLicenseUrl || null,
+    };
+  }
+
   setEyeFocus(enabled) {
     const state = this._state;
     if (!state) return;
@@ -557,6 +641,21 @@ export class VrmRig {
       for (const { node, rest } of state.springBones) {
         node.quaternion.slerpQuaternions(rest, node.quaternion.clone(), this.secondaryScale);
       }
+    }
+    /* 呼吸景深（A-5）：镜头沿基准光轴做极缓慢的推拉（默认 ±1.2% 距离），
+     * 像持机拍摄时人的呼吸。不是真的散景——那需要后处理管线，而持续视差
+     * 已经能读成"镜头是活的"。周期刻意避开呼吸(4.1s)和头发慢漂(7.3s)的
+     * 整数倍，防止出现循环点；reduced-motion 下压到四分之一。 */
+    const dof = state.stage?.dof;
+    if (dof && dof.enabled !== false && state.dolly) {
+      const amount = Number.isFinite(dof.amount) ? dof.amount : 0.012;
+      const period = Math.max(1, Number.isFinite(dof.period) ? dof.period : 6.3);
+      const scale = this.reduceGestures ? 0.25 : 1;
+      this._dofPhase = (((this._dofPhase || 0) + safeDelta(dt) / period) % 1 + 1) % 1;
+      const k = 1 + Math.sin(this._dofPhase * Math.PI * 2) * amount * scale;
+      state.camera.position.set(state.dolly.focus.x, state.dolly.focus.y,
+        state.dolly.focus.z + state.dolly.distance * k);
+      state.camera.lookAt(state.dolly.focus);
     }
     state.renderer.render(state.scene, state.camera);
   }

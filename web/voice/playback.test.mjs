@@ -158,3 +158,77 @@ test('reentrant stop during play still disposes the cleanup returned afterwards'
   queue.enqueue({ duration: 1 }); await flush();
   assert.equal(stopped, 1); assert.equal(queue.busy, false); assert.equal(clock.tasks.size, 0);
 });
+
+test('chunk pause_after_ms spaces the next chunk on the injected clock', async () => {
+  const f = setup();
+  f.queue.enqueue({ id: 1, chunk: { seq: 0, of: 2, chars: 7, pause_after_ms: 260, breath: true } });
+  f.queue.enqueue({ id: 2, chunk: { seq: 1, of: 2, chars: 9, pause_after_ms: 120, breath: false } });
+  f.context.decoded(1); await flush();
+  f.context.decoded(2); await flush();
+  f.context.sources[0].end(); await flush();
+  assert.deepEqual(f.context.sources.map(s => s.buffer.id), [1]);
+  assert.equal(f.queue.busy, true, 'a broadcast stays busy through its breath pause');
+  await f.clock.advance(200);
+  assert.deepEqual(f.context.sources.map(s => s.buffer.id), [1], 'the pause is not over yet');
+  await f.clock.advance(60);
+  assert.deepEqual(f.context.sources.map(s => s.buffer.id), [1, 2], 'the next chunk starts after the pause');
+  f.context.sources[1].end(); await flush();
+  await f.clock.advance(120);
+  assert.equal(f.idle, 1, 'the final pause settles before the queue goes idle');
+  assert.equal(f.queue.busy, false); assert.equal(f.clock.tasks.size, 0);
+});
+
+test('stop during a breath pause cancels it and never starts the queued chunk', async () => {
+  const f = setup();
+  f.queue.enqueue({ id: 1, chunk: { pause_after_ms: 300 } });
+  f.queue.enqueue({ id: 2 });
+  f.context.decoded(1); await flush();
+  f.context.sources[0].end(); await flush();
+  assert.equal(f.queue.busy, true);
+  f.queue.stop();
+  assert.equal(f.queue.busy, false);
+  await f.clock.advance(500); await flush();
+  assert.deepEqual(f.context.sources.map(s => s.buffer.id), [1]);
+  assert.equal(f.idle, 0, 'a stopped broadcast never reports idle twice');
+  f.queue.enqueue({ id: 3 }); f.context.decoded(3); await flush();
+  assert.deepEqual(f.context.sources.map(s => s.buffer.id), [1, 3]);
+  f.context.sources[1].end(); await flush();
+  assert.equal(f.idle, 1); assert.equal(f.errors.length, 0); assert.equal(f.clock.tasks.size, 0);
+});
+
+test('items without a usable pause never wait, keeping the legacy schedule', async () => {
+  const f = setup();
+  for (const item of [{ id: 1 }, { id: 2, chunk: null }, { id: 3, chunk: { pause_after_ms: 0 } },
+                      { id: 4, chunk: { pause_after_ms: -5 } }, { id: 5, chunk: { pause_after_ms: 'bad' } }]) {
+    f.queue.enqueue(item);
+  }
+  f.context.decoded(1); await flush();
+  f.context.decoded(2); await flush();
+  f.context.sources[0].end(); await flush();
+  assert.deepEqual(f.context.sources.map(s => s.buffer.id), [1, 2], 'no chunk field: the next chunk starts immediately');
+  f.context.decoded(3); await flush();
+  f.context.sources[1].end(); await flush();
+  assert.deepEqual(f.context.sources.map(s => s.buffer.id), [1, 2, 3]);
+  f.context.decoded(4); await flush();
+  f.context.sources[2].end(); await flush();
+  assert.deepEqual(f.context.sources.map(s => s.buffer.id), [1, 2, 3, 4]);
+  f.context.decoded(5); await flush();
+  f.context.sources[3].end(); await flush();
+  assert.deepEqual(f.context.sources.map(s => s.buffer.id), [1, 2, 3, 4, 5]);
+  f.context.sources[4].end(); await flush();
+  assert.equal(f.idle, 1); assert.equal(f.clock.tasks.size, 0);
+});
+
+test('an out-of-contract pause is capped at 400ms instead of stalling playback', async () => {
+  const f = setup();
+  f.queue.enqueue({ id: 1, chunk: { pause_after_ms: 9999 } });
+  f.queue.enqueue({ id: 2 });
+  f.context.decoded(1); await flush();
+  f.context.decoded(2); await flush();
+  f.context.sources[0].end(); await flush();
+  assert.deepEqual(f.context.sources.map(s => s.buffer.id), [1]);
+  await f.clock.advance(400);
+  assert.deepEqual(f.context.sources.map(s => s.buffer.id), [1, 2]);
+  f.context.sources[1].end(); await flush();
+  assert.equal(f.idle, 1); assert.equal(f.clock.tasks.size, 0);
+});

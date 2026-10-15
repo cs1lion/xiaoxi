@@ -19,7 +19,7 @@
 [data-explore-tone=companion] .title-highlight::before { background:linear-gradient(100deg,#f4bca3,#efcce3); }
 [data-explore-tone=future] { color-scheme:dark; --bg:#101a2b; --panel:#1c2940; --line:#3c5069; --text:#ecf2fc; --muted:#b1bfd2; --accent:#8ce3dd; --accent-2:#efbf90; --danger:#ffaab1; }
 [data-explore-tone=future] .side { background:#142035; }[data-explore-tone=future] .stage { background:var(--bg); }
-[data-explore-tone=future] .panel,[data-explore-tone=future] .msg.bot,[data-explore-tone=future] .controls,[data-explore-tone=future] input,[data-explore-tone=future] select { background:var(--panel); border-color:var(--line); }
+[data-explore-tone=future] .panel,[data-explore-tone=future] .msg.bot,[data-explore-tone=future] .capsule,[data-explore-tone=future] input,[data-explore-tone=future] select { background:var(--panel); border-color:var(--line); }
 [data-explore-tone=future] input::placeholder { color:#b1bfd2; }[data-explore-tone=future] button:hover { background:#2d405a; }
 [data-explore-tone=future] button.ghost:hover { background:#2d405a; }[data-explore-tone=future] #sendBtn { color:#102331; }[data-explore-tone=future] #sendBtn:hover { background:#b6f5ee; }
 [data-explore-tone=future] .mic,[data-explore-tone=future] .tag { background:#2c3c56; }
@@ -31,7 +31,7 @@
 [data-explore-tone=companion][data-fx-atmosphere] .stage { background:radial-gradient(ellipse at 85% 25%,#f6bbac70,transparent 50%),radial-gradient(ellipse at 20% 90%,#bba3e950,transparent 55%),var(--bg); }
 [data-explore-tone=future][data-fx-atmosphere] .stage { background:radial-gradient(ellipse at 85% 30%,#3c86af60,transparent 45%),radial-gradient(ellipse at 20% 90%,#644b9d55,transparent 50%),var(--bg); }
 [data-fx-texture] .stage::before { content:''; position:absolute; inset:0; z-index:-1; pointer-events:none; opacity:.35; background-image:repeating-linear-gradient(0deg,transparent 0 3px,#8e765f0c 3px 4px),repeating-linear-gradient(90deg,transparent 0 5px,#8e765f0a 5px 6px); }
-[data-fx-glass] .panel,[data-fx-glass] .controls { background:color-mix(in srgb,var(--panel) 80%,transparent); backdrop-filter:blur(14px); box-shadow:0 8px 30px #23374110,inset 0 1px #ffffff40; }
+[data-fx-glass] .panel,[data-fx-glass] .capsule { background:color-mix(in srgb,var(--panel) 80%,transparent); backdrop-filter:blur(14px); box-shadow:0 8px 30px #23374110,inset 0 1px #ffffff40; }
 [data-fx-halo] .avatar-stage { border-radius:48% 48% 42% 42%; background:radial-gradient(ellipse at center,color-mix(in srgb,var(--accent) 17%,transparent),transparent 68%); border-bottom:1px solid color-mix(in srgb,var(--accent) 30%,transparent); }
 @media(hover:hover) and (prefers-reduced-motion:no-preference) {
  [data-fx-spring] .suggestions button:hover,[data-fx-spring] #sendBtn:hover { animation:explore-pop .38s both; }

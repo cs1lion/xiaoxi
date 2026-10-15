@@ -225,6 +225,11 @@ export class SvgRig {
     el("stop", { offset: "0%", "stop-color": L.blush, "stop-opacity": "0.85" }, blush);
     el("stop", { offset: "65%", "stop-color": L.blush, "stop-opacity": "0.32" }, blush);
     el("stop", { offset: "100%", "stop-color": L.blush, "stop-opacity": "0" }, blush);
+    /* 腮红高光（A-5）：腮红上方一小块柔光。没有它，红晕只是一块哑色，
+     * 像贴纸；加一点高光才读得出"皮肤下面的血晕"。 */
+    const blushHi = el("radialGradient", { id: "av-blush-hi" }, defs);
+    el("stop", { offset: "0%", "stop-color": "#fffafa", "stop-opacity": "0.55" }, blushHi);
+    el("stop", { offset: "100%", "stop-color": "#fffafa", "stop-opacity": "0" }, blushHi);
     /* 上眼睑在眼白上的投影。没有它眼睛就是贴纸。 */
     const lidShade = el("linearGradient", { id: "av-lidshade", x1: "0", y1: "0", x2: "0", y2: "1" }, defs);
     el("stop", { offset: "0%", "stop-color": "#6b4f45", "stop-opacity": "0.34" }, lidShade);
@@ -392,6 +397,13 @@ export class SvgRig {
         fill: "url(#av-blush)", opacity: "0",
       }, features));
     }
+    n.blushHi = [];
+    for (const side of [-1, 1]) {
+      n.blushHi.push(el("ellipse", {
+        cx: side * 46, cy: 27, rx: 13, ry: 7,
+        fill: "url(#av-blush-hi)", opacity: "0",
+      }, features));
+    }
 
     n.brow = [
       el("path", { fill: "none", stroke: L.brow, "stroke-width": "5",
@@ -555,8 +567,13 @@ export class SvgRig {
      * 等周期的话，头发和呼吸会同时到极限，循环点就是个"标志帧"，
      * 观众看五秒就能指出它在循环。 */
     this.hairT = (this.hairT || 0) + dt;
+    /* 发丝次级摆动（A-5）：原来只有两个慢周期，摇头停下之后头发会显出
+     * 一个安静的"来回摇"。补一组更短、带相位偏移的谐波，三个周期互不可约，
+     * 每段头发又有自己的增益（末端最大），才读得出"发丝自己在飘"。
+     * 幅度仍受 secondaryScale 控制，reduced-motion 下整体收敛。 */
     const drift = Math.sin((this.hairT / 7.3) * Math.PI * 2) * s;
     const drift2 = Math.sin((this.hairT / 5.1) * Math.PI * 2 + 1.7) * s;
+    const drift3 = Math.sin((this.hairT / 3.7) * Math.PI * 2 + 0.6) * s;
 
     /* --- 弹簧链头发物理 ---
      * 3 段串联：段1 跟随头，段2 跟随段1，段3 跟随段2。
@@ -573,24 +590,23 @@ export class SvgRig {
     const s2 = 1 - this.secondaryScale * 0.7;
     const s3 = 1 - this.secondaryScale * 0.4;
 
-    n.hairSeg0.setAttribute(
-      "transform",
-      `translate(${(-(yaw - seg1X) * 5 + drift * 1.2).toFixed(2)} ` +
-      `${(-(pitch - seg1Y) * 3 + drift2 * 0.6).toFixed(2)}) ` +
-      `rotate(${((yaw - seg1X) * 2.2 + drift * 0.4).toFixed(2)} 0 0)`
-    );
-    n.hairSeg1.setAttribute(
-      "transform",
-      `translate(${(-(seg1X - seg2X) * 4 + drift * 1.0).toFixed(2)} ` +
-      `${(-(seg1Y - seg2Y) * 2.5 + drift2 * 0.5).toFixed(2)}) ` +
-      `rotate(${((seg1X - seg2X) * 2.0 + drift * 0.3).toFixed(2)} 0 60)`
-    );
-    n.hairSeg2.setAttribute(
-      "transform",
-      `translate(${(-(seg2X - seg3X) * 3 + drift * 0.8).toFixed(2)} ` +
-      `${(-(seg2Y - seg3Y) * 2 + drift2 * 0.4).toFixed(2)}) ` +
-      `rotate(${((seg2X - seg3X) * 1.8 + drift * 0.25).toFixed(2)} 0 140)`
-    );
+    /* 高次谐波逐段叠加：根段最小、末段最大，末端因此甩得最活。
+     * 每个分量的平移/旋转增益按段递增，和弹簧链的滞后量叠在一起。 */
+    const segBase = [
+      { tx: -(yaw - seg1X) * 5, ty: -(pitch - seg1Y) * 3, rot: (yaw - seg1X) * 2.2, pivot: 0 },
+      { tx: -(seg1X - seg2X) * 4, ty: -(seg1Y - seg2Y) * 2.5, rot: (seg1X - seg2X) * 2.0, pivot: 60 },
+      { tx: -(seg2X - seg3X) * 3, ty: -(seg2Y - seg3Y) * 2, rot: (seg2X - seg3X) * 1.8, pivot: 140 },
+    ];
+    const segDrift = [drift * 1.2, drift * 1.0, drift * 0.8];
+    const segDrift2 = [drift2 * 0.6, drift2 * 0.5, drift2 * 0.4];
+    const segDrift3 = [drift3 * 0.4, drift3 * 0.7, drift3 * 1.0];
+    for (const [index, node] of [n.hairSeg0, n.hairSeg1, n.hairSeg2].entries()) {
+      const base = segBase[index];
+      node.setAttribute("transform",
+        `translate(${(base.tx + segDrift[index]).toFixed(2)} ` +
+        `${(base.ty + segDrift2[index] + segDrift3[index] * 0.5).toFixed(2)}) ` +
+        `rotate(${(base.rot + segDrift[index] * 0.35 + segDrift3[index] * 0.3).toFixed(2)} 0 ${base.pivot})`);
+    }
 
     const bh = this.spring.brow.step(pitch, dt);
     n.browLag.setAttribute("transform", `translate(0 ${(-(pitch - bh) * 9 * s).toFixed(2)})`);
@@ -730,7 +746,9 @@ export class SvgRig {
         const cx = parseFloat(m[1]) + parallaxX * 0.3;
         const cy = parseFloat(m[2]) + parallaxY * 0.2;
         n.hairSeg0.setAttribute("transform",
-          cur.replace(/translate\([^)]+\)/, `translate(${cx.toFixed(2)} ${cy.toFixed(2)}`));
+          // 替换串必须自带右括号：少了它，后面整个 rotate(...) 都会被吞进
+          // 一个不闭合的 translate(...)，浏览器当场丢掉这条 transform。
+          cur.replace(/translate\([^)]+\)/, `translate(${cx.toFixed(2)} ${cy.toFixed(2)})`));
       }
     }
 
@@ -754,5 +772,6 @@ export class SvgRig {
     /* --- 腮红 --- */
     const cheek = clamp01(p.ParamCheek);
     for (const b of n.blush) b.setAttribute("opacity", (cheek * 0.85).toFixed(3));
+    for (const h of n.blushHi) h.setAttribute("opacity", (cheek * 0.5).toFixed(3));
   }
 }

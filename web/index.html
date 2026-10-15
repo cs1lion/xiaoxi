@@ -37,37 +37,8 @@
       <div class="mem-list" id="memList"></div>
       <div class="row foot"><span id="memCount">0 条</span><button class="ghost" id="memRefresh">刷新</button><button class="danger ghost" id="memClear">清空</button></div>
     </section>
-    <a class="text-link" href="/static/interpret.html">英 → 中实时字幕 · 共享音频 / 麦克风 ↗</a>
-    <a class="text-link" href="/static/music.html">原创音乐 · 异步创作实验 ↗</a>
     <div id="experienceMount"></div>
     <div id="assistantMount"></div>
-
-    <a class="text-link" href="/static/threads.html">共同事项 · 正在一起做 ↗</a>
-    <details class="panel preferences">
-      <summary>声音与形象 <span class="section-mark">偏好</span></summary>
-      <h2>形象 · 实验版</h2>
-      <div class="row"><select id="avatarRenderer" aria-label="形象渲染模式"><option value="svg">插画形象 · SVG</option><option value="vrm">立体形象 · VRM 示例</option></select></div>
-      <p class="hint" id="avatarRendererStatus" role="status">可切换立体形象，失败保留当前形象。</p>
-      <a class="text-link" href="/static/avatar_lab.html" target="_blank" rel="noopener">探索形象实验室 ↗</a>
-      <div id="dialogueReviewMount"></div>
-      <h2>英语口语搭档 · 实验</h2>
-      <label for="practiceMode">练习场景</label><select id="practiceMode"><option value="off">普通陪聊</option><option value="free">英语自由聊</option><option value="cafe">咖啡店点单</option><option value="interview">面试练习</option></select>
-      <label for="practiceLevel">表达难度</label><select id="practiceLevel"><option>A2</option><option selected>B1</option><option>B2</option></select>
-      <label for="practiceCorrection">纠错方式</label><select id="practiceCorrection"><option value="off">不纠错</option><option value="after" selected>回顾时纠错</option><option value="immediate">对话中轻度纠错</option></select>
-      <button id="practiceApply" type="button">应用练习设置</button><button id="practiceReview" type="button" disabled>回顾本次表达</button>
-      <p class="hint" id="practiceStatus" role="status">改变练习设置会清空本次练习上下文。练习不执行任务、不写长期记忆；反馈只评估文字表达，不打发音分数。请从打招呼或介绍自己开始。</p>
-      <label for="practicePause">练习收句等待</label><select id="practicePause"><option value="1600">1.6秒</option><option value="2200" selected>2.2秒</option><option value="3000">3秒</option></select>
-      <h2>全双工 · 实验</h2>
-      <div class="row"><label for="duplexMode">抢话策略</label><select id="duplexMode"><option value="headset">耳机 · 平衡</option><option value="speaker">外放 · 保守</option><option value="immediate">快速打断</option><option value="manual">播放时仅按键打断</option></select></div>
-      <p class="hint">自动模式先压低回复，持续说话才打断。混响、噪声可能误触发，轻声也可能漏检；不稳定时选“播放时仅按键打断”。短声不代表语义附和识别。</p>
-      <p class="hint" id="voiceDiagnostics">尚未采集 · 指标仅在本页内存，不保存录音</p>
-      <button class="ghost" id="resetVoiceMetrics">清空语音指标</button>
-      <div id="voiceBaselineMount"></div>
-      <h2>声音</h2><div class="row"><label for="emotionSelect">说话语气</label><select id="emotionSelect"></select></div>
-      <p class="hint">日常默认自然语气。可以手动换语气，或选择自动随内容变化。</p>
-      <div class="preference-actions"><button class="ghost" id="faceToggle">面部反应：关</button><button class="ghost" id="followToggle">视线跟随：关</button></div>
-      <p class="hint">面部反应需授权摄像头，默认关闭。</p>
-    </details>
     <p class="side-footer">慢慢来，我们不赶时间。<span aria-hidden="true">✳</span></p>
   </aside>
   <main class="stage">
@@ -76,10 +47,58 @@
       <div class="connection" role="status"><span id="statusDot" class="dot"></span><span id="status">连接中</span></div>
       <span class="spacer"></span>
       <button class="ghost" id="writingToggle" aria-expanded="false" aria-controls="work-notes">一起写</button>
-      <button class="ghost" id="starmapToggle" aria-expanded="false" aria-controls="starmapMount">星图</button>
-      <button class="ghost" id="bargeToggle" aria-pressed="false" title="开启后检测开口与停顿；确认开口才上传音频。建议戴耳机。">连续对话：关</button>
-      <button class="ghost" id="stopBtn" title="停止当前录音与回复；连续模式仍在本地监听，关闭连续对话可释放麦克风。不会撤销已执行的操作。">停止回复</button>
-      <button class="ghost" id="resumeSpeechBtn" hidden title="只续播刚被打断的当前句剩余音频，不重做任务；90秒内有效。">续播被打断句</button>
+      <details class="preferences" id="settingsPanel">
+        <summary id="settingsToggle" aria-label="设置" title="设置">
+          <svg class="icon" viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><circle cx="12" cy="12" r="3.2"></circle><path d="M19.4 15a1.7 1.7 0 0 0 .34 1.87l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.7 1.7 0 0 0-1.87-.34 1.7 1.7 0 0 0-1 1.56V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.11-1.56 1.7 1.7 0 0 0-1.87.34l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.7 1.7 0 0 0 .34-1.87 1.7 1.7 0 0 0-1.56-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.56-1.11 1.7 1.7 0 0 0-.34-1.87l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.7 1.7 0 0 0 1.87.34H9a1.7 1.7 0 0 0 1-1.56V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.56 1.7 1.7 0 0 0 1.87-.34l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.7 1.7 0 0 0-.34 1.87V9a1.7 1.7 0 0 0 1.56 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.56 1z"></path></svg>
+        </summary>
+        <div class="settings-body" id="settingsBody">
+          <h2>设置</h2>
+          <section class="settings-section" aria-label="形象">
+            <h3>形象</h3>
+            <div class="row"><select id="avatarRenderer" aria-label="形象渲染模式"><option value="svg">插画形象 · SVG</option><option value="vrm">立体形象 · VRM 示例</option></select></div>
+            <p class="hint" id="avatarRendererStatus" role="status">可切换立体形象，失败保留当前形象。</p>
+            <div class="row external-model">
+              <input id="externalModelUrl" type="text" inputmode="url" spellcheck="false" autocomplete="off" maxlength="2048" aria-label="外部 .vrm 模型地址" placeholder="https://…/model.vrm 或 /static/models/xxx.vrm" />
+              <button id="externalModelLoad" type="button">加载</button>
+            </div>
+            <p class="hint" id="externalModelStatus" role="status">可加载任意外部 .vrm（HTTPS 或站内路径）；失败时保留当前形象。模型许可由提供方负责，加载前请确认你有权使用。</p>
+            <a class="text-link" href="/static/avatar_lab.html" target="_blank" rel="noopener">探索形象实验室 ↗</a>
+            <div id="dialogueReviewMount"></div>
+          </section>
+          <section class="settings-section" aria-label="视线与反应">
+            <h3>视线与反应</h3>
+            <div class="preference-actions"><button class="ghost" id="faceToggle" type="button">面部反应：关</button><button class="ghost" id="followToggle" type="button">视线跟随：开</button></div>
+            <p class="hint">面部反应需授权摄像头，默认关闭。</p>
+          </section>
+          <section class="settings-section" aria-label="语气">
+            <h3>语气</h3>
+            <div class="row"><label for="emotionSelect">说话语气</label><select id="emotionSelect"></select></div>
+            <p class="hint">日常默认自然语气。可以手动换语气，或选择自动随内容变化。</p>
+            <div class="settings-embed"><iframe id="voiceTasteFrame" title="语气试音台" data-src="/static/voice_taste.html"></iframe></div>
+          </section>
+          <section class="settings-section" aria-label="语音与双工">
+            <h3>语音与双工</h3>
+            <div class="row"><label for="duplexMode">抢话策略</label><select id="duplexMode"><option value="headset">耳机 · 平衡</option><option value="speaker">外放 · 保守</option><option value="immediate">快速打断</option><option value="manual">播放时仅按键打断</option></select></div>
+            <p class="hint">自动模式先压低回复，持续说话才打断。混响、噪声可能误触发，轻声也可能漏检；不稳定时选“播放时仅按键打断”。短声不代表语义附和识别。</p>
+            <p class="hint" id="voiceDiagnostics">尚未采集 · 指标仅在本页内存，不保存录音</p>
+            <button class="ghost" id="resetVoiceMetrics" type="button">清空语音指标</button>
+            <div id="voiceBaselineMount"></div>
+          </section>
+          <section class="settings-section" id="practiceSection" aria-label="英语练习">
+            <h3>英语练习</h3>
+            <div class="row"><label for="practiceMode">练习场景</label><select id="practiceMode"><option value="off">普通陪聊</option><option value="free">英语自由聊</option><option value="cafe">咖啡店点单</option><option value="interview">面试练习</option></select></div>
+            <div class="row"><label for="practiceLevel">表达难度</label><select id="practiceLevel"><option>A2</option><option selected>B1</option><option>B2</option></select></div>
+            <div class="row"><label for="practiceCorrection">纠错方式</label><select id="practiceCorrection"><option value="off">不纠错</option><option value="after" selected>回顾时纠错</option><option value="immediate">对话中轻度纠错</option></select></div>
+            <div class="row"><label for="practicePause">练习收句等待</label><select id="practicePause"><option value="1600">1.6秒</option><option value="2200" selected>2.2秒</option><option value="3000">3秒</option></select></div>
+            <div class="preference-actions"><button id="practiceApply" type="button">应用练习设置</button><button id="practiceReview" type="button" disabled>回顾本次表达</button></div>
+            <p class="hint" id="practiceStatus" role="status">改变练习设置会清空本次练习上下文。练习不执行任务、不写长期记忆；反馈只评估文字表达，不打发音分数。请从打招呼或介绍自己开始。</p>
+          </section>
+          <section class="settings-section" aria-label="上下文预算">
+            <h3>上下文预算</h3>
+            <p class="hint" id="contextBudgetStatus" role="status">尚未开始对话。每一轮实际参考了哪些资料，会在消息里的“本轮参考”中列明。</p>
+          </section>
+        </div>
+      </details>
     </header>
     <section id="starmapMount" class="starmap-mount" hidden aria-label="星图记忆"></section>
     <div class="room-label"><span class="room-line"></span> 一段只属于你的时间 <span aria-hidden="true">✧</span></div>
@@ -103,11 +122,82 @@
       <button id="latestMessage" class="latest-message" hidden>回到最新 ↓</button>
       <div class="subtitle" id="subtitle" role="status" aria-live="polite"></div>
       <div class="meter" aria-hidden="true"><div class="meter-fill" id="meterFill"></div></div>
-      <div class="controls"><button id="micBtn" class="mic" title="按住说话；键盘可按住空格">按住说话</button><input id="textInput" aria-label="给阿栖的消息" placeholder="想说什么，都可以…" autocomplete="off" /><button id="sendBtn">发送 <span aria-hidden="true">↑</span></button></div>
+      <div class="mode-strip" id="modeStrip"></div>
+      <div class="capsule">
+        <button id="micBtn" class="mic" type="button" title="按住说话；键盘可按住空格">
+          <svg class="icon" viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M12 15a3 3 0 0 0 3-3V5a3 3 0 0 0-6 0v7a3 3 0 0 0 3 3z"></path><path d="M19 11v1a7 7 0 0 1-14 0v-1"></path><line x1="12" y1="19" x2="12" y2="22"></line></svg>
+          <span class="mic-label">按住说话</span>
+        </button>
+        <button id="stopBtn" class="capsule-stop" type="button" title="停止当前录音与回复；连续模式仍在本地监听，关闭连续对话可释放麦克风。不会撤销已执行的操作。">
+          <svg class="icon" viewBox="0 0 24 24" width="14" height="14" fill="currentColor" aria-hidden="true" focusable="false"><rect x="6" y="6" width="12" height="12" rx="2.4"></rect></svg>
+          <span class="capsule-stop-label">停止</span>
+        </button>
+        <div class="input-wrap">
+          <input id="textInput" aria-label="给阿栖的消息" placeholder="想说什么，都可以…" autocomplete="off" />
+          <button id="sendBtn" type="button" title="发送" aria-label="发送">
+            <svg class="icon" viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><line x1="12" y1="19" x2="12" y2="6"></line><polyline points="6 12 12 6 18 12"></polyline></svg>
+          </button>
+        </div>
+        <button id="drawerToggle" class="capsule-drawer" type="button" aria-expanded="false" aria-controls="workDrawer" title="工作台" aria-label="工作台">
+          <svg class="icon" viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><rect x="3" y="4.5" width="18" height="15" rx="2.4"></rect><line x1="9.6" y1="4.5" x2="9.6" y2="19.5"></line></svg>
+        </button>
+      </div>
       <div class="composer-foot"><p class="hint" id="voiceHint">连续对话：开口即录，停顿约一秒发送；停止回复后仍监听。关闭连续对话释放麦克风，建议戴耳机。</p><span class="composer-signature" aria-hidden="true">在这里，做你自己</span></div>
     </div>
   </main>
 </div>
+<aside class="drawer" id="workDrawer" hidden aria-label="工作台">
+  <header class="drawer-head">
+    <div class="drawer-title">
+      <h2>工作台</h2>
+      <p class="hint">不离开这里，也能一起做点别的。</p>
+    </div>
+    <button id="drawerClose" class="ghost" type="button">收起</button>
+  </header>
+  <nav class="drawer-nav" aria-label="工作台视图">
+    <button id="drawerWriting" type="button">一起写</button>
+    <button id="drawerCompanion" type="button">共同事项</button>
+    <button id="starmapToggle" type="button" aria-expanded="false" aria-controls="starmapMount">星图</button>
+    <button id="drawerMusic" type="button" aria-pressed="false">音乐</button>
+    <button id="drawerInterpret" type="button" aria-pressed="false">实时字幕</button>
+    <button id="drawerPractice" type="button">英语练习</button>
+  </nav>
+  <div class="drawer-body">
+    <section id="drawerViewWriting" class="drawer-view" aria-label="一起写">
+      <h3>一起写</h3>
+      <p>你来写，阿栖偶尔提一个值得想的点。草稿留在你的浏览器里，离开也不会丢。</p>
+      <button id="drawerWritingOpen" type="button">打开一起写</button>
+    </section>
+    <section id="drawerViewCompanion" class="drawer-view" aria-label="共同事项" hidden>
+      <h3>共同事项</h3>
+      <p>把一件事一起往下推进：决定、下一步和执行回执都接在对话里。</p>
+      <button id="drawerCompanionOpen" type="button">查看共同事项</button>
+      <a class="text-link" href="/static/threads.html" target="_blank" rel="noopener">宽屏模式管理事项 ↗</a>
+    </section>
+    <section id="drawerViewStarmap" class="drawer-view" aria-label="星图记忆" hidden>
+      <h3>星图记忆</h3>
+      <p>点亮的是共同的记忆、日记与念头。点一颗星，让小溪讲给你听。</p>
+      <button id="drawerStarmapOpen" type="button">打开星图</button>
+    </section>
+    <section id="drawerViewMusic" class="drawer-view" aria-label="原创音乐" hidden>
+      <h3>原创音乐</h3>
+      <p>异步生成原创歌曲，只使用你提供的描述与歌词；可能产生费用，需你明确确认。</p>
+      <div class="drawer-embed"><iframe title="原创音乐" data-src="/static/music.html"></iframe></div>
+      <a class="text-link" href="/static/music.html" target="_blank" rel="noopener">宽屏模式打开 ↗</a>
+    </section>
+    <section id="drawerViewInterpret" class="drawer-view" aria-label="实时字幕" hidden>
+      <h3>实时字幕</h3>
+      <p>英语 → 中文短段滚动翻译。字幕只留在当前页面，不进入角色、任务与记忆。</p>
+      <div class="drawer-embed"><iframe title="英语中文字幕" data-src="/static/interpret.html"></iframe></div>
+      <a class="text-link" href="/static/interpret.html" target="_blank" rel="noopener">宽屏模式打开 ↗</a>
+    </section>
+    <section id="drawerViewPractice" class="drawer-view" aria-label="英语练习" hidden>
+      <h3>英语练习</h3>
+      <p>练习场景、难度、纠错方式和收句等待都在设置面板里，随时可改。</p>
+      <button id="drawerPracticeOpen" type="button">去设置面板练习</button>
+    </section>
+  </div>
+</aside>
 <script type="module" src="/static/app.js"></script>
 <script type="module" src="/static/ui.js"></script>
 <script type="module" src="/static/workspace.js"></script>

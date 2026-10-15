@@ -120,8 +120,31 @@ export class PlaybackQueue {
         }, Math.min(this.playTimeoutMs, Math.max(5000, remaining * 1000 + 5000)));
       } catch (error) { if (generation === this.generation) this.onError(error); }
       if (generation !== this.generation) return;
-      this.cancelWait = null; this.release(entry); this.current = null;
+      this.cancelWait = null;
+      // release() nulls entry.item, so the breath pause is read before it.
+      const pauseAfterMs = Number(entry.item?.chunk?.pause_after_ms);
+      this.release(entry); this.current = null;
+      // 段间呼吸停顿（协议第十一节）：pause_after_ms 的权威消费方。
+      // 停顿跑在注入的时钟上，stop() 经同一条 cancelWait 接缝取消；
+      // 字段缺失时立即返回，行为与从不知道 chunk 的队列逐字节一致。
+      await this._breathe(pauseAfterMs, generation);
     }
     if (generation === this.generation) { this.running = false; this.onIdle(); }
+  }
+
+  /* Inter-chunk breath pause. The mouth's relaxed shape during the pause is
+   * not this queue's job: timeline.js appends a rest segment for it and the
+   * lip driver keeps sampling until the extended timeline ends. Waiting here
+   * only spaces the next chunk; it never blocks a stop or a new turn. */
+  async _breathe(ms, generation) {
+    if (!Number.isFinite(ms) || ms <= 0 || generation !== this.generation) return;
+    await new Promise(resolve => {
+      const timer = this.timers.setTimeout(() => {
+        if (this.cancelWait === cancel) this.cancelWait = null;
+        resolve();
+      }, Math.min(400, ms));
+      const cancel = () => { this.timers.clearTimeout(timer); resolve(); };
+      this.cancelWait = cancel;
+    });
   }
 }

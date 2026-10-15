@@ -9,8 +9,17 @@ body.is-writing .shared-workspace{width:min(1100px,100%);height:100%;margin:0 au
 body.is-writing .shared-workspace>[role=tablist],body.is-writing #work-feedback,body.is-writing #work-note-draft{display:none!important}
 body.is-writing #work-notes{flex:1;min-height:0}
 body.is-writing .shared-workspace iframe{height:100%;border-radius:0}
-body.is-writing .stage>:not(.topbar){visibility:hidden}
-body.is-writing .stage{grid-column:1/-1}
+body.is-writing .stage{grid-column:1/-1;isolation:auto}
+/* 写作视图只收起舞台内容；底部模式状态条保持可见，停止回复与连续对话开关随时可达 */
+body.is-writing .stage>:not(.topbar):not(.composer){visibility:hidden}
+body.is-writing .composer{position:relative;z-index:7}
+body.is-writing .composer{pointer-events:none}
+body.is-writing .composer>.capsule{pointer-events:auto}
+/* 写作视图只保留一枚停止回复；模式状态条收起，避免压住编辑器右下角的观点浮层 */
+body.is-writing .composer>*:not(.capsule){visibility:hidden}
+body.is-writing .composer>.capsule{visibility:visible;width:fit-content;margin-inline:auto}
+body.is-writing .capsule>:not(#stopBtn){display:none}
+body.is-writing .shared-workspace{padding-bottom:40px}
 body.is-writing #writingToggle{color:var(--accent);background:#e5ecdf}
 @media(max-width:760px){body.is-writing .side{inset:68px 0 0;padding:0}body.is-writing .shared-workspace{border-radius:0;border:0;padding:12px}.writing-header{gap:8px}.writing-header h2{font-size:18px}.writing-header p{font-size:11px}}
 @media(max-width:420px){.topbar .connection{display:none}.topbar #writingToggle{min-height:44px}}
