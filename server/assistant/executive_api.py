@@ -83,6 +83,34 @@ def create_executive_router(executive):
         await payload(request)
         return ready(call(executive.cancel, commission_id))
 
+    @router.post('/commissions/{commission_id}/submit')
+    async def submit(commission_id: str, request: Request):
+        """Worker 交差入口：外部执行体（CLI / HTTP / MCP）跑完从这里把成果交回来。
+
+        没有这条路由，适配器只能被进程内驱动；外部 Worker 就只能在stdout里
+        自说自话。交上来的 artifact 直接进初审室，和内部链路同一套判据。
+        """
+        data = await payload(request, ['artifact'])
+        artifact = data.get('artifact')
+        if not isinstance(artifact, dict):
+            raise HTTPException(400, 'artifact_object_required')
+        return ready(call(executive.submit, commission_id, artifact))
+
+    @router.post('/commissions/{commission_id}/run')
+    async def run(commission_id: str, request: Request):
+        """进程内驱动执行体跑完这一单：适配器事件流 -> 遥测 -> 初审。"""
+        await payload(request)
+        try:
+            return ready(await executive.run_commission(commission_id))
+        except ValueError as exc:
+            raise HTTPException(400, str(exc))
+
+    @router.get('/adapters')
+    async def adapters():
+        """已登记的适配器类型，以及每个 Agent 当前绑的是哪一个。"""
+        return ready({'types': call(executive.adapter_types),
+                      'agents': call(executive.adapter_bindings)})
+
     @router.get('/telemetry')
     async def telemetry(window_seconds: int = 86400):
         if type(window_seconds) is not int or not 60 <= window_seconds <= 30 * 86400:

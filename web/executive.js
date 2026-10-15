@@ -7,6 +7,8 @@
  * 新完结的督办只亮胶囊呼吸灯 + 一条静音气泡，不自动开抽屉、不发声音、不抢焦点。
  */
 
+import { createFlowGuard, pendingMessage, shouldHighlight } from "./executive-state.js";
+
 const el = (id) => document.getElementById(id);
 
 const STATUS_LABELS = {
@@ -19,7 +21,6 @@ const STATUS_LABELS = {
   done: "已归档",
 };
 const POLL_MS = 4000;
-const QUIET_MS = 1200;
 const MAX_CARDS = 20;
 
 function node(tag, className, text) {
@@ -58,22 +59,21 @@ export function mountExecutive() {
   if (!root || !list || !telemetryBox || !rubricBox) return null;
 
   const state = { seen: new Set(), lastKeyAt: 0, timer: null, active: false, revision: 0 };
+  const flow = createFlowGuard({ isWriting: () => document.body.classList.contains("is-writing") });
 
   // 抽屉内部的操作是"正在办这件事"，不算打扰；其余地方的按键才算。
   document.addEventListener(
     "keydown",
     (event) => {
       if (root.contains(event.target)) return;
-      state.lastKeyAt = Date.now();
+      flow.markTyping();
     },
     true,
   );
   window.addEventListener("message", (event) => {
     if (event.origin !== location.origin) return;
-    if (event.data && event.data.type === "aqi-notes-typing") state.lastKeyAt = Date.now();
+    if (event.data && event.data.type === "aqi-notes-typing") flow.markTyping();
   });
-  const typing = () =>
-    Date.now() - state.lastKeyAt < QUIET_MS || document.body.classList.contains("is-writing");
 
   function agentName(item) {
     return item.agent_id ? `${item.agent_id}` : "还没选将";
@@ -134,7 +134,7 @@ export function mountExecutive() {
   function commissionCard(item, quiet) {
     const card = node("article", "ops-card");
     card.dataset.status = item.status;
-    card.dataset.quiet = quiet ? "1" : "0";
+    card.dataset.quiet = String(!shouldHighlight(quiet));
     const head = node("div", "ops-card-head");
     head.append(node("h5", "ops-card-title", item.title || "未命名督办"));
     head.append(node("span", "ops-pill", STATUS_LABELS[item.status] || item.status));
@@ -193,7 +193,7 @@ export function mountExecutive() {
   }
 
   function renderCommissions(items) {
-    const quiet = typing();
+    const quiet = flow.isQuiet();
     const fresh = items.filter((item) => item.status === "ready_to_report" && !state.seen.has(item.id));
     for (const item of fresh) state.seen.add(item.id);
     pending.replaceChildren();
@@ -202,13 +202,7 @@ export function mountExecutive() {
       pending.dataset.quiet = String(quiet);
       pending.append(node("span", "ops-breathe"));
       pending.append(
-        node(
-          "span",
-          "ops-pending-text",
-          quiet
-            ? `${fresh.length} 单结了。你在忙，我先不出声，灯给你留着。`
-            : `${fresh.length} 单等你验收。`,
-        ),
+        node("span", "ops-pending-text", pendingMessage(fresh.length, quiet)),
       );
     }
     list.replaceChildren();

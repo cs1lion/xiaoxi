@@ -373,6 +373,12 @@ def load_roster(path=None):
         return empty
     for key, default in empty.items():
         data.setdefault(key, default)
+    # v1 花名册用 workers:，v2 起改叫 agents: 以便和 adapter 绑定对齐。
+    # 两种键都认，旧配置不必改写； agents 优先。
+    if not data.get("agents") and data.get("workers"):
+        data["agents"] = data["workers"]
+    data.setdefault("agents", [])
+    data.setdefault("adapter_types", [])
     return data
 
 

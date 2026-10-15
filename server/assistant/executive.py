@@ -11,7 +11,7 @@ from pathlib import Path
 from typing import Any, Callable
 
 from ..interaction.threads import CommissionStore
-from .dispatcher import Dispatcher
+from .dispatcher import Dispatcher, roster_agents
 from .evaluator import Evaluator, load_roster
 from .telemetry import SpinningGuard, TelemetryGateway, TelemetryStore
 
@@ -21,7 +21,8 @@ DEFAULT_TELEMETRY_WINDOW = 24 * 60 * 60
 class ExecutiveService:
     def __init__(self, directory, *, llm: Any = None, notes: Any = None, threads: Any = None,
                  preference_store: Any = None, roster: dict[str, Any] | None = None,
-                 clock: Callable[[], float] = time.time, commissions_path: str | None = None):
+                 clock: Callable[[], float] = time.time, commissions_path: str | None = None,
+                 roster_loader: Callable[[], dict[str, Any]] | None = None):
         directory = Path(directory)
         directory.mkdir(parents=True, exist_ok=True)
         self.clock = clock
@@ -32,10 +33,34 @@ class ExecutiveService:
         self.evaluator = Evaluator(roster=roster or load_roster(),
                                    path=directory / "executive.db", clock=clock)
         self.evaluator.seed()
+        # 花名册热重载：生产环境由 server.config.agents_roster_cfg 注入，
+        # 隔离测试不注入，回落到启动时读的那一份。见 docs/PROTOCOL.md §17。
+        self.roster_loader = roster_loader
         self.dispatcher = Dispatcher(commissions=self.ledger, evaluator=self.evaluator,
                                      roster=self.evaluator.roster,
                                      memory_provider=self._memory_provider(notes, threads, preference_store),
-                                     clock=clock)
+                                     clock=clock, telemetry=self.telemetry)
+
+    @property
+    def roster(self) -> dict[str, Any]:
+        """当前花名册。配了 loader 就每次现取，改配置无需重启。"""
+        if self.roster_loader is None:
+            return self.evaluator.roster
+        try:
+            fresh = self.roster_loader()
+        except Exception:
+            return self.evaluator.roster
+        return fresh if isinstance(fresh, dict) and fresh else self.evaluator.roster
+
+    def reload_roster(self) -> bool:
+        """把最新花名册同步给 evaluator 与 dispatcher（热重载的落点）。"""
+        fresh = self.roster
+        if not fresh or fresh is self.evaluator.roster:
+            return False
+        self.evaluator.roster = fresh
+        self.evaluator.thresholds = dict(fresh.get("eval_thresholds") or {})
+        self.dispatcher.roster = fresh
+        return True
 
     # ---------- 记忆注入 ----------
     @staticmethod
@@ -91,10 +116,35 @@ class ExecutiveService:
                 "agent_id": commission["agent_id"], "agent_name": self._agent_name(commission["agent_id"])}
 
     def _agent_name(self, agent_id: str) -> str:
-        for worker in self.evaluator.roster.get("workers") or []:
-            if isinstance(worker, dict) and worker.get("id") == agent_id:
+        for worker in roster_agents(self.evaluator.roster):
+            if isinstance(worker, dict) and str(worker.get("id")) == str(agent_id):
                 return str(worker.get("name") or agent_id)
         return ""
+
+    def adapter_types(self) -> list[str]:
+        return self.dispatcher.available_adapter_types()
+
+    def adapter_bindings(self) -> list[dict[str, Any]]:
+        """每个 Agent 当前绑的适配器（只回类型名，不回配置值）。"""
+        bindings = []
+        for entry in roster_agents(self.roster):
+            if not isinstance(entry, dict) or not entry.get("id"):
+                continue
+            try:
+                described = self.dispatcher.adapter_for(str(entry["id"])).describe()
+            except Exception as exc:
+                described = {"adapter": None, "error": type(exc).__name__}
+            bindings.append({"agent_id": str(entry["id"]), "name": str(entry.get("name") or ""),
+                             **described})
+        return bindings
+
+    def adapter_for(self, agent_id: str) -> dict[str, Any]:
+        """观测用：某个 Agent 绑的是哪个适配器。只回类型名，不回配置值。"""
+        return self.dispatcher.adapter_for(agent_id).describe()
+
+    async def run_commission(self, commission_id: str) -> dict[str, Any]:
+        """驱动执行体跑完这一单：适配器事件流 -> 遥测 -> 初审。"""
+        return await self.dispatcher.run_commission(commission_id)
 
     # ---------- 台账读数 ----------
     def commission(self, commission_id: str) -> dict[str, Any]:
@@ -129,8 +179,8 @@ class ExecutiveService:
         return self.dispatcher.accept(commission_id)
 
     def reject(self, commission_id: str, boss_feedback: str) -> dict[str, Any]:
-        commission, rubric = self.dispatcher.reject(commission_id, boss_feedback)
-        return {"commission": commission, "rubric": rubric}
+        commission, rubric, boss_reject_count = self.dispatcher.reject(commission_id, boss_feedback)
+        return {"commission": commission, "rubric": rubric, "boss_reject_count": boss_reject_count}
 
     def cancel(self, commission_id: str) -> dict[str, Any]:
         return self.dispatcher.cancel(commission_id)

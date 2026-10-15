@@ -17,7 +17,8 @@ sys.path.insert(0, str(ROOT))
 
 os.environ["DB_PATH"] = ":memory:"
 
-from server.assistant.dispatcher import BriefingPacket, Dispatcher, select_agent  # noqa: E402
+from server.assistant.dispatcher import (BriefingPacket, Dispatcher, roster_agents,  # noqa: E402
+                                          select_agent)
 from server.assistant.evaluator import (EvalRubricStore, Evaluator, extract_triggers,  # noqa: E402
                                         load_roster, scold)
 from server.assistant.executive import ExecutiveService  # noqa: E402
@@ -126,9 +127,10 @@ def test_briefing_packet() -> None:
 def test_roster_selection_and_capacity() -> None:
     print("[roster selection]")
     roster = load_roster()
-    check("花名册三个 Worker", len(roster["workers"]) == 3)
+    check("花名册三个 Agent", len(roster["agents"]) == 3)
+    check("旧键 workers 仍被识别", roster_agents({"workers": roster["agents"]}) == roster["agents"])
     check("三条种子铁律", len(roster["seed_rules"]) == 3)
-    full = {worker["id"]: worker.get("max_concurrent", 2) for worker in roster["workers"]}
+    full = {worker["id"]: worker.get("max_concurrent", 2) for worker in roster_agents(roster)}
     best, ranked = select_agent(roster, "整理标题摘要", full)
     check("满载时无将可选", best is None)
     check("排行仍给出理由", all("score" in item for item in ranked))
@@ -383,7 +385,7 @@ def test_delegate_without_worker() -> None:
     print("[delegate degradation]")
     service = build_service()
     roster = dict(service.evaluator.roster)
-    roster["workers"] = []
+    roster["agents"] = []
     service.dispatcher.roster = roster
     result = service.delegate("去把这个整理一下")
     check("没将可派转 blocked", result["status"] == "blocked")

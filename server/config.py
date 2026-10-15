@@ -80,6 +80,17 @@ def _avatar_base() -> dict[str, Any]:
     return _load_yaml("avatar.yaml")
 
 
+@lru_cache(maxsize=1)
+def _agents_roster_base() -> dict[str, Any]:
+    return _load_yaml("agents_roster.yaml")
+
+
+def agents_roster_cfg() -> dict[str, Any]:
+    """V3 麾下花名册。与 persona/pacing 一样走 _live，因此 config_hot 装上快照后
+    改 agents_roster.yaml 无需重启即可在下次派单生效（协议 §17）。"""
+    return _live("agents_roster.yaml", _agents_roster_base)
+
+
 def avatar_cfg() -> dict[str, Any]:
     return _live("avatar.yaml", _avatar_base)
 

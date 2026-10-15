@@ -13,6 +13,22 @@
 .\.venv\Scripts\python.exe scripts\test_core.py        # 基线 38 passed / 0 failed，零回归
 ```
 
+## V3 内阁总管（全员适用，2026-10-15 起）
+
+```bash
+.\.venv\Scripts\python.exe scripts\test_executive_v3.py         # 督办台账 / 观测网关 / 自进化初审 / 台前意图
+.\.venv\Scripts\python.exe scripts\test_agent_adapter_ext.py    # Worker 适配器可插拔（Mock 适配器跑通全程）
+node web\executive-state.test.mjs                               # 心流防打扰纯逻辑（零 DOM）
+```
+
+`check_protocol.py` 在 V3 起多管一类：**服务端自用路由**（`/internal/telemetry_proxy`）。
+前端不引用它，所以第五类检查看不见；改了路径会让 Worker 的调用静默 404，
+因此显式列在 `INTERNAL_ROUTES` 里，契约一改静态检查直接报警。
+
+跑 V3 相关改动时，上面三行加全局门禁两行全部跑通才算完。
+
+## Role 1（记忆 / 日记 / 自进化 / 星图底层）
+
 ## Role 1（记忆 / 日记 / 自进化 / 星图底层）
 
 ```bash

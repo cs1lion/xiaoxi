@@ -372,3 +372,74 @@ V3 内阁总管的督办台账，与共同事项同库同规约（`server/intera
 - `Evaluator.distill()` 是唯一新增入口：输入是老板退回原话 + 初审为何没拦住的 Delta，输出一条新判例。同一 Delta 不重复落库（按 `evidence` 去重）。
 - 判例可被用户在抽屉里看见与删除；删除只置 `active=false`，不抹掉历史 `audit.findings` 的引用。
 - 打回训话模板内置在 `evaluator.py`，分三种：`l1_error`（客观报错驳回）、`l2_aesthetic`（审美违规驳回）、`spinning_warning`（鬼打墙熔断警告）。台词风格样本在 `config/response_examples.json`，模板只做兜底，不覆盖真实 findings。
+
+## 二十二、Worker 适配器契约（Adapter & Registry）
+
+V3 的"Agent 指挥官"不允许在调度核心里写 `if agent_type == ...`。新增一种干活方式 = 写一个适配器 + 在花名册加一行，`dispatcher.py` 零改动。
+
+### 22.1 抽象基类 `BaseWorkerAdapter`
+
+定义在 `server/assistant/adapters/base.py`。所有干活的 Agent 必须继承它并实现三个异步方法：
+
+| 方法 | 职责 | 边界 |
+|---|---|---|
+| `async prepare_context(commission_id, briefing_packet) -> dict` | 组装初始化上下文/环境变量 | 纯数据，零副作用；不启动进程、不发请求；凭据只来自注入的 config，不得落盘 |
+| `async execute(task_spec) -> AsyncGenerator[Dict, None]` | 异步执行并以标准事件流吐结果 | 只吐标准事件，不自己改状态机 |
+| `async cancel() -> None` | 异常时（如鬼打墙熔断）的安全中断与子进程回收 | 必须幂等且不抛异常；可能被调用多次 |
+
+`task_spec` 形状为 `{"context": <prepare_context 的返回值>, "commission_id": ..., "packet": ...}`。
+`prepare_context` 的产出必须原样流进 `execute`——这条断裂时适配器契约即失效。
+
+### 22.2 标准事件类型
+
+`execute` 只允许吐出五种事件，未知类型在构造时即被拒（不静默吞掉一种新事件）：
+
+| type | 含义 | 必需字段 |
+|---|---|---|
+| `progress` | 步骤进展 | `step_idx`、`text` |
+| `token` | 一次模型调用的用量 | `model`、`prompt_tokens`、`completion_tokens`、`ttft_ms`、`duration_ms`、`status_code`，可选 `error` |
+| `artifact` | 最终产出，唯一终止事件 | `artifact`（对象，字段同 §19 的 `delivery`） |
+| `log` | 仅供观测的原始行 | `text` |
+| `error` | 失败，终止事件 | `text` |
+
+`token` 事件的字段与 `agent_telemetry_spans` 一一对应，因此可直接落库，无需二次翻译。
+
+### 22.3 注册表
+
+- 登记：`@register_adapter("cli_subproc")` 装饰器，或 `register_adapter(type_name, cls)` 直接传类。两者等价。
+- 查询：`adapter_types()` / `get_adapter_class(name)` / `create_adapter(name, config)`。
+- 调度核心唯一入口：`create_adapter_for(花名册条目)`，读条目里的 `adapter` 字符串查表；缺省视为 `manual`。
+- 未登记的类型抛 `UnknownAdapterError`；抽象类（三个方法有任一未实现）在登记时即被拒——放它进去只会在派单时才炸，那时候老板已经在等了。
+- 内置四种：`manual`（只组密件不执行）、`cli_subproc`（CLI 子进程）、`http_api`（远端 HTTP，支持 JSON 与 SSE）、`mcp`（MCP over stdio）。
+
+### 22.4 花名册绑定
+
+`config/agents_roster.yaml` 的 `agents:` 每条都可直接映射到适配器类与参数：
+
+```yaml
+agents:
+  - id: "my_new_agent"
+    name: "自定义Agent"
+    adapter: "cli_subproc"      # 对应注册表中的类型
+    executable: "claude"
+    args: ["--dangerously-skip-permissions"]
+    strengths: [...]
+```
+
+整条条目（含 `executable` / `args` / `endpoint` / `headers` / `env` / `timeout`）原样透传给适配器 `__init__(config)`，因此新增参数不需要改基类。花名册热重载见 §17。
+
+### 22.5 CLI 子进程行协议
+
+`cli_subproc` 的 Worker 侧约定：stdout 每行一个 JSON 对象，`type` 取 22.2 表中的值；
+非 JSON 行一律降级为 `log` 事件，绝不因为 Worker 多打印一行废话就中断任务。
+派单密件经 `AQI_BRIEFING_PACKET` 环境变量递入（不进命令行参数——那会出现在 `ps` 里）；
+观测网关地址经 `AQI_TELEMETRY_PROXY` / `OPENAI_BASE_URL` 注入，让 Worker 自己的模型调用也落 span。
+
+### 22.6 相关路由
+
+- `POST /api/executive/commissions/{id}/submit`：外部 Worker 交差入口，`artifact` 直接进初审室，与内部链路同一套判据。
+- `POST /api/executive/commissions/{id}/run`：进程内驱动执行体跑完这一单。
+- `GET /api/executive/adapters`：已登记类型 + 每个 Agent 当前绑定（只回类型名，不回配置值）。
+- `POST /internal/telemetry_proxy`：本地透明代理，见 §20。该路由无前端引用，由 `check_protocol.py` 第六类检查显式纳管。
+
+回归：`python scripts/test_agent_adapter_ext.py`（Mock 适配器验证注册表派发全程）。

@@ -19,7 +19,7 @@ from .config import CONFIG_DIR, _deep_merge, _load_yaml
 
 logger = logging.getLogger(__name__)
 
-MANAGED = ("persona.yaml", "memory.yaml", "pacing.yaml", "avatar.yaml")
+MANAGED = ("persona.yaml", "memory.yaml", "pacing.yaml", "avatar.yaml", "agents_roster.yaml")
 LOCAL_SUFFIX = ".local.yaml"
 
 _lock = threading.Lock()

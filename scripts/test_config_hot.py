@@ -27,10 +27,14 @@ class ConfigHotTest(unittest.TestCase):
         (self.dir / "persona.yaml").write_text("name: base\n", encoding="utf-8")
         (self.dir / "pacing.yaml").write_text("ambient:\n  mumble_seconds: 45\n", encoding="utf-8")
         (self.dir / "avatar.yaml").write_text("neutral: {}\n", encoding="utf-8")
+        # V3 花名册也进了 MANAGED；临时目录里必须有一份，否则 install() 读不到文件。
+        (self.dir / "agents_roster.yaml").write_text(
+            "version: 2\nagents: []\nseed_rules: []\ndispatch: {}\n", encoding="utf-8")
         self._old_c, self._old_h = C.CONFIG_DIR, H.CONFIG_DIR
         C.CONFIG_DIR = self.dir
         H.CONFIG_DIR = self.dir
-        for loader in (C._persona_base, C._memory_base, C._pacing_base, C._avatar_base):
+        for loader in (C._persona_base, C._memory_base, C._pacing_base, C._avatar_base,
+                       C._agents_roster_base):
             loader.cache_clear()
         H.stop_watcher()
         H._snapshots.clear()
@@ -40,7 +44,8 @@ class ConfigHotTest(unittest.TestCase):
     def tearDown(self) -> None:
         H.stop_watcher()
         C.CONFIG_DIR, H.CONFIG_DIR = self._old_c, self._old_h
-        for loader in (C._persona_base, C._memory_base, C._pacing_base, C._avatar_base):
+        for loader in (C._persona_base, C._memory_base, C._pacing_base, C._avatar_base,
+                       C._agents_roster_base):
             loader.cache_clear()
         H._snapshots.clear()
         H._mtimes.clear()
@@ -57,6 +62,21 @@ class ConfigHotTest(unittest.TestCase):
         self.assertIsNone(H.snapshot("memory.yaml"))
         self.assertEqual(C.memory_cfg()["self_evolution"]["idle_minutes"], 60)
 
+    def test_roster_hot_reloads_without_restart(self) -> None:
+        """V3：改花名册不用重启服务，下次派单就生效（协议 §17）。"""
+        H.install()
+        self.assertEqual(C.agents_roster_cfg()["version"], 2)
+        self.assertEqual(C.agents_roster_cfg()["agents"], [])
+        H._local_path("agents_roster.yaml").write_text(
+            "agents:\n  - id: hot_agent\n    adapter: cli_subproc\n    executable: echo\n",
+            encoding="utf-8")
+        self._bump("agents_roster.yaml")
+        self.assertIn("agents_roster.yaml", H.refresh())
+        roster = C.agents_roster_cfg()
+        self.assertEqual([agent["id"] for agent in roster["agents"]], ["hot_agent"])  # live
+        self.assertEqual(roster["agents"][0]["adapter"], "cli_subproc")
+        self.assertEqual(roster["version"], 2)   # base key preserved by the merge
+
     def test_local_override_merges_and_hot_swaps_without_restart(self) -> None:
         H.install()
         self.assertEqual(C.memory_cfg()["self_evolution"]["idle_minutes"], 60)
@@ -68,6 +88,7 @@ class ConfigHotTest(unittest.TestCase):
 
     def test_invalid_override_keeps_last_valid(self) -> None:
         H.install()
+        self.assertEqual(C.agents_roster_cfg()["version"], 2)
         lp = H._local_path("memory.yaml")
         lp.write_text("self_evolution:\n  idle_minutes: 7\n", encoding="utf-8")
         self._bump("memory.yaml")

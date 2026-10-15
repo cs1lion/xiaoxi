@@ -21,6 +21,7 @@ V2 把阿栖（小溪）做成了一个有记忆、会自省的头脑。V3 把�
 | 观测网关 | `server/assistant/telemetry.py` | 记 span、算战况、熔断鬼打墙 | 不判断审美、不修改 Worker 输出 |
 | 初审室 | `server/assistant/evaluator.py` | L1 客观校验 + L2 判例、打回、提炼新判例 | 不代替 Worker 重做、不无限重试 |
 | 督办台账 | `server/interaction/threads.py` | Commission 6 阶段状态机与事件留痕 | 不存思考过程、不存凭据 |
+| 执行体适配层 | `server/assistant/adapters/` | 把一种干活方式包装成统一三方法接口 | 不改状态机、不自己决定派给谁 |
 
 ---
 
@@ -130,7 +131,42 @@ V2 把阿栖（小溪）做成了一个有记忆、会自省的头脑。V3 把�
 **失败模式：** span 落库失败必须降级为"这次调用不计入战况"，绝不能把 Worker 的调用带崩。
 `error_snippet` 截断到 200 字符并剥掉凭据样文本。
 
-### 2.4 自进化初审室（`server/assistant/evaluator.py`）
+### 2.4 执行体适配层（`server/assistant/adapters/`）
+
+这一层是"Agent 指挥官"的插座。`dispatcher.py` 从不判断 Agent 是什么类型，它只做两件事：
+按花名册的 `adapter:` 字符串经注册表拿一个适配器实例，然后驱动那三个标准异步方法
+（`prepare_context` / `execute` / `cancel`，契约见 PROTOCOL §22）。
+
+```
+花名册 adapter: "cli_subproc"
+        │
+        ▼
+   registry.create_adapter_for(条目)
+        │
+        ▼
+   CliSubprocessAdapter(config=整条花名册条目)
+        │
+        ├── prepare_context()  → 环境变量（含派单密件、观测网关地址）
+        ├── execute()          → 标准事件流
+        │     progress → 记步 + 鬼打墙检测
+        │     token    → 落一条 telemetry span
+        │     artifact → 流结束后交初审室
+        │     error    → 记下并中止
+        └── cancel()           → 杀整个进程组并回收
+```
+
+新增一种干活方式（新的 CLI、新的 MCP Server、新的远端服务）只需在 `adapters/` 下加一个
+模块并 `@register_adapter("类型名")`，再在花名册里加一行。`dispatcher.py` 零改动——
+这条能被机器断言，`scripts/test_agent_adapter_ext.py` 用一个 Mock 适配器把"零侵入"
+走成事实，而不是靠读代码相信它。
+
+三条执行期的底线：
+
+1. **适配器起不来、抛异常、或鬼打墙熔断，一律先 `cancel()` 回收，再转 BLOCKED 请示老板。** 绝不假装执行过。
+2. **`manual` 是诚实的缺省。** 没配执行体的 Agent 只组密件，跑完转 BLOCKED 说清"没交差"，不伪造 artifact。
+3. **遥测记不上只当这次不计入战况**，不带崩执行。
+
+### 2.5 自进化初审室（`server/assistant/evaluator.py`）
 
 Worker 交差后跑两层，**两层都是确定性的**，不靠模型心情：
 
@@ -192,6 +228,7 @@ DRAFTING ──▶ BRIEFING ──▶ RUNNING ──┬──▶ BLOCKED ──�
 | Worker 花名册 + 种子铁律 | `config/agents_roster.yaml` | Role 1 |
 | 大秘台词样本 | `config/response_examples.json` | Role 2 |
 | 慢环调度 | `server/assistant/dispatcher.py` | Role 1 |
+| 执行体适配层 | `server/assistant/adapters/` | Role 1 |
 | 观测网关 | `server/assistant/telemetry.py` | Role 1 |
 | 自进化初审 | `server/assistant/evaluator.py` | Role 1 |
 | 派单记忆打包 | `server/memory/commission_context.py` | Role 1 |
@@ -199,7 +236,7 @@ DRAFTING ──▶ BRIEFING ──▶ RUNNING ──┬──▶ BLOCKED ──�
 | 台前接单与战况播报 | `server/dialogue/orchestrator.py` | Role 2 |
 | 监工微动作 | `web/avatar/drivers/ambient.js` | Role 2 |
 | 督办沙盘与 API 战况卡 | `web/` 工作台抽屉视图 | Role 3 |
-| 回归 | `scripts/test_executive_v3.py` | Role 1 |
+| 回归 | `scripts/test_executive_v3.py` / `scripts/test_agent_adapter_ext.py` | Role 1 |
 
 ---
 
@@ -207,11 +244,18 @@ DRAFTING ──▶ BRIEFING ──▶ RUNNING ──┬──▶ BLOCKED ──�
 
 ```bash
 .\.venv\Scripts\python.exe scripts\test_executive_v3.py   # V3 专项
+.\.venv\Scripts\python.exe scripts\test_agent_adapter_ext.py   # 适配器可插拔
 .\.venv\Scripts\python.exe scripts\check_protocol.py      # 接缝零漂移
 .\.venv\Scripts\python.exe scripts\test_core.py           # 基线零回归
+node web\executive-state.test.mjs                          # 心流防打扰纯逻辑
 ```
 
-`test_executive_v3.py` 必须覆盖：阶段机合法/非法迁移、密件字段完整、
-span 落库与战况统计、鬼打墙熔断、L1/L2 双层打回与重试上限、
-老板退回 → 新判例落库、前台意图识别不误伤普通对话。
+两个测试各管一段，互不重复：
+
+- `test_executive_v3.py`：阶段机合法/非法迁移、密件字段完整、span 落库与战况统计、
+  鬼打墙熔断、L1/L2 双层打回与重试上限、老板退回 → 新判例落库、前台意图识别不误伤普通对话。
+- `test_agent_adapter_ext.py`：注册表登记/查询/缺省、抽象契约被机器强制、
+  Mock 适配器跑通"派单 → 事件流 → 遥测 → 初审"全程、新增类型零侵入、
+  熔断/起不来/未登记/抛异常四条失败路径都转 BLOCKED 且不伪造执行。
+- `web/executive-state.test.mjs`：心流防打扰的时间窗与文案分支。
 

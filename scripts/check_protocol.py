@@ -100,7 +100,7 @@ def turn_envelope_fields() -> set[str]:
 
 
 def server_routes() -> set[str]:
-    """Collect literal /api routes: @app.<m>(...) plus @<router>.<m>(...) joined with APIRouter prefixes."""
+    """Collect literal routes: @app.<m>(...) plus @<router>.<m>(...) joined with APIRouter prefixes."""
     routes: set[str] = set()
     for path in sorted(SERVER_DIR.rglob('*.py')):
         text = path.read_text(encoding='utf-8')
@@ -110,7 +110,15 @@ def server_routes() -> set[str]:
         # 集合路由注册的是空路径（@router.get('')），所以路径组必须允许零长度。
         for match in re.finditer(r'@(\w+)\.(?:get|post|patch|delete|put)\(\s*["\']([^"\']*)["\']', text):
             routes.add(prefixes.get(match.group(1), '') + match.group(2))
-    return {route for route in routes if route.startswith('/api/')}
+    return {route for route in routes if route.startswith('/')}
+
+
+INTERNAL_ROUTES = ('/internal/telemetry_proxy',)
+"""服务端自用路由：前端不引用，所以第五类检查看不到它们。
+
+观测网关这条最怕被顺手重构掉——改了路径，Worker 的调用会静默 404，
+而前端一个字都不会提。所以在这里显式纳管：契约一改，静态检查直接报警。
+"""
 
 
 def frontend_api_calls() -> set[str]:
@@ -240,9 +248,15 @@ def main() -> int:
 
     # ---- 5. REST 接缝：前端引用的 /api 路由必须真的存在 ----
     routes = server_routes()
+    api_routes = {route for route in routes if route.startswith('/api/')}
     for call in sorted(frontend_api_calls()):
-        if not route_exists(call, routes):
+        if not route_exists(call, api_routes):
             problems.append(f"web 里引用了 {call}，但服务端没有注册这个路由（跨角色接口会静默 404）")
+
+    # ---- 6. 服务端自用路由：前端不引用，改坏了同样静默 ----
+    for internal in INTERNAL_ROUTES:
+        if internal not in routes:
+            problems.append(f"服务端自用路由 {internal} 没有注册（观测网关断了不会有人报警）")
 
     if problems:
         print("FAIL")

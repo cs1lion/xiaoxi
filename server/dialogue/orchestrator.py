@@ -118,6 +118,11 @@ def audit_reject_line() -> str:
     return stage_sample_line("audit_reject_brag")
 
 
+def audit_reject_pout_line() -> str:
+    """第三次被打回时的委屈吐槽。前两次她还得意，第三次该换脸了。"""
+    return stage_sample_line("audit_reject_pout")
+
+
 def plan_guardian_pushback_line() -> str:
     return stage_sample_line("plan_guardian_pushback")
 
@@ -1142,15 +1147,24 @@ class Orchestrator:
             return None
         if pending:
             verdict = acceptance_intent(text)
+            if len(pending) > 1:
+                # 手上不止一单时，凭"最近更新那一单"下手很容易砍错人：不猜，问一句。
+                titles = "、".join(f"《{item.get('title') or '未命名'}》" for item in pending[:3])
+                more = "等" if len(pending) > 3 else ""
+                return {"kind": "clarify",
+                        "text": f"你手上等着验收的有 {len(pending)} 单：{titles}{more}。说个名字我就知道是哪一单。",
+                        "commission_ids": [item["id"] for item in pending[:3]]}
+            target = pending[0]
             if verdict == "accept":
-                target = pending[0]
                 line = commission_progress_line() or eval_self_reflection_line()
                 return {"kind": "accept", "text": line, "commission_id": target["id"],
                         "agent_name": self._agent_name(executive, target)}
             if verdict == "reject":
-                target = pending[0]
-                return {"kind": "reject", "text": audit_reject_line() or eval_self_reflection_line(),
-                        "commission_id": target["id"], "feedback": text}
+                # 第三次被打回换一套说法：前两次她还得意，第三次该委屈了。
+                count = int((target.get("audit") or {}).get("boss_reject_count") or 0) + 1
+                line = audit_reject_pout_line() if count >= 3 else audit_reject_line()
+                return {"kind": "reject", "text": line or eval_self_reflection_line(),
+                        "commission_id": target["id"], "feedback": text, "boss_reject_count": count}
         if telemetry_query_intent(text) and (running or pending):
             report = telemetry_bottleneck_report(executive.telemetry_summary())
             if report:
@@ -1167,8 +1181,10 @@ class Orchestrator:
     @staticmethod
     def _agent_name(executive, commission: dict[str, Any]) -> str:
         agent_id = (commission or {}).get("agent_id") or ""
-        for worker in (getattr(executive, "evaluator", None).roster.get("workers") or []):
-            if isinstance(worker, dict) and worker.get("id") == agent_id:
+        roster = getattr(getattr(executive, "evaluator", None), "roster", None) or {}
+        entries = roster.get("agents") or roster.get("workers") or []
+        for worker in entries:
+            if isinstance(worker, dict) and str(worker.get("id")) == str(agent_id):
                 return str(worker.get("name") or agent_id)
         return agent_id
 

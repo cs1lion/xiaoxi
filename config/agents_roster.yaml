@@ -1,10 +1,13 @@
 # ============================================================
 # V3 麾下 Worker 花名册 + 初审种子铁律
 # 小溪（阿栖）不亲自干活：她照这张表选将、派单、验收。
-# 改这张表不会改变任何既有行为——只有 ExecutiveService 起来后才被读取。
+#
+# 每种 Agent 通过 `adapter:` 绑定到 server/assistant/adapters/ 下登记的适配器类
+# （manual / cli_subproc / http_api / mcp）。新增一种干活方式 = 写一个适配器 +
+# 在这里加一行，调度核心一行代码都不用改。
 # ============================================================
 
-version: 1
+version: 2
 
 # ---------- 选将打分权重 ----------
 # 只认这三项，不认"哪个模型最近表现好"这类无据可查的分数。
@@ -21,6 +24,9 @@ dispatch:
   max_retry: 2                # 初审打回上限；第 3 次不过转 BLOCKED 请示
   spin_guard:
     max_identical: 3          # 同一步骤签名连续重复几次算鬼打墙
+  # 观测网关地址。配了执行体的 Agent，prepare_context 会把它注入环境变量，
+  # 让 Worker 自己的模型调用也落到 agent_telemetry_spans 里。
+  telemetry_proxy_url: "http://127.0.0.1:8000/internal/telemetry_proxy"
 
 # ---------- 琐事代答策略 ----------
 # BLOCKED 时：问题能在这里或已有偏好里找到依据 → 琐事，总管代答继续；
@@ -32,44 +38,57 @@ trivia_policy:
     answer: "按截止时间排，最晚不能拖的那件先开刀。我代你定了。"
 
 # ---------- Worker 花名册 ----------
-workers:
+# 三条现有编制都还是 adapter: manual——它们只接单、组密件，没有执行体。
+# 真要让它干活，把 adapter / executable / endpoint 换成下面注释里的样子即可，
+# 不需要改任何 Python 代码。
+agents:
   - id: scribe
     name: 笔录官
+    adapter: manual           # manual | cli_subproc | http_api | mcp
     summary: 便笺整理、标题、摘要、口吻改写；只读已保存版本，不新建文档
     strengths: [写作, 整理, 标题, 摘要, 便笺, 笔记, 文案, 改写, 润色]
     weaknesses: [不碰代码, 不做架构判断]
     cost_tier: cheap
     max_concurrent: 3
-    eval_commands:
-      - required_fields
-      - artifacts_exist
-      - token_budget
+    eval_commands: [required_fields, artifacts_exist, token_budget]
 
   - id: builder
     name: 营造匠
+    adapter: manual
+    # 接线示例（把上面那行换成这两行即可让它真正跑起来）：
+    # adapter: cli_subproc
+    # executable: "claude"
+    # args: ["--dangerously-skip-permissions"]
     summary: 前端页面、抽屉视图、样式与接线；严守主舞台 0 新增按钮
     strengths: [页面, 前端, 样式, 组件, 接线, 抽屉, 界面, 布局, 按钮]
     weaknesses: [不改后端契约, 不新增顶栏按钮]
     cost_tier: medium
     max_concurrent: 2
-    eval_commands:
-      - required_fields
-      - artifacts_exist
-      - wired_not_dry
-      - no_topbar_button
-      - token_budget
+    eval_commands: [required_fields, artifacts_exist, wired_not_dry, no_topbar_button, token_budget]
 
   - id: scout
     name: 探马
+    adapter: manual
+    # 接线示例：
+    # adapter: http_api
+    # endpoint: "http://127.0.0.1:9000/v1/run"
+    # method: POST
     summary: 检索、比对、查资料、汇总外部信息；只汇报查到的，不补全没查到的
     strengths: [检索, 查找, 搜索, 调研, 比对, 资料, 汇总, 查一下, 看看有没有]
     weaknesses: [不做最终决策, 不写长文]
     cost_tier: cheap
     max_concurrent: 2
-    eval_commands:
-      - required_fields
-      - artifacts_exist
-      - token_budget
+    eval_commands: [required_fields, artifacts_exist, token_budget]
+
+# ---------- 适配器类型索引 ----------
+# 这里只是给人看的目录；真正的登记发生在 server/assistant/adapters/ 各模块的
+# @register_adapter("...") 上。花名册写一个没登记的类型，派单会转 BLOCKED 请示，
+# 不会静默失败。
+adapter_types:
+  - manual        # 只组密件不执行；缺省值
+  - cli_subproc   # 拉一个 CLI Agent 子进程，行协议见 PROTOCOL §22
+  - http_api      # POST 给远端 Agent，支持 JSON 与 SSE 两种响应
+  - mcp           # 经 Model Context Protocol 桥接一个 MCP Server
 
 # ---------- 初审种子铁律 ----------
 # 三条起步铁律：一条审美（L2），两条客观（L1）。

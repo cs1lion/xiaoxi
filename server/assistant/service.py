@@ -6,6 +6,7 @@ import re
 from pathlib import Path
 from typing import Any
 
+from ..config import agents_roster_cfg
 from .loop import AgentLoop, Tool
 from .runtime import RuntimeStore
 from .store import AssistantStore
@@ -34,7 +35,8 @@ class AssistantService:
         from .executive import ExecutiveService
         self.executive = ExecutiveService(directory, llm=llm, notes=self.notes,
                                           threads=self.threads,
-                                          preference_store=self.preference_store)
+                                         preference_store=self.preference_store,
+                                         roster_loader=agents_roster_cfg)
         self.participation = Participation(self.threads)
         from ..interaction.activity import ActivityFacade
         self.activity = ActivityFacade(self.notes, self.participation, self.runtime)

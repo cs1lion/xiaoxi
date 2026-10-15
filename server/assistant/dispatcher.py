@@ -11,6 +11,7 @@
 """
 from __future__ import annotations
 
+import contextlib
 import re
 import time
 from dataclasses import dataclass, field
@@ -18,7 +19,10 @@ from typing import Any, Callable
 
 from ..memory.commission_context import gather as gather_memory
 from ..memory.commission_context import memory_refs, render_memory_block
+from .adapters import (UnknownAdapterError, adapter_types, create_adapter_for,
+                       BaseWorkerAdapter)
 from .evaluator import Evaluator, load_roster
+from .telemetry import normalize_signature
 
 COST_SCORE = {"cheap": 1.0, "medium": 0.6, "high": 0.3}
 MAX_OBJECTIVE = 400
@@ -42,6 +46,7 @@ class BriefingPacket:
     budget: dict[str, Any] = field(default_factory=dict)
     spin_guard: dict[str, Any] = field(default_factory=dict)
     memory_block: str = ""
+    telemetry: dict[str, Any] = field(default_factory=dict)
     created_at: float = 0.0
 
     def as_dict(self) -> dict[str, Any]:
@@ -57,6 +62,7 @@ class BriefingPacket:
             "rubrics": [dict(item) for item in self.rubrics],
             "budget": dict(self.budget),
             "spin_guard": dict(self.spin_guard),
+            "telemetry": dict(self.telemetry),
             "created_at": self.created_at,
         }
 
@@ -70,6 +76,15 @@ def _deliverable_for(agent: dict[str, Any]) -> str:
     return f"按本行职责交付：{summary}" if summary else "按密件要求交付"
 
 
+def roster_agents(roster: dict[str, Any]) -> list[dict[str, Any]]:
+    """花名册条目列表。v2 起叫 `agents:`，兼容 v1 的 `workers:`。"""
+    for key in ("agents", "workers"):
+        entries = roster.get(key)
+        if isinstance(entries, list) and entries:
+            return entries
+    return []
+
+
 def select_agent(roster: dict[str, Any], text: str,
                  load: dict[str, int] | None = None) -> tuple[dict[str, Any] | None, list[dict[str, Any]]]:
     """Score every roster worker; return (best, ranked). Best is None when all are full."""
@@ -80,7 +95,8 @@ def select_agent(roster: dict[str, Any], text: str,
     cost_weight = float(selection.get("cost_weight", 0.4))
     default_cap = int(selection.get("max_concurrent_default", 2) or 2)
     ranked: list[dict[str, Any]] = []
-    for worker in roster.get("workers") or []:
+    entries = roster_agents(roster)
+    for worker in entries:
         if not isinstance(worker, dict) or not worker.get("id"):
             continue
         strengths = [str(item) for item in (worker.get("strengths") or [])]
@@ -97,23 +113,50 @@ def select_agent(roster: dict[str, Any], text: str,
     if not available:
         return None, ranked
     winner = available[0]
-    for worker in roster.get("workers") or []:
+    for worker in entries:
         if isinstance(worker, dict) and worker.get("id") == winner["agent_id"]:
             return worker, ranked
     return None, ranked
 
 
 class Dispatcher:
-    """唯一写 Commission 状态机的地方。"""
+    """唯一写 Commission 状态机的地方，也是唯一决定"这个活交给谁干"的地方。
+
+    关于可插拔：本类从不判断 Agent 是什么类型。它只做两件事——按花名册的
+    `adapter:` 字符串经注册表拿一个适配器实例，然后驱动那三个标准异步方法。
+    新增一种干活方式（新的 CLI、新的 MCP Server、新的远端服务）只需要在
+    `server/assistant/adapters/` 下加一个模块并 @register_adapter，这里零改动。
+    """
 
     def __init__(self, *, commissions, roster: dict[str, Any] | None = None,
                  evaluator: Evaluator | None = None, memory_provider: Callable[[str], Any] | None = None,
-                 clock: Callable[[], float] = time.time):
+                 clock: Callable[[], float] = time.time, telemetry: Any = None,
+                 adapter_factory: Callable[[dict[str, Any]], BaseWorkerAdapter] | None = None):
         self.commissions = commissions
         self.roster = roster if roster is not None else load_roster()
         self.evaluator = evaluator if evaluator is not None else Evaluator(roster=self.roster)
         self.memory_provider = memory_provider
         self.clock = clock
+        self.telemetry = telemetry
+        # 可注入的适配器工厂：测试里换成一个假工厂即可验证派发全程，
+        # 生产环境用注册表默认实现。
+        self.adapter_factory = adapter_factory or create_adapter_for
+
+    # ---------- 适配器 ----------
+    def agent_entry(self, agent_id: str) -> dict[str, Any]:
+        """花名册里对应 id 的整条配置（含 adapter / executable / endpoint）。"""
+        for entry in roster_agents(self.roster):
+            if isinstance(entry, dict) and str(entry.get("id")) == str(agent_id):
+                return entry
+        raise KeyError(agent_id)
+
+    def adapter_for(self, agent_id: str) -> BaseWorkerAdapter:
+        """经注册表取适配器。花名册写了没登记的类型时抛 UnknownAdapterError，
+        由调用方决定换将还是请示老板——注册表自己不猜。"""
+        return self.adapter_factory(self.agent_entry(agent_id))
+
+    def available_adapter_types(self) -> list[str]:
+        return adapter_types()
 
     # ---------- 阶段推进 ----------
     def open(self, title: str, brief: str = "", thread_id: str = "") -> dict[str, Any]:
@@ -153,6 +196,8 @@ class Dispatcher:
                     "eval_commands": [str(item) for item in (agent.get("eval_commands") or [])]},
             spin_guard=dict((dispatch_cfg.get("spin_guard") or {"max_identical": 3})),
             memory_block=render_memory_block(memory),
+            telemetry={"proxy_url": str(dispatch_cfg.get("telemetry_proxy_url") or ""),
+                       "commission_id": commission_id, "agent_id": str(agent["id"])},
             created_at=self.clock(),
         )
         updated = self.commissions.transition(commission_id, "briefing", agent_id=packet.agent_id,
@@ -161,6 +206,100 @@ class Dispatcher:
 
     def start(self, commission_id: str) -> dict[str, Any]:
         return self.commissions.transition(commission_id, "running")
+
+    # ---------- 驱动执行体 ----------
+    async def run_commission(self, commission_id: str) -> dict[str, Any]:
+        """RUNNING 期间驱动适配器：prepare_context -> execute 事件流 -> submit。
+
+        事件流的处置规则：
+          progress -> 记步，并喂给鬼打墙检测（同一步骤签名连续重复即熔断）
+          token    -> 落一条遥测 span（Dual-Shim 那条链路）
+          artifact -> 收下，流结束后交初审室
+          error    -> 记下并中止
+
+        适配器起不来、抛异常、或鬼打墙熔断时，先 cancel() 回收进程，再转 BLOCKED
+        请示老板。绝不假装执行过，也绝不无限重试。
+        """
+        commission = self.commissions.get(commission_id)
+        if commission["status"] != "running":
+            raise ValueError("commission_not_running")
+        packet = commission.get("packet") or {}
+        agent_id = str(commission.get("agent_id") or "")
+        try:
+            adapter = self.adapter_for(agent_id)
+        except UnknownAdapterError as exc:
+            return {"commission": self.block(
+                commission_id, f"花名册上的 {agent_id or '这个 Agent'} 没有可用执行体：{exc}。换将，还是这单算了？"),
+                "verdict": None, "failure": "adapter_unavailable"}
+        max_identical = int((packet.get("spin_guard") or {}).get("max_identical") or 3)
+        signatures: list[str] = []
+        artifact: dict[str, Any] | None = None
+        failure: str | None = None
+        try:
+            context = await adapter.prepare_context(commission_id, packet)
+        except Exception as exc:
+            return {"commission": self.block(
+                commission_id, f"执行体没起来：{type(exc).__name__}。要我再试一次吗？"),
+                "verdict": None, "failure": f"prepare_failed:{type(exc).__name__}"}
+        try:
+            async for event in adapter.execute({"context": context, "commission_id": commission_id,
+                                                "packet": packet}):
+                if not isinstance(event, dict):
+                    continue
+                kind = str(event.get("type") or "")
+                step_idx = int(event.get("step_idx") or 0)
+                if kind == "progress":
+                    self.commissions.record_step(commission_id, step_idx or 1)
+                    signature = normalize_signature(event)
+                    signatures.append(signature)
+                    tripped = (len(signatures) >= max_identical
+                               and len(set(signatures[-max_identical:])) == 1)
+                    if tripped and self.telemetry is not None:
+                        with contextlib.suppress(Exception):
+                            self.telemetry.guard.observe(commission_id, signature, agent_id=agent_id)
+                    if tripped:
+                        await adapter.cancel()
+                        return {"commission": self.block(
+                            commission_id, "它开始在原地打转了，我先把闸拉了。换将，还是这单算了？"),
+                            "verdict": None, "failure": "spinning"}
+                elif kind == "token":
+                    self._record_token(commission_id, agent_id, event)
+                elif kind == "artifact":
+                    artifact = event.get("artifact")
+                elif kind == "error":
+                    failure = str(event.get("text") or "执行体报错")[:240]
+                    break
+        except Exception as exc:
+            failure = f"{type(exc).__name__}: {exc}"[:240]
+        finally:
+            with contextlib.suppress(Exception):
+                await adapter.cancel()
+        if artifact is None:
+            reason = failure or "它跑完了但没交差"
+            return {"commission": self.block(
+                commission_id, f"{reason}。要我再催一次，还是这单算了？"),
+                "verdict": None, "failure": failure or "no_artifact"}
+        commission, verdict = self.submit(commission_id, artifact)
+        return {"commission": commission, "verdict": verdict, "failure": failure}
+
+    def _record_token(self, commission_id: str, agent_id: str, event: dict[str, Any]) -> None:
+        """把一次模型调用落成 span。遥测记不上只当这次不计入战况，不带崩执行。"""
+        if self.telemetry is None:
+            return
+        try:
+            self.telemetry.record_event({
+                "commission_id": commission_id, "agent_id": agent_id,
+                "step_idx": int(event.get("step_idx") or 0),
+                "model": str(event.get("model") or ""),
+                "prompt_tokens": int(event.get("prompt_tokens") or 0),
+                "completion_tokens": int(event.get("completion_tokens") or 0),
+                "ttft_ms": int(event.get("ttft_ms") or 0),
+                "duration_ms": int(event.get("duration_ms") or 0),
+                "status_code": int(event.get("status_code") or 0),
+                "error": str(event.get("error") or ""),
+            })
+        except Exception:
+            return
 
     def block(self, commission_id: str, question: str) -> dict[str, Any]:
         """RUNNING/BRIEFING -> BLOCKED. 琐事代答，大事请示，由 trivia_answer 决定。"""
@@ -237,6 +376,10 @@ class Dispatcher:
         commission = self.commissions.get(commission_id)
         if commission["status"] != "ready_to_report":
             raise ValueError("commission_not_ready_to_report")
+        audit = dict(commission.get("audit") or {})
+        # 老板打回次数单独计：初审打回有 MAX_RETRY 兜底，老板的打回是特权，
+        # 但次数要留痕——第三次前台会换一套说法（委屈吐槽防线）。
+        audit["boss_reject_count"] = int(audit.get("boss_reject_count") or 0) + 1
         from .loop import capture_eval_delta
         delta = capture_eval_delta(commission=commission, boss_feedback=boss_feedback,
                                    evaluator=self.evaluator)
@@ -244,11 +387,11 @@ class Dispatcher:
         if delta is not None and delta.learned_rubric_id:
             rubric_ids.append(delta.learned_rubric_id)
         updated = self.commissions.transition(commission_id, "running", rubric_ids=rubric_ids[-12:],
-                                              audit={**(commission.get("audit") or {}),
+                                              audit={**audit,
                                                      "boss_feedback": _clip(boss_feedback, 400),
                                                      "learned_rubric": delta.learned_rubric_id if delta else None,
                                                      "delta": delta.as_dict() if delta else None})
-        return updated, (delta.as_dict() if delta is not None else None)
+        return updated, (delta.as_dict() if delta is not None else None), audit["boss_reject_count"]
 
     def cancel(self, commission_id: str) -> dict[str, Any]:
         commission = self.commissions.get(commission_id)

@@ -98,3 +98,51 @@
 - [ ] U-4 practice 入口从 details 深处提为一级控件
 - [ ] U-5 模式状态可视化：状态栏展示当前生效模式（体验/练习/连续对话/微句流/自进化/星图）
 - [ ] U-6 移动端（≤760px / 390px）验证：胶囊栏不溢出、抽屉可开合、无横向滚动
+
+## V3 内阁总管（Executive Secretary / Agent 指挥官 / 可观测 Eval）
+
+**基线：** `v3.0-executive-secretary`（commit `ebde789`）｜契约：`docs/PROTOCOL.md` §19–§22
+**状态：** 2026-10-15 全部完成并通过全量回归（91 个 Python 套件 + Node 语音套件 + 浏览器套件全绿）。
+
+### 架构与契约（Role 0）
+
+- [x] `docs/EXECUTIVE_SECRETARY_V3.md`：快慢环解耦拓扑、Commission 6 阶段状态机、执行体适配层、验收与回归
+- [x] `docs/PROTOCOL.md` §19 Commission / §20 TelemetrySummary / §21 EvalRubric / §22 Worker 适配器契约
+- [x] `config/agents_roster.yaml`：v2 结构（`agents:` + `adapter` 绑定）、三条种子铁律、派单预算与观测网关地址
+- [x] `config/response_examples.json`：六段大秘台词 + `audit_reject_pout`（第三次打回的委屈吐槽）
+
+### Role 1（慢环调度、观测网关、自进化初审、适配器）
+
+- [x] `dispatcher.py`：派单密件、选将、阶段机；经注册表取适配器，**核心里无 `if agent_type` 分支**（有测试背书）
+- [x] `telemetry.py`：`agent_telemetry_spans` 落库、Dual-Shim 事件流、`/internal/telemetry_proxy`、鬼打墙熔断
+- [x] `evaluator.py`：L1 客观校验 + L2 审美判例、打回上限 2、`distill()` 判例自进化
+- [x] `adapters/`：`BaseWorkerAdapter` 三方法契约 + 注册表 + manual/cli_subproc/http_api/mcp 四种实现
+- [x] `memory/commission_context.py`：派单记忆打包，全程套"不可信资料"取景框
+- [x] `loop.py`：漏审点 Delta 捕获；`service.py`：ExecutiveService 同生命周期持有与关闭
+- [x] 花名册热重载：纳入 `config_hot.py` 的 MANAGED，改配置无需重启（协议 §17）
+- [x] `scripts/test_executive_v3.py`（169 断言）+ `scripts/test_agent_adapter_ext.py`（55 断言）
+
+### Role 2（台前接单、统计播报、监工微动作）
+
+- [x] `orchestrator.py`：四类意图识别（委托/进度/战况/验收），全部正则 + 配置样本，不发第二次模型请求
+- [x] 多任务模糊澄清拦截：手上不止一单待验收时抛一句话选择题，不凭"最近更新"砍错人
+- [x] 老板第三次打回换 `audit_reject_pout` 台词（委屈吐槽防线）
+- [x] `telemetry_bottleneck_report()`：只报真实 span 数字，零调用时闭嘴
+- [x] `ambient.js` + `ambient.py`：`supervisor_check` 监工微动作（低头翻手账/瞥监控副屏/笔尖点两下）
+
+### Role 3（工作台抽屉督办沙盘与 API 战况）
+
+- [x] `interaction/threads.py`：`CommissionStore` 6 阶段状态机 + 事件留痕，与 ThreadStore 同库同规约
+- [x] 抽屉【督办与战况】视图：三句话交付验收卡（`[预览] [语音返修] [收工]`）+ Agent 战况与 API 观测简报卡 + 判例库
+- [x] 心流防打扰：`web/executive-state.js` 纯逻辑 + `node web/executive-state.test.mjs` 9 断言
+- [x] 主舞台 0 新增按钮：浏览器回归里机械断言"督办与战况不占顶栏"
+- [x] `notes.js` 补发 `aqi-notes-typing`，让笔记编辑器的高频打字也能触发静音分支
+
+### 收尾与已知边界
+
+- [x] `check_protocol.py` 第六类检查：服务端自用路由 `/internal/telemetry_proxy` 显式纳管（改坏即报警）
+- [x] `docs/TESTING.md` 补 V3 黄金命令；本看板建档
+- [ ] **Worker 执行体尚未接真**：三个内置 Agent 仍是 `adapter: manual`，只组密件不执行。
+      花名册里已留 `cli_subproc` / `http_api` 接线示例，改成真命令即可跑，无需改 Python。
+- [ ] `POST /commissions/{id}/run` 目前只被进程内链路与测试使用；前台语音路径只接单、不驱动执行。
+- [ ] 语音路径上"收工/打回"仍只认唯一一单；多单时必须先回答澄清选择题。
