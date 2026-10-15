@@ -1,178 +1,105 @@
-# 阿栖（小溪）· 有性格、有记忆、会管事的语音聊天角色
+# 阿栖 (Aqi)
 
-做一个能在长期互动里保持角色一致、理解共同经历、并以合适方式参与对话的角色系统。
-第一版主场景是我个人使用的中文语音聊天角色：每天聊几次，记得重要经历，性格稳定。
-不做直播、游戏控制、多租户。
+**一个采用「台前语音快环 (System 1) + 幕后 Agent 慢环 (System 2)」双系统架构的个人中文语音 Agent。**
+核心解决两个工程痛点：复杂工具调用**阻塞语音流**，长期记忆检索**诱发幻觉编造**。
 
-**V3 起她升维成"贴身总管"**：不亲自干重活，而是精通我的计划与偏好、熟悉麾下 Worker 的
-长短处、掌握全链路 API 观测（Token / TTFT / 鬼打墙熔断），并替我把控第一道初审关。
+![阿栖 · 实验室内景（目光跟随 / 表情 / 眼内反光标定）](docs/assets/aqi-avatar-lab.png)
 
+<!-- GitHub About 建议：Dual-system personal voice agent with confidence-tiered memory and async multi-agent orchestration. -->
+<!-- 视觉锚点待补：15s 动图（一边语音闲聊、一边抽屉亮呼吸灯汇报后台任务）→ docs/assets/demo.gif -->
+
+## ✨ 核心特色
+
+**⚡ 快慢双环解耦 (Dual-Loop & Orchestrator-Workers)**
+- 台前快环：流式 ASR → 对话管理 → 流式生成，只做日常对话与意图路由；识别到复杂委托立即语音确认、异步卸载，**语音流全程零阻塞**。
+- 幕后慢环：任务规划后分发给独立 Worker 异步执行（CLI / HTTP / MCP / HITL 四种适配器），遥测 (Telemetry) 全程观测；检测到步骤空转或连续异常自动熔断 (Circuit Breaker)。
+- 自进化护栏 (Feedback-Driven Guardrails)：L1 确定性规则 + L2 启发式准则双层评估器；人工驳回并留下反馈后，自动归纳出新准则注入后续 Prompt。
+
+**🧠 置信度分级记忆 (Confidence-Tiered Memory)**
+- 检索结果按三档确定性装配进 System Prompt：【你明确说过的】可直接当事实、【我的推测】必须留余地、【我不确定的】先求证再用——从 Prompt 层约束幻觉，而不是指望模型自觉。
+- 检索为空时显式注入负向约束，禁止用预训练常识脑补共同经历；删除是 SQLite 物理硬删除，没有"删了但索引还在"的记忆幽灵。
+
+**🔌 可插拔与心流防打扰 (Pluggable & Focus-Aware)**
+- 新增一种干活 Agent 只需两步：YAML 花名册加一行 +（可选）实现一个适配器接口，调度核心零改动；角色 / 记忆策略 / 节奏 / 花名册全部热重载 (Hot-Reload)。
+- 你正在打字时，后台完结的任务只亮胶囊呼吸灯，不出声、不抢焦点。
+
+## 🏗️ 系统架构
+
+```text
+        config/*.yaml   角色契约 · 记忆策略 · 节奏 · Worker 花名册（热重载）
+              │
+              ▼
+┌──────────────────────────────────────────────────┐
+│ 台前快环 (System 1) · 实时语音                   │
+│                                                  │
+│   麦克风 → VAD 断句 → 流式 ASR                   │
+│                 ↓                                │
+│   对话管理 + 分级记忆检索 (SQLite 混合检索)      │
+│     ├─ 日常对话 → 流式生成 → 情感 TTS → 立绘     │
+│     └─ 复杂委托 → 语音确认 → 异步卸载至慢环      │
+└──────────────────────────────────────────────────┘
+                       ▼
+┌──────────────────────────────────────────────────┐
+│ 幕后慢环 (System 2) · Orchestrator-Workers       │
+│                                                  │
+│   任务规划 → Worker 异步执行 (CLI/HTTP/MCP/HITL) │
+│     ↑                                            │
+│   遥测监控：步骤空转 / 连续异常 → 自动熔断       │
+│     ↓                                            │
+│   L1/L2 评估器：驳回反馈 → 自动归纳新准则        │
+└──────────────────────────────────────────────────┘
+                       ▼
+┌──────────────────────────────────────────────────┐
+│ 多模态呈现层                                     │
+│   情绪标签 → 可控音色 TTS + 口型 / 表情 / 视线   │
+│   焦点感知节流 → 胶囊呼吸灯 / 任务抽屉 / 图谱    │
+└──────────────────────────────────────────────────┘
 ```
-配置（角色/记忆/节奏/花名册契约）   config/*.yaml
-      ↓  server/persona.py            契约 -> 系统提示词
-      ↓  server/dialogue/orchestrator.py   对话编排 + 台前快环意图
-      ↓  server/memory/               四类记忆 + 三档确定性 + 真删除
-      ↓  server/assistant/            V3 内阁总管
-           dispatcher 派单选将 · telemetry 观测网关 · evaluator 自进化初审
-           adapters   Worker 可插拔适配层（cli_subproc / http_api / mcp / manual）
-      ↓  server/speech/               ASR / TTS（按情绪切音色）
-      ↓  server/app.py + web/         FastAPI + WebSocket + 网页端
-```
 
-## 快速开始
+性格不是一句人设，而是四层契约（身份 / 稳定倾向 / 互动方式 / 可变状态），每条带正例、反例与边界，并写死一条优先级：**性格与事实准确性冲突时，准确性优先**。记忆分四类（`fact` / `episode` / `todo` / `self_state`），行为随配置改变，不改代码。
+
+## 🚀 30 秒快速开始
 
 ```powershell
 uv venv
 uv pip install -r requirements.txt
-Copy-Item .env.example .env             # 填 LLM_API_KEY
-python scripts/run.py --check
-# 打开 http://127.0.0.1:8000
+Copy-Item .env.example .env      # 可选：填入 LLM_API_KEY 接入真实模型
+python scripts/run.py            # 打开 http://127.0.0.1:8000
 ```
 
-没有 API key 也能启动：自动进入离线 mock 模式，全链路（记忆 / 语音 / 打断）都能跑，
-只是回复内容是占位文本。
-
-## 契约文件
-
-| 文件 | 回答什么问题 |
-| --- | --- |
-| `config/persona.yaml` | 它是谁、性格怎么影响说话和选择、情绪怎么映射到音色 |
-| `config/memory.yaml` | 什么值得记、何时存、何时用、冲突怎么办、不确定怎么办、用户怎么改 |
-| `config/pacing.yaml` | 回多长、什么时候追问、什么时候主动、什么时候必须闭嘴 |
-| `config/agents_roster.yaml` | 麾下有哪些 Worker、各绑哪种适配器、初审种子铁律 |
-
-`persona.yaml` 把性格拆成身份 / 稳定倾向 / 互动方式 / 可变状态四层，每条都带正例、反例、
-边界，并写死一条优先级：**性格与事实准确性冲突时，准确性优先**。
-
-记忆分四类（`fact` / `episode` / `todo` / `self_state`），注入提示词时按三档确定性分块：
-
-```
-【你明确说过的】  → 可以直接当事实用
-【我的推测】      → 留余地，"你是喜欢 X 对吧？"
-【我不确定的】    → 先求证再使用
-```
-
-检索不到 ≠ 没发生过；检索到 ≠ 仍然准确，角色被允许说"这个我没什么印象了"。
-**删除是真删除**：SQLite 行被删掉，检索索引从表实时重建，没有"删了但索引里还在"的残留。
-
-## V3 内阁总管
-
-小溪不亲自干活。她照花名册选将、派单、盯调用、把第一道关：
-
-| 层 | 位置 | 干什么 |
-| --- | --- | --- |
-| 台前快环 | `server/dialogue/orchestrator.py` | 认委托/进度/战况/验收四类意图，1.5s 内松弛接单，绝不阻塞语音流 |
-| 幕后慢环 | `server/assistant/dispatcher.py` | 结合记忆组派单密件，按花名册选将，推进督办阶段机 |
-| 观测网关 | `server/assistant/telemetry.py` | 记 span、算战况、熔断鬼打墙；本地透明代理 `/internal/telemetry_proxy` |
-| 自进化初审 | `server/assistant/evaluator.py` | L1 客观校验 + L2 审美判例，打回上限 2 次；老板挑刺退回会长出新判例 |
-| 适配层 | `server/assistant/adapters/` | 统一三方法契约 + 注册表，新增 Agent 类型零改动调度核心 |
-| 督办台账 | `server/interaction/threads.py` | Commission 6 阶段状态机与事件留痕 |
-
-督办六阶段：`DRAFTING → BRIEFING → RUNNING → BLOCKED → AUDITING → READY_TO_REPORT → DONE`。
-琐事她代答，大事起气泡请示；初审放行才值得叫你，被打回会带毒舌批注。
-工作台抽屉里收着《督办与战况》视图（主舞台 0 新增按钮），心流防打扰：你在高频打字时，
-新完结的任务只亮胶囊呼吸灯，不出声、不抢焦点。
-
-**新增一种干活 Agent 只需两步**：在 `server/assistant/adapters/` 下写一个
-`BaseWorkerAdapter` 子类并 `@register_adapter("类型名")`，再在花名册加一行
-`adapter: "类型名"`。`dispatcher.py` 零改动——这条有测试背书
-（`scripts/test_agent_adapter_ext.py` 用 Mock 适配器把全程走成事实）。
-契约详见 [总设计](docs/EXECUTIVE_SECRETARY_V3.md) 与 [PROTOCOL.md](docs/PROTOCOL.md) §19–§22。
-
-## 语音
-
-voice 有两层：**文本层**把说话风格写进提示词（短句、口语、允许只回一两个字、禁止客服词）；
-**声学层**先判定情绪（调侃 / 得意 / 认真 / 收敛 / 轻微不服 / 变小气），再切到
-`persona.yaml` 里对应的 `voice / rate / pitch / volume`。收敛时语速慢、音调低、音量小，
-这就是"性格"能被听见的地方。
-
-默认 TTS 用 edge-tts（不需要显卡，中文音色自然，带情感参数）。想换本地模型，
-只改 `server/speech/tts.py` 的 `synthesize()`，上层只关心 `(text, emotion) -> mp3`：
-
-```python
-# 换成 CosyVoice2 / IndexTTS2 / GPT-SoVITS
-async def synthesize(self, text: str, emotion: str = "base") -> bytes:
-    prompt = EMOTION_PROMPTS[emotion]      # "用带点嘲讽、懒洋洋的语气说"
-    return await cosy_voice.infer(text, spk_id, prompt)
-```
-
-连续对话本地检测开口与停顿，确认开口才上传，停顿约 900ms 自动收句；新轮次取消旧回复。
-全双工实验版见 [FULL_DUPLEX.md](docs/FULL_DUPLEX.md)——**不能可靠理解附和与打断语义，
-也不是专业 DSP 回声消除**，建议戴耳机。
-
-## 立绘（可选层）
-
-`web/avatar/` 是纯前端的 SVG 角色装配（`idle / lip / emotion / gesture` 四层），
-口型按中文拼音切成音素时间轴再用实时 RMS 调幅，所以口型和声音是对齐的。
-接线点三处：`GET /api/avatar` 提供配置、`app.js` 里 `boot()` 启动、把每条 `audio` 事件的
-`text` 喂给 `avatar.speak(...)`。加载失败只移除立绘，不影响聊天。
-
-形象后端同时支持 **VRM + MToon（3 渲 2 实验版）**，共用 `Param*` 驱动。
-实验室 `http://127.0.0.1:8000/static/avatar_lab.html`；聊天页启用 `?avatar=vrm`。
-依赖已固定版本放在 `web/vendor/`，运行时不依赖 CDN；需 WebGL2，VRM 标准表情只能近似
-挑眉、圆唇等行为，不支持的形状会降级。
-
-## 验收
+**没有 API Key 也能跑通全链路**：自动进入离线 Mock 模式——LLM 返回占位文本、TTS 静音输出，而记忆读写、语音链路、打断、任务调度照常运转，零成本体验完整交互。
 
 ```powershell
-python scripts/check_protocol.py            # 协议契约静态校验（字段/路由/引用漂移）
-python scripts/test_core.py                 # 38 项离线确定性检查（不需要网络/API key）
-python scripts/test_executive_v3.py         # V3 督办/观测/初审/台前意图
-python scripts/test_agent_adapter_ext.py    # V3 Worker 适配器可插拔
-python scripts/test_config_hot.py           # 配置热重载（协议 §17）
-node web/executive-state.test.mjs           # V3 心流防打扰纯逻辑
-npm test                                    # Node 单测全集（无浏览器/无模型依赖）
+python scripts/test_core.py      # 38 项离线契约检查（不需要网络 / API Key）
+npm test                         # 前端单测（无浏览器依赖）
 ```
 
-CI 在 push/PR 时跑 `check_protocol.py` + 全部 `scripts/test_*.py` + `npm test`。
-浏览器回归与 `eval_*.py --live` 需要本地服务、Playwright 和真实模型凭据，按
-[TESTING.md](docs/TESTING.md) 在本地执行。`scripts/inspect_extract.py` 是排查记忆问题的
-入口：把抽取拆成模型原文 → 规则解析 → 实际入库 → 事后召回四步，并区分三种"没抽到"。
+更多测试与评测见 [docs/TESTING.md](docs/TESTING.md)，施工细节见 [docs/README_EXTENDED.md](docs/README_EXTENDED.md)。
 
-## 环境变量
+## 🧪 工程实测：与幻觉的几轮交手
 
-见 `.env.example`。要点：
+**1. 模型选型：为什么弃用 `stepaudio-2.5-chat`，锁定 `step-3.7-flash`**
+用诱导性提问探针（询问从未发生过的共同经历）对比：`stepaudio-2.5-chat` 幻觉率 **3/3**——即便 System Prompt 写明"你没有任何相关记忆"，Audio-Chat 微调出的"接话顺从"倾向仍会顺口编造细节；`step-3.7-flash` **0/3**，严格遵守负向约束承认"无相关记录"。性格改由 TTS 的 `instruction`（自然语言情绪指令）承载：音色固定，情绪可变。
 
-- `LLM_BASE_URL` + `LLM_API_KEY` + `LLM_MODEL`：任何 OpenAI 兼容接口
-  （DeepSeek / Moonshot / Qwen / OpenAI，或本地 Ollama `http://127.0.0.1:11434/v1`）。
-- `ASR_MODEL`：`tiny / base / small / medium`。CPU 上 `small` 是速度和准确率的平衡点。
-- `HF_ENDPOINT`：huggingface.co 不通时指向 hf-mirror.com。
-- `TTS_ENGINE=edge_tts|silent`。
+**2. 空检索必须显式声明，不能只传空列表**
+消融实验发现：只传空记忆列表时，LLM 仍有很高概率依赖常识脑补。工程上必须在 Prompt 注入显式空状态——未检索到 → 直接向用户求证，严禁顺从提问编造事实。
 
-## 当前配置与实测
+**3. Few-Shot 示例必须每轮都带情绪标签**
+下游 TTS 音色切换与 Avatar 表情状态机依赖句首 `[情绪]` 标签。仅靠指令约束时，多轮长对话（>5 turns）后会出现指令遗忘；必须在示例集中让每一轮 Assistant 回复都携带合法标签，用 In-Context Learning 维持长程格式对齐。
 
-```
-对话  step-3.7-flash      流式，情绪由模型自报 [情绪] 标签
-抽取  step-3.7-flash      后台异步，不在响应关键路径
-TTS   stepaudio-2.5-tts   instruction = 自然语言情绪指令
-ASR   stepaudio-2.5-asr  0.9s 转写 3.4s 音频
-```
+**4. 延迟地板（诚实数据）**
+级联管线 ASR → LLM → TTS 的首字延迟地板约 2s（空提示词也要 1.95s），短回复首音 ~3.5s、长回复 5.8s。要压进 500ms 需要原生全双工语音模型或 ASR Partial 抢跑。
 
-实测：场景回归 9/9，离线自检 38/38，短回复首音 ~3.5s、长回复首音 5.8s（全文 16s）。
+## 🛠️ 扩展与已知限制
 
-**为什么不用 stepaudio-2.5-chat 做对话**：它语气更活，但实测会无视
-「你没有任何相关记忆」的显式提示，去编造共同经历。flash 在同样的探针下 0/3 编造。
-性格改由 TTS 的 `instruction` 承载，音色固定、情绪变。
+**两步接入一个 Worker**
+1. 在 `config/agents_roster.yaml` 加一行：`id` / `adapter`（`manual` / `cli_subproc` / `http_api` / `mcp`）/ 能力标签。
+2. 内置适配器不够用时，继承适配器基类实现 `prepare_context / execute / cancel` 并注册即可——调度核心零改动，这条有测试背书（Mock 适配器跑通全程）。
 
-两条不能省的提示词约束：**检索为空时必须明说**（留空等于告诉模型"这里没约束"，
-它会自己编一段填上）；**few-shot 必须每轮都带且示例本身带 `[情绪]` 标签**
-（只在指令里要求而不演示，模型会照示例的格式学，从而忽略指令）。
+**已知限制**
+- 级联管线首字延迟地板约 2s，见上文诚实数据。
+- 三个内置 Worker 默认 `manual`（Human-in-the-Loop）：只生成结构化任务简报、在前端抽屉等待人工回填，便于无外部工具环境下验证闭环；生产环境换成 `cli_subproc` / `mcp` 即可，无需改 Python。
+- 混合检索为字符 n-gram TF-IDF + 重要性 / 时近性重排，在百至千条个人记忆规模下零外部向量库依赖；上万条长文档建议在检索层加稠密向量。
+- 语音打断依赖浏览器 WebRTC AEC，扬声器大音量外放可能回声自激，建议戴耳机。
 
-## 已知限制
-
-- 对话接口本身有 ~2s 首字延迟地板（空提示词也要 1.95s），提示词只占其中约 1s
-- 情绪命中率约 7/10，「收敛」有过用倾向——模型自己的判断，不是规则保证
-- 长回复的 TTS 按句串行合成，整段播完仍比文本长
-- V3 三个内置 Worker 仍是 `adapter: manual`，只组密件不执行；花名册里已留
-  `cli_subproc` / `http_api` 接线示例，改成真命令即可跑，无需改 Python
-
-## 其余目录
-
-```
-server/interaction/  threads(共同事项+督办台账) / preferences / participation / proposals
-server/config_hot.py  配置无痕热重载（协议 §17）
-docs/                 PROTOCOL.md 接缝契约 · AGENT_PLAYBOOK.md 协作宪章 · TESTING.md · TASKS.md
-scripts/              run.py / check_protocol.py / test_*.py / eval_*.py / inspect_extract.py
-eval/                 验收场景与输出（gitignore）
-```
-
+设计与协议细节：[docs/PROTOCOL.md](docs/PROTOCOL.md) · [docs/EXECUTIVE_SECRETARY_V3.md](docs/EXECUTIVE_SECRETARY_V3.md) · [docs/AGENT_PLAYBOOK.md](docs/AGENT_PLAYBOOK.md)
