@@ -1,0 +1,270 @@
+"""幕后慢环：把模糊意图组成交派密件（Briefing Packet），按花名册选将，
+推进督办阶段机。它从不直接和用户说话——前台怎么说由 orchestrator 决定。
+
+三条底线：
+
+1. **选将只看花名册上写得下的东西。** 能力匹配、当前负载、成本档位。
+   没有"最近表现分"这种无据可查的指标。
+2. **满载不接单。** 同一位 Worker 在手的督办数到顶，就换将；没有将可换才问老板。
+3. **琐事代答要有依据。** 花名册 `trivia_policy` 或已有偏好里找不到依据的问题，
+   一律算大事，起气泡请示，不猜。
+"""
+from __future__ import annotations
+
+import re
+import time
+from dataclasses import dataclass, field
+from typing import Any, Callable
+
+from ..memory.commission_context import gather as gather_memory
+from ..memory.commission_context import memory_refs, render_memory_block
+from .evaluator import Evaluator, load_roster
+
+COST_SCORE = {"cheap": 1.0, "medium": 0.6, "high": 0.3}
+MAX_OBJECTIVE = 400
+MAX_DELIVERABLE = 400
+MAX_CONSTRAINTS = 6
+
+
+@dataclass(frozen=True)
+class BriefingPacket:
+    """派单密件：Worker 唯一允许看到的工作单。不含思考过程，不含凭据。"""
+
+    commission_id: str
+    objective: str
+    deliverable: str
+    agent_id: str
+    agent_name: str
+    constraints: tuple[str, ...] = ()
+    memory_refs: tuple[dict[str, Any], ...] = ()
+    preferences: tuple[dict[str, Any], ...] = ()
+    rubrics: tuple[dict[str, Any], ...] = ()
+    budget: dict[str, Any] = field(default_factory=dict)
+    spin_guard: dict[str, Any] = field(default_factory=dict)
+    memory_block: str = ""
+    created_at: float = 0.0
+
+    def as_dict(self) -> dict[str, Any]:
+        return {
+            "commission_id": self.commission_id,
+            "objective": self.objective,
+            "deliverable": self.deliverable,
+            "agent_id": self.agent_id,
+            "agent_name": self.agent_name,
+            "constraints": list(self.constraints),
+            "memory_refs": [dict(item) for item in self.memory_refs],
+            "preferences": [dict(item) for item in self.preferences],
+            "rubrics": [dict(item) for item in self.rubrics],
+            "budget": dict(self.budget),
+            "spin_guard": dict(self.spin_guard),
+            "created_at": self.created_at,
+        }
+
+
+def _clip(text: Any, limit: int) -> str:
+    return text[:limit] if isinstance(text, str) else ""
+
+
+def _deliverable_for(agent: dict[str, Any]) -> str:
+    summary = _clip(agent.get("summary"), 200)
+    return f"按本行职责交付：{summary}" if summary else "按密件要求交付"
+
+
+def select_agent(roster: dict[str, Any], text: str,
+                 load: dict[str, int] | None = None) -> tuple[dict[str, Any] | None, list[dict[str, Any]]]:
+    """Score every roster worker; return (best, ranked). Best is None when all are full."""
+    load = load or {}
+    selection = roster.get("selection") or {}
+    strength_weight = float(selection.get("strength_weight", 1.0))
+    load_weight = float(selection.get("load_weight", 0.6))
+    cost_weight = float(selection.get("cost_weight", 0.4))
+    default_cap = int(selection.get("max_concurrent_default", 2) or 2)
+    ranked: list[dict[str, Any]] = []
+    for worker in roster.get("workers") or []:
+        if not isinstance(worker, dict) or not worker.get("id"):
+            continue
+        strengths = [str(item) for item in (worker.get("strengths") or [])]
+        hits = [item for item in strengths if item and item in text]
+        cost = COST_SCORE.get(str(worker.get("cost_tier")), 0.5)
+        concurrent = int(load.get(worker["id"], 0) or 0)
+        cap = int(worker.get("max_concurrent") or default_cap)
+        score = round(len(hits) * strength_weight + cost * cost_weight - concurrent * load_weight, 3)
+        ranked.append({"agent_id": worker["id"], "name": worker.get("name") or worker["id"],
+                       "score": score, "hits": hits, "concurrent": concurrent, "cap": cap,
+                       "available": concurrent < cap})
+    ranked.sort(key=lambda item: item["score"], reverse=True)
+    available = [item for item in ranked if item["available"]]
+    if not available:
+        return None, ranked
+    winner = available[0]
+    for worker in roster.get("workers") or []:
+        if isinstance(worker, dict) and worker.get("id") == winner["agent_id"]:
+            return worker, ranked
+    return None, ranked
+
+
+class Dispatcher:
+    """唯一写 Commission 状态机的地方。"""
+
+    def __init__(self, *, commissions, roster: dict[str, Any] | None = None,
+                 evaluator: Evaluator | None = None, memory_provider: Callable[[str], Any] | None = None,
+                 clock: Callable[[], float] = time.time):
+        self.commissions = commissions
+        self.roster = roster if roster is not None else load_roster()
+        self.evaluator = evaluator if evaluator is not None else Evaluator(roster=self.roster)
+        self.memory_provider = memory_provider
+        self.clock = clock
+
+    # ---------- 阶段推进 ----------
+    def open(self, title: str, brief: str = "", thread_id: str = "") -> dict[str, Any]:
+        return self.commissions.create(title, brief, thread_id)
+
+    def dispatch(self, commission_id: str, *, intent: str = "") -> tuple[dict[str, Any], BriefingPacket]:
+        """DRAFTING -> BRIEFING: pack memory, pick a worker, store the packet."""
+        commission = self.commissions.get(commission_id)
+        if commission["status"] != "drafting":
+            raise ValueError("commission_not_drafting")
+        text = f"{commission['title']} {commission['brief']} {intent}".strip()
+        load: dict[str, int] = {}
+        for item in self.commissions.open_commissions():
+            if item["agent_id"]:
+                load[item["agent_id"]] = load.get(item["agent_id"], 0) + 1
+        agent, ranked = select_agent(self.roster, text, load)
+        if agent is None:
+            raise LookupError("no_worker_available")
+        memory = self._memory(text)
+        rubrics = tuple({"id": item["id"], "severity": item["severity"], "layer": item["layer"]}
+                        for item in self.evaluator.rubrics.list(active_only=True))
+        dispatch_cfg = self.roster.get("dispatch") or {}
+        packet = BriefingPacket(
+            commission_id=commission_id,
+            objective=_clip(commission["brief"] or commission["title"], MAX_OBJECTIVE),
+            deliverable=_deliverable_for(agent),
+            agent_id=str(agent["id"]),
+            agent_name=str(agent.get("name") or agent["id"]),
+            constraints=tuple(_clip(item, 120) for item in (agent.get("weaknesses") or []))[:MAX_CONSTRAINTS],
+            memory_refs=tuple(memory_refs(memory)),
+            preferences=tuple({"dimension": ref.get("dimension"), "value": ref.get("value")}
+                              for ref in memory_refs(memory) if ref.get("type") == "preference"),
+            rubrics=rubrics,
+            budget={"max_steps": int(dispatch_cfg.get("max_steps", 4) or 4),
+                    "max_prompt_tokens": int(dispatch_cfg.get("max_prompt_tokens", 12000) or 12000),
+                    "max_retry": self.evaluator.MAX_RETRY,
+                    "eval_commands": [str(item) for item in (agent.get("eval_commands") or [])]},
+            spin_guard=dict((dispatch_cfg.get("spin_guard") or {"max_identical": 3})),
+            memory_block=render_memory_block(memory),
+            created_at=self.clock(),
+        )
+        updated = self.commissions.transition(commission_id, "briefing", agent_id=packet.agent_id,
+                                             packet=packet.as_dict())
+        return updated, packet
+
+    def start(self, commission_id: str) -> dict[str, Any]:
+        return self.commissions.transition(commission_id, "running")
+
+    def block(self, commission_id: str, question: str) -> dict[str, Any]:
+        """RUNNING/BRIEFING -> BLOCKED. 琐事代答，大事请示，由 trivia_answer 决定。"""
+        return self.commissions.transition(commission_id, "blocked", blocked_question=question)
+
+    def trivia_answer(self, question: str) -> str | None:
+        """An answer grounded in the roster's trivia policy, or None when there is none."""
+        if not isinstance(question, str) or not question.strip():
+            return None
+        for policy in self.roster.get("trivia_policy") or []:
+            if not isinstance(policy, dict):
+                continue
+            pattern = policy.get("pattern")
+            answer = policy.get("answer")
+            if not pattern or not isinstance(answer, str) or not answer.strip():
+                continue
+            try:
+                if re.search(pattern, question):
+                    return answer.strip()
+            except re.error:
+                continue
+        return None
+
+    def answer(self, commission_id: str, answer: str) -> tuple[dict[str, Any], str, bool]:
+        """BLOCKED -> RUNNING. Returns (commission, reply, auto_answered)."""
+        commission = self.commissions.get(commission_id)
+        if commission["status"] != "blocked":
+            raise ValueError("commission_not_blocked")
+        reply, auto = answer, False
+        if not (isinstance(answer, str) and answer.strip()):
+            reply = self.trivia_answer(commission["blocked_question"])
+            if reply is None:
+                raise ValueError("blocked_question_needs_an_answer")
+            auto = True
+        updated = self.commissions.transition(commission_id, "running", blocked_question="")
+        return updated, reply, auto
+
+    # ---------- 交差与初审 ----------
+    def submit(self, commission_id: str, artifact: dict[str, Any], *, usage: dict[str, Any] | None = None,
+               spinning: dict[str, Any] | None = None) -> tuple[dict[str, Any], dict[str, Any]]:
+        """RUNNING -> AUDITING -> (RUNNING | READY_TO_REPORT | BLOCKED)."""
+        commission = self.commissions.get(commission_id)
+        if commission["status"] != "running":
+            raise ValueError("commission_not_running")
+        packet = commission.get("packet") or {}
+        verdict = self.evaluator.review(commission=commission, artifact=artifact, packet=packet,
+                                        usage=usage, spinning=spinning)
+        self.commissions.transition(commission_id, "auditing", audit=verdict)
+        if verdict["passed"]:
+            delivery = {"summary": _clip(artifact.get("summary"), 400),
+                        "intercepted": _clip(artifact.get("intercepted"), 400),
+                        "artifacts": list(artifact.get("artifacts") or [])[:12]}
+            return self.commissions.transition(commission_id, "ready_to_report", delivery=delivery), verdict
+        if int(commission["retry_count"]) + 1 > self.evaluator.MAX_RETRY:
+            # 重试耗尽：不再往 Worker 身上压老板的时间，带完整批注请示。
+            return self.commissions.transition(commission_id, "blocked",
+                                               blocked_question=_clip(verdict["scolding"], 400),
+                                               retry_delta=1), verdict
+        return self.commissions.transition(commission_id, "running", retry_delta=1), verdict
+
+    def accept(self, commission_id: str) -> dict[str, Any]:
+        """READY_TO_REPORT -> DONE: 归档并触发一次 Eval 自进化检查。"""
+        commission = self.commissions.get(commission_id)
+        if commission["status"] != "ready_to_report":
+            raise ValueError("commission_not_ready_to_report")
+        return self.commissions.transition(commission_id, "done")
+
+    def reject(self, commission_id: str, boss_feedback: str) -> tuple[dict[str, Any], dict[str, Any] | None]:
+        """READY_TO_REPORT -> RUNNING, and learn one new rubric from the Delta.
+
+        漏审点捕获走 loop.capture_eval_delta（V3 §2.4）：初审凭什么放行、老板
+        挑了什么地方，两头都写进 Delta，再炼成一条带证据的新判例。
+        """
+        commission = self.commissions.get(commission_id)
+        if commission["status"] != "ready_to_report":
+            raise ValueError("commission_not_ready_to_report")
+        from .loop import capture_eval_delta
+        delta = capture_eval_delta(commission=commission, boss_feedback=boss_feedback,
+                                   evaluator=self.evaluator)
+        rubric_ids = list(commission.get("rubric_ids") or [])
+        if delta is not None and delta.learned_rubric_id:
+            rubric_ids.append(delta.learned_rubric_id)
+        updated = self.commissions.transition(commission_id, "running", rubric_ids=rubric_ids[-12:],
+                                              audit={**(commission.get("audit") or {}),
+                                                     "boss_feedback": _clip(boss_feedback, 400),
+                                                     "learned_rubric": delta.learned_rubric_id if delta else None,
+                                                     "delta": delta.as_dict() if delta else None})
+        return updated, (delta.as_dict() if delta is not None else None)
+
+    def cancel(self, commission_id: str) -> dict[str, Any]:
+        commission = self.commissions.get(commission_id)
+        if commission["status"] == "done":
+            return commission
+        return self.commissions.transition(commission_id, "done")
+
+    # ---------- 内部 ----------
+    def _memory(self, text: str) -> dict[str, Any]:
+        if self.memory_provider is None:
+            return gather_memory()
+        try:
+            result = self.memory_provider(text)
+        except Exception:
+            return gather_memory()
+        return result if isinstance(result, dict) else gather_memory()
+
+
+__all__ = ["BriefingPacket", "Dispatcher", "select_agent"]

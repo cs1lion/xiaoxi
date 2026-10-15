@@ -11,34 +11,153 @@ from ..config import memory_cfg, pacing_cfg, settings
 
 # V2 三梯度梯度1（micro_act）可用的无声舞台微动作；前端 ambient.js 安全降级未知项。
 _MICRO_ACTIONS = ("glance_away", "tilt_head", "stretch", "fidget", "thoughtful", "soft_blink")
-_TOUCH_RECENT: dict[str, list[str]] = {}
 
 
-def touch_sample_line(region: str) -> str:
-    """Pick a real touch_head/touch_face persona sample (§7.2), rotating to avoid repeats.
+_SAMPLE_RECENT: dict[str, list[str]] = {}
+# 旧名指向同一个字典：既有回归清理的就是它，重命名不该让老测试炸。
+_TOUCH_RECENT = _SAMPLE_RECENT
 
-    Reads config/response_examples.json stage_samples; returns "" when absent so the
-    caller stays silent instead of fabricating a reaction.
+
+def stage_sample_line(key: str) -> str:
+    """Pick a real persona sample from config/response_examples.json stage_samples.
+
+    Returns "" when the key is missing or the file is unreadable, so the caller
+    stays silent instead of fabricating a reaction in the persona's voice. V3 的
+    总管台词（commission_accept / telemetry_token_bloat 等）走同一个入口。
     """
-    if region not in ("head", "face"):
+    if not isinstance(key, str) or not key:
         return ""
     try:
         import json
         from ..config import ROOT
         data = json.loads((ROOT / "config" / "response_examples.json").read_text(encoding="utf-8"))
-        lines = ((data.get("stage_samples") or {}).get(f"touch_{region}") or [])
+        lines = ((data.get("stage_samples") or {}).get(key) or [])
     except Exception:
         return ""
     lines = [line.strip() for line in lines if isinstance(line, str) and line.strip()]
     if not lines:
         return ""
-    recent = _TOUCH_RECENT.setdefault(region, [])
+    recent = _SAMPLE_RECENT.setdefault(key, [])
     fresh = [line for line in lines if line not in recent] or lines
     pick = fresh[0]
     recent.append(pick)
     if len(recent) >= len(lines):
         recent.clear()
     return pick
+
+
+def touch_sample_line(region: str) -> str:
+    """Pick a real touch_head/touch_face persona sample (§7.2), rotating to avoid repeats."""
+    if region not in ("head", "face"):
+        return ""
+    return stage_sample_line(f"touch_{region}")
+
+
+# ---------- V3 内阁总管：台前快环意图识别 ----------
+# 全部是正则，不发第二次模型请求——接单必须赶在 1~2 秒内说完。
+# 意图命中只是"可能相关"，最终是否路由还要看台账里有没有真实督办，
+# 否则一句普通的"好了吗"会把普通对话劫走。
+_DELEGATION = re.compile(
+    r"(?:去(?:把|帮我|替我)\s*[^，。！？]{1,24}(?:做|改|整理|查|弄|搞|处理|安排|写)|"
+    r"(?:安排|派|交)\s*(?:人|给|到|一下)?\s*[^，。！？]{0,12}(?:做|处理|干|弄|搞)|"
+    r"(?:交给|丢给|扔给|托给|委托)\s*[^，。！？]{1,16}|"
+    r"(?:让|叫)\s*[^，。！？]{1,12}\s*(?:去|来)\s*(?:做|处理|干|弄|搞|查)|"
+    r"(?:盯着|盯一下|跟进一下|跟进|看着办|做完再叫我|有结论再叫我))")
+_PROGRESS = re.compile(
+    r"(?:进度|怎么样了|做得怎么样|做完没|做完了吗|有结论了吗|还在跑|还在做|"
+    r"等到什么时候|什么时候能好|交差了没|好了吗)")
+_TELEMETRY = re.compile(
+    r"(?:API|api|接口|调用|token|Token|TOKEN|延迟|TTFT|战况|烧了|花了多少|"
+    r"消耗|额度|用量|监控副屏|副屏)")
+_ACCEPT = re.compile(
+    r"^\s*(?:收工|可以了|行吧|就这样|没问题|不错|挺好|成交|通过|收下|存档吧|归档吧|"
+    r"这单结了|结了|留下吧)\s*[。！!？?\s]*$")
+_REJECT = re.compile(
+    r"(?:不行|打回|重做|退回|再改|改一下|换个|重来|不满意|不对|不是这样|漏了|少了|退回去)")
+
+
+def delegation_intent(text: str) -> bool:
+    """委托意图：要把一件事交给麾下 Worker，而不是让阿栖本人搭把手。"""
+    return isinstance(text, str) and bool(_DELEGATION.search(text))
+
+
+def progress_query_intent(text: str) -> bool:
+    return isinstance(text, str) and bool(_PROGRESS.search(text))
+
+
+def telemetry_query_intent(text: str) -> bool:
+    return isinstance(text, str) and bool(_TELEMETRY.search(text))
+
+
+def acceptance_intent(text: str) -> str | None:
+    """验收反馈：'accept' / 'reject' / None。只在有待验收督办时才被调用。"""
+    if not isinstance(text, str) or not text.strip():
+        return None
+    if _ACCEPT.match(text):
+        return "accept"
+    return "reject" if _REJECT.search(text) else None
+
+
+def commission_accept_line() -> str:
+    return stage_sample_line("commission_accept")
+
+
+def commission_progress_line() -> str:
+    return stage_sample_line("commission_progress")
+
+
+def telemetry_token_bloat_line() -> str:
+    return stage_sample_line("telemetry_token_bloat")
+
+
+def spinning_intercept_line() -> str:
+    return stage_sample_line("spinning_intercept_mumble")
+
+
+def audit_reject_line() -> str:
+    return stage_sample_line("audit_reject_brag")
+
+
+def plan_guardian_pushback_line() -> str:
+    return stage_sample_line("plan_guardian_pushback")
+
+
+def eval_self_reflection_line() -> str:
+    return stage_sample_line("eval_self_reflection")
+
+
+def telemetry_bottleneck_report(summary: dict[str, Any]) -> str:
+    """把 TelemetrySummary 翻成小溪微毒舌口吻的瓶颈分析。只报真实数字。
+
+    没有任何 span 时返回 ""：此时报"目前很健康"是无据 conclusions，前台该闭嘴。
+    """
+    if not isinstance(summary, dict) or not summary.get("calls"):
+        return ""
+    calls = int(summary.get("calls") or 0)
+    total = int(summary.get("total_tokens") or 0)
+    notes: list[str] = []
+    ranking = [item for item in (summary.get("token_ranking") or []) if isinstance(item, dict)]
+    if ranking and total:
+        top = ranking[0]
+        share = float(top.get("total_tokens") or 0) / total
+        if share >= 0.5:
+            notes.append(f"Token 有 {share * 100:.0f}% 烧在{top.get('agent_id')}一个人身上")
+        else:
+            notes.append(f"Token 头名是{top.get('agent_id')}，{int(top.get('total_tokens') or 0)}")
+    rate = summary.get("success_rate")
+    if isinstance(rate, (int, float)) and rate < 0.9:
+        notes.append(f"成功率只有 {rate * 100:.0f}%，{int(summary.get('failed') or 0)} 次白跑")
+    avg = summary.get("avg_ttft_ms")
+    if isinstance(avg, (int, float)) and avg > 1500:
+        notes.append(f"首包平均 {avg:.0f} 毫秒，慢得够我把话说完")
+    elif isinstance(avg, (int, float)):
+        notes.append(f"首包平均 {avg:.0f} 毫秒，还算听话")
+    alerts = summary.get("spinning_alerts") or []
+    if alerts:
+        notes.append(f"另有 {len(alerts)} 次鬼打墙被我拉了闸")
+    if not notes:
+        notes.append(f"{calls} 次调用都还在预算内，今天没什么好骂的")
+    return "。".join(notes) + "。"
 from ..llm import llm
 from ..memory.manager import manager
 from ..persona import build_messages, dynamic_prompt, static_system_prompt
@@ -923,7 +1042,7 @@ class Orchestrator:
                           spark_id=spark_id if isinstance(spark_id, int) else None)
 
     def ambient_event(self, *, idle_seconds: float, now: float | None = None) -> dict[str, Any] | None:
-        """V2 three-tier non-voiced presence (§16): micro_act / mumble from real content.
+        """V3 three-tier non-voiced presence (§16): micro_act / mumble from real content.
 
         Returns a connection-level event dict or None. The voiced proactive tier is
         handled by self_topic_turn; this covers the silent micro_act and the soft
@@ -952,6 +1071,12 @@ class Orchestrator:
         if last_tier in order and now - last_at < window and order[tier] <= order[last_tier]:
             return None
         if tier == "micro_act":
+            # V3 监工微动作：手上有在跑的督办时，她低头翻手账/瞥监控副屏，
+            # 而不是重复那套 idle 小动作。没有督办时行为与打磨轮逐字节一致。
+            if self._supervising():
+                self.state["last_ambient_tier"] = "micro_act"
+                self.state["last_ambient_at"] = now
+                return ambient.build_supervisor_check(reason=f"running_{int(idle_seconds)}s", now=now)
             seq = int(self.state.get("ambient_seq") or 0)
             action = _MICRO_ACTIONS[seq % len(_MICRO_ACTIONS)]
             self.state["ambient_seq"] = seq + 1
@@ -988,6 +1113,64 @@ class Orchestrator:
         return ambient.build_mumble(text=text, reason=f"idle_{int(idle_seconds)}s",
                                     voice=bool(cfg.get("mumble_voice", False)),
                                     bubble=text, source_refs=refs, now=now)
+
+    # ---------------- V3 内阁总管：台前快环 ----------------
+    def _supervising(self) -> bool:
+        """True when at least one commission is actually RUNNING (never guessed)."""
+        executive = getattr(self, "executive", None)
+        if executive is None:
+            return False
+        try:
+            return bool(executive.open_commissions())
+        except Exception:
+            return False
+
+    def executive_route(self, text: str, executive) -> dict[str, Any] | None:
+        """Decide the front-of-house action for one utterance, or None for normal chat.
+
+        Intent alone never routes: every branch also requires real ledger state, so
+        an ordinary "好了吗" cannot hijack a normal conversation. The returned dict
+        is {"kind", "text", ...}; `text` is a real config sample or a report built
+        from real spans, never a fabricated promise.
+        """
+        if executive is None or not isinstance(text, str) or not text.strip():
+            return None
+        try:
+            pending = executive.pending_reports()
+            running = executive.open_commissions()
+        except Exception:
+            return None
+        if pending:
+            verdict = acceptance_intent(text)
+            if verdict == "accept":
+                target = pending[0]
+                line = commission_progress_line() or eval_self_reflection_line()
+                return {"kind": "accept", "text": line, "commission_id": target["id"],
+                        "agent_name": self._agent_name(executive, target)}
+            if verdict == "reject":
+                target = pending[0]
+                return {"kind": "reject", "text": audit_reject_line() or eval_self_reflection_line(),
+                        "commission_id": target["id"], "feedback": text}
+        if telemetry_query_intent(text) and (running or pending):
+            report = telemetry_bottleneck_report(executive.telemetry_summary())
+            if report:
+                return {"kind": "telemetry", "text": report}
+        if progress_query_intent(text) and running:
+            return {"kind": "progress", "text": commission_progress_line(), "commission_id": running[0]["id"]}
+        if delegation_intent(text):
+            line = commission_accept_line()
+            if not line:
+                return None  # no real sample: fall through to normal dialogue
+            return {"kind": "delegation", "text": line, "brief": text}
+        return None
+
+    @staticmethod
+    def _agent_name(executive, commission: dict[str, Any]) -> str:
+        agent_id = (commission or {}).get("agent_id") or ""
+        for worker in (getattr(executive, "evaluator", None).roster.get("workers") or []):
+            if isinstance(worker, dict) and worker.get("id") == agent_id:
+                return str(worker.get("name") or agent_id)
+        return agent_id
 
     def set_proactivity(self, enabled: bool) -> None:
         self.state["proactivity_enabled"] = enabled

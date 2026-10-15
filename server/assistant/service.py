@@ -28,6 +28,13 @@ class AssistantService:
         from ..interaction.threads import ThreadStore
         from ..interaction.participation import Participation
         self.threads = ThreadStore(directory / 'threads.db')
+        # V3 内阁总管：督办台账 / 观测网关 / 自进化初审与既有记忆库同生命周期，
+        # 由本对象统一关闭——单独持有一个长生命周期单例会让数据库句柄漏出
+        # 调用方的清理范围（临时目录删不掉 commissions.db）。
+        from .executive import ExecutiveService
+        self.executive = ExecutiveService(directory, llm=llm, notes=self.notes,
+                                          threads=self.threads,
+                                          preference_store=self.preference_store)
         self.participation = Participation(self.threads)
         from ..interaction.activity import ActivityFacade
         self.activity = ActivityFacade(self.notes, self.participation, self.runtime)
@@ -459,3 +466,4 @@ class AssistantService:
         self.runtime.close()
         self.preference_store.close()
         self.threads.close()
+        self.executive.close()

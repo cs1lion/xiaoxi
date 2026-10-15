@@ -91,6 +91,9 @@ def load_ws():
                store=SimpleNamespace(start_session=lambda _: None, end_session=lambda _: None),
                llm=SimpleNamespace(aclose=noop), manager=SimpleNamespace(enabled=True),
                assistant=SimpleNamespace(should_route=lambda _, session_id='': False, waiting_input=lambda _: None),
+              # V3 内阁总管接缝：隔离环境不装配 ExecutiveService，路由函数返回 None，
+              # _run_turn 的总管分支因此整段跳过，既有语音路径逐字节不变。
+              executive=None,
                tts=SimpleNamespace(engine='silent'), deliver_reply=module.deliver_reply,
                to_wav_bytes=lambda audio, rate: audio.tobytes())
     exec(compile(ast.Module(body=nodes, type_ignores=[]), str(path), "exec"), env)
@@ -123,7 +126,8 @@ class VoiceTurnTests(unittest.IsolatedAsyncioTestCase):
 
         self.env["recognizer"] = SimpleNamespace(transcribe_wav=transcribe)
         self.env["orchestrator"] = SimpleNamespace(stream_respond=stream, proactive_turn=proactive,
-                                                   state={"proactivity_enabled": False}, set_proactivity=lambda _: None)
+                                                   state={"proactivity_enabled": False}, set_proactivity=lambda _: None,
+                                                   executive_route=lambda text, executive=None: None)
         self.ws = FakeSocket()
         self.endpoint = asyncio.create_task(self.env["websocket_endpoint"](self.ws))
         await self.ws.wait("ready")

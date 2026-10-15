@@ -100,7 +100,8 @@ class ExperienceWebSocketTests(unittest.IsolatedAsyncioTestCase):
                         store=SimpleNamespace(start_session=Mock(), end_session=Mock()),
                         orchestrator=SimpleNamespace(stream_respond=stream, proactive_turn=proactive,
                                                      state={"proactivity_enabled": False},
-                                                     set_proactivity=Mock()))
+                                                     set_proactivity=Mock(),
+                executive_route=lambda text, executive=None: None))
         modules = {}
         for name, attrs in {
             "experience_ws_test.speech.experience": {"ExperienceSession": TestExperience},

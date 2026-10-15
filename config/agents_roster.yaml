@@ -1,0 +1,100 @@
+# ============================================================
+# V3 麾下 Worker 花名册 + 初审种子铁律
+# 小溪（阿栖）不亲自干活：她照这张表选将、派单、验收。
+# 改这张表不会改变任何既有行为——只有 ExecutiveService 起来后才被读取。
+# ============================================================
+
+version: 1
+
+# ---------- 选将打分权重 ----------
+# 只认这三项，不认"哪个模型最近表现好"这类无据可查的分数。
+selection:
+  strength_weight: 1.0        # 能力关键词命中意图的权重
+  load_weight: 0.6            # 同 agent 未完结 Commission 的惩罚
+  cost_weight: 0.4            # 琐事优先廉价档
+  max_concurrent_default: 2   # 单个 Worker 同时在手的督办上限
+
+# ---------- 派单预算 ----------
+dispatch:
+  max_steps: 4                # 单个 Worker 一轮最多几步
+  max_prompt_tokens: 12000    # 单个 Commission 的 Prompt Token 预算
+  max_retry: 2                # 初审打回上限；第 3 次不过转 BLOCKED 请示
+  spin_guard:
+    max_identical: 3          # 同一步骤签名连续重复几次算鬼打墙
+
+# ---------- 琐事代答策略 ----------
+# BLOCKED 时：问题能在这里或已有偏好里找到依据 → 琐事，总管代答继续；
+# 找不到依据 → 大事，起气泡请示老板，不猜。
+trivia_policy:
+  - pattern: "命名|起名|标题叫什么|用什么名字"
+    answer: "按你上次定的偏好来：先短句，别用生僻词。我代你定了，不满意再喊停。"
+  - pattern: "顺序|先做哪个|优先级"
+    answer: "按截止时间排，最晚不能拖的那件先开刀。我代你定了。"
+
+# ---------- Worker 花名册 ----------
+workers:
+  - id: scribe
+    name: 笔录官
+    summary: 便笺整理、标题、摘要、口吻改写；只读已保存版本，不新建文档
+    strengths: [写作, 整理, 标题, 摘要, 便笺, 笔记, 文案, 改写, 润色]
+    weaknesses: [不碰代码, 不做架构判断]
+    cost_tier: cheap
+    max_concurrent: 3
+    eval_commands:
+      - required_fields
+      - artifacts_exist
+      - token_budget
+
+  - id: builder
+    name: 营造匠
+    summary: 前端页面、抽屉视图、样式与接线；严守主舞台 0 新增按钮
+    strengths: [页面, 前端, 样式, 组件, 接线, 抽屉, 界面, 布局, 按钮]
+    weaknesses: [不改后端契约, 不新增顶栏按钮]
+    cost_tier: medium
+    max_concurrent: 2
+    eval_commands:
+      - required_fields
+      - artifacts_exist
+      - wired_not_dry
+      - no_topbar_button
+      - token_budget
+
+  - id: scout
+    name: 探马
+    summary: 检索、比对、查资料、汇总外部信息；只汇报查到的，不补全没查到的
+    strengths: [检索, 查找, 搜索, 调研, 比对, 资料, 汇总, 查一下, 看看有没有]
+    weaknesses: [不做最终决策, 不写长文]
+    cost_tier: cheap
+    max_concurrent: 2
+    eval_commands:
+      - required_fields
+      - artifacts_exist
+      - token_budget
+
+# ---------- 初审种子铁律 ----------
+# 三条起步铁律：一条审美（L2），两条客观（L1）。
+# 新的铁律只从"老板挑刺退回"里长出来，不手写堆砌。
+seed_rules:
+  - id: no_topbar_button
+    layer: l2
+    severity: blocker
+    rule: 严禁在主舞台顶栏新增按钮；新入口只能落在侧滑工作台抽屉里
+    triggers: [顶栏, topbar, 加个按钮, 顶部按钮]
+
+  - id: no_unwired_dry_run
+    layer: l1
+    severity: blocker
+    rule: 严禁未接线空跑：声称交付的每一项都必须有可达的 ref（文件路径/接口/便笺版本），不能只描述做了
+    triggers: [未接线, 空跑, 假交付, 没接上]
+
+  - id: prompt_token_bloat
+    layer: l1
+    severity: major
+    rule: 控制 Prompt Tokens 异常膨胀：单个 Commission 超出预算即打回，先砍上下文再谈质量
+    triggers: [token, 膨胀, 上下文太大, 预算超了]
+
+# ---------- L1 客观校验阈值 ----------
+eval_thresholds:
+  token_bloat_ratio: 1.0      # 实际/预算比值超过即判膨胀
+  max_summary_chars: 400      # 三句话卡的 summary 上限
+  max_intercepted_chars: 400

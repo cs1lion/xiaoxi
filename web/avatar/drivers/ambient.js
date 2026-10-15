@@ -10,14 +10,26 @@ export const MICRO_ACT_MAP = {
   fidget: { kind: "micro", amount: 0.3, duration: 0.5 },
   thoughtful: { kind: "gaze", up: 0.3, duration: 0.9 },
   soft_blink: { kind: "blink", double: false, duration: 0.3 },
+  // V3 监工微动作（协议 §16 / EXECUTIVE_SECRETARY_V3.md §2.3）：后台有督办在跑时，
+  // 小溪低头翻手账、瞥监控副屏、笔尖点两下。kind 仍取既有三类，渲染侧无需改动。
+  ledger_glance: { kind: "gaze", down: 0.45, duration: 1.2 },
+  monitor_glance: { kind: "gaze", right: 0.4, up: 0.12, duration: 1.0 },
+  pen_tap: { kind: "micro", amount: 0.22, duration: 0.6 },
 };
 const MICRO_ACT_FALLBACK = { kind: "micro", amount: 0.2, duration: 0.5 };
+const SUPERVISOR_ACTIONS = ["ledger_glance", "monitor_glance", "pen_tap"];
 const TOUCH_KEYS = { head: "touch_head", face: "touch_face" };
 const MAX_SEEN = 256;
 
 export function resolveMicroAct(action) {
   return Object.prototype.hasOwnProperty.call(MICRO_ACT_MAP, action)
     ? MICRO_ACT_MAP[action] : MICRO_ACT_FALLBACK;
+}
+
+// 后台 RUNNING 时的监工微动作轮换：按序号取，避免同一空闲周期里重复同一个姿势。
+export function supervisorAction(seq) {
+  const index = Math.abs(Math.trunc(Number(seq) || 0)) % SUPERVISOR_ACTIONS.length;
+  return SUPERVISOR_ACTIONS[index];
 }
 
 export function pickTouchLine(samples, region, rng) {

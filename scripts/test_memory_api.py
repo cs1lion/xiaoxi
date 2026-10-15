@@ -87,8 +87,11 @@ class MemoryAPITests(unittest.IsolatedAsyncioTestCase):
         cls.store = cls.module.store
         cls.manager = cls.module.manager
         cls.addClassCleanup(cls.store._conn.close)
+        # V3 内阁总管由 AssistantService 持有，同样要在这里关掉，
+        # 否则它持有的 commissions/telemetry/executive 三个库会把临时目录锁住。
         for resource in (cls.module.assistant.store, cls.module.assistant.runtime,
-                         cls.module.assistant.preference_store, cls.module.assistant.threads):
+                         cls.module.assistant.preference_store, cls.module.assistant.threads,
+                         cls.module.assistant.executive):
             cls.addClassCleanup(resource.close)
         start(patch.object(cls.module.llm, "complete_raw",
                            side_effect=AssertionError("LLM calls are forbidden")))

@@ -21,6 +21,7 @@ export function mountWorkDrawer(root, deps = {}) {
     music: el("drawerViewMusic"),
     interpret: el("drawerViewInterpret"),
     practice: el("drawerViewPractice"),
+    ops: el("drawerViewOps"),
   };
   let opened = false;
   let lastFocus = null;
@@ -34,6 +35,8 @@ export function mountWorkDrawer(root, deps = {}) {
   function selectView(name) {
     if (!views[name]) return;
     current = name;
+    // V3：通知外部模块（督办与战况视图）该刷新了；不知道这个事件的模块不受影响。
+    window.dispatchEvent(new CustomEvent("aqi-drawer-view", { detail: name }));
     for (const [key, view] of Object.entries(views)) view.hidden = key !== name;
     for (const button of nav) {
       if (!button.hasAttribute("aria-pressed")) continue;
@@ -79,6 +82,7 @@ export function mountWorkDrawer(root, deps = {}) {
   });
   el("drawerMusic")?.addEventListener("click", () => selectView("music"));
   el("drawerInterpret")?.addEventListener("click", () => selectView("interpret"));
+  el("drawerOps")?.addEventListener("click", () => selectView("ops"));
   el("drawerWritingOpen")?.addEventListener("click", () => {
     if (!document.body.classList.contains("is-writing")) onWriting?.();
     close(false);

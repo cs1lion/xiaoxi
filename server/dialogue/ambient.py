@@ -13,6 +13,7 @@ from typing import Any
 from ..config import pacing_cfg
 
 TIERS = ("micro_act", "mumble", "proactive")
+SUPERVISOR_ACTIONS = ("ledger_glance", "monitor_glance", "pen_tap")
 AMBIENT_DEFAULTS: dict[str, Any] = {
     "enabled": True,
     "micro_act_seconds": 20,
@@ -76,6 +77,19 @@ def build_micro_act(*, action: str, reason: str, source_refs: list[str] | None =
             "expires_at": now + expires_in}
 
 
+def build_supervisor_check(*, reason: str, now: float | None = None, event_id: str | None = None,
+                           expires_in: float = 30.0) -> dict[str, Any]:
+    """V3 监工微动作：手上有在跑的督办时，小溪低头翻手账/瞥监控副屏。
+
+    与 build_micro_act 同一事件形状，前端未知 action 安全降级；
+    reason 用 running_<idle>s 前缀，便于和 idle 微动作区分。
+    """
+    now = time.time() if now is None else float(now)
+    seq = int(now) % len(SUPERVISOR_ACTIONS)
+    return build_micro_act(action=SUPERVISOR_ACTIONS[seq], reason=f"supervising_{reason}",
+                           now=now, event_id=event_id, expires_in=expires_in)
+
+
 def build_mumble(*, text: str, reason: str, voice: bool = False, bubble: Any = None,
                  source_refs: list[str] | None = None, now: float | None = None,
                  event_id: str | None = None, dedupe_key: str | None = None,
@@ -120,5 +134,6 @@ def choose_content(*, discovery: Any = None, mood: Any = None, spark: Any = None
     return None, []
 
 
-__all__ = ["AMBIENT_DEFAULTS", "TIERS", "ambient_cfg", "build_micro_act", "build_mumble",
+__all__ = ["AMBIENT_DEFAULTS", "SUPERVISOR_ACTIONS", "TIERS", "ambient_cfg", "build_micro_act",
+           "build_mumble",
            "build_proactive", "choose_content", "new_event_id", "select_tier"]

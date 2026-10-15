@@ -503,3 +503,225 @@ class ThreadStore:
                                  evidence, object_refs, now)
             self._bump(thread_id, expected_revision, now)
             return self._thread(thread_id)
+
+
+class CommissionStore:
+    """V3 督办台账：6 阶段状态机（docs/PROTOCOL.md §19 / EXECUTIVE_SECRETARY_V3.md §3）。
+
+    与 ThreadStore 同库同规约：缺失 ID 抛 KeyError，非法迁移抛 ValueError，
+    时间戳一律 Unix 秒，只存公开决定与结果，不存模型思考过程、不存凭据。
+    事件表只追加不改写，方便事后回答"这一单到底卡在谁手里"。
+    """
+
+    STATUSES = frozenset(('drafting', 'briefing', 'running', 'blocked',
+                          'auditing', 'ready_to_report', 'done'))
+    TERMINAL = frozenset(('done',))
+    TRANSITIONS = {
+        'drafting': frozenset(('briefing', 'done')),
+        'briefing': frozenset(('running', 'blocked', 'done')),
+        'running': frozenset(('blocked', 'auditing', 'done')),
+        'blocked': frozenset(('running', 'done')),
+        'auditing': frozenset(('running', 'ready_to_report', 'blocked')),
+        'ready_to_report': frozenset(('done', 'running')),
+    }
+    MAX_TITLE = 200
+    MAX_BRIEF = 4000
+    MAX_QUESTION = 400
+    MAX_LIST = 100
+
+    def __init__(self, path):
+        if not isinstance(path, (str, os.PathLike)) or not os.fspath(path):
+            raise ValueError('path must be a nonempty filesystem path or :memory:')
+        self._lock = threading.RLock()
+        self._closed = False
+        self._db = sqlite3.connect(path, isolation_level=None, check_same_thread=False)
+        self._db.row_factory = sqlite3.Row
+        try:
+            self._db.execute('PRAGMA foreign_keys = ON')
+            with self._transaction():
+                self._db.execute('''CREATE TABLE IF NOT EXISTS commissions (
+                    id TEXT PRIMARY KEY, thread_id TEXT NOT NULL DEFAULT '',
+                    title TEXT NOT NULL, brief TEXT NOT NULL DEFAULT '',
+                    agent_id TEXT NOT NULL DEFAULT '', status TEXT NOT NULL,
+                    step_idx INTEGER NOT NULL DEFAULT 0, retry_count INTEGER NOT NULL DEFAULT 0,
+                    blocked_question TEXT NOT NULL DEFAULT '',
+                    delivery TEXT NOT NULL DEFAULT '{}', audit TEXT NOT NULL DEFAULT '{}',
+                    packet TEXT NOT NULL DEFAULT '{}',
+                    rubric_ids TEXT NOT NULL DEFAULT '[]',
+                    created_at REAL NOT NULL, updated_at REAL NOT NULL, closed_at REAL)''')
+                self._db.execute('''CREATE TABLE IF NOT EXISTS commission_events (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT, commission_id TEXT NOT NULL,
+                    kind TEXT NOT NULL, payload TEXT NOT NULL, created_at REAL NOT NULL)''')
+                self._db.execute('CREATE INDEX IF NOT EXISTS commission_status ON commissions(status, updated_at)')
+                self._db.execute('CREATE INDEX IF NOT EXISTS commission_events_id ON commission_events(commission_id, id)')
+        except BaseException:
+            self._db.close()
+            self._closed = True
+            raise
+
+    @contextmanager
+    def _transaction(self):
+        with self._lock:
+            if self._closed:
+                raise RuntimeError('CommissionStore is closed')
+            self._db.execute('BEGIN IMMEDIATE')
+            try:
+                yield
+                self._db.commit()
+            except BaseException:
+                self._db.rollback()
+                raise
+
+    def close(self):
+        with self._lock:
+            if not self._closed:
+                self._db.close()
+                self._closed = True
+
+    # ---------- 内部 ----------
+    def _row(self, commission_id):
+        if not isinstance(commission_id, str) or not commission_id:
+            raise ValueError('id must be nonempty text')
+        row = self._db.execute('SELECT * FROM commissions WHERE id=?', (commission_id,)).fetchone()
+        if row is None:
+            raise KeyError(commission_id)
+        return self._project(dict(row))
+
+    @staticmethod
+    def _project(row):
+        try:
+            row['packet'] = json.loads(row.get('packet') or '{}')
+        except (TypeError, ValueError):
+            row['packet'] = {}
+        for key in ('delivery', 'audit', 'rubric_ids'):
+            try:
+                row[key] = json.loads(row.get(key) or ('[]' if key == 'rubric_ids' else '{}'))
+            except (TypeError, ValueError):
+                row[key] = [] if key == 'rubric_ids' else {}
+        return row
+
+    def _allowed(self, status, target):
+        return target in self.TRANSITIONS.get(status, frozenset())
+
+    @staticmethod
+    def _string(value, name, maximum):
+        if not isinstance(value, str) or len(value) > maximum or '\x00' in value:
+            raise ValueError(f'{name} must be a string of at most {maximum} characters without NUL')
+        return value
+
+    # ---------- 写入 ----------
+    def create(self, title, brief='', thread_id='', agent_id=''):
+        title = self._string(title, 'title', self.MAX_TITLE)
+        brief = self._string(brief, 'brief', self.MAX_BRIEF)
+        thread_id = self._string(thread_id, 'thread_id', 100)
+        agent_id = self._string(agent_id, 'agent_id', 100)
+        commission_id, now = 'c_' + uuid.uuid4().hex[:12], time.time()
+        with self._transaction():
+            self._db.execute('''INSERT INTO commissions
+                (id, thread_id, title, brief, agent_id, status, step_idx, retry_count,
+                 blocked_question, delivery, audit, packet, rubric_ids, created_at, updated_at, closed_at)
+                VALUES (?,?,?,?,?, 'drafting', 0, 0, '', '{}', '{}', '{}', '[]', ?, ?, NULL)''',
+                (commission_id, thread_id, title, brief, agent_id, now, now))
+            self._event(commission_id, 'opened', {'title': title, 'brief': brief[:200]}, now)
+            return self._row(commission_id)
+
+    def transition(self, commission_id, status, **changes):
+        """Move one commission along the 6-phase machine; illegal moves raise ValueError."""
+        if not isinstance(status, str) or status not in self.STATUSES:
+            raise ValueError('invalid commission status')
+        allowed_changes = {'agent_id', 'step_idx', 'retry_delta', 'blocked_question',
+                           'delivery', 'audit', 'rubric_ids', 'packet', 'title', 'brief'}
+        if set(changes) - allowed_changes:
+            raise ValueError('unknown commission changes')
+        with self._transaction():
+            row = self._row(commission_id)
+            if not self._allowed(row['status'], status):
+                raise ValueError(f"illegal commission transition {row['status']}->{status}")
+            now = time.time()
+            updates = {'status': status, 'updated_at': now}
+            payload = {'from': row['status'], 'to': status}
+            if 'agent_id' in changes:
+                updates['agent_id'] = self._string(changes['agent_id'], 'agent_id', 100)
+            if 'step_idx' in changes:
+                updates['step_idx'] = max(0, int(changes['step_idx']))
+                payload['step_idx'] = updates['step_idx']
+            if changes.get('retry_delta'):
+                updates['retry_count'] = max(0, int(row['retry_count']) + int(changes['retry_delta']))
+                payload['retry_count'] = updates['retry_count']
+            if 'blocked_question' in changes or status == 'blocked':
+                # 协议 §19：blocked 状态的前置条件是一句非空请示；清空只在离开 blocked 时发生。
+                question = self._string(changes.get('blocked_question', row['blocked_question']),
+                                        'blocked_question', self.MAX_QUESTION)
+                if status == 'blocked' and not question:
+                    raise ValueError('blocked requires a question')
+                updates['blocked_question'] = question
+                payload['question'] = question
+            for key in ('delivery', 'audit', 'rubric_ids', 'packet'):
+                if key in changes:
+                    value = changes[key]
+                    encoded = json.dumps(value, ensure_ascii=False)
+                    if len(encoded) > 8000:
+                        raise ValueError(f'{key} too large')
+                    updates[key] = encoded
+            if status in self.TERMINAL:
+                updates['closed_at'] = now
+            columns = ', '.join(f'{key}=?' for key in updates)
+            self._db.execute(f'UPDATE commissions SET {columns} WHERE id=?',
+                             (*updates.values(), commission_id))
+            self._event(commission_id, 'transition', payload, now)
+            return self._row(commission_id)
+
+    def record_step(self, commission_id, step_idx):
+        with self._transaction():
+            row = self._row(commission_id)
+            if row['status'] not in ('running', 'auditing'):
+                raise ValueError('only a running commission records steps')
+            now = time.time()
+            step = max(0, int(step_idx))
+            self._db.execute('UPDATE commissions SET step_idx=?, updated_at=? WHERE id=?',
+                             (step, now, commission_id))
+            self._event(commission_id, 'step', {'step_idx': step}, now)
+            return self._row(commission_id)
+
+    def _event(self, commission_id, kind, payload, now):
+        self._db.execute('INSERT INTO commission_events (commission_id, kind, payload, created_at)'
+                         ' VALUES (?,?,?,?)',
+                         (commission_id, kind, json.dumps(payload, ensure_ascii=False), now))
+
+    # ---------- 读取 ----------
+    def get(self, commission_id):
+        with self._transaction():
+            return self._row(commission_id)
+
+    def list_commissions(self, status=None, limit=50):
+        clause, params = '', []
+        if status is not None:
+            if not isinstance(status, str) or status not in self.STATUSES:
+                raise ValueError('invalid commission status filter')
+            clause, params = 'WHERE status=?', [status]
+        params.append(max(1, min(int(limit), self.MAX_LIST)))
+        with self._transaction():
+            rows = self._db.execute(
+                f'SELECT * FROM commissions {clause} ORDER BY updated_at DESC, id LIMIT ?',
+                params).fetchall()
+        return [self._project(dict(row)) for row in rows]
+
+    def open_commissions(self, agent_id=None):
+        with self._transaction():
+            if agent_id:
+                rows = self._db.execute(
+                    "SELECT * FROM commissions WHERE agent_id=? AND status NOT IN ('done')"
+                    " ORDER BY updated_at DESC", (agent_id,)).fetchall()
+            else:
+                rows = self._db.execute(
+                    "SELECT * FROM commissions WHERE status NOT IN ('done') ORDER BY updated_at DESC").fetchall()
+        return [self._project(dict(row)) for row in rows]
+
+    def events(self, commission_id, limit=50):
+        with self._transaction():
+            self._row(commission_id)
+            rows = self._db.execute(
+                'SELECT kind, payload, created_at FROM commission_events WHERE commission_id=?'
+                ' ORDER BY id DESC LIMIT ?', (commission_id, max(1, min(int(limit), 200)))).fetchall()
+        return [{'kind': row['kind'], 'payload': json.loads(row['payload']),
+                 'created_at': row['created_at']} for row in rows]

@@ -79,7 +79,8 @@ class ActivityWebSocketTests(unittest.IsolatedAsyncioTestCase):
         self.env.update(tts=TTS(), llm=self.llm,
             store=SimpleNamespace(start_session=self.sessions.append, end_session=self.ended.append),
             orchestrator=SimpleNamespace(stream_respond=forbidden_stream,
-                state={'proactivity_enabled': False}, set_proactivity=lambda _: None))
+                state={'proactivity_enabled': False}, set_proactivity=lambda _: None,
+                executive_route=lambda text, executive=None: None))
         self.forbid_model_and_tools()
 
     def forbid_model_and_tools(self):

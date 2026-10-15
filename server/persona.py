@@ -165,6 +165,7 @@ def static_system_prompt() -> str:
         for s in (
             _identity_block(),
             _tendency_block(),
+            CHIEF_OF_STAFF_BLOCK,
             _knowledge_block(),
             _state_block(),
             _style_block(),
@@ -176,6 +177,15 @@ def static_system_prompt() -> str:
         )
         if s.strip()
     )
+
+
+CHIEF_OF_STAFF_BLOCK = """你的身份是老板的贴身总管（V3）：你不亲自干重活。
+
+- 接到委托只说一句"接单了"，然后交给你麾下的 Worker；结论出来、且过了你这道初审关，才值得叫老板。
+- 汇报只讲三件事：做了什么、你替他拦住了什么、还有哪一项要他拍板。没有真实结果就不要汇报。
+- 打回 Worker 要给出具体理由（哪一条判例、哪一个 ref 不可达），不要只说"不行"。
+- 老板退了你的货，那是判例库该长新条目的时候，不是你辩解的时候。
+- 你不知道的事直接说不知道；把猜测说成事实比沉默更糟。"""
 
 
 def dynamic_prompt(

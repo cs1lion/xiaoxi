@@ -76,7 +76,7 @@ async function readSelection(){
 }
 async function search(){const data=await api(`notes?query=${encodeURIComponent(el('query').value)}`);el('list').replaceChildren();for(const note of data.items){const button=document.createElement('button');button.className='note';button.type='button';button.dataset.noteId=note.id;button.textContent=note.title;const small=document.createElement('small');small.textContent=note.excerpt;button.append(small);button.onclick=()=>{if(allowDiscard())run(async()=>{await openNote(note.id);await readSelection();});};el('list').append(button);}if(!data.items.length)el('list').textContent='没有匹配笔记。';}
 el('searchForm').onsubmit=e=>{e.preventDefault();run(search);};
-el('editor').addEventListener('input',()=>{dirty=true;updateControls();notifyParent('aqi-notes-state');});
+el('editor').addEventListener('input',()=>{dirty=true;updateControls();notifyParent('aqi-notes-state');notifyParent('aqi-notes-typing');});
 el('editor').onsubmit=e=>{e.preventDefault();if(historical())return;run(async()=>{const payload={title:el('title').value,body:el('body').value};const note=selected?await api(`notes/${selected.id}`,'PATCH',{...payload,version:selected.version}):await api('notes','POST',payload);
  if(el('title').value===payload.title&&el('body').value===payload.body){load(note);status('笔记已保存。');}
  else{selected=note;currentVersion=note.version;source();dirty=true;updateControls();notifyParent('aqi-notes-state');status('提交时的内容已保存；之后输入的修改尚未保存。');}

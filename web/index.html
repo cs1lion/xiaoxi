@@ -161,6 +161,7 @@
     <button id="drawerMusic" type="button" aria-pressed="false">音乐</button>
     <button id="drawerInterpret" type="button" aria-pressed="false">实时字幕</button>
     <button id="drawerPractice" type="button">英语练习</button>
+    <button id="drawerOps" type="button" aria-pressed="false">督办与战况</button>
   </nav>
   <div class="drawer-body">
     <section id="drawerViewWriting" class="drawer-view" aria-label="一起写">
@@ -196,11 +197,24 @@
       <p>练习场景、难度、纠错方式和收句等待都在设置面板里，随时可改。</p>
       <button id="drawerPracticeOpen" type="button">去设置面板练习</button>
     </section>
+    <section id="drawerViewOps" class="drawer-view" aria-label="督办与战况" hidden>
+      <h3>督办与战况</h3>
+      <p>小溪替你派出去的单，和它们烧掉的 Token。主舞台不添按钮，都收在这儿。</p>
+      <div id="opsPending" class="ops-pending" hidden></div>
+      <h4 class="ops-heading">督办清单</h4>
+      <div id="opsCommissions" class="ops-list"></div>
+      <h4 class="ops-heading">Agent 战况与 API 观测</h4>
+      <div id="opsTelemetry" class="ops-telemetry"></div>
+      <h4 class="ops-heading">初审判例</h4>
+      <p class="ops-note">种子铁律来自花名册；后面长的都来自你亲自退回的那几单。</p>
+      <div id="opsRubrics" class="ops-rubrics"></div>
+    </section>
   </div>
 </aside>
 <script type="module" src="/static/app.js"></script>
 <script type="module" src="/static/ui.js"></script>
 <script type="module" src="/static/workspace.js"></script>
+<script type="module" src="/static/executive.js"></script>
 <script type="module">
 if (new URLSearchParams(location.search).get('explore') === '1') {
   import('/static/explore.js').then(module => module.mountExploration()).catch(error => console.warn('设计探索未加载，原界面不受影响', error));

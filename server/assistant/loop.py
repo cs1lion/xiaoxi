@@ -269,6 +269,51 @@ REFLECT_MIN_CHILDREN = 1
 REFLECT_MAX_CHILDREN = 2
 
 
+MAX_DELTA_FEEDBACK = 2000
+
+
+@dataclass(frozen=True)
+class EvalDelta:
+    """漏审点（V3 §2.4）：初审放行、老板仍然退回的那一处差距。
+
+    它只记录"老板说了什么"和"初审当时凭什么放行"，不记录模型怎么想的。
+    没有这条 Delta 就不该长出新判例——判例库靠真实退货长大，不靠凑数。
+    """
+
+    commission_id: str
+    boss_feedback: str
+    audit_layer: str
+    audit_findings: tuple[str, ...]
+    learned_rubric_id: str | None
+
+    def as_dict(self) -> dict[str, Any]:
+        return {"commission_id": self.commission_id, "boss_feedback": self.boss_feedback,
+                "audit_layer": self.audit_layer, "audit_findings": list(self.audit_findings),
+                "learned_rubric_id": self.learned_rubric_id}
+
+
+def capture_eval_delta(*, commission: dict[str, Any], boss_feedback: str,
+                       evaluator: Any) -> EvalDelta | None:
+    """把一次老板退回炼成一条新判例。没有 evaluator 或原话太短就什么都不落。"""
+    if evaluator is None:
+        return None
+    feedback = (boss_feedback or "").strip()
+    if len(feedback) < 4:
+        return None
+    audit = (commission or {}).get("audit") or {}
+    if not isinstance(audit, dict):
+        audit = {}
+    rubric = evaluator.distill(commission=commission, boss_feedback=feedback[:MAX_DELTA_FEEDBACK],
+                               verdict=audit)
+    findings = tuple(str(item.get("rule_id") or "") for item in (audit.get("findings") or [])
+                     if isinstance(item, dict))
+    return EvalDelta(commission_id=str((commission or {}).get("id") or ""),
+                     boss_feedback=feedback[:MAX_DELTA_FEEDBACK],
+                     audit_layer=str(audit.get("layer") or "none"),
+                     audit_findings=findings,
+                     learned_rubric_id=rubric["id"] if isinstance(rubric, dict) else None)
+
+
 def validate_reflection_payload(payload: Any) -> tuple[dict[str, Any] | None, str | None]:
     """Gate a reflection payload (§14.2/§14.3): (normalized, None) or (None, reason).
 

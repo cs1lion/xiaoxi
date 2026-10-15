@@ -93,7 +93,8 @@ class EditorDiscussionWebSocketTests(unittest.IsolatedAsyncioTestCase):
         self.env.update(
             assistant=SimpleNamespace(should_route=should_route, waiting_input=waiting_input),
             orchestrator=SimpleNamespace(stream_respond=ordinary,
-                state={'proactivity_enabled': False}, set_proactivity=lambda _: None),
+                state={'proactivity_enabled': False}, set_proactivity=lambda _: None,
+                executive_route=lambda text, executive=None: None),
             recognizer=SimpleNamespace(transcribe_wav=transcribe), tts=TTS())
         self.ws = FakeSocket()
         self.ws.headers = {'origin': 'http://testserver', 'host': 'testserver'}

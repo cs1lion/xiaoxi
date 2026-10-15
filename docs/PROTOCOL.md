@@ -314,3 +314,61 @@ uv run python scripts/check_protocol.py
 - 新增 `GET /api/memory/starmap/node/seed:<id>` 返回 Seed 全文（含 `reflections`/父子/来源）；`reflection:<id>` 返回 Reflection 全文。
 - 必须支持从子节点**追溯到原始问题**（沿 `parent_child` 上行）与查看节点/关系的来源与理由。前端对未知 `kind`/`kind` 边安全降级，不报错。
 - 刷新/重连不得制造虚假节点或重复边；`epiphany` 边在视觉上与普通关联明确区分。
+
+## 十九、督办事项（Commission）状态结构
+
+V3 内阁总管的督办台账，与共同事项同库同规约（`server/interaction/threads.py`）。总设计见 [贴身总管 V3](EXECUTIVE_SECRETARY_V3.md)。
+
+- 状态集合固定为 6 阶段 + 归档：`drafting` / `briefing` / `running` / `blocked` / `auditing` / `ready_to_report` / `done`。旧客户端读到未知状态必须降级为"进行中"，不得报错。
+- 合法迁移只有这些，其余抛 `ValueError`：`drafting→{briefing,done}`、`briefing→{running,blocked,done}`、`running→{blocked,auditing,done}`、`blocked→{running,done}`、`auditing→{running,ready_to_report,blocked}`、`ready_to_report→{done,running}`。
+- `done` 是唯一终态；进入 `done` 必须写 `closed_at` 并触发一次 Eval 自进化检查（有漏审点才提炼，没有就不写）。
+- 一条 Commission 的形状：
+  ```json
+  {"id":"c_1f0a…","thread_id":"","title":"把便笺整理成三版标题","brief":"老板原话",
+   "agent_id":"scribe","status":"running","step_idx":2,"retry_count":1,
+   "blocked_question":"","delivery":{},"audit":{},"rubric_ids":["no_topbar_button"],
+   "created_at":1760000000.0,"updated_at":1760000100.0,"closed_at":null}
+  ```
+- `delivery` 是《三句话交付验收卡》：`{summary, intercepted, artifacts[]}`。`summary` 说做了什么，`intercepted` 说小溪替他拦了什么，`artifacts` 每项 `{kind,ref,preview}`；缺一项即视为未交差，初审直接 L1 驳回。
+- `audit` 是初审结论：`{passed, layer, findings[], scolding, retry_count, created_at}`。`layer` 取值 `none` / `l1` / `l2`；`findings[]` 每项 `{rule_id, severity, detail}`。
+- `retry_count` 上限 2（`Evaluator.MAX_RETRY`）。打回时 `retry_count+1` 并回到 `running`；已达上限仍不过则转 `blocked` 并带完整批注请示，不无限重试。
+- `blocked_question` 非空是 `blocked` 状态的前置条件。问题必须是一句话、二选一或可一句话回答；琐事由总管依花名册 `trivia_policy` 或已有偏好代答，大事才起气泡请示。
+- 台账只存公开决定与结果，**不存模型思考过程，不存凭据**。缺失 ID 抛 `KeyError`；事件表 `commission_events` 只追加不改写。
+
+## 二十、观测统计（TelemetrySummary）结构
+
+`server/assistant/telemetry.py` 落库 `agent_telemetry_spans`，字段固定：
+`commission_id, agent_id, step_idx, model, prompt_tokens, completion_tokens, ttft_ms, duration_ms, status_code, error_snippet`。
+
+- `ttft_ms` 是首字节毫秒数；非流式调用记 `duration_ms`（无法区分时两者相等），**不得编造**。
+- `status_code` 用上游 HTTP 语义；子进程事件用 `0` 表示非 HTTP 结果，`error_snippet` 说明原因。
+- `error_snippet` 截断到 200 字符，且必须剥掉 `api_key/token/password/secret/authorization/cookie` 样文本。
+- `GET /api/executive/telemetry` 返回 `TelemetrySummary`：
+  ```json
+  {"window_seconds":86400,"calls":42,"succeeded":40,"failed":2,"success_rate":0.952,
+   "prompt_tokens":180000,"completion_tokens":24000,"total_tokens":204000,
+   "avg_ttft_ms":820.0,"max_ttft_ms":4100.0,
+   "by_agent":[{"agent_id":"scribe","calls":30,"succeeded":29,"total_tokens":150000,"avg_ttft_ms":700.0}],
+   "token_ranking":[{"agent_id":"scribe","total_tokens":150000}],
+   "spinning_alerts":[{"commission_id":"c_…","agent_id":"builder","repeats":3,"signature":"…"}]}
+  ```
+- `token_ranking` 按 `total_tokens` 降序，只含真实 span；没有任何 span 时 `calls=0`、`token_ranking=[]`、`success_rate=null`——前台据此闭嘴，不报"目前很健康"这类无据结论。
+- **鬼打墙熔断（Spinning Guard）**：同一 `commission_id` 内同一步骤签名连续出现 `max_identical` 次即熔断，Commission 转 `blocked`，`spinning_alerts` 记一条。熔断只认归一化签名，不做语义相似度，因此不漏熔也不误熔"合理的重复步骤"。
+- `POST /internal/telemetry_proxy` 是本地透明代理：请求体原样转发、响应原样返回，只旁路记 span。落库失败降级为"本次不计入战况"，绝不影响 Worker 调用本身。
+
+## 二十一、自进化判例（EvalRubric）结构
+
+`server/assistant/evaluator.py` 的判例库，种子来自 `config/agents_roster.yaml` 的 `seed_rules`，新增只来自老板退回。
+
+- 一条判例：
+  ```json
+  {"id":"no_topbar_button","layer":"l2","severity":"blocker",
+   "rule":"严禁在主舞台顶栏新增按钮；新入口只能落在工作台抽屉",
+   "triggers":["顶栏","topbar","加个按钮"],
+   "source":"seed","evidence":"","created_at":1760000000.0,"active":true}
+  ```
+- `layer` 取值 `l1`（客观校验，命令/预算/空跑可判定）或 `l2`（审美与偏好判例）。`severity` 取值 `blocker` / `major` / `minor`。
+- `source` 取值 `seed`（花名册种子铁律）或 `boss_rejection`（老板挑刺退回后提炼）。`boss_rejection` 判例必须带 `evidence`（老板原话或漏审点 Delta），否则不落库。
+- `Evaluator.distill()` 是唯一新增入口：输入是老板退回原话 + 初审为何没拦住的 Delta，输出一条新判例。同一 Delta 不重复落库（按 `evidence` 去重）。
+- 判例可被用户在抽屉里看见与删除；删除只置 `active=false`，不抹掉历史 `audit.findings` 的引用。
+- 打回训话模板内置在 `evaluator.py`，分三种：`l1_error`（客观报错驳回）、`l2_aesthetic`（审美违规驳回）、`spinning_warning`（鬼打墙熔断警告）。台词风格样本在 `config/response_examples.json`，模板只做兜底，不覆盖真实 findings。

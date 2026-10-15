@@ -74,14 +74,16 @@ try {
   await page.locator('#settingsToggle').click();
   await page.screenshot({ path: `${out}/desktop-settings.png`, fullPage: true });
 
-  /* ---- U-3 工作台抽屉：六视图统一导航 ---- */
+  /* ---- U-3 工作台抽屉：视图统一导航 ---- */
   check(await page.locator('#workDrawer').evaluate(node => node.hidden) === true, '抽屉默认收起');
   await page.locator('#drawerToggle').click();
   check(await page.locator('#workDrawer').isVisible(), '抽屉开关打开工作台');
   check(await page.locator('#drawerToggle').getAttribute('aria-expanded') === 'true', '抽屉开关状态同步');
   const navLabels = await page.locator('.drawer-nav button').allInnerTexts();
-  assert.deepEqual(navLabels, ['一起写', '共同事项', '星图', '音乐', '实时字幕', '英语练习'], '抽屉六视图导航齐全');
-  checks.push('抽屉六视图导航齐全');
+  // V3 追加「督办与战况」：铁律是主舞台 0 新增按钮，新入口只能落在抽屉里。
+  assert.deepEqual(navLabels, ['一起写', '共同事项', '星图', '音乐', '实时字幕', '英语练习', '督办与战况'], '抽屉七视图导航齐全');
+  checks.push('抽屉七视图导航齐全');
+  check(topbarIds.every(id => id !== 'drawerOps') && !await page.locator('.topbar #opsToggle').count(), '督办与战况不占顶栏');
   check(await page.locator('#drawerViewMusic iframe').getAttribute('src') === null, '音乐视图按需加载，不预连接');
   await page.locator('#drawerMusic').click();
   check(await page.locator('#drawerViewMusic').isVisible() && await page.locator('#drawerViewMusic iframe').getAttribute('src') === '/static/music.html', '音乐内嵌视图加载既有页面');
@@ -106,6 +108,18 @@ try {
   await page.locator('.starmap-close').click();
   await page.locator('#drawerToggle').click();
   await page.screenshot({ path: `${out}/desktop-drawer.png`, fullPage: true });
+
+  /* ---- V3 督办与战况：抽屉视图、三句话验收卡、API 战况 ---- */
+  await page.locator('#drawerOps').click();
+  check(await page.locator('#drawerViewOps').isVisible(), '督办与战况视图可打开');
+  await page.waitForFunction(() => document.querySelector('#opsCommissions')?.children.length > 0);
+  check((await page.locator('#opsCommissions').allInnerTexts()).join('').length > 0, '督办清单有内容');
+  check(await page.locator('#opsTelemetry').isVisible(), 'API 观测简报卡在位');
+  check(await page.locator('#opsRubrics').isVisible(), '初审判例卡在位');
+  check((await page.locator('#opsRubrics').allInnerTexts()).join('').includes('no_topbar_button'), '种子铁律可见');
+  await page.screenshot({ path: `${out}/desktop-ops.png`, fullPage: true });
+  await page.locator('#drawerClose').click();
+  check(await page.locator('#workDrawer').evaluate(node => node.hidden) === true, '督办视图可收起');
 
   /* ---- U-4/U-5 练习入口与模式状态可视化 ---- */
   check(await page.locator('#bargeToggle').textContent() === '连续对话：关', '连续对话模式常驻可见');

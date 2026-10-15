@@ -14,7 +14,7 @@ from fastapi.responses import FileResponse, JSONResponse
 from .static import AppStaticFiles
 
 from .config import ROOT, avatar_cfg, ensure_dirs, pacing_cfg, persona_cfg, settings
-from .dialogue.orchestrator import EMOTIONS, orchestrator
+from .dialogue.orchestrator import EMOTIONS, orchestrator, parse_emotion
 from .dialogue.delivery import deliver_reply
 from .llm import llm
 from .memory.manager import manager
@@ -31,7 +31,13 @@ from .assistant.api import create_router, scheduler
 assistant = AssistantService(ROOT / "data", llm, manager)
 orchestrator.context_broker = assistant.context_broker
 orchestrator.activity_facade = assistant.activity
+# ExecutiveService 由 AssistantService 持有并统一关闭（同生命周期、同一关闭路径）。
+from .assistant.executive_api import create_executive_router, create_telemetry_proxy_router
+executive = assistant.executive
+orchestrator.executive = executive
 app.include_router(create_router(assistant))
+app.include_router(create_executive_router(executive))
+app.include_router(create_telemetry_proxy_router(executive))
 from .interaction.threads_api import create_threads_router
 app.include_router(create_threads_router(assistant))
 from .interaction.proposals_api import create_proposals_router
@@ -573,6 +579,24 @@ async def _run_turn(conn: Connection, text: str, mode: str, turn: VoiceTurn | No
                 await conn.send_turn(turn, payload)
             await conn.finish(turn, {'type': 'done', 'text': '', 'latency_ms': 0})
             return
+        # V3 台前快环：委托接单 / 进度追问 / API 战况 / 验收反馈。
+        # 全部用配置样本或真实台账数据回答，不发第二次模型请求；慢环另起后台任务。
+        route = orchestrator.executive_route(text, executive)
+        if route is not None:
+            from .dialogue.orchestrator import store_message
+            store_message(conn.session_id, "user", text, mode)
+            await conn.send_turn(turn, {"type": "thinking"})
+            if route.get("text"):
+                await _present_reply(conn, turn, route["text"], parse_emotion(route["text"])[0])
+            else:
+                await conn.finish(turn, {"type": "done", "text": "", "latency_ms": 0})
+            kind = route.get("kind")
+            if kind == "delegation":
+                conn.spawn(_executive_delegate(route.get("brief") or text))
+            elif kind in ("accept", "reject"):
+                conn.spawn(_executive_finish(route.get("commission_id", ""), kind,
+                                             route.get("feedback") or text))
+            return
         if assistant.should_route(text, conn.session_id) or assistant.waiting_input(conn.session_id):
             from .dialogue.orchestrator import store_message, store_recent
             await conn.send_turn(turn, {"type": "thinking"})
@@ -721,6 +745,29 @@ async def _touch_reply(conn: Connection, revision: int, region: str) -> None:
         await _present_reply(conn, turn, line, detect_emotion(line))
     except asyncio.CancelledError:
         raise
+    except Exception:
+        return
+
+
+async def _executive_delegate(text: str) -> None:
+    """幕后慢环接单：组密件、选将、开局。任何失败都只在台账里留痕。
+
+    这一句跑在 spawn 出来的后台任务里，语音流早就说完"接单了"——
+    老板的时间不该花在等派单上。
+    """
+    try:
+        executive.delegate(text)
+    except Exception:
+        return
+
+
+async def _executive_finish(commission_id: str, action: str, feedback: str = "") -> None:
+    """收工归档 / 挑刺打回。打回会顺手把漏审点炼成新判例。"""
+    try:
+        if action == "accept":
+            executive.accept(commission_id)
+        else:
+            executive.reject(commission_id, feedback)
     except Exception:
         return
 
