@@ -276,16 +276,32 @@ class SpinningGuard:
         self._alerts: list[dict[str, Any]] = []
         self._tracked = max(4, int(max_tracked))
 
-    def observe(self, commission_id: str, signature: str, *, agent_id: str = "") -> dict[str, Any]:
-        history = self._recent.setdefault(commission_id, deque(maxlen=self.max_identical))
+    def observe(self, commission_id: str, signature: str, *, agent_id: str = "",
+                max_identical: int | None = None, channel: str = "") -> dict[str, Any]:
+        """记一次观测，返回是否跳闸。
+
+        `channel` 把不同来源的签名流分开计数（Worker 步骤 vs 上游 API 调用）：
+        混在同一个窗口里会互相顶掉重复计数，两种熔断都会失灵。告警里记的仍然
+        是真实 commission_id。
+        `max_identical` 让花名册里这一单的阈值生效；缺省用实例阈值。阈值变化时
+        重新开窗，不背着上一个配置的计数。
+        """
+        limit = self.max_identical if max_identical is None else int(max_identical)
+        if limit < 2:
+            raise ValueError("max_identical must be an integer >= 2")
+        key = f"{channel}:{commission_id}" if channel else commission_id
+        history = self._recent.get(key)
+        if history is None or history.maxlen != limit:
+            history = deque(maxlen=limit)
+            self._recent[key] = history
         if len(self._recent) > self._tracked:
             for stale in list(self._recent)[: len(self._recent) - self._tracked]:
                 self._recent.pop(stale, None)
         history.append(signature)
         repeats = 0
-        if len(history) == self.max_identical and len(set(history)) == 1:
-            repeats = self.max_identical
-        tripped = repeats == self.max_identical
+        if len(history) == limit and len(set(history)) == 1:
+            repeats = limit
+        tripped = repeats == limit
         if tripped:
             alert = {"commission_id": commission_id, "agent_id": agent_id,
                      "repeats": repeats, "signature": signature}
@@ -298,7 +314,10 @@ class SpinningGuard:
         return [dict(item) for item in self._alerts]
 
     def reset(self, commission_id: str) -> None:
-        self._recent.pop(commission_id, None)
+        """清空这一单的计数窗口（含各 channel）。告警历史不动——它要留在战况里。"""
+        for key in [item for item in self._recent
+                    if item == commission_id or item.endswith(f":{commission_id}")]:
+            self._recent.pop(key, None)
 
 
 class TelemetryGateway:

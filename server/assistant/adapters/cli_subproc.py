@@ -10,8 +10,10 @@
     {"type":"artifact","artifact":{...}}           最终产出，唯一终止事件
 
 非 JSON 行一律降级成 LOG 事件，绝不因为 Worker 多打印了一行废话就中断任务。
-`cancel` 杀整个进程组（start_new_session=True），避免子进程再 fork 出孙子进程
-变成孤儿——那是"中断了但没中断干净"的典型来源。
+`cancel` 杀整个进程组（POSIX）或进程树（Windows，taskkill /T），避免子进程再
+fork 出孙子进程变成孤儿——那是"中断了但没中断干净"的典型来源。
+超时是**一个**截止时间，管住读 stdout、等退出、流处理的全部过程：子进程捏着
+一行不换行、或者一直吐不换行的输出，都逃不过它。
 """
 from __future__ import annotations
 
@@ -19,11 +21,11 @@ import asyncio
 import contextlib
 import json
 import os
-import signal
 from typing import Any, AsyncIterator
 
 from .base import (ARTIFACT, ERROR, LOG, PROGRESS, TOKEN, AdapterError,
-                   BaseWorkerAdapter, artifact_event, make_event)
+                   BaseWorkerAdapter, artifact_event, make_event,
+                   terminate_process_group)
 from .registry import register_adapter
 
 DEFAULT_TIMEOUT = 600.0
@@ -83,6 +85,10 @@ class CliSubprocessAdapter(BaseWorkerAdapter):
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.STDOUT,
                 start_new_session=True,
+                # asyncio 的 readline() 自带 64KiB 流上限，超了直接抛 ValueError。
+                # 把流上限对齐 MAX_LINE：之内的行整行返回（再由下面的截断兜底），
+                # 之外的走降级分支——Worker 多打印一行废话不该炸掉整单。
+                limit=MAX_LINE,
             )
         except FileNotFoundError as exc:
             raise AdapterError(f"executable not found: {executable}") from exc
@@ -90,9 +96,28 @@ class CliSubprocessAdapter(BaseWorkerAdapter):
             raise AdapterError(f"failed to start subprocess: {type(exc).__name__}") from exc
 
         assert self._process.stdout is not None
+        # 一个截止时间管住整个生命周期。旧实现只给最后的 wait() 包了超时，
+        # 子进程只要不输出换行（或一直输出不结束），readline() 这里就能把
+        # 整个派单挂死——配的 timeout 永远走不到。
+        loop = asyncio.get_running_loop()
+        deadline = loop.time() + max(0.1, timeout)
         try:
             while True:
-                raw = await self._process.stdout.readline()
+                if self._cancelled:
+                    return  # 已经中断：管道里残留的事件不再往外吐
+                remaining = deadline - loop.time()
+                if remaining <= 0:
+                    raise asyncio.TimeoutError()
+                try:
+                    raw = await asyncio.wait_for(self._process.stdout.readline(), remaining)
+                except asyncio.TimeoutError:
+                    raise  # 读 stdout 也算执行时间，不是"还没开始干活"
+                except ValueError:
+                    # 单行超过 MAX_LINE：readline() 已把这一行从缓冲区清掉，降级成
+                    # 一条 log 继续听，不当成适配器故障。
+                    step_idx += 1
+                    yield make_event(LOG, step_idx=step_idx, text="（超长行已丢弃）")
+                    continue
                 if not raw:
                     break
                 if len(raw) > MAX_LINE:
@@ -106,7 +131,10 @@ class CliSubprocessAdapter(BaseWorkerAdapter):
                     yield event
                     if event["type"] in (ARTIFACT, ERROR):
                         return
-            return_code = await asyncio.wait_for(self._process.wait(), timeout=max(1.0, timeout))
+            remaining = deadline - loop.time()
+            if remaining <= 0:
+                raise asyncio.TimeoutError()
+            return_code = await asyncio.wait_for(self._process.wait(), remaining)
             if self._cancelled:
                 return
             if return_code != 0:
@@ -118,20 +146,9 @@ class CliSubprocessAdapter(BaseWorkerAdapter):
             await self._reap()
 
     async def cancel(self) -> None:
-        """杀整个进程组并回收。幂等：重复调用只发一次信号。"""
+        """杀整个进程组并回收。幂等：重复调用只发一次信号，绝不抛异常。"""
         self._cancelled = True
-        process = self._process
-        if process is None or process.returncode is not None:
-            return
-        with contextlib.suppress(ProcessLookupError, PermissionError, OSError):
-            os.killpg(os.getpgid(process.pid), signal.SIGTERM)
-        with contextlib.suppress(Exception):
-            await asyncio.wait_for(process.wait(), 5.0)
-        if process.returncode is None:
-            with contextlib.suppress(ProcessLookupError, PermissionError, OSError):
-                os.killpg(os.getpgid(process.pid), signal.SIGKILL)
-            with contextlib.suppress(Exception):
-                await asyncio.wait_for(process.wait(), 5.0)
+        await terminate_process_group(self._process)
 
     @staticmethod
     def _parse_line(line: str, step_idx: int) -> dict[str, Any] | None:

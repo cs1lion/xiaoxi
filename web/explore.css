@@ -1,15 +1,15 @@
 /* Disposable sandbox skin. All canvas rules require explicit experiment attributes. */
-.explore-launcher { position:fixed; right:18px; top:86px; z-index:4; border-radius:24px; background:var(--panel); color:var(--accent); box-shadow:0 4px 20px #24303d18; font-size:12px; }
-.explore-dialog { position:fixed; margin:0; inset:18px 18px auto auto; width:min(410px,calc(100vw - 36px)); max-height:calc(100dvh - 36px); overflow:auto; border:1px solid #d3dacb; border-radius:20px; padding:22px; background:#fffefa; color:#303d36; box-shadow:0 20px 90px #15212f30; }
+.explore-launcher { position:fixed; right:18px; top:86px; z-index:4; border-radius:var(--r-chip); background:var(--panel); color:var(--accent); box-shadow:0 4px 20px #24303d18; font-size:13px; }
+.explore-dialog { position:fixed; margin:0; inset:18px 18px auto auto; width:min(410px,calc(100vw - 36px)); max-height:calc(100dvh - 36px); overflow:auto; border:1px solid #d3dacb; border-radius:var(--r-panel); padding:22px; background:#fffefa; color:#303d36; box-shadow:0 20px 90px #15212f30; }
 .explore-dialog::backdrop { background:#18241c24; }
 .explore-header { display:flex; align-items:center; gap:12px; }.explore-header h2 { font-size:17px; margin:0; flex:1; }
-.explore-dialog button,.explore-dialog select,.explore-dialog textarea { font:13px/1.6 system-ui,'Microsoft YaHei',sans-serif; color:#303d36; background:#f7f8f1; border:1px solid #d3dacb; border-radius:10px; padding:10px; min-height:44px; }
-.explore-dialog button:hover { background:#e7eddf; }.explore-dialog label { display:block; font-size:12px; margin:12px 0; }
+.explore-dialog button,.explore-dialog select,.explore-dialog textarea { font:13px/1.6 system-ui,'Microsoft YaHei',sans-serif; color:#303d36; background:#f7f8f1; border:1px solid #d3dacb; border-radius:var(--r-control); padding:10px; min-height:44px; }
+.explore-dialog button:hover { background:#e7eddf; }.explore-dialog label { display:block; font-size:13px; margin:12px 0; }
 .explore-dialog select,.explore-dialog textarea { display:block; width:100%; margin-top:6px; }.explore-dialog textarea { resize:vertical; }
-.explore-description { font-size:12px; line-height:1.8; color:#5f6b61; }.explore-status { font-size:12px; color:#456e54; min-height:3em; }
-.explore-dialog fieldset { border:1px solid #d3dacb; border-radius:12px; margin-top:18px; padding:8px 12px; }
-.explore-dialog legend { font-size:12px; }.explore-dialog .explore-effect { display:flex; align-items:flex-start; gap:10px; }
-.explore-effect input { accent-color:#456e54; min-height:0; margin-top:5px; }.explore-effect small { display:block; color:#5f6b61; font-size:11px; margin-top:4px; }
+.explore-description { font-size:13px; line-height:1.8; color:#5f6b61; }.explore-status { font-size:13px; color:#456e54; min-height:3em; }
+.explore-dialog fieldset { border:1px solid #d3dacb; border-radius:var(--r-control); margin-top:18px; padding:8px 12px; }
+.explore-dialog legend { font-size:13px; }.explore-dialog .explore-effect { display:flex; align-items:flex-start; gap:10px; }
+.explore-effect input { accent-color:#456e54; min-height:0; margin-top:5px; }.explore-effect small { display:block; color:#5f6b61; font-size:13px; margin-top:4px; }
 .explore-actions { display:grid; gap:8px; margin:16px 0; }
 [data-explore-tone=desk] { --bg:#f8f0df; --panel:#fffaf0; --line:#ddd1b9; --text:#453b2d; --muted:#73624e; --accent:#766140; --accent-2:#905a33; }
 [data-explore-tone=desk] .side { background:#eee3cc; }[data-explore-tone=desk] .stage { background:var(--bg); }[data-explore-tone=desk] .msg.user { background:#e9dec2; }
@@ -37,5 +37,5 @@
  [data-fx-spring] .suggestions button:hover,[data-fx-spring] #sendBtn:hover { animation:explore-pop .38s both; }
 }
 @keyframes explore-pop { 0% { transform:scale(1); } 45% { transform:scale(1.035,.975); } 75% { transform:scale(.992,1.008); } 100% { transform:scale(1); } }
-@media(max-width:760px) { .explore-launcher { top:76px; right:12px; min-height:34px; padding:5px 10px; font-size:11px; }.explore-dialog { inset:12px 12px auto; width:calc(100vw - 24px); max-height:calc(100dvh - 24px); padding:18px; }.explore-dialog select,.explore-dialog textarea { font-size:16px; } }
+@media(max-width:760px) { .explore-launcher { top:76px; right:12px; min-height:34px; padding:5px 10px; font-size:13px; }.explore-dialog { inset:12px 12px auto; width:calc(100vw - 24px); max-height:calc(100dvh - 24px); padding:18px; }.explore-dialog select,.explore-dialog textarea { font-size:16px; } }
 @media(prefers-reduced-motion:reduce) { [data-fx-spring] button { animation:none!important; } }

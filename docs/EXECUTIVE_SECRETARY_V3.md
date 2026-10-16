@@ -75,13 +75,15 @@ V2 把阿栖（小溪）做成了一个有记忆、会自省的头脑。V3 把�
 
 | 意图 | 识别函数 | 台前动作 | 异步副作用 |
 |---|---|---|---|
-| 委托 Delegation | `delegation_intent()` | 从 `response_examples.json` 的 `commission_accept` 取一句，走 `mumble` 气泡 | `ExecutiveService.delegate()` 后台组密件 |
+| 委托 Delegation | `delegation_intent()` | 从 `response_examples.json` 的 `commission_accept` 取一句，走 `mumble` 气泡 | `ExecutiveService.delegate()` 后台组密件**并驱动执行体跑完**（服务端唯一的执行所有权） |
 | 进度追问 | `progress_query_intent()` | 一句话结论，取自 Commission 台账 | 无 |
 | 验收反馈 | `acceptance_intent()` | `accept` 归档 / `reject` 打回并认领漏审 | `reject` 触发 Eval 自进化 |
 | API 战况查询 | `telemetry_query_intent()` | `telemetry_bottleneck_report()` 生成微毒舌瓶颈分析 | 无 |
 
 **失败模式：** 接单句取不到样本时必须静默退回普通对话，不许硬编一句"好的收到"冒充人格样本。
 后台 `delegate()` 抛任何异常都不能让这一轮语音失败——它只会在台账里留下失败事件。
+执行体跑多久都在这个后台任务里收尾（`conn.spawn`），不占语音轮次；同一 commission 同时只允许一个
+执行体，重复点击、重试、并发 `/run` 都由执行权租约挡掉，不会开出两份工。
 
 ### 2.2 幕后慢环（`server/assistant/dispatcher.py`）
 
@@ -152,7 +154,7 @@ V2 把阿栖（小溪）做成了一个有记忆、会自省的头脑。V3 把�
         │     token    → 落一条 telemetry span
         │     artifact → 流结束后交初审室
         │     error    → 记下并中止
-        └── cancel()           → 杀整个进程组并回收
+        └── cancel()           → 杀整个进程组/进程树并回收（跨平台）
 ```
 
 新增一种干活方式（新的 CLI、新的 MCP Server、新的远端服务）只需在 `adapters/` 下加一个
@@ -163,7 +165,7 @@ V2 把阿栖（小溪）做成了一个有记忆、会自省的头脑。V3 把�
 三条执行期的底线：
 
 1. **适配器起不来、抛异常、或鬼打墙熔断，一律先 `cancel()` 回收，再转 BLOCKED 请示老板。** 绝不假装执行过。
-2. **`manual` 是诚实的缺省。** 没配执行体的 Agent 只组密件，跑完转 BLOCKED 说清"没交差"，不伪造 artifact。
+2. **`manual` 是诚实的缺省。** 没配执行体的 Agent 只组密件，直接以 error 收尾转 BLOCKED，请示里写清"没有配置执行体"，不伪造 artifact、不假装在干活。
 3. **遥测记不上只当这次不计入战况**，不带崩执行。
 
 ### 2.5 自进化初审室（`server/assistant/evaluator.py`）

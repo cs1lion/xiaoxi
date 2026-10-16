@@ -27,13 +27,14 @@ def load_transport():
     path = Path(__file__).resolve().parents[1] / "server" / "app.py"
     tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
     nodes = [node for node in tree.body if isinstance(node, (ast.ClassDef, ast.AsyncFunctionDef))
-             and node.name in {"VoiceTurn", "Connection", "_run_turn"}]
+             and node.name in {"VoiceTurn", "Connection", "_run_turn", "_present_reply",
+                               "_maybe_diary", "_executive_delegate", "_executive_finish"}]
     env = dict(asyncio=asyncio, base64=base64, json=json, time=time, uuid=uuid,
                Any=Any, WebSocket=Socket, settings=SimpleNamespace(tts_default_emotion="base"),
                EMOTIONS=("base", "认真"),
                assistant=SimpleNamespace(should_route=lambda _, session_id='': False,
                                          waiting_input=lambda _: False),
-              executive=None)
+              executive=None, manager=SimpleNamespace(enabled=False))
     exec(compile(ast.Module(body=nodes, type_ignores=[]), str(path), "exec"), env)
     return env
 
@@ -61,7 +62,7 @@ class SpeechPerformanceRouteTests(unittest.IsolatedAsyncioTestCase):
             yield {"type": "thinking"}
             yield audio
             yield {"type": "done", "text": audio["text"], "emotion": "认真"}
-        self.env["orchestrator"] = SimpleNamespace(stream_respond=stream, executive_route=lambda text, executive=None: None)
+        self.env["orchestrator"] = SimpleNamespace(stream_respond=stream, executive_route=lambda text, executive=None, memory_enabled=False: None)
         turn = await self.conn.begin("semantic-turn")
         await self.env["_run_turn"](self.conn, "详细解释", "voice", turn)
         self.assertEqual([e["type"] for e in self.socket.events], ["thinking", "audio", "done"],
@@ -85,7 +86,7 @@ class SpeechPerformanceRouteTests(unittest.IsolatedAsyncioTestCase):
             await release.wait()
             yield self.audio_event()
             yield {"type": "done", "text": "late text"}
-        self.env["orchestrator"] = SimpleNamespace(stream_respond=stream, executive_route=lambda text, executive=None: None)
+        self.env["orchestrator"] = SimpleNamespace(stream_respond=stream, executive_route=lambda text, executive=None, memory_enabled=False: None)
         turn = await self.conn.begin("old")
         running = asyncio.create_task(self.env["_run_turn"](self.conn, "解释", "voice", turn))
         await asyncio.wait_for(waiting.wait(), 2)
@@ -101,7 +102,7 @@ class SpeechPerformanceRouteTests(unittest.IsolatedAsyncioTestCase):
             produced.set()
             yield self.audio_event()
             yield {"type": "done", "text": "late text"}
-        self.env["orchestrator"] = SimpleNamespace(stream_respond=stream, executive_route=lambda text, executive=None: None)
+        self.env["orchestrator"] = SimpleNamespace(stream_respond=stream, executive_route=lambda text, executive=None, memory_enabled=False: None)
         turn = await self.conn.begin("old")
         await self.conn.send_lock.acquire()
         running = asyncio.create_task(self.env["_run_turn"](self.conn, "解释", "voice", turn))
@@ -119,7 +120,7 @@ class SpeechPerformanceRouteTests(unittest.IsolatedAsyncioTestCase):
         async def stream(**kwargs):
             yield audio
             yield {"type": "done", "text": audio["text"]}
-        self.env["orchestrator"] = SimpleNamespace(stream_respond=stream, executive_route=lambda text, executive=None: None)
+        self.env["orchestrator"] = SimpleNamespace(stream_respond=stream, executive_route=lambda text, executive=None, memory_enabled=False: None)
         await self.env["_run_turn"](self.conn, "解释", "voice")
         wire = next(e for e in self.socket.events if e["type"] == "audio")
         self.assertNotIn("word_timings", wire)

@@ -70,7 +70,11 @@ def load_ws():
     # 后台函数，被 _run_turn / _proactive_check / websocket_endpoint 引用；编译进来
     # 后它们在隔离环境里经自有 try/except 自然降级（懒导入失败即返回），否则调用处
     # 会 NameError 并被 _proactive_check 的 except 吞掉，proactive 流程静默中止。
-    names = {"VoiceTurn", "Connection", "_present_reply", "_confirm_action", "_run_turn", "_transcribe_turn", "_proactive_check", "websocket_endpoint", "proactive_socket", "_maybe_diary", "_maybe_self_evolution", "_narrate_turn"}
+    # _executive_delegate / _executive_finish / _touch_reply 同理：V3 派单收工与
+    # 摸头回应被 _run_turn / websocket_endpoint spawn，隔离环境里 executive=None、
+    # 懒导入失败，两者都落进自身 except 安全返回，但名字必须编译进来才不至于
+    # 在调用点炸 NameError 把整轮语音流程带崩（done 事件永不到达 → 超时）。
+    names = {"VoiceTurn", "Connection", "_present_reply", "_confirm_action", "_run_turn", "_transcribe_turn", "_proactive_check", "websocket_endpoint", "proactive_socket", "_maybe_diary", "_maybe_self_evolution", "_narrate_turn", "_node_snippet", "_aqi_action", "_executive_delegate", "_executive_finish", "_touch_reply"}
     nodes = []
     for node in tree.body:
         if isinstance(node, (ast.ClassDef, ast.AsyncFunctionDef)) and node.name in names:
@@ -82,6 +86,11 @@ def load_ws():
     spec = importlib.util.spec_from_file_location('isolated_reply_delivery', path.parent / 'dialogue' / 'delivery.py')
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
+    # 协议 §23：aqi_blocks 组装器无相对导入（纯 stdlib），隔离环境直接装真身，
+    # 快环积木随路下发与 aqi_action 回传都在真实实现上验证。
+    blocks_spec = importlib.util.spec_from_file_location('isolated_aqi_blocks', path.parent / 'dialogue' / 'aqi_blocks.py')
+    blocks_module = importlib.util.module_from_spec(blocks_spec)
+    blocks_spec.loader.exec_module(blocks_module)
     env = dict(asyncio=asyncio, base64=base64, json=json, time=time, uuid=uuid,
                Any=Any, np=np, WebSocket=FakeSocket, WebSocketDisconnect=Disconnect,
                settings=SimpleNamespace(audio_sample_rate=16000, tts_default_emotion="base"),
@@ -90,11 +99,18 @@ def load_ws():
                    key: {} for key in ("base", "调侃", "得意", "认真", "收敛", "轻微不服", "变小气")}},
                store=SimpleNamespace(start_session=lambda _: None, end_session=lambda _: None),
                llm=SimpleNamespace(aclose=noop), manager=SimpleNamespace(enabled=True),
+               # 打磨轮：_proactive_check 的有声 mumble 分支改用模块级导入，
+               # 隔离环境注入内存假实现即可验证整条真声链路。
+               detect_emotion=lambda text: "base",
+               store_message=lambda *args, **kwargs: None,
+               commission_accept_line=lambda: "收工快乐。",
                assistant=SimpleNamespace(should_route=lambda _, session_id='': False, waiting_input=lambda _: None),
               # V3 内阁总管接缝：隔离环境不装配 ExecutiveService，路由函数返回 None，
               # _run_turn 的总管分支因此整段跳过，既有语音路径逐字节不变。
               executive=None,
                tts=SimpleNamespace(engine='silent'), deliver_reply=module.deliver_reply,
+               aqi_blocks_message=blocks_module.aqi_blocks_message,
+               note_snippet=blocks_module.note_snippet,
                to_wav_bytes=lambda audio, rate: audio.tobytes())
     exec(compile(ast.Module(body=nodes, type_ignores=[]), str(path), "exec"), env)
     return env
@@ -127,7 +143,7 @@ class VoiceTurnTests(unittest.IsolatedAsyncioTestCase):
         self.env["recognizer"] = SimpleNamespace(transcribe_wav=transcribe)
         self.env["orchestrator"] = SimpleNamespace(stream_respond=stream, proactive_turn=proactive,
                                                    state={"proactivity_enabled": False}, set_proactivity=lambda _: None,
-                                                   executive_route=lambda text, executive=None: None)
+                                                   executive_route=lambda text, executive=None, memory_enabled=False: None)
         self.ws = FakeSocket()
         self.endpoint = asyncio.create_task(self.env["websocket_endpoint"](self.ws))
         await self.ws.wait("ready")
@@ -339,6 +355,34 @@ class VoiceTurnTests(unittest.IsolatedAsyncioTestCase):
         event = await self.ws.wait("turn_started")
         self.assertEqual(event["source"], "proactive")
         await self.ws.wait("done", event["turn_id"])
+
+    async def test_voiced_mumble_icebreaker_uses_shared_voice_path(self):
+        """灵动伴随 + 空闲到达首次阈值（25~30s）：冷启动破冰兜底产出有声 mumble，
+        连接级气泡先到，随后经 deliver_reply 真声链路完成整轮（静音 TTS 下有文本无音频）。"""
+        stored = []
+        self.env["store_message"] = lambda *args, **kwargs: stored.append(args)
+
+        async def silent_proactive(**kwargs):
+            return None
+
+        self.env["orchestrator"].proactive_turn = silent_proactive
+        self.env["orchestrator"].ambient_event = lambda **kwargs: {
+            "type": "mumble", "event_id": "mu_ice", "text": "你停在那儿快两分钟了哦。",
+            "voice": True, "trigger_reason": "icebreaker_28s",
+            "source_refs": ["config:response_examples.json"], "interactive": True,
+            "dedupe_key": "mu_ice", "expires_at": time.time() + 60,
+            "bubble": {"text": "你停在那儿快两分钟了哦。", "ttl_ms": 60000}}
+        self.ws.send("proactive_check")
+        bubble = await self.ws.wait("mumble")
+        self.assertTrue(bubble["voice"], "主动搭话默认真声（mumble_voice: true）")
+        self.assertEqual(bubble["source_refs"], ["config:response_examples.json"])
+        started = await self.ws.wait("turn_started")
+        self.assertEqual(started["source"], "mumble")
+        done = await self.ws.wait("done", started["turn_id"])
+        self.assertEqual(done["text"], "你停在那儿快两分钟了哦。")
+        self.assertEqual(done["delivery"]["text_status"], "complete")
+        self.assertEqual(done["delivery"]["audio_status"], "none")  # 静音 TTS：文本完整，可恢复
+        self.assertEqual(stored[-1][1:], ("assistant", "你停在那儿快两分钟了哦。", "mumble"))
 
     async def test_late_proactive_cannot_replace_user(self):
         started, release, returned = [asyncio.Event() for _ in range(3)]

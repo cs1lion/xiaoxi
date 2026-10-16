@@ -1,6 +1,8 @@
 /* V2 微光想法气泡状态机（协议 §16.2）。纯逻辑、零 DOM，便于 node 单测；
  * 真正渲染由 app.js 把回调接到 DOM。mumble 气泡可展开（带上下文接话）、
- * 可关闭、可自然消散；event_id 去重，重连不重复弹。 */
+ * 可关闭、可自然消散；event_id 去重，重连不重复弹。
+ * Voice-First 打磨轮（协议 §23）：update() 让同一枚气泡跟随流式句子刷新，
+ * 可选延寿——去文字框化后，小溪的口头台词就住在这一枚头顶微光里。 */
 
 export function createGlimmer({ onExpand, onDismiss, onExpire } = {}) {
   let status = "hidden"; // hidden | visible | expanded
@@ -28,6 +30,16 @@ export function createGlimmer({ onExpand, onDismiss, onExpire } = {}) {
       const context = { text: current.text, source_refs: current.source_refs };
       if (typeof onExpand === "function") onExpand(context);
       return context;
+    },
+    update(text, ttlMs) {
+      // 同一枚气泡换文（流式口头台词）；可选 ttlMs 顺延自然消散。
+      if (status === "hidden" || !current) return false;
+      if (typeof text !== "string" || !text.trim()) return false;
+      current.text = text;
+      if (typeof ttlMs === "number" && Number.isFinite(ttlMs) && ttlMs > 0) {
+        current.expires_at = Date.now() + ttlMs;
+      }
+      return true;
     },
     dismiss() {
       if (status === "hidden") return false;

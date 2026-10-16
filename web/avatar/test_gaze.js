@@ -33,6 +33,7 @@ const gazeTargets = {
   mic: { x: -0.34, y: 0.20, drift: 0.06 },
   think: { x: 0.62, y: -0.36, drift: 0.17 },
   down: { x: -0.18, y: 0.54, drift: 0.09 },
+  side: { x: -0.50, y: 0.10, drift: 0.05 },
 };
 const makeIdle = (extra = {}) => new IdleDriver({ gaze: { targets: gazeTargets }, ...extra });
 

@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from typing import Any, AsyncIterator
 
-from .base import LOG, BaseWorkerAdapter, make_event
+from .base import ERROR, BaseWorkerAdapter, make_event
 from .registry import register_adapter
 
 
@@ -32,7 +32,9 @@ class ManualAdapter(BaseWorkerAdapter):
 
     async def execute(self, task_spec: dict[str, Any]) -> AsyncIterator[dict[str, Any]]:
         agent_name = self.config.get("name") or self.config.get("id") or "未命名 Agent"
-        yield make_event(LOG, step_idx=0,
+        # 没有执行体就不是"干活中"：直接以 error 收尾，派单方据此转 BLOCKED，
+        # 请示里写的是"没有执行体"这句实话，而不是"它跑完了但没交差"。
+        yield make_event(ERROR, step_idx=0,
                          text=f"{agent_name} 没有配置执行体，本单不会自动执行。")
 
     async def cancel(self) -> None:

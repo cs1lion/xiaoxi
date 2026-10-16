@@ -1,1 +1,2 @@
-.interaction-state{font-size:11px;color:var(--muted);text-align:center;margin:2px 0 8px;min-height:17px;flex-shrink:0}
+/* 状态字样只在顶栏 .connection 出现一处（评审去重）；本元素保留给读屏与既有钩子 */
+.interaction-state{position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0 0 0 0);clip-path:inset(50%);white-space:nowrap;border:0}

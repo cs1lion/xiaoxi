@@ -91,18 +91,25 @@ class ExecutiveService:
 
     def dispatch(self, commission_id: str, *, intent: str = "") -> dict[str, Any]:
         commission, packet = self.dispatcher.dispatch(commission_id, intent=intent)
-        return {"commission": commission, "packet": packet.as_dict()}
+        return {"commission": commission, "packet": packet.as_stored()}
 
     def start(self, commission_id: str) -> dict[str, Any]:
         return self.dispatcher.start(commission_id)
 
-    def delegate(self, text: str, *, thread_id: str = "") -> dict[str, Any]:
-        """后台接单：open -> dispatch -> start。任何一步失败都留痕，不向外抛。"""
+    async def delegate(self, text: str, *, thread_id: str = "") -> dict[str, Any]:
+        """后台接单：open -> dispatch -> start -> 驱动执行体跑完。
+
+        执行所有权在这里：正常委派由服务端自己驱动到终态，调用方不需要
+        （也不能）只派不跑。任何一步失败都只在台账里留痕，不向外抛——
+        语音轮次早就说完"接单了"，不该被慢环拖住，更不该被它带崩。
+        """
         title = (text or "").strip()[:80] or "未命名督办"
         commission = self.dispatcher.open(title, text or "", thread_id)
         try:
             self.dispatcher.dispatch(commission["id"], intent=text or "")
             commission = self.dispatcher.start(commission["id"])
+            await self._drive(commission["id"])
+            commission = self.ledger.get(commission["id"])
         except LookupError:
             # 选不出将：先承认进了组密件阶段，再带一句请示转 BLOCKED。
             # 只用协议 §19 里写明的迁移，不为了顺手新开一条边。
@@ -114,6 +121,17 @@ class ExecutiveService:
             commission = self.ledger.get(commission["id"])
         return {"commission_id": commission["id"], "status": commission["status"],
                 "agent_id": commission["agent_id"], "agent_name": self._agent_name(commission["agent_id"])}
+
+    async def _drive(self, commission_id: str) -> None:
+        """驱动执行体跑完这一单。
+
+        失败已经在台账里转成 BLOCKED 并留下请示，这里不再外抛：调用方（语音
+        后台任务 / REST 路由）没有能力处理慢环故障，重复抛一次只是把栈打厚。
+        """
+        try:
+            await self.run_commission(commission_id)
+        except Exception:
+            return
 
     def _agent_name(self, agent_id: str) -> str:
         for worker in roster_agents(self.evaluator.roster):
@@ -164,19 +182,29 @@ class ExecutiveService:
         return self.ledger.list_commissions("ready_to_report", 20)
 
     # ---------- 老板动作 ----------
-    def answer(self, commission_id: str, answer: str = "") -> dict[str, Any]:
+    async def answer(self, commission_id: str, answer: str = "") -> dict[str, Any]:
+        """BLOCKED -> RUNNING，并驱动执行体接着跑完。
+
+        答完不接着跑，票就又躺回 running 没人管——和"派了不跑"是同一个坑，
+        只是换了个入口。返回值是驱动之后的真实状态。
+        """
         commission, reply, auto = self.dispatcher.answer(commission_id, answer)
-        return {"commission": commission, "reply": reply, "auto_answered": auto}
+        await self._drive(commission["id"])
+        return {"commission": self.commission(commission["id"]), "reply": reply,
+                "auto_answered": auto}
 
     def submit(self, commission_id: str, artifact: dict[str, Any]) -> dict[str, Any]:
-        usage = self.telemetry.store.commission_usage(commission_id)
-        alerts = [item for item in self.telemetry.guard.alerts() if item["commission_id"] == commission_id]
-        spinning = {"tripped": bool(alerts), "repeats": alerts[-1]["repeats"]} if alerts else None
-        commission, verdict = self.dispatcher.submit(commission_id, artifact, usage=usage, spinning=spinning)
+        usage, spinning = self.dispatcher.audit_inputs(commission_id)
+        commission, verdict = self.dispatcher.submit(commission_id, artifact, usage=usage,
+                                                     spinning=spinning)
         return {"commission": commission, "verdict": verdict}
 
     def accept(self, commission_id: str) -> dict[str, Any]:
         return self.dispatcher.accept(commission_id)
+
+    def reassign(self, commission_id: str) -> dict[str, Any]:
+        """换将重派（协议 §23.3）：BLOCKED -> RUNNING 并重新选将。"""
+        return self.dispatcher.reassign(commission_id)
 
     def reject(self, commission_id: str, boss_feedback: str) -> dict[str, Any]:
         commission, rubric, boss_reject_count = self.dispatcher.reject(commission_id, boss_feedback)

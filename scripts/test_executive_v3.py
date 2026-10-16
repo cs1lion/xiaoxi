@@ -19,6 +19,9 @@ os.environ["DB_PATH"] = ":memory:"
 
 from server.assistant.dispatcher import (BriefingPacket, Dispatcher, roster_agents,  # noqa: E402
                                           select_agent)
+from server.assistant.adapters import register_adapter  # noqa: E402
+from server.assistant.adapters.base import (BaseWorkerAdapter, artifact_event,  # noqa: E402
+                                            make_event, token_event)
 from server.assistant.evaluator import (EvalRubricStore, Evaluator, extract_triggers,  # noqa: E402
                                         load_roster, scold)
 from server.assistant.executive import ExecutiveService  # noqa: E402
@@ -28,7 +31,9 @@ from server.assistant.telemetry import (SpinningGuard, TelemetryGateway, Telemet
 from server.dialogue import ambient  # noqa: E402
 from server.dialogue.orchestrator import (acceptance_intent, commission_accept_line,  # noqa: E402
                                           delegation_intent, progress_query_intent,
-                                          stage_sample_line, telemetry_bottleneck_report,
+                                          notes_view_intent, stage_sample_line,
+                                          starmap_view_intent,
+                                          telemetry_bottleneck_report,
                                           telemetry_query_intent)
 from server.interaction.threads import CommissionStore  # noqa: E402
 
@@ -64,10 +69,96 @@ GOOD_ARTIFACT = {
     "touched_ui": ["drawer"],
 }
 
+DEFAULT_STUB_EVENTS = [
+    make_event("progress", step_idx=1, text="读完派单密件，开始整理"),
+    token_event(model="stub-model", prompt_tokens=1200, completion_tokens=200,
+                ttft_ms=90, duration_ms=400, status_code=200),
+    artifact_event(GOOD_ARTIFACT),
+]
 
-def build_service() -> ExecutiveService:
+
+class StubAdapter(BaseWorkerAdapter):
+    """测试用执行体：事件表挂类上（Dispatcher 每次新建实例），并充当记录仪。"""
+
+    adapter_type = "stub"
+    instances: list["StubAdapter"] = []
+    default_events = list(DEFAULT_STUB_EVENTS)
+
+    def __init__(self, config: dict | None = None):
+        super().__init__(config)
+        type(self).instances.append(self)
+        self.prepared: list[dict] = []
+        self.cancelled = 0
+
+    async def prepare_context(self, commission_id: str, briefing_packet: dict) -> dict:
+        self.prepared.append(dict(briefing_packet or {}))
+        return {"commission_id": commission_id, "env": {"STUB": "1"}}
+
+    async def execute(self, task_spec: dict):
+        for event in type(self).default_events:
+            yield event
+
+    async def cancel(self) -> None:
+        self.cancelled += 1
+
+
+register_adapter("stub", StubAdapter)
+
+STUB_AGENT = {
+    "id": "stub", "name": "stub 工", "adapter": "stub",
+    "strengths": ["整理", "mock产出"], "weaknesses": [], "cost_tier": "cheap",
+    "max_concurrent": 2,
+    "eval_commands": ["required_fields", "artifacts_exist", "wired_not_dry",
+                      "no_topbar_button", "token_budget"],
+}
+
+
+class NotesStub:
+    def search(self, query):
+        return [{"id": "n_1", "version": 7, "title": "七月选题"}]
+
+
+class ThreadsStub:
+    def list_threads(self):
+        return [{"id": "t_1", "title": "选题会", "status": "open"}]
+
+
+class HugeNotesStub:
+    """顶格记忆：8 条长正文，逼着 memory_block 去撞台账的 8000 字符上限。"""
+
+    def search(self, query):
+        return [{"id": f"n_{index}", "version": 3, "title": "七月选题",
+                 "body": "题" * 260} for index in range(8)]
+
+
+class HugeThreadsStub:
+    def list_threads(self):
+        return [{"id": f"t_{index}", "title": "选题会", "status": "open",
+                 "body": "事" * 260} for index in range(8)]
+
+
+class HugePreferenceStore:
+    def list_claims(self):
+        return [{"dimension": f"维度{index}", "value": "值" * 120} for index in range(8)]
+
+
+def build_service(**kwargs) -> ExecutiveService:
     directory = Path(tempfile.mkdtemp(prefix="executive-v3-"))
-    return ExecutiveService(directory, roster=load_roster())
+    return ExecutiveService(directory, roster=load_roster(), **kwargs)
+
+
+def build_stub_service(events=None, **kwargs) -> ExecutiveService:
+    """带 stub 执行体的台账：验证"派单之后真的有人干活"的那条链路。
+
+    花名册里只留 stub 一个 Agent：选将打分是另一条链路的测试，这里不该掺进
+    "哪个关键词更亮"的运气——否则 stub 能不能被选中取决于便笺里有没有错别字。
+    """
+    StubAdapter.default_events = list(events or DEFAULT_STUB_EVENTS)
+    StubAdapter.instances = []
+    base = load_roster()
+    base["agents"] = [dict(STUB_AGENT)]
+    directory = Path(tempfile.mkdtemp(prefix="executive-v3-stub-"))
+    return ExecutiveService(directory, roster=base, **kwargs)
 
 
 def test_commission_state_machine() -> None:
@@ -122,6 +213,36 @@ def test_briefing_packet() -> None:
     check("前端活派给营造匠", picked["agent_id"] == "builder", picked["agent_id"])
     check("检索活派给探马", select_agent(load_roster(), "帮我检索查一下这份资料", {})[0]["id"] == "scout")
     service.close()
+
+
+def test_memory_block_survives_serialization() -> None:
+    print("[memory block end to end]")
+    service = build_service(notes=NotesStub(), threads=ThreadsStub(),
+                            preference_store=HugePreferenceStore())
+    commission = service.open("整理便笺", "把《七月选题》理成三版标题")
+    packet = service.dispatch(commission["id"], intent="整理便笺标题")["packet"]
+    check("序列化后 memory_block 还在", bool(packet.get("memory_block")))
+    check("记忆段仍带不可信取景框", packet["memory_block"].startswith("【不可信派单资料"))
+    stored = service.commission(commission["id"])["packet"]
+    check("落库的密件也带 memory_block", bool(stored.get("memory_block")))
+    check("稳定引用同时在", len(stored.get("memory_refs", [])) >= 2)
+    service.close()
+
+    empty = build_service()
+    other = empty.open("整理便笺", "把《七月选题》理成三版标题")
+    blank = empty.dispatch(other["id"], intent="整理便笺标题")["packet"]
+    check("空记忆时键在、值为空", blank.get("memory_block") == "" and "memory_block" in blank)
+    empty.close()
+
+    # 顶格记忆：丢正文保引用，派单不许因为记忆太多而失败
+    huge = build_service(notes=HugeNotesStub(), threads=HugeThreadsStub(),
+                         preference_store=HugePreferenceStore())
+    third = huge.open("整理便笺", "把《七月选题》理成三版标题")
+    big = huge.dispatch(third["id"], intent="整理便笺标题")["packet"]
+    check("记忆顶格时派单仍然成功", big["agent_id"] == "scribe")
+    check("记忆顶格时丢掉正文", "memory_block" not in big)
+    check("记忆顶格时保留引用", len(big.get("memory_refs", [])) >= 8)
+    huge.close()
 
 
 def test_roster_selection_and_capacity() -> None:
@@ -319,23 +440,35 @@ def test_evaluator_self_evolution() -> None:
 
 def test_dispatcher_lifecycle() -> None:
     print("[dispatcher lifecycle]")
-    service = build_service()
+    service = build_stub_service()
     commission = service.open("去把这个整理一下", "把《七月选题》理成三版标题")
     service.dispatch(commission["id"], intent="整理便笺标题")
     service.start(commission["id"])
     check("进入 running", service.commission(commission["id"])["status"] == "running")
-    blocked = service.answer.__self__  # keep the facade honest: answer needs a blocked commission
-    raises("未 blocked 不能答", lambda: service.answer(commission["id"], "都可以"), ValueError)
+    raises("未 blocked 不能答",
+           lambda: asyncio.run(service.answer(commission["id"], "都可以")), ValueError)
     check("琐事代答有依据", service.dispatcher.trivia_answer("这个用什么名字") is not None)
     check("大事不猜", service.dispatcher.trivia_answer("要不要把整个模块推翻重写") is None)
-    service.dispatcher.block(commission["id"], "换将还是等一轮？")
-    answered = service.answer(commission["id"], "等一轮")
-    check("答完回 running", answered["commission"]["status"] == "running" and not answered["auto_answered"])
     verdict = service.submit(commission["id"], GOOD_ARTIFACT)
     check("初审放行进待验收", verdict["commission"]["status"] == "ready_to_report")
     check("三句话卡成形", verdict["commission"]["delivery"]["summary"].startswith("把《七月选题》"))
+    check("没有 span 时预算标注为未验证", verdict["verdict"]["usage"]["budget_checked"] is False,
+          str(verdict["verdict"]["usage"]))
     service.accept(commission["id"])
     check("收工归档", service.commission(commission["id"])["status"] == "done")
+
+    # 请示 -> 回答 -> 服务端自动接着跑完：answer 不再把票扔回 running 没人管
+    second = service.open("再整理一版", "把《七月选题》理成三版标题")
+    service.dispatch(second["id"], intent="整理 mock产出")
+    service.start(second["id"])
+    service.dispatcher.block(second["id"], "换将还是等一轮？")
+    answered = asyncio.run(service.answer(second["id"], "等一轮"))
+    check("答完自动接着跑完", answered["commission"]["status"] == "ready_to_report",
+          answered["commission"]["status"])
+    check("不是自动代答", not answered["auto_answered"])
+    service.accept(second["id"])
+    check("答完这单也能归档", service.commission(second["id"])["status"] == "done")
+    service.close()
 
 
 def test_dispatcher_retry_cap() -> None:
@@ -387,9 +520,46 @@ def test_delegate_without_worker() -> None:
     roster = dict(service.evaluator.roster)
     roster["agents"] = []
     service.dispatcher.roster = roster
-    result = service.delegate("去把这个整理一下")
+    result = asyncio.run(service.delegate("去把这个整理一下"))
     check("没将可派转 blocked", result["status"] == "blocked")
     check("请示一句话", "没人能接" in service.commission(result["commission_id"])["blocked_question"])
+    service.close()
+
+
+def test_real_usage_and_partial_failure() -> None:
+    print("[real usage in the audit]")
+    # 超预算：dispatcher 链路必须拿真实用量去审，而不是因为没有 usage 就放行
+    bloated = [
+        make_event("progress", step_idx=1, text="读完派单密件，开始整理"),
+        token_event(model="stub-model", prompt_tokens=99999, completion_tokens=200,
+                    ttft_ms=90, duration_ms=400, status_code=200),
+        artifact_event(GOOD_ARTIFACT),
+    ]
+    service = build_stub_service(events=bloated)
+    result = asyncio.run(service.delegate("整理 mock 产出"))
+    check("超预算被打回，不是放行", result["status"] == "running", result["status"])
+    audit = service.commission(result["commission_id"])["audit"] or {}
+    check("打回原因是 token 膨胀",
+          any(item["rule_id"] == "prompt_token_bloat" for item in audit.get("findings", [])),
+          str(audit.get("findings")))
+    check("用量标注为已核对", (audit.get("usage") or {}).get("budget_checked") is True,
+          str(audit.get("usage")))
+    check("用量数字是真实的", (audit.get("usage") or {}).get("prompt_tokens") == 99999,
+          str(audit.get("usage")))
+    service.close()
+
+
+def test_spinning_alert_lands_in_telemetry() -> None:
+    print("[spinning alert lands in telemetry]")
+    looping = [make_event("progress", step_idx=index, text="完全一样的进展")
+               for index in range(5)]
+    service = build_stub_service(events=looping)
+    result = asyncio.run(service.delegate("整理 mock 产出"))
+    check("熔断后转 blocked", result["status"] == "blocked", result["status"])
+    alerts = [item for item in service.telemetry_summary().get("spinning_alerts", [])
+              if item["commission_id"] == result["commission_id"]]
+    check("战况里看得到这次熔断", len(alerts) == 1, str(alerts))
+    check("告警带上重复次数", bool(alerts) and alerts[0]["repeats"] == 3, str(alerts))
     service.close()
 
 
@@ -406,6 +576,12 @@ def test_front_intents() -> None:
     check("验收-收工", acceptance_intent("收工") == "accept")
     check("验收-打回", acceptance_intent("不行，顶栏那个按钮收回去") == "reject")
     check("普通句不判验收", acceptance_intent("今天先这样吧") is None)
+    check("星图意图", starmap_view_intent("打开星图"))
+    check("看看脑内宇宙也是星图", starmap_view_intent("看看你的脑内宇宙"))
+    check("普通对话不是星图", not starmap_view_intent("今天天气不错啊"))
+    check("笔记意图", notes_view_intent("看看笔记"))
+    check("打开便笺也是笔记", notes_view_intent("打开便笺"))
+    check("普通对话不是笔记", not notes_view_intent("今天天气不错啊"))
 
 
 def test_front_samples_and_report() -> None:
@@ -441,15 +617,104 @@ def test_orchestrator_route_needs_real_state() -> None:
     service.dispatch(commission["id"], intent="整理便笺标题")
     service.start(commission["id"])
     route = orchestrator.executive_route("那单进度怎么样了", service)
-    check("有在跑的单才报进度", route is not None and route["kind"] == "progress")
+    check("有在跑的单才报进度", route is not None and route["kind"] == "progress",
+          f"got {route!r}")
+    check("进度路由附挂 ui_nav", route is not None and isinstance(route.get("ui_nav"), dict)
+          and route["ui_nav"].get("target_view") == "ops"
+          and route["ui_nav"].get("focus_id") == commission["id"])
     telemetry = orchestrator.executive_route("今天 API 烧了多少 token", service)
     check("有在跑的单才报战况", telemetry is None or telemetry["kind"] == "telemetry")
+    check("战况路由附挂 ui_nav", telemetry is None or
+          telemetry.get("ui_nav", {}).get("target_view") == "ops"
+          and telemetry.get("ui_nav", {}).get("sub_action") == "highlight_telemetry")
     service.submit(commission["id"], GOOD_ARTIFACT)
     accepted = orchestrator.executive_route("收工", service)
     check("有待验收才认收工", accepted is not None and accepted["kind"] == "accept")
+    check("收工路由附挂 open_preview", accepted is not None and
+          accepted.get("ui_nav", {}).get("sub_action") == "open_preview"
+          and accepted.get("ui_nav", {}).get("focus_id") == commission["id"])
     rejected = orchestrator.executive_route("不行，顶栏那个按钮收回去", service)
     check("有待验收才认打回", rejected is not None and rejected["kind"] == "reject")
-    check("打回带上原话", "顶栏" in rejected["feedback"])
+    check("打回带原话且附挂 highlight_rubrics", "顶栏" in rejected["feedback"]
+          and rejected.get("ui_nav", {}).get("sub_action") == "highlight_rubrics")
+    delegated = orchestrator.executive_route("去把这个再整理一版", service)
+    check("委托路由附挂 ui_nav", delegated is not None and delegated["kind"] == "delegation"
+          and delegated.get("ui_nav", {}).get("target_view") == "ops"
+          and delegated.get("ui_nav", {}).get("sub_action") == "focus_latest")
+    service.close()
+
+
+def test_starmap_notes_intent_routes() -> None:
+    """§二十四：看星图 / 看笔记 的意图路由独立于台账，但要求记忆开启。"""
+    print("[starmap / notes intent routes]")
+    from server.dialogue.orchestrator import Orchestrator
+
+    service = build_service()
+    orchestrator = Orchestrator()
+    # 记忆关闭时，星图 / 笔记意图都不命中（护栏：意图识别不是路由，得有数据底座）
+    check("记忆关闭不劫走星图意图", orchestrator.executive_route(
+        "打开星图", service, memory_enabled=False) is None)
+    check("记忆关闭不劫走笔记意图", orchestrator.executive_route(
+        "看看笔记", service, memory_enabled=False) is None)
+    check("记忆关闭普通对话不被劫", orchestrator.executive_route(
+        "去把这个整理一下", service, memory_enabled=False) is not None)
+
+    starmap = orchestrator.executive_route("打开星图", service, memory_enabled=True)
+    check("星图意图路由命中", starmap is not None and starmap["kind"] == "starmap_view")
+    check("星图 ui_nav 拉星图视图", starmap is not None and
+          starmap.get("ui_nav", {}).get("target_view") == "starmap"
+          and starmap.get("ui_nav", {}).get("gaze_target") == "side")
+
+    notes = orchestrator.executive_route("看看笔记", service, memory_enabled=True)
+    check("笔记意图路由命中", notes is not None and notes["kind"] == "notes_view")
+    check("笔记 ui_nav 拉 threads 视图", notes is not None and
+          notes.get("ui_nav", {}).get("target_view") == "threads"
+          and notes.get("ui_nav", {}).get("sub_action") == "focus_latest")
+
+    # 星图意图与台账意图互不干涉：台账在忙也照开
+    commission = service.open("去把这个整理一下", "把《七月选题》理成三版标题")
+    service.dispatch(commission["id"], intent="整理便笺标题")
+    service.start(commission["id"])
+    still_starmap = orchestrator.executive_route("看看星图", service, memory_enabled=True)
+    check("台账在忙也不拦星图", still_starmap is not None and still_starmap["kind"] == "starmap_view")
+    service.close()
+
+
+def test_ui_nav_value_domain() -> None:
+    """§二十四：ui_nav 载荷的取值域——前后端必须对着这份白名单走。"""
+    print("[ui_nav value domain]")
+    from server.dialogue.orchestrator import Orchestrator
+
+    service = build_service()
+    orchestrator = Orchestrator()
+    # 台账在忙，能走通的意图全走一遍，逐个断言取值都在协议允许域内
+    commission = service.open("去把这个整理一下", "把《七月选题》理成三版标题")
+    service.dispatch(commission["id"], intent="整理便笺标题")
+    service.start(commission["id"])
+
+    allowed_targets = {"ops", "notes", "threads", "starmap", "close"}
+    allowed_subs = {"open_preview", "highlight_telemetry", "highlight_rubrics", "focus_latest"}
+    allowed_gazes = {"viewer", "mic", "think", "down", "side"}
+
+    routes = [
+        orchestrator.executive_route("那单进度怎么样了", service),
+        orchestrator.executive_route("今天 API 烧了多少 token", service),
+        orchestrator.executive_route("去把这个再整理一版", service),
+    ]
+    for route in routes:
+        if route is None:
+            continue
+        nav = route.get("ui_nav")
+        check(f"{route['kind']} ui_nav 存在", nav is not None)
+        if nav is None:
+            continue
+        check(f"{route['kind']} target_view 在域内", nav.get("target_view") in allowed_targets,
+              f"got {nav.get('target_view')}")
+        if nav.get("sub_action") is not None:
+            check(f"{route['kind']} sub_action 在域内", nav["sub_action"] in allowed_subs,
+                  f"got {nav.get('sub_action')}")
+        check(f"{route['kind']} gaze_target 在域内", nav.get("gaze_target") in allowed_gazes,
+              f"got {nav.get('gaze_target')}")
     service.close()
 
 
@@ -498,15 +763,47 @@ def test_rest_seam() -> None:
         missing = client.get("/api/executive/commissions/c_missing")
         check("缺失票 404", missing.status_code == 404)
 
+        # 重复 /run：第二个直接被租约挡下，不会开出第二份工
+        # 必须用路由背后那个单例：另起一个 AssistantService 会写到另一个库里，
+        # HTTP 那一侧根本看不到这张票。
+        import server.app as app_module
+        service = app_module.assistant.executive
+        repeat = client.post("/api/executive/commissions",
+                             json={"title": "重复触发", "brief": "同一票跑两次"})
+        repeat_id = repeat.json()["id"]
+        try:
+            service.dispatch(repeat_id, intent="整理便笺标题")
+            service.start(repeat_id)
+            first = client.post(f"/api/executive/commissions/{repeat_id}/run", json={})
+            check("第一次驱动 200", first.status_code == 200, str(first.status_code))
+            second = client.post(f"/api/executive/commissions/{repeat_id}/run", json={})
+            check("重复驱动被拒", second.status_code == 400, str(second.status_code))
+            blocked_events = [item for item in
+                              client.get(f"/api/executive/commissions/{repeat_id}/events").json()["items"]
+                              if item["payload"].get("to") == "blocked"]
+            check("只阻塞过一次，没有重复执行", len(blocked_events) == 1, str(len(blocked_events)))
+        finally:
+            # 自归档：这张票跑完使命即终。单例库是真实运行库，blocked/drafting 的
+            # 遗留会按 agent 占满产能（select_agent 全员满载 → no_worker_available），
+            # 本测试第二次起就自己毒死自己。done 是各状态的合法迁移目标。
+            try:
+                service.ledger.transition(repeat_id, "done")
+            except Exception:
+                pass
+
 
 def main() -> int:
     for test in (test_commission_state_machine, test_briefing_packet, test_roster_selection_and_capacity,
-                 test_memory_block_is_framed, test_telemetry_store_and_summary, test_spinning_guard,
-                 test_telemetry_gateway_proxy, test_evaluator_layers, test_evaluator_self_evolution,
-                 test_dispatcher_lifecycle, test_dispatcher_retry_cap, test_boss_rejection_learns,
-                 test_delegate_without_worker, test_front_intents, test_front_samples_and_report,
-                 test_orchestrator_route_needs_real_state, test_ambient_supervisor_check,
-                 test_rest_seam):
+                 test_memory_block_is_framed, test_memory_block_survives_serialization,
+                 test_telemetry_store_and_summary, test_spinning_guard,
+                 test_telemetry_gateway_proxy, test_evaluator_layers,
+                 test_evaluator_self_evolution, test_dispatcher_lifecycle,
+                 test_dispatcher_retry_cap, test_boss_rejection_learns,
+                 test_delegate_without_worker, test_real_usage_and_partial_failure,
+                 test_spinning_alert_lands_in_telemetry, test_front_intents,
+                 test_front_samples_and_report, test_orchestrator_route_needs_real_state,
+                 test_starmap_notes_intent_routes, test_ui_nav_value_domain,
+                 test_ambient_supervisor_check, test_rest_seam):
         test()
     print(f"\n=== {passed} passed, {len(failed)} failed ===")
     for name in failed:

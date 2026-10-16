@@ -35,8 +35,10 @@ try {
  assert(!sent.some(x=>x.type==='text'),'IME confirmation never sends');
  await page.locator('#textInput').press('Enter');
  assert(sent.some(x=>x.type==='text'),'Enter sends explicit draft');
- await page.locator('.msg.bot').waitFor();
- assert((await page.locator('.msg.bot').textContent()).includes('心里终于'),'Streamed response uses real message renderer');
+ // 去文字框化（协议 §23）：小溪的口头台词住进头顶微光气泡，不再产生 bot 文字气泡
+ await page.locator('.glimmer-bubble').waitFor();
+ assert((await page.locator('.glimmer-bubble').textContent()).includes('心里终于'),'Streamed reply lands in the head glimmer bubble');
+ assert(await page.locator('.msg.bot').count()===0,'Voice-First streamed reply produces no bot text bubble');
  await page.locator('#welcome').waitFor({state:'hidden'});
  assert(await page.locator('.stage').evaluate(el=>el.classList.contains('has-messages')),'Welcome yields to conversation');
  await page.screenshot({path:'eval/ui/conversation.png',fullPage:true});
@@ -76,8 +78,8 @@ try {
  await page.emulateMedia({reducedMotion:'reduce'});
  assert(await page.locator('#welcome').evaluate(el=>getComputedStyle(el).animationName)==='none','Reduced motion removes entrance animation');
  await page.locator('#sidebarToggle').click();
- await page.locator('#memoryToggle').focus();
- assert(await page.locator('#memoryToggle').evaluate(el=>document.activeElement===el),'Memory switch is keyboard focusable');
+ await page.locator('#presenceCapsule').focus();
+ assert(await page.locator('#presenceCapsule').evaluate(el=>document.activeElement===el),'Presence capsule is keyboard focusable');
  await page.locator('#work-tasks-tab').click();
  await page.locator('.assistant-panel:not([data-interaction-preferences]) summary').click();
  await page.screenshot({path:'eval/ui/mobile-preferences.png',fullPage:true});
@@ -112,11 +114,14 @@ try {
  await page.waitForFunction(()=>document.querySelector('#memoryFeedback').textContent.includes('没有记下'));
  assert((await page.inputValue('#manualInput')).includes('测试草稿'),'Failed memory save retains draft');
  await page.route('**/api/memory/toggle',route=>route.fulfill({status:503,json:{detail:'Unavailable'}}));
- const previous=await page.locator('#memoryToggle').isChecked();
- await page.locator('#memoryToggle').focus();
- await page.keyboard.press('Space');
+ // 三态胶囊：灵动伴随 →（点一次）静默旁观 →（再点一次）无痕闲聊；后者要关记忆，REST 503 保存失败。
+ await page.keyboard.press('Escape');   // 先收起移动侧栏，胶囊在主舞台才可点
+ await page.locator('#presenceCapsule').click();
+ await page.locator('#presenceCapsule').click();
  await page.waitForFunction(()=>document.querySelector('#memoryFeedback').textContent.includes('设置未保存'));
- assert(await page.locator('#memoryToggle').isChecked()===previous,'Failed preference save rolls switch back');
+ assert((await page.locator('#presenceCapsule .presence-label').innerText())==='静默旁观','Failed preference save rolls the capsule back');
+ assert(await page.evaluate(()=>document.getElementById('memoryToggle').checked)===true,'Failed save rolls the memory bit back');
+ await page.locator('#sidebarToggle').click();   // 后续记忆列表断言需要侧栏展开
  await page.route('**/api/memories',route=>route.fulfill({json:{count:1,items:[{id:'fixture',value:'测试记忆',kind:'fact',source:'stated',key:'<b>literal</b>'}]}}));
  await page.locator('#memRefresh').click();
  await page.getByRole('button',{name:'编辑记忆：测试记忆'}).waitFor();

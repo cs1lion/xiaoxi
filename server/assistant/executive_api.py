@@ -36,6 +36,15 @@ def create_executive_router(executive):
         except (ValueError, TypeError) as exc:
             raise HTTPException(400, str(exc))
 
+    async def acall(fn, *args, **kwargs):
+        """同一个错误映射的异步版：服务端自动驱动执行体的入口走这里。"""
+        try:
+            return await fn(*args, **kwargs)
+        except KeyError:
+            raise HTTPException(404, 'commission_not_found')
+        except (ValueError, TypeError) as exc:
+            raise HTTPException(400, str(exc))
+
     def ready(value):
         return JSONResponse(value, headers={'Cache-Control': 'no-store'})
 
@@ -63,7 +72,8 @@ def create_executive_router(executive):
     @router.post('/commissions/{commission_id}/answer')
     async def answer(commission_id: str, request: Request):
         data = await payload(request, ['answer'])
-        return ready(call(executive.answer, commission_id, str(data.get('answer') or '')))
+        # answer 会驱动执行体接着跑（服务端唯一的执行所有权），因此是协程。
+        return ready(await acall(executive.answer, commission_id, str(data.get('answer') or '')))
 
     @router.post('/commissions/{commission_id}/accept')
     async def accept(commission_id: str, request: Request):

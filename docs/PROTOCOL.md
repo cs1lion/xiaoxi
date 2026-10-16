@@ -281,6 +281,15 @@ uv run python scripts/check_protocol.py
 - **统一规则**：三个事件共用去重/过期/交互语义；进入新空闲周期按策略重估，用户活动重置计时；页面刷新/前后台切换/重连防计时重复、事件重复、重复播放；区分页面可见/实际活动/后台运行/主动返回；用户可关闭主动语音、限制搭话频率或启用安静模式（`ambient.quiet_mode_default`，只保留 `micro_act`）；用户正在输入/播放媒体/关键操作/明确表示不打扰时，抑制高打扰度行为（`ambient.respect_typing`）。授权门复用 `proactivity.require_authorization` 与 `cooldown` 冷静期。
 - 协议必须允许前端**安全忽略**不支持的可选字段，并对未知事件类型安全降级。
 
+### 首次有声搭话与冷启动破冰（打磨轮 2026-10-16）
+
+真机联调发现"允许主动开口"勾选后从不触发：梯度 3 的 90s 边界之后只剩 900s 门的重通道，`mumble` 又要求已有 reflection/mood/spark，冷启动时两者都不可达，形成静音断层。本节是契约内的一次行为收紧，不新增事件与字段：
+
+- **首次有声阈值 25~30s**：`pacing.ambient.mumble_seconds` 默认 28；`voice_backoff`（默认 2.0）与 `voice_backoff_max_seconds`（默认 240）对同一空闲周期内的再次开口做指数退避，`cycle_reset_seconds`（默认 5）之下视为新空闲周期、计数清零——"安静半分钟必被搭理，之后不吵闹"。
+- **`mumble_voice` 默认 `true`**：`voice:true` 的 mumble 由固定回复交付器（`deliver_reply`，与 narrate 同一路径）软播、可打断；连接级气泡事件先于轮次发送，前端不收回属于该轮次的气泡（有声微气泡）。`conn.busy` 语义下的录音/播放/活跃轮次重检先于 `begin()`，用户轮次永不被环境音抢话。
+- **梯度 3 由陪伴通道接管**：`ambient_event` 在 `proactive` 梯度继续产出有声 mumble（退避与去重不变），消除 90s~900s 静音断层；完整 `proactive` 轮次仍只由 `proactive_turn` / `self_topic_turn` 的 900s 门产出。
+- **冷启动破冰兜底**：无 reflection/mood/spark 时，按序回退到"最近真实待办"（`source_refs=["memory:<id>"]`）或 `config/response_examples.json` 的 `stage_samples.idle_proactive` 原创样本（`source_refs=["config:response_examples.json"]`，`trigger_reason` 以 `icebreaker_` 前缀）。两者都真实可溯；**不得**据此声称已完成反思或准备了礼物，样本也不得写入用户记忆。开启主动模式（含前端三态胶囊切到"灵动伴随"）时，连接级空闲计时从切换时刻起算。
+
 ## 十七、无痕热修改：本地配置覆盖（V2 §8.1）
 
 - 监听 `config/*.local.yaml`（已加入 `.gitignore`），与基础配置按“默认 < 本地覆盖”优先级合并。
@@ -330,7 +339,9 @@ V3 内阁总管的督办台账，与共同事项同库同规约（`server/intera
    "created_at":1760000000.0,"updated_at":1760000100.0,"closed_at":null}
   ```
 - `delivery` 是《三句话交付验收卡》：`{summary, intercepted, artifacts[]}`。`summary` 说做了什么，`intercepted` 说小溪替他拦了什么，`artifacts` 每项 `{kind,ref,preview}`；缺一项即视为未交差，初审直接 L1 驳回。
-- `audit` 是初审结论：`{passed, layer, findings[], scolding, retry_count, created_at}`。`layer` 取值 `none` / `l1` / `l2`；`findings[]` 每项 `{rule_id, severity, detail}`。
+- `audit` 是初审结论：`{passed, layer, findings[], usage, scolding, retry_count, created_at}`。`layer` 取值 `none` / `l1` / `l2`；`findings[]` 每项 `{rule_id, severity, detail}`。
+- `audit.usage` 是这次初审拿到的真实用量：`{calls, prompt_tokens, budget_checked}`。`budget_checked` 为 `false` 表示**没有真实 span、预算未被验证**——此时初审不因此判不合格，但也不得把"没查"读成"查过了"。没有遥测时该字段为 `{"calls":0,"prompt_tokens":0,"budget_checked":false}`。
+- **执行触发与唯一性**：正常委派（`ExecutiveService.delegate`）与请示获答后的续跑（`answer`）由服务端自己驱动执行体到终态；`POST /api/executive/commissions/{id}/run` 是外部/手动再驱动的入口。同一 commission 同时只允许一个执行体：重复或并发触发第二个直接 `400 commission_already_running`，不排队、不重复开工。适配器产出 `artifact` 之后又出现 `error` 事件，一律判失败转 `blocked`（部分产物留待人工核），不当成功交付。
 - `retry_count` 上限 2（`Evaluator.MAX_RETRY`）。打回时 `retry_count+1` 并回到 `running`；已达上限仍不过则转 `blocked` 并带完整批注请示，不无限重试。
 - `blocked_question` 非空是 `blocked` 状态的前置条件。问题必须是一句话、二选一或可一句话回答；琐事由总管依花名册 `trivia_policy` 或已有偏好代答，大事才起气泡请示。
 - 台账只存公开决定与结果，**不存模型思考过程，不存凭据**。缺失 ID 抛 `KeyError`；事件表 `commission_events` 只追加不改写。
@@ -438,8 +449,135 @@ agents:
 ### 22.6 相关路由
 
 - `POST /api/executive/commissions/{id}/submit`：外部 Worker 交差入口，`artifact` 直接进初审室，与内部链路同一套判据。
-- `POST /api/executive/commissions/{id}/run`：进程内驱动执行体跑完这一单。
+- `POST /api/executive/commissions/{id}/run`：进程内驱动执行体跑完这一单。与自动驱动共用同一把执行权租约，已在跑时返回 `400 commission_already_running`。
 - `GET /api/executive/adapters`：已登记类型 + 每个 Agent 当前绑定（只回类型名，不回配置值）。
 - `POST /internal/telemetry_proxy`：本地透明代理，见 §20。该路由无前端引用，由 `check_protocol.py` 第六类检查显式纳管。
 
 回归：`python scripts/test_agent_adapter_ext.py`（Mock 适配器验证注册表派发全程）。
+
+## 二十三、动态积木消息 aqi_blocks（全局唯一默认交互范式）
+
+**全系统咽喉收口**："简短口语语音 + 动态生成式 UI 积木"是全部输出路径的唯一默认形态——小溪开口只说 1~2 句自然口语（由系统提示词约束，不口播长列表与枯燥数据），需要展示的状态、选项、卡片数据一律以积木随路下发。本节是契约内加法：不新增 REST 路由，不改既有轮次事件顺序，旧客户端可整个忽略 `aqi_blocks` 与 `aqi_action`。四条产出路径（常规对话 / 快环总管 / 慢环主动汇报 / 抽屉战报）共用同一消息形状与同一渲染引擎。
+
+### 23.1 消息形状
+
+- `aqi_blocks={type,turn_id?,source,layout,nav?,gaze?,blocks[]}`：轮次事件（经既有 `send_turn` 信封携带 `turn_id`，客户端按 TurnGate 过期过滤）。快环路由直出、慢环流式尾部块、主动汇报随路卡共用同一形状。
+- `source`：产出路径溯源，`chat`（慢环对话：模型自带标签或闲聊兜底）、`executive`（快环总管路由直出）、`ambient`（主动搭话 / 星图查看 / 待验收汇报）、`loop`（自我进化跨界偷师顿悟）。纯观测字段，不影响渲染，供测试与日志断言。
+- `layout`：`stage_holo`（主舞台全息悬浮卡，落在 Holo-Deck）或 `drawer_ops`（自动拉开战况抽屉渲染）。
+- `nav`：可选，自动跳转目标 `ops|notes|threads|starmap`（映射到工作台抽屉既有视图：ops→战况、notes→一起写、threads→共同事项、starmap→星图）。缺省不跳转。
+- `gaze`：可选，`holo_right|drawer|user`，卡片浮现时形象视线微微看向卡片方向（`user`=正视老板递卡）；舞台降级时安全忽略。
+- `blocks`：积木数组，每项 `{kind,...}`；空数组等于本消息不渲染。未知 `kind` 安全降级（不渲染、不报错）。
+
+### 23.2 七种标准积木 Schema
+
+| kind | 用途 | 字段 |
+|---|---|---|
+| `choice_pills` | 二选一请示 / 多任务消歧胶囊组 | `question`（str）、`options:[{label,cmd}]`（1~6 项，label ≤40 字符） |
+| `spotlight_card` | 成果验收 / 预览 / 初审邀功卡 | `title`（str）、`summary?`、`intercepted?`、`artifacts?:[{kind,ref,preview?}]` |
+| `alert_card` | 鬼打墙熔断 / 报错拦截 / 多次打回预警卡 | `title`、`detail?`、`level?:"warn"|"critical"` |
+| `swimlane_strip` | 多 Agent 并行干活流光进度条 | `lanes:[{agent_id,agent_name?,title?,step_idx?,status?}]`（status ∈ 督办六阶段） |
+| `metric_flame` | Token 消耗与延迟对比迷你图卡 | `metrics:[{label,value}]`（1~8 项）、`note?` |
+| `note_snippet` | 关联笔记 / 偷师顿悟引用摘录卡 | `title?`、`text`、`ref?` |
+| `memo_note` | 平静期安心便签（无待办时的状态安抚） | `title`、`body`、`meta?:{k:v}`（至多 6 对短键值） |
+
+每个 block 都可带可选 `actions:[{label,cmd}]`（0~4 个交互按钮）与通用可选字段：`id`（目标对象 id，`ui:preview` 高亮定位用）、`subtitle`（副标题行）、`meta`（短键值展示，至多 6 对）、`tone`（`gold|red|mint|neutral`，覆盖该 kind 的默认强调色）。字段缺失或类型不符时该项按最小可用集渲染，不抛错、不编造内容。
+
+### 23.3 actions 的 cmd 语法
+
+`cmd` 是 `<verb>:<payload>` 字符串，前后端对同一张白名单：
+
+- `ui:preview:<ref>`：本地 UI 动作，打开战况抽屉并高亮对应成果 ref（或 block 的 `id` 目标），不回传服务端。
+- `ui:starmap`：本地 UI 动作，打开星图全屏视图。
+- `ui:drawer:<view>`：本地 UI 动作，跳到抽屉既有视图（`writing|companion|starmap|music|interpret|practice|ops`）。
+- `say:<text>`：把 `<text>` 作为一轮普通用户话语发回后端（走既有 `text` 轮次链路，小溪语音确认），用于 choice_pills 选项等需要服务端决策的场景。
+- `dispatch:accept:<commission_id>`：业务动作，回传服务端执行 `executive.accept`，成功后以固定回复交付器（与主动发言同一路径）语音确认；失败回连接级 `error(code=aqi_action_failed,recoverable:true)`，不重试、不排队。
+- `dispatch:reassign:<commission_id>`：业务动作，回传服务端为熔断/受阻督办换将重派（真实台账迁移），成功后语音确认；失败同样回 recoverable error，不重复副作用。
+- `choice:<index>`：本地动作，触发同一卡片第 `<index>` 个 option 的 cmd（0 起，越界忽略）——动嘴点名之外，直接伸手点胶囊。
+
+未知 verb 前端忽略、服务端拒绝，均无副作用。`text`/`commission_id` 分别按 100 / 100 字符收紧，非法直接丢弃该消息。
+
+### 23.4 慢环流式分流（Voice-First, Tail-Block）
+
+- 模型回复中 `<aqi-block>{...}</aqi-block>` 标签（每标签一个 block JSON）由服务端流式过滤器拦截：**标签前的纯文本实时流式送入 TTS 与正文；标签内的 JSON 绝不进入 TTS、正文、字幕或存储**。跨 delta 的标签必须完整缓冲；未闭合标签在流末整体扣留（不发声、不显示）；JSON 解析失败或 Schema 校验失败的块整体丢弃，不影响同一轮的文字与语音。
+- 解析成功的块在轮次内聚合为**一条** `aqi_blocks` 消息（`layout` 默认 `stage_holo`、`gaze` 默认 `holo_right`），先于 `done` 下发；多个标签聚为多 block。模型可在标签 JSON 内带 `layout` 覆盖消息级布局。
+- 快环路由（派单 / 多任务消歧 / 进度查询 / API 战况查账 / 验收 / 打回）与笔记、星图查看，由服务端用**真实台账/笔记/星图数据**直接组装积木随路下发（`source=executive`）；派单成功附 `nav=ops` 自动滑出战况抽屉。没有任何真实数据时不发对应积木，不用占位卡充数。
+- **闲聊兜底（记忆卡）**：纯闲聊轮次（快环未命中、模型未附标签、无显式便笺）时，若本轮上下文检索到高置信长期记忆（`long_term_memory.stated`，即本轮注入 prompt 的真实记忆），服务端补发一枚 `note_snippet`（`ref=memory:<id>`，动作为 `ui:starmap` 指向星图）。只认 stated（用户明确说过 / 手动保存的），推测与不确定的记忆不进卡；且该卡只在整轮没有任何其他积木时补，不与督办卡/模型卡同轮叠加。
+- **抽屉战况动态编排（路径 D）**：战况抽屉的督办列表复用同一 `blocks.js` 渲染引擎动态编排——平静期（无待办/无在跑）显示 `memo_note` 安心便签 + `swimlane_strip` 流光条；异常期（blocked/熔断）`alert_card` 置顶放大，正常任务折叠为单行。卡片数据仍来自真实台账（`GET /api/executive/commissions`），不编造。
+
+### 23.5 客户端动作消息 aqi_action
+
+- 客户端 `aqi_action={type,cmd,turn_id?}`：仅承载 23.3 的业务动词（`dispatch:accept` / `dispatch:reassign`）。服务端校验后按白名单执行，重复/并发点击不排队：accept/reassign 均以台账真实状态为准，已归档再点只回 `aqi_action_failed`，不重复副作用。
+- 执行成功后的语音确认与既有固定回复交付器同路径（`turn_started(source:"aqi_action") → thinking → emotion → text_delta → audio* → done`），可被 barge_in 打断；确认台词必须是 `config/response_examples.json` 真实样本，没有样本就静默交差，不编造。
+
+### 23.6 慢环主动汇报随路积木（路径 C）与心流防打扰
+
+- 主动开口轮次（`_proactive_check` 命中的 proactive / self_topic，以及星图查看 narrate）除了口头 1~2 句，必须随路下发 `aqi_blocks`（`layout=stage_holo`），且**先于 `_present_reply` 收轮之前 `send_turn`**（Turn fence 铁律）：
+  - 鬼打墙熔断（`executive.spinning_alerts()` 非空）→ 红色 `alert_card`（`level=critical`，actions 带 `dispatch:reassign:<id>` 换将 / `ui:drawer:ops` 暂停），`source=ambient`；
+  - 初审通过待验收（`pending_reports()` 非空）→ 金色 `spotlight_card`（actions 带 `ui:preview:<id>` 预览 / `dispatch:accept:<id>` 收工），`source=ambient`；
+  - 跨界偷师顿悟（self_topic 轮次带 surfaced spark）→ `note_snippet`（`ref=spark:<id>`，actions 带 `ui:starmap`），`source=loop`。
+- 真实数据铁律同样适用于主动汇报：无熔断、无待验收、无 spark 时不出对应卡，不用占位卡充数；同一轮多类数据齐全时任选最重要的一枚（熔断 > 邀功 > 顿悟）。
+- **心流防打扰（typing 守卫）**：客户端正在打字（或写作宽屏）时，新到达的 `aqi_blocks` 不直接弹卡——静默挂载进待阅队列，点亮战况胶囊呼吸灯并报数；停手（quiet 解除）后按原序补弹到 Holo-Deck。该守卫只延迟"弹卡"，不丢弃、不改内容；轮次事件本身照常入队（TurnGate 不受影响）。
+
+回归：`python scripts/test_aqi_blocks.py`、`node web/test_blocks.mjs`、`node scripts/test-aqi-blocks-browser.mjs`、`python scripts/check_protocol.py`。
+## 二十四、意图驱动的界面自动领航（ui_nav）
+
+V3 台前快环（`orchestrator.executive_route`）认出的意图，同时随路下发一条轻量的界面领航指令，
+让工作台视图自动打开、聚焦、展开——用户说完话不必再手动点抽屉。识别仍是纯正则（不发第二次
+模型请求）；领航只对**用户主动输入的轮次**立即执行，后台被动事件不受本通道影响，心流防打扰
+守卫（`executive-state.js` 的 `typing()`/`createFlowGuard`）语义不变。
+
+与 §二十三 的 `aqi_blocks` 是两条独立通道：积木消息可自带 `nav`/`gaze` 做布局跳转，
+`ui_nav` 只承载台前快环意图的视图领航，两者互不依赖、各按各的白名单消费。
+
+- 新事件 `ui_nav` 是**轮次事件**：带该轮 `turn_id`，在服务端路由命中时先行下发（早于该轮语音
+  的 `thinking` / `emotion`），前端在 `TurnGate` 之内消费，沿用既有过期轮次过滤；服务端只向
+  发起指令的那个连接下发，其它连接不投递。
+- 载荷字段（旧客户端读到未知类型整条忽略，安全降级）：
+  - `target_view`：`ops`（督办与战况抽屉）/ `threads`（侧栏行动面板，定位共同事项卡片）/
+    `starmap`（星图全屏视图）/ `close`（收起抽屉，视线回收）/ `notes`（预留"看笔记"取值，
+    前端未实现时与 threads 同路降级——侧栏行动面板）。前端收到未知/未实现视图时安全降级，
+    不报错。
+  - `focus_id`：可选，定位目标（如 commission_id、thread_id 或 "latest"），缺失/不存在时安全降级
+    到该视图默认位置。
+  - `sub_action`：可选，`open_preview`（展开该卡片的交付预览）/ `highlight_telemetry`
+    （高亮 Agent 战况区）/ `highlight_rubrics`（高亮初审判例区）/ `focus_latest`（定位到最近一张卡）。
+  - `gaze_target`：可选，形象注视点名，取值必须在 `config/avatar.yaml` 的 `gaze.targets` 里
+    （脚本静态核对）；缺失默认 `viewer`，未知值也安全回落 `viewer`。
+- `gaze_target` 由前端调既有 `avatar.lookAtGaze(name)` 通道消费（协议 §二十四 的视线
+  微转闭环："她亲手帮你拉开面板指给你看"）；形象层自身不新增触发器，on_message 规则
+  不因 ui_nav 而多切一次，避免与事件自带 gaze_target 打架。
+- 触发面（全部由服务端在既有意图命中时附挂，不新增识别）：
+  | 台前意图 | `ui_nav` |
+  |---|---|
+  | 委托派单（delegation） | `{target_view:"ops", focus_id:"latest", sub_action:"focus_latest"}`；后台 `delegate()` 照常立即启动，不阻塞台词 |
+  | 进度追问（progress） | `{target_view:"ops", focus_id:<commission_id>}` |
+  | 战况查询（telemetry） | `{target_view:"ops", sub_action:"highlight_telemetry"}` |
+  | 验收收工（accept） | `{target_view:"ops", focus_id:<commission_id>, sub_action:"open_preview"}` |
+  | 验收打回（reject） | `{target_view:"ops", focus_id:<commission_id>, sub_action:"highlight_rubrics"}` |
+  | 看星图（`starmap_view_intent`，需记忆开启） | `{target_view:"starmap"}` |
+  | 看笔记/便笺（`notes_view_intent`，需记忆开启） | `{target_view:"threads", focus_id:"latest", sub_action:"focus_latest"}`（侧栏行动面板定位最近共同事项卡） |
+  - 星图与笔记意图不进台账分支：它们不读 Commission 台账，台账在忙时也能打开；
+    其余意图仍要求真实台账状态才命中（"意图命中 ≠ 一定路由"的护栏不变）。
+- 前端落点（app.js `case "ui_nav"` 消费，纯逻辑在 `web/ui_nav.js`）：
+  - `target_view:"ops"`：先开抽屉（若未开）再 `drawer.selectView("ops")`，并广播
+    `aqi-ui-nav` 事件，`executive.js` 据此定位 `focus_id` 卡片、展开 `sub_action`
+    子视图、施加 `.nav-spotlight` 高亮动效。
+  - `target_view:"starmap"`：收起抽屉后触发既有 `#starmapToggle`（走
+    `starmap/index.js` 的 `open()` 状态机，含焦点管理、`loadCurrent`、`aqi-fullview`
+    广播），不绕过该模块的开关语义。
+  - `target_view:"threads"`/`"notes"`：收起抽屉让位，拉既有侧栏行动面板
+    （`#sidebarToggle`，`assistant.js` owns），定位最近一张共同事项卡。
+  - `target_view:"close"`：抽屉当前开着才收（降噪方向，后台事件缺 `turn_id` 也放行）。
+  - 所有落点都同时触发一次 `avatar.lookAtGaze(gaze_after, {settleMs:1600})` 视线微转，
+    形成"她亲手帮你拉开面板指给你看"的闭环；`gaze_after` 为 `close` 时回收 `viewer`。
+- 护栏：本事件只由**用户轮次**的路由命中产生；后台事件（`memory_notice` / `diary_notice` /
+  `self_evolution` / mumble 等）绝不携带 `ui_nav`。前端对未知 `sub_action`/`gaze_target` 安全忽略，
+  不报错、不阻塞其它领航字段。
+- 心流护栏（前端侧）：领航载荷带 `turn_id`（用户主动轮次）时 `auto_open=true`，立即拉开对应
+  面板；缺 `turn_id` 的（理论上不会出现，出现即协议违规）一律 `auto_open=false`，只指不拉。
+  `close` 类领航是降噪方向（收手不是打扰），缺 `turn_id` 也放行——消费方对 close 的动作是
+  "抽屉当前开着才收"，不误开任何面板。该判定在 `web/ui_nav.js` 的 `normalizeUiNav()`，
+  纯逻辑可单测，不受 DOM 影响。
+
+回归：`python scripts/test_executive_v3.py`（路由载荷断言）、`node web/ui_nav.test.mjs`
+（领航纯逻辑 + 心流护栏）、`node scripts/test-ui-nav-browser.mjs`（抽屉自动开合、聚焦、子动作、

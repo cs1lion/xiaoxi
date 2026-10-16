@@ -49,7 +49,7 @@ class WebSocketTests(unittest.IsolatedAsyncioTestCase):
 
         self.env.update(tts=TTS(), orchestrator=SimpleNamespace(stream_respond=stream,
             state={'proactivity_enabled': False}, set_proactivity=lambda _: None,
-            executive_route=lambda text, executive=None: None))
+            executive_route=lambda text, executive=None, memory_enabled=False: None))
         self.ws = FakeSocket()
         self.endpoint = asyncio.create_task(self.env['websocket_endpoint'](self.ws))
         self.session_id = (await self.ws.wait('ready'))['session_id']

@@ -13,6 +13,10 @@
 """
 from __future__ import annotations
 
+import asyncio
+import contextlib
+import os
+import signal
 import abc
 from typing import Any, AsyncIterator
 
@@ -94,5 +98,51 @@ class BaseWorkerAdapter(abc.ABC):
         return f"<{type(self).__name__} {self.adapter_type}>"
 
 
+async def _reaped(process: Any, grace: float) -> bool:
+    """等进程退出。等不到不算失败——调用方会升级手段，最后由 wait() 收尸。"""
+    with contextlib.suppress(Exception):
+        await asyncio.wait_for(process.wait(), max(0.1, grace))
+    return process.returncode is not None
+
+
+async def terminate_process_group(process: Any, *, grace: float = 5.0) -> None:
+    """终止整个进程组并回收。幂等，绝不抛异常。
+
+    `cancel()` 的契约是"可能被调用多次、绝不抛异常"，两个子进程适配器
+    （cli_subproc / mcp）因此共用这一份实现——各写一遍的后果是各漏一种平台：
+    POSIX 有进程组信号但没有任务树；Windows 反过来，用 `taskkill /T` 杀整树，
+    失败再回退到单进程 terminate / kill。
+    """
+    if process is None or process.returncode is not None:
+        return
+    if os.name == "posix":
+        with contextlib.suppress(ProcessLookupError, PermissionError, OSError):
+            os.killpg(os.getpgid(process.pid), signal.SIGTERM)
+        if await _reaped(process, grace):
+            return
+        with contextlib.suppress(ProcessLookupError, PermissionError, OSError):
+            os.killpg(os.getpgid(process.pid), signal.SIGKILL)
+        await _reaped(process, grace)
+        return
+    try:
+        killer = await asyncio.create_subprocess_exec(
+            "taskkill", "/T", "/F", "/PID", str(process.pid),
+            stdout=asyncio.subprocess.DEVNULL, stderr=asyncio.subprocess.DEVNULL)
+        with contextlib.suppress(Exception):
+            await asyncio.wait_for(killer.wait(), max(0.1, grace))
+    except Exception:
+        pass
+    if await _reaped(process, grace):
+        return
+    with contextlib.suppress(Exception):
+        process.terminate()
+    if await _reaped(process, grace):
+        return
+    with contextlib.suppress(Exception):
+        process.kill()
+    await _reaped(process, grace)
+
+
 __all__ = ["EVENT_TYPES", "TERMINAL_EVENTS", "AdapterError", "BaseWorkerAdapter",
-           "UnknownAdapterError", "artifact_event", "make_event", "token_event"]
+           "UnknownAdapterError", "artifact_event", "make_event", "token_event",
+           "terminate_process_group"]

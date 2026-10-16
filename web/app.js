@@ -29,6 +29,9 @@ import { mountExternalModel } from './external-model.js';
 import { mountContextBudget } from './context-budget.js';
 import { AmbientDriver } from "./avatar/drivers/ambient.js";
 import { createGlimmer } from "./glimmer_bubble.js";
+import { createHoloDeck, parseCmd, summarizeAqiBlocks } from "./blocks.js";
+import { normalizeUiNav, drawerViewFor, shouldCloseDrawer, shouldOpenSidePanel,
+  shouldOpenStarmap, gazeAfter } from "./ui_nav.js";
 bootAssistant().catch(error => console.warn('助手面板启动失败', error));
 bootCompanion().catch(error => console.warn('共同事项启动失败', error));
 
@@ -224,6 +227,59 @@ const externalModel = mountExternalModel({
   },
 });
 
+/* ---------------- 星座连线（对话=星座：星点与星点之间连线） ---------------- */
+let constellationQueued = false;
+function drawConstellation() {
+  try {
+    const svgNS = "http://www.w3.org/2000/svg";
+    let svg = chat.querySelector(":scope > .chat-constellation");
+    if (!svg) {
+      svg = document.createElementNS(svgNS, "svg");
+      svg.setAttribute("class", "chat-constellation");
+      svg.setAttribute("aria-hidden", "true");
+      chat.appendChild(svg);
+    }
+    const w = chat.clientWidth;
+    const h = chat.scrollHeight;
+    svg.setAttribute("width", w);
+    svg.setAttribute("height", h);
+    svg.style.height = `${h}px`;
+    const pts = [];
+    for (const m of chat.querySelectorAll(".msg")) {
+      if (m.classList.contains("thinking")) continue;
+      const y = m.offsetTop + 21.5;
+      const x = m.classList.contains("user") ? m.offsetLeft + m.offsetWidth + 12.5 : m.offsetLeft - 12.5;
+      if (Number.isFinite(x) && Number.isFinite(y)) pts.push({ x, y });
+    }
+    while (svg.firstChild) svg.removeChild(svg.firstChild);
+    const g = document.createElementNS(svgNS, "g");
+    g.setAttribute("stroke", "#e8c26a33");
+    g.setAttribute("stroke-width", "1");
+    for (let i = 0; i + 1 < pts.length; i++) {
+      const line = document.createElementNS(svgNS, "line");
+      line.setAttribute("x1", pts[i].x); line.setAttribute("y1", pts[i].y);
+      line.setAttribute("x2", pts[i + 1].x); line.setAttribute("y2", pts[i + 1].y);
+      g.appendChild(line);
+    }
+    svg.appendChild(g);
+  } catch { /* 连线失败不影响对话本身 */ }
+}
+function scheduleConstellation() {
+  if (constellationQueued) return;
+  constellationQueued = true;
+  requestAnimationFrame(() => { constellationQueued = false; drawConstellation(); });
+}
+scheduleConstellation();
+window.addEventListener("resize", scheduleConstellation);
+new MutationObserver(muts => {
+  for (const m of muts) {
+    const t = m.target.nodeType === Node.TEXT_NODE ? m.target.parentElement : m.target;
+    if (t && t.closest && t.closest(".chat-constellation")) continue;
+    scheduleConstellation();
+    return;
+  }
+}).observe(chat, { childList: true, subtree: true, characterData: true });
+
 /* ---------------- 文本气泡 ---------------- */
 function addBubble(role, text) {
   const node = document.createElement("div");
@@ -232,9 +288,10 @@ function addBubble(role, text) {
   if (editorDiscussionTurn && turns.id === editorDiscussionTurn) node.classList.add('editor-discussion-message');
   const time = document.createElement("span");
   time.className = "time";
-  time.textContent = new Date().toLocaleTimeString();
+  time.textContent = new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
   node.appendChild(time);
   chat.appendChild(node);
+  scheduleConstellation();
   return node;
 }
 
@@ -407,6 +464,7 @@ const starmap = mountStarmap(el('starmapMount'), {
 /* ---------------- V2 三梯度主动在场：micro_act / mumble / 微光气泡（协议 §16） ---------------- */
 const AMBIENT_SAMPLES = window.__PERSONA_SAMPLES__ || { stage_samples: {} };
 let mumbleActive = false;
+let voicedMumbleText = "";   // 当前有声搭话的文本：它的气泡不随 mumble 轮次开始被收回
 
 function applyMicroAct(descriptor) {
   // 复用真实 Avatar 动作：眨眼 / idle 微动层唤醒；未知或缺失 descriptor 安静降级，不伪造效果。
@@ -459,6 +517,9 @@ function handleAmbient(msg) {
   else if (msg.type === "mumble") {
     // 服务端 expires_at 是服务端 epoch 秒，不能直接和 Date.now() 比；这里转成本端相对过期。
     const ttl = (msg.bubble && typeof msg.bubble.ttl_ms === "number") ? msg.bubble.ttl_ms : 12000;
+    // 有声微气泡：voice=true 的搭话随后会走 mumble 轮次真声播出，
+    // 记住这段文本，让轮次开始时不收回属于它自己的气泡。
+    if (msg.voice) voicedMumbleText = msg.text || "";
     if (glimmer.show({ ...msg, expires_at: Date.now() + ttl })) renderGlimmer();
   }
 }
@@ -475,6 +536,161 @@ if (!document.getElementById("glimmer-style")) {
     + ".glimmer-close{flex:none;border:0;background:transparent;color:#9cc7a9;font-size:16px;line-height:1;cursor:pointer;padding:0 2px}"
     + ".glimmer-close:hover{color:#eef1ea}";
   document.head.append(style);
+}
+
+/* ---------------- 协议 §23：动态积木（Voice-First, Tail-Block） ----------------
+ * 小溪开口只说一两句口语；状态、选项、卡片数据以 aqi_blocks 消息随路下发，
+ * 落在舞台侧翼 Holo-Deck；layout=drawer_ops 时自动拉开战况抽屉渲染。
+ * 去文字框化：bot 聊天气泡不再出场——口头台词住在头顶微光气泡里，说完自然淡出，
+ * 视觉重心交给卡片与联动滑出的工作台抽屉。 */
+const VOICE_FIRST = window.__AQI_VOICE_FIRST__ !== false;   // 默认开启；测试可显式关闭
+const holoDeck = createHoloDeck(el("holoDeck"), { onAction: handleAqiAction });
+const opsDeck = createHoloDeck(el("opsAqiBlocks"), { onAction: handleAqiAction });
+const AQI_NAV_VIEWS = { ops: "ops", notes: "writing", threads: "companion", starmap: "starmap" };
+
+function navDrawerView(nav) {
+  return AQI_NAV_VIEWS[nav] || null;
+}
+
+function gazeAtCard(direction) {
+  // 她亲手把卡片递给你看：视线微微转向卡片方向；舞台降级时安全忽略。
+  try {
+    const point = direction === "drawer" ? { x: -0.15, y: 0.8 } : { x: 0.9, y: 0.05 };
+    avatar.idle?.setGazeTarget?.(point.x, point.y);
+    (window.__aqiGazeLog = window.__aqiGazeLog || []).push(direction || "holo_right");
+  } catch (_) { /* 形象层降级不影响积木本身 */ }
+}
+
+function handleAqiBlocks(msg) {
+  const summary = summarizeAqiBlocks(msg);
+  if (!summary || !summary.count) return;
+  const deck = summary.layout === "drawer_ops" ? opsDeck : holoDeck;
+  deck.render(msg);
+  gazeAtCard(summary.gaze || (summary.layout === "drawer_ops" ? "drawer" : "holo_right"));
+  if (summary.layout === "drawer_ops") { drawer?.open(); drawer?.selectView("ops"); }
+  if (summary.nav) {
+    const view = navDrawerView(summary.nav);
+    if (view) { drawer?.open(); drawer?.selectView(view); }
+  }
+}
+
+function handleAqiAction(cmd, block) {
+  if (typeof cmd !== "string" || !cmd) return;
+  const { verb, payload } = parseCmd(cmd);
+  if (!verb) return;
+  if (verb === "ui") {
+    if (payload === "starmap") { el("starmapToggle")?.click(); return; }
+    if (payload.startsWith("drawer:")) {
+      const wanted = payload.slice(7);
+      const view = navDrawerView(wanted) || wanted;
+      drawer?.open(); drawer?.selectView(view);
+      return;
+    }
+    if (payload.startsWith("preview:")) {
+      // 本地预览：拉开战况抽屉并高亮对应成果 ref（executive.js 消费）。
+      drawer?.open(); drawer?.selectView("ops");
+      window.dispatchEvent(new CustomEvent("aqi-block-preview", { detail: { ref: payload.slice(8) } }));
+      return;
+    }
+    return;   // 未知 ui 动词：协议 §23.3 规定忽略，无副作用
+  }
+  if (verb === "say") {
+    // 作为一轮普通用户话语发回后端：走既有 text 链路，小溪语音确认。
+    const text = payload.trim();
+    if (!text) return;
+    const input = el("textInput");
+    if (input) { input.value = text; el("sendBtn")?.click(); }
+    return;
+  }
+  if (verb === "dispatch") {
+    if (ws.readyState !== WebSocket.OPEN) {
+      subtitle.textContent = "连接暂不可用，这单没收工；稍后再点。";
+      return;
+    }
+    send({ type: "aqi_action", cmd });
+    return;
+  }
+  // 未知业务动词：忽略。
+}
+
+/* 去文字框化：小溪的口头台词住在头顶微光气泡里（同 event_id 换文 + 顺延消散）。 */
+let spokenLineId = null;
+function showSpokenLine(text, ttlMs = 9000) {
+  if (!VOICE_FIRST) return;
+  const value = typeof text === "string" ? text.trim() : "";
+  if (!value) return;
+  const id = `turn_${turns.id || "ambient"}`;
+  if (glimmer.current && glimmer.current.event_id === id) glimmer.update(value, ttlMs);
+  else if (glimmer.show({ event_id: id, text: value, expires_at: Date.now() + ttlMs })) spokenLineId = id;
+  renderGlimmer();
+}
+
+/* ---------------- 陪伴心流三态胶囊（Presence Mode Capsule）---------------- * 替代原来平铺的两个工业风 Switch。协议零破坏：底层布尔位仍是
+ * #memoryToggle（记住）/ #proactiveToggle（主动开口）两个隐藏 checkbox，
+ * WS config 的 memory / proactivity 字段与 /api/memory/toggle 契约原样复用；
+ * 本模块只把两颗生硬滑块收敛为一枚循环切换的高颜值胶囊。 */
+const PRESENCE_MODES = [
+  { id: "lively", glyph: "✨", label: "灵动伴随", memory: true, proactive: true,
+    bubble: "那我看到好玩的、或者有想法了就随时跟你说咯！",
+    react: () => { avatar.gesture?.play?.("nod", avatar.clock); avatar.setEyeExpression?.("happy"); } },
+  { id: "quiet", glyph: "🌙", label: "静默旁观", memory: true, proactive: false,
+    bubble: "好嘞，我安安静静陪着你，不打岔~",
+    react: () => { avatar.gesture?.play?.("nod", avatar.clock); } },
+  { id: "off", glyph: "🍃", label: "无痕闲聊", memory: false, proactive: false,
+    bubble: "明白，现在开始说的悄悄话，我绝不往小本本上记。",
+    react: () => { avatar.blinkEyes?.(); } },
+];
+const presenceCapsule = el("presenceCapsule");
+
+/* 胶囊是布尔位的纯视图：隐藏 checkbox 永远是唯一状态源，
+ * 测试或脚本直接拨动 checkbox 时，视觉与循环顺序都不会漂移。 */
+function currentPresenceMode() {
+  const memory = !!el("memoryToggle")?.checked;
+  const proactive = !!el("proactiveToggle")?.checked;
+  return PRESENCE_MODES.find((mode) => mode.memory === memory && mode.proactive === proactive)
+    || PRESENCE_MODES[0];
+}
+
+function renderPresenceCapsule() {
+  if (!presenceCapsule) return;
+  const mode = currentPresenceMode();
+  presenceCapsule.classList.toggle("is-lively", mode.id === "lively");
+  presenceCapsule.classList.toggle("is-quiet", mode.id === "quiet");
+  presenceCapsule.classList.toggle("is-off", mode.id === "off");
+  const glyph = presenceCapsule.querySelector(".presence-glyph");
+  const label = presenceCapsule.querySelector(".presence-label");
+  if (glyph) glyph.textContent = mode.glyph;
+  if (label) label.textContent = mode.label;
+  presenceCapsule.setAttribute("aria-label", `陪伴方式：${mode.label}，点击切换`);
+  presenceCapsule.title = `陪伴方式：${mode.label}（点击在 灵动伴随 / 静默旁观 / 无痕闲聊 间切换）`;
+}
+
+function applyPresenceMode(index) {
+  if (!presenceCapsule) return;
+  const next = PRESENCE_MODES[(index + PRESENCE_MODES.length) % PRESENCE_MODES.length];
+  const memoryBox = el("memoryToggle");
+  const proactiveBox = el("proactiveToggle");
+  if (!memoryBox || !proactiveBox) return;
+  const memoryChanged = memoryBox.checked !== next.memory;
+  memoryBox.checked = next.memory;          // 底层布尔位：协议字段由此派生
+  proactiveBox.checked = next.proactive;
+  renderPresenceCapsule();
+  pushConfig();                              // 既有同步通道，零新协议
+  if (memoryChanged) persistMemoryToggle(next.memory);
+  // 切换瞬间反馈：微表情 + 头顶微光气泡确认
+  try { next.react(); } catch (_) { /* 形象层降级不影响设置本身 */ }
+  if (glimmer.show({ event_id: `presence_${next.id}_${Date.now()}`, text: next.bubble,
+                     expires_at: Date.now() + 9000 })) {
+    renderGlimmer();
+  }
+}
+
+if (presenceCapsule) {
+  presenceCapsule.addEventListener("click", () => {
+    const current = PRESENCE_MODES.indexOf(currentPresenceMode());
+    applyPresenceMode(current + 1);
+  });
+  renderPresenceCapsule();
 }
 const discussionBanner = document.createElement('section');
 discussionBanner.id = 'editorDiscussion'; discussionBanner.className = 'editor-discussion';
@@ -538,6 +754,8 @@ function cancelTurn(preserveAudio = false) {
   stopPlayback();
   if (cancelledId) dialogueReview?.endTurn(cancelledId, 'interrupted');
   turns.clear(); avatar.onBargeIn(); currentBubble = null; pendingText = "";
+  // 去文字框化：打断时收回这一轮的口头微光，不留下半句闪着。
+  if (VOICE_FIRST) { glimmer.dismiss(); renderGlimmer(); }
   editorDiscussionTurn = null;
   editorSubmittedText = null;
 }
@@ -805,13 +1023,18 @@ navigator.mediaDevices?.addEventListener?.('devicechange', () => baseline.invali
 
 /* ---------------- WebSocket ---------------- */
 /* 主动搭话心跳（协议第六节）：空闲时周期性请求服务端做主动发言/自进化检查。
- * 本地只做最轻门控（授权 + 页面可见 + 本地空闲）；practice/experience/忙碌守卫以服务端为准。
- * 没有这条线，proactive_check 永不被触发，主动开口与自进化都不可达。 */
-const PROACTIVE_HEARTBEAT_MS = 45000;
+ * 本地只做最轻门控（授权 + 页面可见 + 本地空闲 + 输入框没有未发送草稿）；
+ * practice/experience/忙碌守卫以服务端为准。
+ * 没有这条线，proactive_check 永不被触发，主动开口与自进化都不可达。
+ * 打磨轮：45s → 15s 一轮，配合 pacing.ambient.mumble_seconds=28，
+ * 让"安静半分钟就被搭理"在真机上真实可感（每次 tick 都有服务端门控兜底）。 */
+const PROACTIVE_HEARTBEAT_MS = 15000;
 let proactiveHeartbeat = null;
 function proactiveLocallyIdle() {
+  const draft = el("textInput");
   return document.visibilityState === "visible" && !recording && !manualHeld
-    && !turns.id && !playback.busy && !microphone.pending;
+    && !turns.id && !playback.busy && !microphone.pending
+    && !(draft && draft.value.trim());   // 心流打字静音：草稿还在框里就不打扰
 }
 function proactiveHeartbeatTick() {
   if (el("proactiveToggle")?.checked && proactiveLocallyIdle()) {
@@ -877,11 +1100,54 @@ ws.onmessage = async (event) => {
       narrationActive = msg.source === "narration";
       proactiveActive = msg.source === "proactive" || msg.source === "self_topic";
       mumbleActive = msg.source === "mumble";
-      if (mumbleActive) { glimmer.dismiss(); renderGlimmer(); }
+      // 有声微气泡：当前气泡正是这一轮轻声搭话的文本时留着它（气泡 + 真声），
+      // 否则按原行为收回，避免两种气泡叠在一起。
+      if (mumbleActive && glimmer.current?.text !== voicedMumbleText) { glimmer.dismiss(); renderGlimmer(); }
+      // 去文字框化（协议 §23）：新轮次开始收回上一轮的口头微光，让这一轮的
+      // 台词重新住进气泡；mumble 自己的气泡上面已经放过。
+      else if (VOICE_FIRST && !mumbleActive) { glimmer.dismiss(); renderGlimmer(); }
       microFlow = false;
       syncModeStrip();
       idleStatus();
       break;
+    case "ui_nav": {
+      /* §二十四 界面自动领航：随路的 ui_nav 载荷（ui_nav.js 是纯逻辑，
+       * 未登记取值全部安全降级，未知视图不影响其它领航字段）。
+       *
+       * 护栏：auto_open 由 normalizeUiNav 决定——带 turn_id 的用户轮次领航
+       * 立即拉开抽屉；后台事件（缺 turn_id）一律降级为"只指不拉"，
+       * close 类领航是降噪方向、缺 turn_id 也放行。
+       * 心流防打扰语义照旧（executive-state.js 的 typing() 守卫不动）。 */
+      const nav = normalizeUiNav(msg);
+      if (nav.auto_open) {
+        const view = drawerViewFor(nav);
+        if (view) {
+          /* 先开抽屉（若未开），再切到目标标签页；顺序不能反，
+           * 否则首次领航只开不切，停在默认标签。 */
+          if (!drawer?.opened) drawer?.open(false);
+          drawer?.selectView(view);
+        } else if (shouldOpenSidePanel(nav)) {
+          /* 侧栏行动面板是主页面既有区域：收起抽屉让位，点亮最近一张共同事项卡。 */
+          if (drawer?.opened) drawer.close(false);
+          const side = el("sidePanel");
+          if (side && !side.classList.contains("is-open")) el("sidebarToggle")?.click();
+        } else if (shouldOpenStarmap(nav)) {
+          /* 星图全屏视图由 starmap/index.js 的入口绑开关：收起抽屉后触发既有 toggle。
+           * 触发走既有 toggle（含焦点管理、loadCurrent、aqi-fullview 广播），
+           * 不直接改 #starmapMount 的显隐，避免绕过该模块的状态机。 */
+          if (drawer?.opened) drawer.close(false);
+          el("starmapToggle")?.click();
+        }
+        /* open 类领航（ops/threads/starmap）：广播 aqi-ui-nav，消费方据此
+         * 定位卡片、展开子视图、点亮 .nav-spotlight 动效。 */
+        window.dispatchEvent(new CustomEvent("aqi-ui-nav", { detail: nav }));
+      }
+      /* close 类领航允许后台放行（降噪方向）：auto_open 未覆盖的 close 在这里收手。 */
+      if (shouldCloseDrawer(nav) && drawer?.opened) drawer.close(false);
+      /* 视线微转：她亲手帮你拉开面板指给你看。gaze 是既有通道，无形象层新增触发器。 */
+      avatar.lookAtGaze?.(gazeAfter(nav), { settleMs: 1600 });
+      break;
+    }
     case "ready":
       setStatus("在线", "on");
       subtitle.textContent = "按住左下角说话，或者打字。";
@@ -895,7 +1161,8 @@ ws.onmessage = async (event) => {
       break;
     case "thinking":
       pendingText = "";
-      if (!mumbleActive) { currentBubble = addBubble("bot", "…"); currentBubble.classList.add("thinking"); }
+      // 去文字框化：小溪说话不再起 bot 文字气泡，头顶微光 + Holo-Deck 接手。
+      if (!VOICE_FIRST && !mumbleActive) { currentBubble = addBubble("bot", "…"); currentBubble.classList.add("thinking"); }
       setStatus("在想…", "busy", "thinking");
       break;
     case "emotion":
@@ -904,14 +1171,21 @@ ws.onmessage = async (event) => {
       break;
     case "text_delta":
       // 流式增量：字幕跟着生成走，不用等整句
-      if (currentBubble && currentBubble.classList.contains("thinking")) {
+      if (!VOICE_FIRST && currentBubble && currentBubble.classList.contains("thinking")) {
+        const t0 = currentBubble.querySelector(":scope > .time");
         currentBubble.textContent = "";
+        if (t0) currentBubble.appendChild(t0);
         currentBubble.classList.remove("thinking");
       }
       pendingText = (pendingText || "") + (msg.delta || "");
-      if (currentBubble) {
+      if (VOICE_FIRST) showSpokenLine(pendingText);   // 口头台词进头顶微光气泡
+      else if (currentBubble) {
+        // 流式覆写正文时保留 .time，时间戳属于有正文的气泡
+        const timeEl = currentBubble.querySelector(":scope > .time");
         currentBubble.textContent = pendingText;
-            }
+        if (timeEl) currentBubble.appendChild(timeEl);
+        scheduleConstellation();
+      }
       // Keep the subtitle on the audible sentence while later text streams ahead.
       if (!sourceNode) subtitle.textContent = pendingText;
       break;
@@ -928,8 +1202,14 @@ ws.onmessage = async (event) => {
     case "done":
       recordBaselineTurn('turn_done', msg.turn_id, { textStatus: msg.delivery?.text_status, audioStatus: msg.delivery?.audio_status });
       if (pendingConfirmation?.id === msg.turn_id) rejectConfirmation('未收到行动结果，请查看任务面板；不会自动重试操作。');
-      if (currentBubble && msg.text) currentBubble.textContent = msg.text;
-      if (msg.delivery && currentBubble) {
+      if (VOICE_FIRST) showSpokenLine(msg.text || pendingText);   // 完整口头句入住微光，说完自然淡出
+      if (!VOICE_FIRST && currentBubble && msg.text) {
+        const timeDone = currentBubble.querySelector(":scope > .time");
+        currentBubble.textContent = msg.text;
+        if (timeDone) currentBubble.appendChild(timeDone);
+        scheduleConstellation();
+      }
+      if (!VOICE_FIRST && msg.delivery && currentBubble) {
         const notes = [];
         if (msg.delivery.text_status === 'limit_reached') notes.push('本轮已达长度上限，可能尚未展开完整；可以让我继续。');
         if (msg.delivery.text_status === 'partial') notes.push('生成中断，这里只保留了部分回答。');
@@ -942,7 +1222,7 @@ ws.onmessage = async (event) => {
           currentBubble.append(document.createElement('br'), note);
         }
       }
-      if (currentBubble) appendContextUsage(currentBubble, msg.context_usage);
+      if (!VOICE_FIRST && currentBubble) appendContextUsage(currentBubble, msg.context_usage);
       contextBudget?.note(msg.context_usage);
       microFlow = false; narrationActive = false; proactiveActive = false; mumbleActive = false; syncModeStrip();
       turns.done = true;
@@ -962,6 +1242,11 @@ ws.onmessage = async (event) => {
         clearTimeout(pending.timer); pending.resolve(msg.result);
       } else showAssistantResult(msg.result, { confirm: confirmAssistant });
       contextBudget?.note(msg.result?.context_usage);
+      break;
+    case "aqi_blocks":
+      // 协议 §23：动态积木随路下发——渲染到 Holo-Deck 或战况抽屉，
+      // 并按 layout/nav/gaze 联动抽屉与视线。
+      handleAqiBlocks(msg);
       break;
     case "memory_notice":
       if (msg.items) {
@@ -1033,6 +1318,8 @@ async function mutateMemory(control, path, options, message) {
 function refreshMemories() {
   return loadMemories().catch(error => { el("memoryFeedback").textContent = `记忆未刷新：${error.message}`; });
 }
+/* 星点点亮：只给本次新出现的记忆加 mem-new，让星点闪一下金光（纯表现层，不进状态） */
+const seenMemoryIds = new Set();
 async function loadMemories() {
   const res = await fetch(el("memHistory")?.checked ? "/api/memories?include_history=true" : "/api/memories");
   if (!res.ok) throw new Error(`无法加载记忆（${res.status}）`);
@@ -1043,7 +1330,8 @@ async function loadMemories() {
   el("memCount").textContent = `${data.count} 条当前记忆`;
   data.items.forEach((m) => {
     const div = document.createElement("div");
-    div.className = "mem";
+    div.className = seenMemoryIds.has(String(m.id)) ? "mem" : "mem mem-new";
+    seenMemoryIds.add(String(m.id));
     div.dataset.memoryId = String(m.id);
     const val = document.createElement("button");
     val.type = "button";
@@ -1063,8 +1351,11 @@ async function loadMemories() {
     };
     const meta = document.createElement("div");
     meta.className = "meta";
-    for (const [text, className] of [[KIND_LABEL[m.kind] || m.kind, "tag"], [memorySourceLabel(m), "tag"],
-      [STATUS_LABEL[m.status] || "当前", "tag"], [m.key, ""]]) {
+    // key 与 value 相同（手动记忆）时不再重复渲染同一句话
+    const metaItems = [[KIND_LABEL[m.kind] || m.kind, "tag"], [memorySourceLabel(m), "tag"],
+      [STATUS_LABEL[m.status] || "当前", "tag"]];
+    if (m.key && m.key !== m.value) metaItems.push([m.key, ""]);
+    for (const [text, className] of metaItems) {
       const label = document.createElement("span");
       label.className = className;
       label.textContent = text;
@@ -1239,9 +1530,9 @@ async function saveMemoryRequest(path, body) {
   });
   if (!response.ok) throw new Error(`服务暂不可用（${response.status}），请重试。`);
 }
-el("memoryToggle").onchange = async (event) => {
-  const control = event.target;
-  const enabled = control.checked;
+async function persistMemoryToggle(enabled) {
+  const control = el("memoryToggle");
+  if (!control) return;
   control.disabled = true;
   try {
     await saveMemoryRequest("/api/memory/toggle", { enabled });
@@ -1250,7 +1541,14 @@ el("memoryToggle").onchange = async (event) => {
   } catch (error) {
     control.checked = !enabled;
     el("memoryFeedback").textContent = `设置未保存：${error.message}`;
+    // 回滚布尔位后重新同步 WS 配置与胶囊视觉，避免服务端与界面各说各话。
+    pushConfig();
+    renderPresenceCapsule();
   } finally { control.disabled = false; }
+}
+el("memoryToggle").onchange = async (event) => {
+  await persistMemoryToggle(event.target.checked);
+  renderPresenceCapsule();   // 脚本/测试直接拨动隐藏布尔位时，胶囊视觉跟上
 };
 
 el("manualAdd").onclick = async () => {

@@ -395,6 +395,25 @@ this.face = new FaceDriver();
     this.idle.mousePos = null;
     this.idle.setGaze("viewer");
   }
+
+  /**
+   * 协议§二十四 ui_nav：领航时的视线微转。前端在拉开面板的同时调一次，
+   * 让形象"侧目看向抽屉那边"——她亲手帮你指给你看的最后一笔。
+   *
+   * 走既有 idle.setGaze(name) 通道（与 gaze.on_message 规则同一套语义），
+   * 未知注视点名由 idle 内部回落 viewer（配置校验由 check_protocol 静态把关）；
+   * 模型/config 尚未就绪时安全降级为 no-op，不阻塞界面领航本身。
+   */
+  lookAtGaze(name, { settleMs = 1600 } = {}) {
+    if (!this.idle || !name) return;
+    this.idle.setGaze(name, false);
+    this.idle.wake(0.6);
+    if (this._navGazeReturn) clearTimeout(this._navGazeReturn);
+    this._navGazeReturn = setTimeout(() => {
+      this._navGazeReturn = null;
+      if (this.idle && this.gazeMode === "natural") this.idle.setGaze("viewer");
+    }, settleMs);
+  }
   setEyeExpression(name) {
     this.idle?.wake(0.9);
     return this.eyeExpression.set(name);

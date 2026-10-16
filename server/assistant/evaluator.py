@@ -293,9 +293,21 @@ class Evaluator:
             "layer": layer,
             "findings": findings,
             "retry_count": int((commission or {}).get("retry_count") or 0),
+            "usage": self._usage_note(commands, usage),
             "scolding": scold("accepted", self._accept_note(artifact)) if passed else self._scold(findings, layer),
             "created_at": self.clock(),
         }
+
+    @staticmethod
+    def _usage_note(commands: list[str], usage: dict[str, Any]) -> dict[str, Any]:
+        """这次初审到底有没有拿到真实用量。
+
+        没有 span 时预算检查本来就不下结论（不猜，也不因此判不合格），但结论里
+        必须写清"未验证"——不能让人把"没查"读成"查过了"。
+        """
+        calls = int(usage.get("calls") or 0)
+        return {"calls": calls, "prompt_tokens": int(usage.get("prompt_tokens") or 0),
+                "budget_checked": bool("token_budget" in commands and calls)}
 
     def _l2(self, artifact):
         surface = _surface(artifact if isinstance(artifact, dict) else {}).lower()

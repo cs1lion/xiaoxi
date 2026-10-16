@@ -50,6 +50,33 @@ function line(label, value) {
   return row;
 }
 
+/* ops 视图专属的定位器：ui_nav.js 保持零 DOM 纯逻辑，落点映射留在这里。
+ * focus_id 命中 .ops-card[data-commission-id]；"latest" / 无 focus 退到最近一张卡。 */
+function opsFocusSelector(nav) {
+  const id = nav.focus_id && nav.focus_id !== "latest"
+    ? String(nav.focus_id).replace(/[^a-zA-Z0-9_-]/g, "") : "";
+  if (id) return `.ops-card[data-commission-id="${id}"]`;
+  if (nav.sub_action === "focus_latest" || nav.focus_id === "latest") {
+    return ".ops-list .ops-card:last-child";
+  }
+  return null;
+}
+
+function opsSubActionSelector(nav) {
+  switch (nav.sub_action) {
+    case "highlight_telemetry": return "#opsTelemetry";
+    case "highlight_rubrics": return "#opsRubrics";
+    case "open_preview": {
+      const id = nav.focus_id && nav.focus_id !== "latest"
+        ? String(nav.focus_id).replace(/[^a-zA-Z0-9_-]/g, "") : "";
+      const cardSel = id ? `.ops-card[data-commission-id="${id}"] .ops-delivery`
+        : ".ops-list .ops-card:last-child .ops-delivery";
+      return cardSel;
+    }
+    default: return null;
+  }
+}
+
 export function mountExecutive() {
   const root = el("drawerViewOps");
   const list = el("opsCommissions");
@@ -58,7 +85,7 @@ export function mountExecutive() {
   const rubricBox = el("opsRubrics");
   if (!root || !list || !telemetryBox || !rubricBox) return null;
 
-  const state = { seen: new Set(), lastKeyAt: 0, timer: null, active: false, revision: 0 };
+  const state = { seen: new Set(), lastKeyAt: 0, timer: null, active: false, revision: 0, highlight: "" };
   const flow = createFlowGuard({ isWriting: () => document.body.classList.contains("is-writing") });
 
   // 抽屉内部的操作是"正在办这件事"，不算打扰；其余地方的按键才算。
@@ -134,7 +161,10 @@ export function mountExecutive() {
   function commissionCard(item, quiet) {
     const card = node("article", "ops-card");
     card.dataset.status = item.status;
+    card.dataset.commissionId = item.id;
     card.dataset.quiet = String(!shouldHighlight(quiet));
+    // 协议 §23：积木 ui:preview:<ref> 的高亮联动（ref 命中这一单时描金边）。
+    if (state.highlight && item.id === state.highlight) card.classList.add("is-highlighted");
     const head = node("div", "ops-card-head");
     head.append(node("h5", "ops-card-title", item.title || "未命名督办"));
     head.append(node("span", "ops-pill", STATUS_LABELS[item.status] || item.status));
@@ -331,6 +361,63 @@ export function mountExecutive() {
     } else {
       stop();
     }
+  });
+  // 协议 §23.3：积木 ui:preview:<ref> —— 打开战况抽屉并高亮对应成果 ref。
+  window.addEventListener("aqi-block-preview", (event) => {
+    const ref = event.detail?.ref;
+    if (typeof ref !== "string" || !ref || ref.length > 200) return;
+    state.highlight = ref;
+    refresh();
+  });
+
+  /* §二十四 界面自动领航：app.js 收到 ui_nav 后广播 aqi-ui-nav，
+   * 该视图在 active 时消费——定位目标卡、展开子动作、加 .nav-spotlight 动效。
+   * 抽屉标签页切换与视线微转（gaze_target）由 app.js 直接做，这里只管"指给谁看"。
+   * 心流护栏：领航只在 aqi-ui-nav 的 detail.auto_open 为 true 时才立即动手；
+   * 后台被动事件（缺 turn_id）在 app.js 那一层就被降级为 auto_open=false。
+   *
+   * 竞态说明：refresh() 会 replaceChildren 重渲染卡片列表，抹掉刚加的
+   * .nav-spotlight 与展开态。所以把"应用领航"提取成可重放函数，refresh()
+   * 完成后再回放一次当前 nav，保证高亮与子动作稳定可见。 */
+  let lastNav = null;
+  function applyNav(nav) {
+    if (!nav || nav.target_view !== "ops" || !state.active || !nav.auto_open) return;
+    lastNav = nav;
+    const focusSel = opsFocusSelector(nav);
+    if (focusSel) {
+      const card = root.querySelector(focusSel);
+      if (card) {
+        card.scrollIntoView({ behavior: "smooth", block: "center" });
+        card.classList.add("nav-spotlight");
+        setTimeout(() => card.classList.remove("nav-spotlight"), 1600);
+      }
+    }
+    const subSel = opsSubActionSelector(nav);
+    if (subSel) {
+      const target = root.querySelector(subSel);
+      if (target) {
+        if (nav.sub_action === "open_preview") {
+          const box = target.closest(".ops-delivery") || target;
+          const artifacts = box.querySelector(".ops-artifacts");
+          if (artifacts) artifacts.hidden = false;
+          const previewBtn = box.querySelector("button[aria-expanded]");
+          if (previewBtn && artifacts) previewBtn.setAttribute("aria-expanded", "true");
+          box.classList.add("nav-spotlight");
+          setTimeout(() => box.classList.remove("nav-spotlight"), 1600);
+        } else {
+          target.scrollIntoView({ behavior: "smooth", block: "nearest" });
+          target.classList.add("nav-spotlight");
+          setTimeout(() => target.classList.remove("nav-spotlight"), 1600);
+        }
+      }
+    }
+  }
+
+  window.addEventListener("aqi-ui-nav", (event) => {
+    const nav = event.detail;
+    applyNav(nav);
+    // 列表若是旧的，refresh() 重渲染后再回放一次领航，保证定位落到真实数据。
+    refresh().then(() => { if (lastNav === nav) applyNav(nav); });
   });
   refresh();
   return { refresh, get active() { return state.active; } };

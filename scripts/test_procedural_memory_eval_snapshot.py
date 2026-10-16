@@ -314,6 +314,10 @@ class SnapshotTests(unittest.TestCase):
             member.symlink_to(external)
         except OSError as error:
             self.skipTest(f'symlink creation unavailable: {error.__class__.__name__}')
+        # 无符号链接权限的 Windows 上 symlink_to 可能不报错、也不建链接，
+        # 只落一个普通空文件——场景没建成，跳过而不是误判产品故障。
+        if not member.is_symlink():
+            self.skipTest('symlink creation degraded to a regular file; escape scenario not built')
         with self.assertRaisesRegex(target.SnapshotError, 'source_file_unavailable'):
             target.create_snapshot(self.source, self.output)
         member.unlink()

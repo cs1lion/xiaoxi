@@ -1,22 +1,22 @@
 /* Scoped to the explicitly mounted experience panel. */
-.experience-panel { margin-block: 12px; padding: 14px; border: 1px solid var(--line, #dedfd5); border-radius: 12px; }
+.experience-panel { margin-block: 12px; padding: 14px; border: 1px solid var(--line, #2a3854); border-radius: 16px; }
 .experience-panel summary { cursor: pointer; font-weight: 600; }
-.experience-panel p { line-height: 1.6; font-size: .9rem; overflow-wrap: anywhere; }
-.experience-panel .experience-status { border-left: 3px solid var(--accent, #72afdf); padding-left: 10px; }
+.experience-panel p { line-height: 1.7; font-size: var(--fs-content, 13px); overflow-wrap: anywhere; }
+.experience-panel .experience-status { color: var(--muted, #a9b2c4); }
 .experience-fields { display: grid; gap: 12px; }
-.experience-fields label { display: grid; gap: 5px; font-size: .9rem; }
-.experience-fields input, .experience-fields select, .experience-fields textarea { box-sizing: border-box; width: 100%; min-width: 0; padding: 8px 10px; color: inherit; background: var(--panel, #fffefa); border: 1px solid var(--line, #dedfd5); border-radius: 7px; font: inherit; }
+.experience-fields label { display: grid; gap: 5px; font-size: var(--fs-content, 13px); }
+.experience-fields input, .experience-fields select, .experience-fields textarea { box-sizing: border-box; width: 100%; min-width: 0; padding: 9px 12px; color: inherit; background: var(--panel, #1c2740); border: 1px solid var(--line, #2a3854); border-radius: 10px; font: inherit; }
 .experience-fields textarea { resize: vertical; }
 .experience-panel [hidden] { display: none !important; }
 .experience-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-block: 10px; }
-.experience-actions button { min-height: 36px; padding: 7px 11px; border-radius: 7px; font: inherit; cursor: pointer; }
+.experience-actions button { min-height: 38px; padding: 8px 12px; border-radius: 10px; font: inherit; cursor: pointer; }
 .experience-actions button:disabled { opacity: .5; cursor: not-allowed; }
-.experience-panel :focus-visible { outline: 2px solid var(--accent, #72afdf); outline-offset: 3px; }
-.experience-hint { opacity: .85; margin-block: 0; }
-.experience-applied-source { margin-block: 12px; padding: 12px; border: 1px solid var(--accent, #72afdf); border-radius: 7px; }
-.experience-quote { margin-block: 10px; padding-left: 10px; border-left: 2px solid var(--line, #dedfd5); }
+.experience-panel :focus-visible { outline: 2px solid var(--accent, #c9a227); outline-offset: 3px; }
+.experience-hint { color: var(--muted, #a9b2c4); margin-block: 0; }
+.experience-applied-source { margin-block: 12px; padding: 12px; border: 1px solid var(--accent, #c9a227); border-radius: 10px; }
+.experience-quote { margin-block: 10px; padding-left: 10px; border-left: 2px solid var(--line, #2a3854); }
 .experience-quote p { white-space: pre-wrap; max-height: 180px; overflow: auto; }
 .experience-shelf { margin-top: 14px; }
-.experience-bookmark { margin-block: 10px; padding: 10px; border: 1px solid var(--line, #dedfd5); border-radius: 7px; }
+.experience-bookmark { margin-block: 10px; padding: 10px; border: 1px solid var(--line, #2a3854); border-radius: 10px; }
 .experience-bookmark p { white-space: pre-wrap; max-height: 180px; overflow: auto; }
 @media (max-width: 480px) { .experience-actions button { flex: 1 1 150px; } .experience-panel { padding: 10px; } }

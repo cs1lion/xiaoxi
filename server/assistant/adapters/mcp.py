@@ -12,12 +12,11 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import json
-import os
-import signal
 from typing import Any, AsyncIterator
 
 from .base import (ARTIFACT, ERROR, LOG, TOKEN, AdapterError,
-                   BaseWorkerAdapter, artifact_event, make_event)
+                   BaseWorkerAdapter, artifact_event, make_event,
+                   terminate_process_group)
 from .registry import register_adapter
 
 DEFAULT_TIMEOUT = 600.0
@@ -99,17 +98,9 @@ class McpBridgeAdapter(BaseWorkerAdapter):
             await self._reap()
 
     async def cancel(self) -> None:
+        """杀整个 MCP Server 进程组并回收。幂等，不抛异常。"""
         self._cancelled = True
-        process = self._process
-        if process is None or process.returncode is not None:
-            return
-        with contextlib.suppress(ProcessLookupError, PermissionError, OSError):
-            os.killpg(os.getpgid(process.pid), signal.SIGTERM)
-        with contextlib.suppress(Exception):
-            await asyncio.wait_for(process.wait(), 5.0)
-        if process.returncode is None:
-            with contextlib.suppress(ProcessLookupError, PermissionError, OSError):
-                os.killpg(os.getpgid(process.pid), signal.SIGKILL)
+        await terminate_process_group(self._process)
 
     # ---------- 内部 ----------
     def _allocate_id(self) -> int:

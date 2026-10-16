@@ -12,7 +12,9 @@
 from __future__ import annotations
 
 import contextlib
+import json
 import re
+import threading
 import time
 from dataclasses import dataclass, field
 from typing import Any, Callable
@@ -28,6 +30,10 @@ COST_SCORE = {"cheap": 1.0, "medium": 0.6, "high": 0.3}
 MAX_OBJECTIVE = 400
 MAX_DELIVERABLE = 400
 MAX_CONSTRAINTS = 6
+# CommissionStore.transition 对 packet JSON 的硬限（server/interaction/threads.py）。
+# 记忆正文顶格时整包会超限，那时丢 memory_block 保 memory_refs——派单不能因为
+# 记忆太多而失败，稳定引用比正文重要。
+MAX_PACKET_CHARS = 8000
 
 
 @dataclass(frozen=True)
@@ -49,8 +55,13 @@ class BriefingPacket:
     telemetry: dict[str, Any] = field(default_factory=dict)
     created_at: float = 0.0
 
-    def as_dict(self) -> dict[str, Any]:
-        return {
+    def as_dict(self, *, max_chars: int = 0) -> dict[str, Any]:
+        """序列化成可持久化的密件。
+
+        `max_chars` 是台账的落库上限；超限时丢掉 memory_block（保留 memory_refs），
+        其余字段都有独立长度上限，丢掉正文后必定放得下。
+        """
+        data = {
             "commission_id": self.commission_id,
             "objective": self.objective,
             "deliverable": self.deliverable,
@@ -59,12 +70,20 @@ class BriefingPacket:
             "constraints": list(self.constraints),
             "memory_refs": [dict(item) for item in self.memory_refs],
             "preferences": [dict(item) for item in self.preferences],
+            "memory_block": self.memory_block,
             "rubrics": [dict(item) for item in self.rubrics],
             "budget": dict(self.budget),
             "spin_guard": dict(self.spin_guard),
             "telemetry": dict(self.telemetry),
             "created_at": self.created_at,
         }
+        if max_chars and len(json.dumps(data, ensure_ascii=False)) > int(max_chars):
+            data.pop("memory_block", None)
+        return data
+
+    def as_stored(self) -> dict[str, Any]:
+        """落库/外发用的密件视图：与 CommissionStore 里那份逐字节一致。"""
+        return self.as_dict(max_chars=MAX_PACKET_CHARS)
 
 
 def _clip(text: Any, limit: int) -> str:
@@ -141,6 +160,11 @@ class Dispatcher:
         # 可注入的适配器工厂：测试里换成一个假工厂即可验证派发全程，
         # 生产环境用注册表默认实现。
         self.adapter_factory = adapter_factory or create_adapter_for
+        # 执行权租约：检查与占位之间没有 await，在单事件循环里是原子的；加锁是
+        # 为了万一有线程池调用方也安全。重复领取直接失败而不是排队——排队只会
+        # 让第二次点击白等一圈，然后跑一份重复的工。
+        self._claim_lock = threading.Lock()
+        self._active_runs: set[str] = set()
 
     # ---------- 适配器 ----------
     def agent_entry(self, agent_id: str) -> dict[str, Any]:
@@ -201,7 +225,7 @@ class Dispatcher:
             created_at=self.clock(),
         )
         updated = self.commissions.transition(commission_id, "briefing", agent_id=packet.agent_id,
-                                             packet=packet.as_dict())
+                                             packet=packet.as_stored())
         return updated, packet
 
     def start(self, commission_id: str) -> dict[str, Any]:
@@ -212,14 +236,33 @@ class Dispatcher:
         """RUNNING 期间驱动适配器：prepare_context -> execute 事件流 -> submit。
 
         事件流的处置规则：
-          progress -> 记步，并喂给鬼打墙检测（同一步骤签名连续重复即熔断）
+          progress -> 记步，并喂给遥测里的熔断器（同一步骤签名连续重复即熔断）
           token    -> 落一条遥测 span（Dual-Shim 那条链路）
-          artifact -> 收下，流结束后交初审室
+          artifact -> 收下；其后若又出现 error，这一版不算交差
           error    -> 记下并中止
 
         适配器起不来、抛异常、或鬼打墙熔断时，先 cancel() 回收进程，再转 BLOCKED
         请示老板。绝不假装执行过，也绝不无限重试。
+
+        执行权：进来先领租约。重复点击、重试、并发 /run 只会有一个真正起身，
+        第二个拿到 ValueError——只查 status 防不住并发，检查和起适配器之间
+        隔着好几轮 await，两个请求都能看到"还是 running"。
         """
+        commission = self.commissions.get(commission_id)
+        if commission["status"] != "running":
+            raise ValueError("commission_not_running")
+        if not self._claim_run(commission_id):
+            raise ValueError("commission_already_running")
+        # 每次开跑重新开窗：否则上一轮熔断留下的签名，会让这一轮的第一步就跳闸。
+        if self.telemetry is not None:
+            with contextlib.suppress(Exception):
+                self.telemetry.guard.reset(commission_id)
+        try:
+            return await self._run_adapter(commission_id)
+        finally:
+            self._release_run(commission_id)
+
+    async def _run_adapter(self, commission_id: str) -> dict[str, Any]:
         commission = self.commissions.get(commission_id)
         if commission["status"] != "running":
             raise ValueError("commission_not_running")
@@ -251,12 +294,8 @@ class Dispatcher:
                 if kind == "progress":
                     self.commissions.record_step(commission_id, step_idx or 1)
                     signature = normalize_signature(event)
-                    signatures.append(signature)
-                    tripped = (len(signatures) >= max_identical
-                               and len(set(signatures[-max_identical:])) == 1)
-                    if tripped and self.telemetry is not None:
-                        with contextlib.suppress(Exception):
-                            self.telemetry.guard.observe(commission_id, signature, agent_id=agent_id)
+                    tripped = self._spinning(signatures, commission_id, signature,
+                                             agent_id, max_identical)
                     if tripped:
                         await adapter.cancel()
                         return {"commission": self.block(
@@ -279,8 +318,69 @@ class Dispatcher:
             return {"commission": self.block(
                 commission_id, f"{reason}。要我再催一次，还是这单算了？"),
                 "verdict": None, "failure": failure or "no_artifact"}
-        commission, verdict = self.submit(commission_id, artifact)
+        if failure:
+            # artifact 之后又报错：这一版没有收尾。"交了又炸了"和"交差了"不是
+            # 一回事，部分产物留给老板定夺，不当成功交付。
+            return {"commission": self.block(
+                commission_id, f"它交了差又报错：{failure}。部分产物还在，要我核一遍再交吗？"),
+                "verdict": None, "failure": f"partial_artifact:{failure}"}
+        usage, spinning = self.audit_inputs(commission_id)
+        commission, verdict = self.submit(commission_id, artifact, usage=usage, spinning=spinning)
         return {"commission": commission, "verdict": verdict, "failure": failure}
+
+    def _spinning(self, signatures: list[str], commission_id: str, signature: str,
+                  agent_id: str, max_identical: int) -> bool:
+        """鬼打墙判据只有一个来源：遥测里的 SpinningGuard。
+
+        每一步签名都喂给它，而不是等本地计数跳闸了才补喂一次——后者让告警永远
+        进不了 spinning_alerts，抽屉里看得见熔断、战况里查无此事。遥测缺失时才
+        回落到本地计数，行为与从前一致。
+        """
+        if self.telemetry is not None:
+            try:
+                return bool(self.telemetry.guard.observe(
+                    commission_id, signature, agent_id=agent_id,
+                    max_identical=max_identical, channel="progress")["tripped"])
+            except Exception:
+                pass
+        signatures.append(signature)
+        return (len(signatures) >= max_identical
+                and len(set(signatures[-max_identical:])) == 1)
+
+    def audit_inputs(self, commission_id: str) -> tuple[dict[str, Any] | None, dict[str, Any] | None]:
+        """初审的真实读数：这一单的实际用量 + 熔断告警。
+
+        `run_commission` 和外部 `/submit` 走同一个入口，两条路径判据因此一致，
+        不会出现"内部链路不查预算、外部链路查"的双标。遥测缺失时两个都是 None，
+        初审按"没有真实 span"处理，不猜。
+        """
+        if self.telemetry is None:
+            return None, None
+        usage: dict[str, Any] | None = None
+        spinning: dict[str, Any] | None = None
+        try:
+            usage = self.telemetry.store.commission_usage(commission_id)
+        except Exception:
+            usage = None
+        try:
+            alerts = [item for item in self.telemetry.guard.alerts()
+                      if item["commission_id"] == commission_id]
+            if alerts:
+                spinning = {"tripped": True, "repeats": alerts[-1]["repeats"]}
+        except Exception:
+            spinning = None
+        return usage, spinning
+
+    def _claim_run(self, commission_id: str) -> bool:
+        with self._claim_lock:
+            if commission_id in self._active_runs:
+                return False
+            self._active_runs.add(commission_id)
+            return True
+
+    def _release_run(self, commission_id: str) -> None:
+        with self._claim_lock:
+            self._active_runs.discard(commission_id)
 
     def _record_token(self, commission_id: str, agent_id: str, event: dict[str, Any]) -> None:
         """把一次模型调用落成 span。遥测记不上只当这次不计入战况，不带崩执行。"""
@@ -366,6 +466,32 @@ class Dispatcher:
         if commission["status"] != "ready_to_report":
             raise ValueError("commission_not_ready_to_report")
         return self.commissions.transition(commission_id, "done")
+
+    def reassign(self, commission_id: str) -> dict[str, Any]:
+        """换将重派（协议 §23.3 dispatch:reassign）：BLOCKED -> RUNNING 并重新选将。
+
+        只对 blocked 单生效：running 的单没有合法迁移边，auditing 的单正在初审，
+        都不该被一张卡片上的按钮掀翻。排除现任将的办法是把它在负载表里顶满
+        （不改 select_agent 的签名）；花名册只剩一个人时承认换不动，原样解冻
+        重跑——由上层照实说，不编造"已换将"。
+        """
+        commission = self.commissions.get(commission_id)
+        if commission["status"] != "blocked":
+            raise ValueError("commission_not_blocked")
+        text = f"{commission['title']} {commission['brief']}".strip()
+        load: dict[str, int] = {}
+        for item in self.commissions.open_commissions():
+            if item["agent_id"]:
+                load[item["agent_id"]] = load.get(item["agent_id"], 0) + 1
+        current = str(commission.get("agent_id") or "")
+        if current:
+            load[current] = max(load.get(current, 0), 10 ** 6)
+        agent, _ranked = select_agent(self.roster, text, load)
+        if agent is not None:
+            return self.commissions.transition(commission_id, "running",
+                                               agent_id=str(agent["id"]),
+                                               blocked_question="")
+        return self.commissions.transition(commission_id, "running", blocked_question="")
 
     def reject(self, commission_id: str, boss_feedback: str) -> tuple[dict[str, Any], dict[str, Any] | None]:
         """READY_TO_REPORT -> RUNNING, and learn one new rubric from the Delta.

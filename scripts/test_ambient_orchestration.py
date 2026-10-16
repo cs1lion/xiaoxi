@@ -1,7 +1,8 @@
 """V2 三梯度编排契约（PROTOCOL §16）：orchestrator.ambient_event 集成。只用临时库。
 
 Run: python -B scripts/test_ambient_orchestration.py
-Covers: micro_act/mumble 分级产出、真实内容来源、去重、无内容不编造、授权门。
+Covers: micro_act/mumble 分级产出、真实内容来源、冷启动破冰兜底、去重、
+指数退避与周期重置、梯度3 陪伴通道接管（无静音断层）、授权门、真声字段。
 """
 from __future__ import annotations
 
@@ -28,6 +29,7 @@ class AmbientOrchestrationTest(unittest.TestCase):
         orch.state["last_ambient_tier"] = None
         orch.state["last_ambient_at"] = 0.0
         orch.state["ambient_seq"] = 0
+        orch.state["voice_cycle"] = 0
 
     def tearDown(self):
         O.manager = self._orig_manager
@@ -37,6 +39,7 @@ class AmbientOrchestrationTest(unittest.TestCase):
         orch = O.orchestrator
         orch.state["last_ambient_tier"] = None
         orch.state["last_ambient_at"] = 0.0
+        orch.state["voice_cycle"] = 0
 
     def test_micro_act_tier(self):
         event = O.orchestrator.ambient_event(idle_seconds=25, now=1000.0)
@@ -59,9 +62,62 @@ class AmbientOrchestrationTest(unittest.TestCase):
         self.assertEqual(event["type"], "mumble")
         self.assertIn("关键环节", event["text"])
 
-    def test_no_real_content_stays_silent(self):
+    def test_voiced_mumble_carries_voice_and_bubble(self):
+        self.store.save_mood(narrative="余温", state="active")
         self._reset_dedup()
-        self.assertIsNone(O.orchestrator.ambient_event(idle_seconds=50, now=1000.0))
+        event = O.orchestrator.ambient_event(idle_seconds=50, now=1000.0)
+        self.assertEqual(event["type"], "mumble")
+        self.assertTrue(event["voice"], "打磨轮主动搭话默认走真声链路（mumble_voice: true）")
+        self.assertEqual(event["bubble"]["text"], event["text"])
+
+    def test_first_voiced_threshold_is_25_to_30s(self):
+        self._reset_dedup()
+        # 28s 之前只有无声微动作，不会有声搭话。
+        early = O.orchestrator.ambient_event(idle_seconds=27.9, now=1000.0)
+        self.assertEqual(early["type"], "micro_act")
+        event = O.orchestrator.ambient_event(idle_seconds=28, now=1000.0)
+        self.assertEqual(event["type"], "mumble")
+        self.assertTrue(event["voice"])
+
+    def test_cold_start_icebreaker_uses_real_samples(self):
+        # 空库：没有 reflection / mood / spark，也必须开口，而不是装哑巴。
+        self._reset_dedup()
+        event = O.orchestrator.ambient_event(idle_seconds=28, now=1000.0)
+        self.assertEqual(event["type"], "mumble")
+        self.assertTrue(event["voice"])
+        self.assertTrue(event["text"].strip())
+        self.assertIn("config:response_examples.json", event["source_refs"],
+                      "破冰语料必须真实可溯，不能声称完成过反思")
+        self.assertTrue(event["trigger_reason"].startswith("icebreaker_"))
+
+    def test_cold_start_icebreaker_prefers_real_todo(self):
+        todo_id = self.store.upsert(kind="todo", value="把周报改成三句话", key="todo:weekly")
+        self._reset_dedup()
+        event = O.orchestrator.ambient_event(idle_seconds=28, now=1000.0)
+        self.assertEqual(event["type"], "mumble")
+        self.assertIn("周报", event["text"])
+        self.assertIn(f"memory:{todo_id}", event["source_refs"])
+
+    def test_voice_backoff_then_cycle_reset(self):
+        self.store.save_mood(narrative="余温", state="active")
+        self._reset_dedup()
+        first = O.orchestrator.ambient_event(idle_seconds=28, now=1000.0)
+        self.assertEqual(first["type"], "mumble")
+        # 同一空闲周期：退避后阈值 56s，idle 40s 只够 micro_act，且被去重挡住。
+        self.assertIsNone(O.orchestrator.ambient_event(idle_seconds=40, now=1010.0))
+        # 越过退避阈值但仍处于去重窗口内，不刷屏。
+        self.assertIsNone(O.orchestrator.ambient_event(idle_seconds=60, now=1015.0))
+        # 用户一有动作（空闲回落到 5s 以下）：退避计数清零，去重窗口也已过去。
+        self.assertIsNone(O.orchestrator.ambient_event(idle_seconds=2, now=1500.0))
+        again = O.orchestrator.ambient_event(idle_seconds=28, now=1501.0)
+        self.assertEqual(again["type"], "mumble", "新空闲周期里安静半分钟 again 被搭理")
+
+    def test_proactive_tier_stays_voiced_companion(self):
+        # 梯度3（90s+）不再留给 900s 门的重通道独占：陪伴通道接管，消除静音断层。
+        self._reset_dedup()
+        event = O.orchestrator.ambient_event(idle_seconds=200, now=1000.0)
+        self.assertEqual(event["type"], "mumble")
+        self.assertTrue(event["voice"])
 
     def test_dedup_blocks_repeat_within_window(self):
         self.store.save_mood(narrative="余温", state="active")
@@ -79,14 +135,17 @@ class AmbientOrchestrationTest(unittest.TestCase):
         mumble = O.orchestrator.ambient_event(idle_seconds=50, now=1010.0)  # escalate
         self.assertEqual(mumble["type"], "mumble")
 
-    def test_proactive_tier_not_handled_here(self):
-        self._reset_dedup()
-        self.assertIsNone(O.orchestrator.ambient_event(idle_seconds=200, now=1000.0))
-
     def test_authorization_gate(self):
         O.orchestrator.state["proactivity_enabled"] = False
         self._reset_dedup()
         self.assertIsNone(O.orchestrator.ambient_event(idle_seconds=50, now=1000.0))
+
+    def test_disabled_stays_silent(self):
+        from unittest.mock import patch
+        from server.dialogue import ambient as A
+        with patch.object(A, "ambient_cfg", return_value={**A.AMBIENT_DEFAULTS, "enabled": False}):
+            self._reset_dedup()
+            self.assertIsNone(O.orchestrator.ambient_event(idle_seconds=50, now=1000.0))
 
 
 class TouchSampleTest(unittest.TestCase):

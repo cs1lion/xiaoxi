@@ -14,7 +14,11 @@ from fastapi.responses import FileResponse, JSONResponse
 from .static import AppStaticFiles
 
 from .config import ROOT, avatar_cfg, ensure_dirs, pacing_cfg, persona_cfg, settings
-from .dialogue.orchestrator import EMOTIONS, orchestrator, parse_emotion
+from .dialogue.aqi_blocks import (aqi_blocks_message, compose_delivery_card,
+                                  compose_spinning_card, note_snippet)
+from .dialogue.orchestrator import (EMOTIONS, commission_accept_line, detect_emotion,
+                                   orchestrator, parse_emotion, spinning_intercept_line,
+                                   store_message)
 from .dialogue.delivery import deliver_reply
 from .llm import llm
 from .memory.manager import manager
@@ -433,6 +437,12 @@ async def _narrate_turn(conn: Connection, turn: VoiceTurn, node_id: str) -> None
             return
         await conn.send_turn(turn, {"type": "turn_started", "source": "narration"})
         await conn.send_turn(turn, {"type": "thinking"})
+        # 协议 §23.4：星图查看随路下发真实节点摘录积木，并联动星图视图。
+        snippet = _node_snippet(node_id, record)
+        if snippet is not None:
+            await conn.send_turn(turn, aqi_blocks_message([snippet], layout="stage_holo",
+                                                          nav="starmap", gaze="holo_right",
+                                                          source="ambient"))
         text = await narrate_opening(record, llm)
         if not conn.current(turn):
             return
@@ -489,6 +499,70 @@ async def _maybe_self_evolution(conn: Connection) -> None:
                 await conn.send(payload)
     except asyncio.CancelledError:
         raise
+    except Exception:
+        return
+
+
+def _node_snippet(node_id: str, record: dict[str, Any]) -> dict[str, Any] | None:
+    """协议 §23.4：星图节点 → note_snippet 积木。只取记录里真实存在的字段，
+    五种节点形状（memory/diary/spark/seed/ledger）按可选字段依序取文本。"""
+    if not isinstance(record, dict):
+        return None
+    text = next((str(record[key]).strip() for key in ("value", "body", "text", "stance", "question")
+                 if isinstance(record.get(key), str) and record[key].strip()), "")
+    if not text:
+        return None
+    title = next((str(record[key]).strip() for key in ("title", "topic")
+                  if isinstance(record.get(key), str) and record[key].strip()), "")
+    return note_snippet(text, title=title, ref=node_id)
+
+
+async def _aqi_action(conn: Connection, cmd: str) -> None:
+    """协议 §23.5：积木业务动作回传。只认白名单动词
+    （dispatch:accept:<id> / dispatch:reassign:<id>），以台账真实状态为准；
+    失败回连接级可恢复错误，不重试、不排队、不重复副作用。"""
+    try:
+        if conn.closed:
+            return
+        parts = cmd.split(":", 2)
+        if len(parts) != 3 or parts[0] != "dispatch" or parts[1] not in ("accept", "reassign"):
+            return
+        commission_id = parts[2].strip()
+        if not commission_id or len(commission_id) > 100:
+            return
+        action = parts[1]
+        turn = await conn.begin()
+        await conn.send_turn(turn, {"type": "turn_started", "source": "aqi_action"})
+        try:
+            if action == "accept":
+                executive.accept(commission_id)
+            else:
+                executive.reassign(commission_id)
+                # 换将之后这一单还得有人跑：驱动放后台，确认语音不傻等。
+                conn.spawn(_executive_reassign_drive(commission_id))
+        except Exception:
+            await conn.finish(turn, {"type": "error", "code": "aqi_action_failed",
+                                     "recoverable": True,
+                                     "message": "这单的状态变了，没收工成功；看看战况抽屉里的实际状态。"})
+            return
+        # 确认台词必须是真实配置样本；没有样本就静默交差，不编造。
+        line = commission_accept_line() if action == "accept" else spinning_intercept_line()
+        if line:
+            await conn.send_turn(turn, {"type": "thinking"})
+            await _present_reply(conn, turn, line, detect_emotion(line))
+        else:
+            await conn.finish(turn, {"type": "done", "text": "", "latency_ms": 0})
+    except asyncio.CancelledError:
+        raise
+    except Exception:
+        # There is no announced turn to fail when a background action fails.
+        return
+
+
+async def _executive_reassign_drive(commission_id: str) -> None:
+    """换将之后驱动执行体接着跑；失败只在台账里留痕，不向外抛。"""
+    try:
+        await executive.run_commission(commission_id)
     except Exception:
         return
 
@@ -581,11 +655,32 @@ async def _run_turn(conn: Connection, text: str, mode: str, turn: VoiceTurn | No
             return
         # V3 台前快环：委托接单 / 进度追问 / API 战况 / 验收反馈。
         # 全部用配置样本或真实台账数据回答，不发第二次模型请求；慢环另起后台任务。
-        route = orchestrator.executive_route(text, executive)
+        route = orchestrator.executive_route(text, executive,
+                                              memory_enabled=manager.enabled)
         if route is not None:
             from .dialogue.orchestrator import store_message
             store_message(conn.session_id, "user", text, mode)
+            # 界面自动领航（协议§二十四）：先于该轮语音下发，让她"亲手拉开面板"
+            # 指给老板看；旧客户端读到未知类型整条忽略，不阻塞。
+            # 字面量 {"type": "ui_nav"} 供 check_protocol.py 的静态字段扫描识别。
+            if isinstance(route.get("ui_nav"), dict):
+                nav_payload = {
+                    "type": "ui_nav",
+                    "target_view": "ops",
+                    "sub_action": "focus_latest",
+                    "gaze_target": "side",
+                }
+                nav_payload.update(route["ui_nav"])
+                await conn.send_turn(turn, nav_payload)
             await conn.send_turn(turn, {"type": "thinking"})
+            # 协议 §23：积木先递到她嘴边——卡片就位，再开口说这一单的事。
+            # 必须在 _present_reply 收轮之前发，否则 turn fence 已关。
+            # source=executive（快环台账直出）；delegation 附 nav=ops 自动滑抽屉。
+            blocks = route.get("aqi_blocks") or []
+            if blocks:
+                await conn.send_turn(turn, aqi_blocks_message(
+                    blocks, layout="stage_holo", nav=route.get("nav"),
+                    gaze="holo_right", source="executive"))
             if route.get("text"):
                 await _present_reply(conn, turn, route["text"], parse_emotion(route["text"])[0])
             else:
@@ -596,6 +691,12 @@ async def _run_turn(conn: Connection, text: str, mode: str, turn: VoiceTurn | No
             elif kind in ("accept", "reject"):
                 conn.spawn(_executive_finish(route.get("commission_id", ""), kind,
                                              route.get("feedback") or text))
+            elif kind == "starmap_view":
+                # 看星图是纯领航：没有后台动作要跑，台词说完即收。
+                pass
+            elif kind == "notes_view":
+                # 看笔记/便笺同理，前端侧栏行动面板自己定位，不需要后台任务。
+                pass
             return
         if assistant.should_route(text, conn.session_id) or assistant.waiting_input(conn.session_id):
             from .dialogue.orchestrator import store_message, store_recent
@@ -674,6 +775,45 @@ async def _transcribe_turn(conn: Connection, turn: VoiceTurn, data: bytes) -> No
         await conn.finish(turn, {"type": "error", "message": str(exc), "terminal": True})
 
 
+async def _send_proactive_blocks(conn: Connection, turn: VoiceTurn, source: str,
+                                result) -> None:
+    """协议 §23.6：主动开口轮次随路积木——熔断红卡 > 邀功金卡 > 偷师顿悟卡。
+
+    只用真实台账数据组装：无熔断、无待验收、无 spark 时一枚都不发
+    （不拿占位卡充数）。必须在 _run_turn 收轮之前 send_turn，否则
+    turn fence 已关，卡片会被当成陈旧帧丢弃。
+    """
+    blocks: list[dict] = []
+    try:
+        alerts = executive.spinning_alerts()
+    except Exception:
+        alerts = []
+    card = compose_spinning_card(alerts)
+    if card is not None:
+        blocks.append(card)
+    if not blocks:
+        try:
+            pending = executive.pending_reports()
+        except Exception:
+            pending = []
+        if pending:
+            card = compose_delivery_card(pending[0])
+            if card is not None:
+                blocks.append(card)
+    if not blocks and source == "self_topic":
+        spark = getattr(result, "spark", None)
+        if isinstance(spark, dict) and isinstance(spark.get("text"), str) and spark["text"].strip():
+            card = note_snippet(spark["text"], title="偷师顿悟",
+                                ref=f"spark:{spark.get('id')}",
+                                actions=[{"label": "去星图看看", "cmd": "ui:starmap"}])
+            if card is not None:
+                blocks.append(card)
+    if blocks:
+        await conn.send_turn(turn, aqi_blocks_message(
+            blocks, layout="stage_holo", gaze="holo_right",
+            source="loop" if source == "self_topic" else "ambient"))
+
+
 async def _proactive_check(conn: Connection, revision: int) -> None:
     try:
         await _maybe_self_evolution(conn)
@@ -689,11 +829,18 @@ async def _proactive_check(conn: Connection, revision: int) -> None:
             source = "self_topic"
         # busy includes this check itself; revision fences even a user turn that
         # has already finished or was cancelled while the provider ignored cancel.
-        if conn.closed or conn.revision != revision:
+        # recording/playing/live-turn re-check: a user turn that started after the
+        # spawn guard must never be cancelled by an ambient opener (conn.busy
+        # cannot be used here because this very task is conn.task).
+        if (conn.closed or conn.revision != revision
+                or conn.recording or conn.playing
+                or (conn.turn is not None and conn.turn.live)):
             return
         if result:
             turn = await conn.begin()
             await conn.send_turn(turn, {"type": "turn_started", "source": source})
+            # 协议 §23.6：卡片先递到她嘴边，再开口说这一单的事。
+            await _send_proactive_blocks(conn, turn, source, result)
             await _run_turn(conn, result.text, "proactive", turn)
             if source == "self_topic":
                 spark_id = getattr(result, "spark_id", None)
@@ -707,10 +854,13 @@ async def _proactive_check(conn: Connection, revision: int) -> None:
             if event.get("type") == "mumble" and event.get("voice"):
                 # Real mumble through the shared voice path (deliver_reply); the frontend
                 # renders a "mumble" turn as an ambient subtitle, not a chat bubble. Reuses
-                # barge-in / interruption and the existing turn fence.
+                # barge-in / interruption and the existing turn fence. The connection-level
+                # bubble rides along first so the voiced opener also leaves its glimmer.
+                await conn.send(event)
                 turn = await conn.begin()
-                if turn is not None and conn.revision == revision:
-                    from .dialogue.orchestrator import detect_emotion, store_message
+                # begin() 自增 revision，轮次有效性以 current(turn) 为准：
+                # 用户轮次在栅栏与 begin() 之间抢进来时，这一轮已被取消，静默退出。
+                if turn is not None and conn.current(turn):
                     text = event.get("text") or ""
                     await conn.send_turn(turn, {"type": "turn_started", "source": "mumble"})
                     store_message(conn.session_id, "assistant", text, "mumble")
@@ -756,7 +906,9 @@ async def _executive_delegate(text: str) -> None:
     老板的时间不该花在等派单上。
     """
     try:
-        executive.delegate(text)
+        # delegate 自己驱动执行体跑完（服务端唯一的执行所有权），所以这里必须
+        # await：它可能跑满一个 Worker 超时，但仍在后台任务里，不占语音轮次。
+        await executive.delegate(text)
     except Exception:
         return
 
@@ -859,6 +1011,18 @@ async def websocket_endpoint(ws: WebSocket) -> None:
                 turn = await conn.begin(event.get('turn_id'))
                 await conn.send_turn(turn, {'type': 'turn_started', 'source': 'assistant_confirm'})
                 conn.spawn(_confirm_action(conn, turn, event))
+            elif kind == 'aqi_action':
+                # 协议 §23.5：积木业务动作回传。cmd 白名单在校验函数里，未知动词静默忽略。
+                cmd = event.get('cmd')
+                if not isinstance(cmd, str) or not 0 < len(cmd) <= 200:
+                    continue
+                if conn.busy:
+                    # 她正忙着（含这一轮语音确认）时不排队：按钮可稍后再点。
+                    await conn.send({"type": "error", "code": "aqi_action_failed",
+                                     "recoverable": True,
+                                     "message": "小溪正忙着，这单没收工；稍后再点。"})
+                    continue
+                conn.spawn(_aqi_action(conn, cmd))
             elif kind == 'practice_review':
                 if getattr(conn, 'practice', None) is not None and conn.practice.mode != 'off':
                     turn = await conn.begin(event.get('turn_id'))
@@ -923,8 +1087,13 @@ async def websocket_endpoint(ws: WebSocket) -> None:
                         await conn.send({'type': 'config_ack', 'practice_error': '无效的练习设置，未应用。'})
                         continue
                 if "proactivity" in event:
-                    conn.proactivity = bool(event["proactivity"])
-                    orchestrator.set_proactivity(conn.proactivity)
+                    enabled = bool(event["proactivity"])
+                    if enabled and not conn.proactivity:
+                        # 开启主动模式（含三态胶囊切到"灵动伴随"）后，空闲窗口从
+                        # 切换时刻起算：安静 25~30s 即可迎来首次主动搭话。
+                        conn.last_spoke_at = time.time()
+                    conn.proactivity = enabled
+                    orchestrator.set_proactivity(enabled)
                 if "memory" in event:
                     manager.enabled = bool(event["memory"])
                 if "emotion" in event:

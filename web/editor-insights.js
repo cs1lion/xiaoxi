@@ -54,7 +54,7 @@ export function mountEditorInsights({ editor, getDraft }) {
   const controls = make('div', undefined, 'editor-insight-controls');
   const toggle = make('button', '陪我看稿：关', 'editor-insight-toggle');
   toggle.id = 'editorInsightToggle'; toggle.type = 'button'; toggle.setAttribute('aria-pressed', 'false');
-  const disclosure = make('p', '开启后，当前未保存稿会用于本次建议，不会保存到记忆。阿栖只在你停笔后提出一条观点，点击才播报。', 'editor-insight-disclosure');
+  const disclosure = make('p', '开启后，当前未保存稿会用于本次建议，不会保存到记忆；停笔后提一条观点，点击才播报。', 'editor-insight-disclosure');
   const feedback = make('p', '', 'editor-insight-feedback'); feedback.id = 'editorInsightFeedback';
   feedback.setAttribute('role', 'status'); feedback.setAttribute('aria-live', 'polite');
   const bubble = make('button', '', 'editor-insight-bubble'); bubble.id = 'editorInsightBubble';

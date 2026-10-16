@@ -1,20 +1,48 @@
-:root { color-scheme: dark; font-family: system-ui, sans-serif; background: #10121d; color: #ececf6; }
-* { box-sizing: border-box; }
-main { max-width: 780px; margin: 3rem auto; padding: 0 1.2rem 3rem; }
-a { color: #c9b8ff; }
-h1 { font-size: 2.1rem; }
-p { line-height: 1.65; }
-form, #result { border: 1px solid #39374d; border-radius: 16px; padding: 1.3rem; background: #1b1d2b; }
-label { display: block; margin: 0.8rem 0 0.5rem; }
-textarea { width: 100%; resize: vertical; background: #111320; color: inherit; border: 1px solid #59536b; border-radius: 8px; padding: 0.8rem; font: inherit; }
-.permission { line-height: 1.6; margin: 1rem 0; }
-input { accent-color: #ba9eff; }
-.actions { display: flex; gap: 0.7rem; flex-wrap: wrap; }
-button { border: 1px solid #aa8ce2; border-radius: 8px; background: #604396; color: white; font: inherit; padding: 0.7rem 1rem; cursor: pointer; }
-button:disabled { opacity: 0.45; cursor: not-allowed; }
-button:focus-visible, textarea:focus-visible, input:focus-visible, a:focus-visible { outline: 3px solid #dfc8ff; outline-offset: 3px; }
-.warning { color: #ffd49a; }
-#capability { color: #c9c0e6; }
-#status { min-height: 2rem; }
-audio { display: block; width: 100%; margin: 1rem 0; }
-[hidden] { display: none !important; }
+/* 与主工作台同一套配色和控件语法：暖纸底、绿主色、四档圆角 */
+:root {
+  color-scheme: light;
+  --bg:#f4f4ec; --panel:#fffefa; --raise:#fbfbf3; --sunken:#eceee3;
+  --line:#dcded2; --line-strong:#c3c9b8;
+  --text:#2c3a32; --muted:#55604f; --faint:#78826f;
+  --accent:#3f6549; --accent-deep:#33543d; --accent-soft:#e4ebdb;
+  --accent-2:#8d5f38; --danger:#a54146; --danger-soft:#f6e9e5;
+  --ease:cubic-bezier(.22,1,.36,1);
+  --r-control:10px; --r-field:12px; --r-panel:16px; --r-chip:999px;
+  --shadow-2:0 8px 24px -14px #43523738;
+  --press:scale(.97);
+  font-family:"PingFang SC","Microsoft YaHei",system-ui,sans-serif;
+  background:var(--bg); color:var(--text);
+}
+* { box-sizing:border-box; }
+body { margin:0; }
+main { max-width:760px; margin:0 auto; padding:44px 24px 72px; }
+a { color:var(--accent); text-underline-offset:4px; }
+h1 { font-family:"Songti SC","Noto Serif CJK SC","SimSun",serif; font-size:34px; font-weight:400; letter-spacing:.03em; margin:22px 0 12px; }
+p { line-height:1.75; color:var(--muted); max-width:40em; }
+
+form, #result { border:1px solid var(--line); border-radius:var(--r-panel); padding:20px 22px; margin-top:22px; background:var(--panel); box-shadow:var(--shadow-2); }
+label { display:block; margin:16px 0 7px; font-size:var(--fs-content,13px); font-weight:500; }
+textarea { width:100%; resize:vertical; background:var(--raise); color:inherit; border:1px solid var(--line); border-radius:var(--r-field); padding:11px 12px; font:inherit; line-height:1.7; }
+textarea:focus { border-color:var(--accent); box-shadow:0 0 0 3px #3f65491f; outline:none; }
+.permission { display:flex; align-items:flex-start; gap:10px; margin:18px 0 4px; font-size:var(--fs-content,13px); color:var(--muted); line-height:1.7; }
+.permission input { flex:none; width:18px; height:18px; margin-top:2px; accent-color:var(--accent); }
+.actions { display:flex; gap:9px; flex-wrap:wrap; margin-top:20px; }
+button { border:1px solid var(--line-strong); border-radius:var(--r-control); background:var(--panel); color:var(--text); font:inherit; padding:10px 16px; min-height:44px; cursor:pointer;
+  transition:background .16s var(--ease), border-color .16s var(--ease), transform .16s var(--ease); }
+button:hover:not(:disabled) { background:var(--accent-soft); border-color:var(--accent); }
+button:active:not(:disabled) { transform:var(--press); transition-duration:.06s; }
+button:disabled { opacity:.5; cursor:not-allowed; }
+button#create { background:var(--accent); border-color:var(--accent); color:#fffefa; }
+button#create:hover:not(:disabled) { background:var(--accent-deep); border-color:var(--accent-deep); }
+button#stop { color:var(--danger); border-color:#e3c6bd; background:transparent; }
+button#stop:hover:not(:disabled) { background:var(--danger-soft); border-color:var(--danger); }
+button:focus-visible, textarea:focus-visible, input:focus-visible, a:focus-visible { outline:2px solid var(--accent); outline-offset:2px; }
+
+.warning { color:var(--accent-2); background:#f7efe1; border:1px solid #e4d3b6; border-radius:var(--r-control); padding:12px 14px; margin:18px 0 0; max-width:none; }
+#capability { color:var(--muted); font-size:var(--fs-content,13px); }
+#status { min-height:2rem; color:var(--accent-2); }
+audio { display:block; width:100%; margin:1rem 0; }
+[hidden] { display:none !important; }
+
+@media(max-width:600px){ main{padding:28px 16px 56px} h1{font-size:28px} form,#result{padding:16px} }
+@media(prefers-reduced-motion:reduce){ *{transition:none!important} }

@@ -4,7 +4,7 @@
 两边唯一的约定是 WebSocket 消息的形状。约定漂移时不会抛异常，
 只会退化成"角色永远没表情"或者"表情卡住不动"，非常难查。
 
-所以与其靠约定，不如把它变成机器可检的。这一脚本查四类漂移：
+所以与其靠约定，不如把它变成机器可检的。这一脚本查八类漂移：
 
   1. 情绪标签：persona.yaml 的 tts_emotions ↔ avatar.yaml 的 emotions 双向齐全
   2. 参数表：web/avatar/params.js 的 PARAM_GROUPS ↔ avatar.yaml 的 neutral 互为全集
@@ -14,6 +14,10 @@
        emotion + text_delta 之后，形象层的 hold 姿势永久卡死"的线上事故）
   5. REST 接缝：web 的 js 里引用的 /api/ 字面量路由，服务端必须真的注册
      （星图这类跨角色接口最常死于静默 404；含 ${ 的模板串无法静态核对，放过）
+  6. 积木契约：PROTOCOL.md §23 的六种 aqi_blocks kind，服务端组装器与前端
+     渲染器必须同时认账——少任何一边，积木会静默变成不渲染/不产出的空卡
+  7. ui_nav 领航：PROTOCOL.md §24 的 target_view / sub_action 取值域，服务端实际
+     下发与前端白名单必须一致；gaze_target 必须落在 avatar.yaml 的 gaze.targets
 
 用法：uv run python scripts/check_protocol.py
 """
@@ -119,6 +123,77 @@ INTERNAL_ROUTES = ('/internal/telemetry_proxy',)
 观测网关这条最怕被顺手重构掉——改了路径，Worker 的调用会静默 404，
 而前端一个字都不会提。所以在这里显式纳管：契约一改，静态检查直接报警。
 """
+
+# 协议 §23 的七种标准积木。契约文档、服务端组装器、前端渲染器三方必须同时
+# 认账：少一边不会报错，只会让积木静默变成空卡（后端不产 / 前端不画）。
+AQI_BLOCK_KINDS = ("choice_pills", "spotlight_card", "alert_card", "swimlane_strip",
+                   "metric_flame", "note_snippet", "memo_note")
+# 协议 §23.1：layout / gaze / source 的取值域，文档与前后端各写一份，这里钉死。
+AQI_LAYOUTS = ("stage_holo", "drawer_ops")
+AQI_GAZES = ("holo_right", "drawer", "user")
+AQI_SOURCES = ("chat", "executive", "ambient", "loop")
+AQI_COMPOSER = ROOT / "server" / "dialogue" / "aqi_blocks.py"
+AQI_RENDERER = ROOT / "web" / "blocks.js"
+# 协议 §24：ui_nav 领航载荷的取值域，前后端各写一份，这里钉死不让漂。
+UI_NAV_TARGETS = ("ops", "notes", "threads", "starmap", "close")
+UI_NAV_SUB_ACTIONS = ("open_preview", "highlight_telemetry", "highlight_rubrics", "focus_latest")
+
+
+def ui_nav_gaze_targets() -> set[str]:
+    """gaze_target 必须落在 avatar.yaml 的 gaze.targets 里——沿用第三类的引用规则。"""
+    from server.config import avatar_cfg
+    return set((avatar_cfg().get("gaze") or {}).get("targets") or {})
+
+
+def emitted_ui_nav_fields() -> dict[str, set[str]]:
+    """服务端 orchestrator 里 ui_nav 载荷各字段实际写到的字面量。"""
+    text = (SERVER_DIR / "dialogue" / "orchestrator.py").read_text(encoding="utf-8")
+
+    def values(key: str) -> set[str]:
+        seen = set(re.findall(rf'{key}[=:]\s*["\']([a-z_]+)["\']', text))
+        seen.update(re.findall(rf'\["{key}"\]\s*=\s*["\']([a-z_]+)["\']', text))
+        return seen
+
+    return {"target_view": values("target_view"), "sub_action": values("sub_action"),
+            "gaze_target": values("gaze_target")}
+
+
+def frontend_ui_nav_fields() -> dict[str, set[str]]:
+    """前端 web/ui_nav.js 里登记的取值域白名单（领航安全降级靠它兜底）。"""
+    path = ROOT / "web" / "ui_nav.js"
+    if not path.exists():
+        return {}
+    text = path.read_text(encoding="utf-8")
+    fields: dict[str, set[str]] = {}
+    # 白名单以 `UI_NAV_TARGETS = [...]` / `UI_NAV_SUB_ACTIONS = [...]` 形式登记，
+    # 按前缀匹配，不硬编码各字段的变量名，避免前后端两份漂移。
+    m = re.search(r'UI_NAV_TARGETS\s*=\s*\[([^\]]*)\]', text)
+    if m:
+        fields["target_view"] = set(re.findall(r'["\']([a-z_]+)["\']', m.group(1)))
+    m = re.search(r'UI_NAV_SUB_ACTIONS\s*=\s*\[([^\]]*)\]', text)
+    if m:
+        fields["sub_action"] = set(re.findall(r'["\']([a-z_]+)["\']', m.group(1)))
+    return fields
+
+
+def check_ui_nav(problems: list[str]) -> None:
+    """§24 ui_nav：前后端取值域同步，服务端只发 avatar.yaml 有登记的注视点。"""
+    emitted = emitted_ui_nav_fields()
+    for key, allowed in (("target_view", UI_NAV_TARGETS), ("sub_action", UI_NAV_SUB_ACTIONS)):
+        bad = emitted.get(key, set()) - set(allowed)
+        if bad:
+            problems.append(f"orchestrator.py 的 ui_nav.{key} 发到了协议未登记的取值 {sorted(bad)}")
+    bad_gaze = emitted.get("gaze_target", set()) - ui_nav_gaze_targets()
+    if bad_gaze:
+        problems.append(
+            f"orchestrator.py 的 ui_nav.gaze_target 指向了 avatar.yaml 没登记的注视点 {sorted(bad_gaze)}"
+            f"（应为 {sorted(ui_nav_gaze_targets())}）")
+    frontend = frontend_ui_nav_fields()
+    if frontend:
+        for key, allowed_vals in (("target_view", UI_NAV_TARGETS), ("sub_action", UI_NAV_SUB_ACTIONS)):
+            missing = set(allowed_vals) - frontend.get(key, set())
+            if missing:
+                problems.append(f"web/ui_nav.js 的 {key} 白名单没覆盖协议取值 {sorted(missing)}")
 
 
 def frontend_api_calls() -> set[str]:
@@ -258,6 +333,27 @@ def main() -> int:
         if internal not in routes:
             problems.append(f"服务端自用路由 {internal} 没有注册（观测网关断了不会有人报警）")
 
+    # ---- 7. 积木契约：七种 kind 与 layout/gaze/source 取值域三方同时存在 ----
+    protocol_text = (ROOT / "docs" / "PROTOCOL.md").read_text(encoding="utf-8")
+    composer_text = AQI_COMPOSER.read_text(encoding="utf-8") if AQI_COMPOSER.exists() else ""
+    renderer_text = AQI_RENDERER.read_text(encoding="utf-8") if AQI_RENDERER.exists() else ""
+    for kind in AQI_BLOCK_KINDS:
+        if kind not in protocol_text:
+            problems.append(f"PROTOCOL.md §23 缺积木 kind {kind!r}（契约文档与实现漂移）")
+        if kind not in composer_text:
+            problems.append(f"server/dialogue/aqi_blocks.py 不认 {kind!r}（后端组装不出这种积木）")
+        if kind not in renderer_text:
+            problems.append(f"web/blocks.js 不渲染 {kind!r}（前端会把这种积木静默丢成空卡）")
+    for group_name, values in (("layout", AQI_LAYOUTS), ("gaze", AQI_GAZES),
+                               ("source", AQI_SOURCES)):
+        for value in values:
+            if value not in protocol_text:
+                problems.append(f"PROTOCOL.md §23.1 缺 {group_name} 取值 {value!r}")
+            if value not in composer_text:
+                problems.append(f"aqi_blocks.py 不认 {group_name}={value!r}（信封校验会静默纠正它）")
+    # ---- 8. 协议 §24 ui_nav 领航：前后端取值域同步 ----
+    check_ui_nav(problems)
+
     if problems:
         print("FAIL")
         for p in problems:
@@ -267,7 +363,10 @@ def main() -> int:
         f"PASS  {len(faces)} 个情绪标签双向齐全；"
         f"{len(params)} 个参数与中位姿态互为全集；"
         f"{len(cases)} 个消息类型的字段全部对得上；"
-        f"{len(routes)} 个 /api 路由与前端引用一致"
+        f"{len(routes)} 个 /api 路由与前端引用一致；"
+        f"{len(AQI_BLOCK_KINDS)} 种积木 kind 三方认账；"
+        f"aqi 信封 layout/gaze/source 取值域文档与组装器一致；"
+        f"ui_nav {len(UI_NAV_TARGETS)} 视图 / {len(UI_NAV_SUB_ACTIONS)} 子动作前后端一致"
     )
     if ignored:
         print(f"      （服务端还发了这些，前端未处理，对形象层无影响：{', '.join(ignored)}）")

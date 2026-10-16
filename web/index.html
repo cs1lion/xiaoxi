@@ -3,8 +3,9 @@
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
-<meta name="theme-color" content="#f5f5ef" />
+<meta name="theme-color" content="#141c2e" />
 <title>阿栖 · 留一点时间给自己</title>
+<style>html{background:#141c2e;color-scheme:dark}</style>
 <link rel="stylesheet" href="/static/style.css" />
 <link rel="stylesheet" href="/static/avatar/dialogue-review.css" />
 <link rel="stylesheet" href="/static/workspace.css" />
@@ -24,13 +25,17 @@
     <div class="brand">
       <div class="avatar" id="avatar" aria-hidden="true">栖</div>
       <div><h1 id="personaName">阿栖</h1><p id="personaTag">正在连接…</p></div>
-      <span class="brand-note">陪伴日常</span>
     </div>
-    <div class="side-intro"><span class="eyebrow">YOUR QUIET CORNER</span><p>琐碎的小事，也值得被记住。</p></div>
+<div class="side-intro"><span class="eyebrow">你的安静角落</span><p>琐碎的小事，也值得被记住。</p></div>
     <section class="panel">
       <h2>关于你的记忆 <span class="section-mark">01</span></h2>
-      <div class="row"><label class="switch"><input type="checkbox" id="memoryToggle" checked /><span></span>允许阿栖记住</label></div>
-      <div class="row"><label class="switch"><input type="checkbox" id="proactiveToggle" checked /><span></span>允许阿栖主动开口</label></div>
+      <!-- 底层布尔位（协议零破坏）：#memoryToggle / #proactiveToggle 仍是唯一状态源，
+           WS config 的 memory / proactivity 字段与 /api/memory/toggle 契约不变；
+           界面入口已收敛为输入区上方的「陪伴心流三态胶囊」。 -->
+      <div class="presence-state" hidden>
+        <input type="checkbox" id="memoryToggle" checked />
+        <input type="checkbox" id="proactiveToggle" checked />
+      </div>
       <div class="row add"><input id="manualInput" aria-label="手动添加记忆" placeholder="告诉阿栖一件小事…" /><button id="manualAdd">记下</button></div>
       <p class="hint" id="memoryFeedback" role="status" aria-live="polite"></p>
       <div class="row"><label><input type="checkbox" id="memHistory" />显示历史和待核对记录</label></div>
@@ -43,7 +48,7 @@
   </aside>
   <main class="stage">
     <header class="topbar">
-      <button class="ghost sidebar-toggle" id="sidebarToggle" aria-expanded="false" aria-controls="sidePanel">记忆与偏好</button>
+      <button class="ghost sidebar-toggle" id="sidebarToggle" aria-expanded="false" aria-controls="sidePanel"><svg class="icon" viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" aria-hidden="true" focusable="false"><path d="M4 7h16"></path><path d="M4 12h16"></path><path d="M4 17h10"></path></svg> 记忆与偏好</button>
       <div class="connection" role="status"><span id="statusDot" class="dot"></span><span id="status">连接中</span></div>
       <span class="spacer"></span>
       <button class="ghost" id="writingToggle" aria-expanded="false" aria-controls="work-notes">一起写</button>
@@ -103,17 +108,19 @@
     <section id="starmapMount" class="starmap-mount" hidden aria-label="星图记忆"></section>
     <div class="room-label"><span class="room-line"></span> 一段只属于你的时间 <span aria-hidden="true">✧</span></div>
     <div class="avatar-stage" id="avatarStage" aria-hidden="true"></div>
+    <!-- 协议 §23：主舞台侧翼的全息微光卡片区（Holo-Deck）。小溪递来的积木落在这里；
+         传统纯文字聊天气泡在 Voice-First 模式下不再出场，视觉重心交给卡片与抽屉。 -->
+    <section id="holoDeck" class="holo-deck" aria-label="阿栖递来的卡片" aria-live="polite" hidden></section>
     <p id="interactionState" class="interaction-state">正在连接…</p>
     <section id="companionMount" aria-label="正在一起做的事"></section>
     <div class="chat" id="chat" role="log" aria-label="对话记录" aria-live="polite">
       <section class="welcome" id="welcome">
-        <span class="eyebrow">A LITTLE SPACE, JUST FOR YOU</span>
         <h2>把今天，<br>轻轻放在<span class="title-highlight">这里</span><span class="heading-dot">。</span></h2>
         <p>聊一件开心的小事，或什么都不想做。<br>不用组织好语言，想到哪里就说到哪里。</p>
         <div class="suggestions" aria-label="开始聊天的灵感">
-          <button data-prompt="今天有件小事想和你分享。"><span aria-hidden="true">☀</span> 分享今天的小事 <span aria-hidden="true">↗</span></button>
-          <button data-prompt="我想休息一下，陪我随便聊聊吧。"><span aria-hidden="true">☕</span> 陪我放空一会儿 <span aria-hidden="true">↗</span></button>
-          <button data-prompt="帮我梳理一下今天要做的事情。"><span aria-hidden="true">✓</span> 理一理待办事项 <span aria-hidden="true">↗</span></button>
+          <button data-prompt="今天有件小事想和你分享。"><svg class="sug-icon" viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M12 3.5l1.7 4.8 4.8 1.7-4.8 1.7L12 16.5l-1.7-4.8-4.8-1.7 4.8-1.7L12 3.5z"></path><path d="M18.8 15.5v4"></path><path d="M16.8 17.5h4"></path></svg> 分享今天的小事 <span aria-hidden="true">↗</span></button>
+          <button data-prompt="我想休息一下，陪我随便聊聊吧。"><svg class="sug-icon" viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M20.5 14.2A8.7 8.7 0 0 1 9.8 3.5 8.7 8.7 0 1 0 20.5 14.2z"></path></svg> 陪我放空一会儿 <span aria-hidden="true">↗</span></button>
+          <button data-prompt="帮我梳理一下今天要做的事情。"><svg class="sug-icon" viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M10 6h10"></path><path d="M10 12h10"></path><path d="M10 18h10"></path><path d="M4 5.8l1.3 1.3L7.8 4.6"></path><path d="M4 11.8l1.3 1.3L7.8 10.6"></path></svg> 理一理待办事项 <span aria-hidden="true">↗</span></button>
         </div>
         <span class="welcome-note" id="draftFeedback" role="status" aria-live="polite">从一句「嗨」开始，也很好。</span>
       </section>
@@ -123,6 +130,11 @@
       <div class="subtitle" id="subtitle" role="status" aria-live="polite"></div>
       <div class="meter" aria-hidden="true"><div class="meter-fill" id="meterFill"></div></div>
       <div class="mode-strip" id="modeStrip"></div>
+      <button id="presenceCapsule" class="presence-capsule is-lively" type="button" aria-label="陪伴方式：灵动伴随，点击切换">
+        <span class="presence-orb" aria-hidden="true"></span>
+        <span class="presence-glyph" aria-hidden="true">✨</span>
+        <span class="presence-label">灵动伴随</span>
+      </button>
       <div class="capsule">
         <button id="micBtn" class="mic" type="button" title="按住说话；键盘可按住空格">
           <svg class="icon" viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M12 15a3 3 0 0 0 3-3V5a3 3 0 0 0-6 0v7a3 3 0 0 0 3 3z"></path><path d="M19 11v1a7 7 0 0 1-14 0v-1"></path><line x1="12" y1="19" x2="12" y2="22"></line></svg>
@@ -142,7 +154,7 @@
           <svg class="icon" viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><rect x="3" y="4.5" width="18" height="15" rx="2.4"></rect><line x1="9.6" y1="4.5" x2="9.6" y2="19.5"></line></svg>
         </button>
       </div>
-      <div class="composer-foot"><p class="hint" id="voiceHint">连续对话：开口即录，停顿约一秒发送；停止回复后仍监听。关闭连续对话释放麦克风，建议戴耳机。</p><span class="composer-signature" aria-hidden="true">在这里，做你自己</span></div>
+      <div class="composer-foot"><p class="hint" id="voiceHint">连续对话：开口即录，停顿约一秒发送；建议戴耳机。</p></div>
     </div>
   </main>
 </div>
@@ -200,6 +212,8 @@
     <section id="drawerViewOps" class="drawer-view" aria-label="督办与战况" hidden>
       <h3>督办与战况</h3>
       <p>小溪替你派出去的单，和它们烧掉的 Token。主舞台不添按钮，都收在这儿。</p>
+      <!-- 协议 §23：layout=drawer_ops 的积木渲染在这里（自动拉开抽屉时可见）。 -->
+      <div id="opsAqiBlocks" class="ops-aqi-blocks" aria-label="小溪递来的战况卡片"></div>
       <div id="opsPending" class="ops-pending" hidden></div>
       <h4 class="ops-heading">督办清单</h4>
       <div id="opsCommissions" class="ops-list"></div>

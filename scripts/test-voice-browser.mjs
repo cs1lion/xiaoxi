@@ -125,7 +125,7 @@ try {
   await page.goto('http://voice.test/');
   await page.waitForFunction(()=>window.voiceHarness?.ws?.readyState===1);
   await personaRequested;
-  await page.locator('label.switch').filter({hasText:'允许阿栖主动开口'}).click();
+  await page.locator('#presenceCapsule').click();
   assert.equal(Object.hasOwn((await sent()).filter(e=>e.type==='config').at(-1), 'emotion'), false,
     'startup controls must not send an unconfirmed speech default');
   await emit({type:'config_ack',emotion:'认真'});
@@ -133,7 +133,7 @@ try {
   await page.locator('#emotionSelect option[value="base"]').waitFor({state:'attached'});
   assert.equal(await page.locator('#emotionSelect').inputValue(), '认真',
     'late persona defaults cannot overwrite an acknowledged speech preference');
-  await page.locator('label.switch').filter({hasText:'允许阿栖主动开口'}).click();
+  await page.locator('#presenceCapsule').click();
   assert.equal((await sent()).filter(e=>e.type==='config').at(-1).emotion, '认真',
     'late persona defaults cannot silently change subsequent configs');
   checks.push('slow persona response preserves acknowledged speech and startup configs omit unknown preference');
@@ -146,23 +146,23 @@ try {
   await page.locator('#emotionSelect').selectOption('认真');
   assert.equal((await sent()).filter(e=>e.type==='config').at(-1).emotion, '认真');
   await emit({type:'config_ack',emotion:'认真'});
-  await page.locator('label.switch').filter({hasText:'允许阿栖主动开口'}).click();
+  await page.locator('#presenceCapsule').click();
   assert.equal((await sent()).filter(e=>e.type==='config').at(-1).emotion, '认真', 'other controls retain selected speech');
-  await page.locator('label.switch').filter({hasText:'允许阿栖主动开口'}).click();
+  await page.locator('#presenceCapsule').click();
   await page.locator('#emotionSelect').selectOption('');
   assert.equal((await sent()).filter(e=>e.type==='config').at(-1).emotion, '', 'automatic speech remains explicit');
   await emit({type:'config_ack',emotion:'认真'});
   assert.equal(await page.locator('#emotionSelect').inputValue(), '', 'older success ack cannot overwrite newer selection');
-  await page.locator('label.switch').filter({hasText:'允许阿栖主动开口'}).click();
+  await page.locator('#presenceCapsule').click();
   assert.equal((await sent()).filter(e=>e.type==='config').at(-1).emotion, '',
     'other controls must retain the newer automatic selection after an older ack');
-  await page.locator('label.switch').filter({hasText:'允许阿栖主动开口'}).click();
+  await page.locator('#presenceCapsule').click();
   checks.push('older successful speech acknowledgement cannot revert a newer local selection');
   await emit({type:'config_ack',emotion:'base',emotion_error:'无效的语气设置，未应用。'});
   assert.equal(await page.locator('#emotionSelect').inputValue(), 'base', 'ack restores actual speech preference');
-  await page.locator('label.switch').filter({hasText:'允许阿栖主动开口'}).click();
+  await page.locator('#presenceCapsule').click();
   assert.equal((await sent()).filter(e=>e.type==='config').at(-1).emotion, 'base', 'ack synchronizes subsequent configs');
-  await page.locator('label.switch').filter({hasText:'允许阿栖主动开口'}).click();
+  await page.locator('#presenceCapsule').click();
   await page.locator('details.preferences > summary').click();
   checks.push('natural default, speech choices, retained preference and server acknowledgement');
   await page.locator('#bargeToggle').click();

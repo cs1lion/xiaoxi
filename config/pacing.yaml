@@ -97,15 +97,23 @@ voice_delivery:
 ambient:
   enabled: true               # 总开关；false 时三梯度全部静默（等价打磨前）
   micro_act_seconds: 20       # 梯度1：连续空闲 20s → 无声微动作（micro_act）
-  mumble_seconds: 45          # 梯度2：连续空闲 45s → 轻声碎碎念（mumble，可忽略/可接话）
+  mumble_seconds: 28          # 梯度2：连续空闲 28s → 轻声碎碎念（mumble）。打磨轮从 45 下调到
+                              # 25~30s 区间：安静半分钟就能真切听到她主动搭话，不再等冷启动慢环
   proactive_seconds: 90       # 梯度3：连续空闲 90s 或离开后返回 → 有真实内容价值的主动（proactive）
   dedupe_window_seconds: 300  # 同一空闲周期内同类事件去重窗口，防刷屏
   respect_typing: true        # 用户正在输入/播放媒体/关键操作时，抑制高打扰度行为
   quiet_mode_default: false   # 安静模式默认关；开启后只保留 micro_act
   require_authorization: true # 复用 proactivity.require_authorization：未授权不主动出声
-  # mumble 是否经 deliver_reply 语音链路播出。false（默认）= 只显示微光气泡、不出声，
-  # 是可验证的降级表现；true = 用现有语音链路播出（沿用普通音色，不额外伪造“轻声音量/音调”）。
-  mumble_voice: false
+  # mumble 是否经 deliver_reply 语音链路播出。false = 只显示微光气泡、不出声；
+  # true = 用现有语音链路播出（沿用普通音色，不额外伪造“轻声音量/音调”）。
+  # 打磨轮默认 true：主动搭话必须真声走通 TTS 合成与前端音频播放（协议 §16.2）。
+  mumble_voice: true
+  # ---- 首次感知阈值 + 指数退避（打磨轮）----
+  # 首次主动搭话后，同一空闲周期内再次开口所需的空闲阈值按倍率翻倍并封顶，
+  # 避免高频吵闹；用户一有动作（新空闲周期）计数清零，"安静半分钟必被搭理"。
+  voice_backoff: 2.0          # 每次有声搭话后，再次开口的空闲阈值倍率
+  voice_backoff_max_seconds: 240  # 退避后的阈值上限，避免越等越哑
+  cycle_reset_seconds: 5      # 连续空闲回落到此值以下视为新空闲周期，退避计数清零
 
 # ---------- 安全与边界 ----------
 safety:

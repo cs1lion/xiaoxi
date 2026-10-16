@@ -45,3 +45,9 @@ __pycache__/
 
 # Generated evaluation outputs
 /eval/
+
+# 本地工具/临时产物：技能目录、worktree、取证与调试中间物，不进版本库
+.agents/
+.claude/
+tmp/
+*.bak

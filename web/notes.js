@@ -9,7 +9,7 @@ let selected=null,dirty=false,pending=false,draft=null,currentVersion=null;
 let selection=null,selectionReady=false;
 const association=document.createElement('p');association.id='noteSelectionStatus';association.className='hint';association.setAttribute('role','status');
 el('source').after(association);
-const scopeNotice=document.createElement('p');scopeNotice.className='hint';scopeNotice.textContent='这里管理个人笔记关联。选定共同事项时，对话按该事项资料中的当前稿继续；请在事项页关联或更新版本。';association.after(scopeNotice);
+const scopeNotice=document.createElement('p');scopeNotice.className='hint';scopeNotice.textContent='选定共同事项时，对话按该事项资料中的当前稿继续；请在事项页关联或更新版本。';association.after(scopeNotice);
 const selectionLink=document.createElement('a');selectionLink.id='selectedNoteLink';selectionLink.hidden=true;association.after(selectionLink);
 const actions=el('editor').querySelector('.actions');
 function control(id,label){const button=document.createElement('button');button.id=id;button.type='button';button.textContent=label;actions.append(button);return button;}
@@ -48,7 +48,7 @@ function updateControls(){
  selectionLink.hidden=!selectionReady||!selection?.note_id||!!selection.missing;
  if(!selectionLink.hidden){selectionLink.href=noteUrl(selection.note_id,selection.selected_version);selectionLink.textContent=`查看已关联的保存版本 ${selection.selected_version}`;}
  if(!selectionReady)association.textContent='暂时无法确认对话的笔记关联；可以继续编辑，刷新后再关联。';
- else if(!selection.note_id)association.textContent='之后的对话尚未关联笔记。打开、编辑或保存不会自动关联。';
+ else if(!selection.note_id)association.textContent='之后的对话尚未关联笔记；打开、编辑或保存都不会自动关联。';
  else if(selection.missing)association.textContent='已关联的笔记已被删除或不可用；未自动换成其他笔记。可以明确取消关联。';
  else association.textContent=`之后的对话关联保存版本 ${selection.selected_version}${selection.stale?`；当前已有保存版本 ${selection.current_version}，需明确关联新版。`:'。'}`;
  if(old)association.textContent+=` 正在只读查看历史版本 ${selected.version}；当前保存版本是 ${currentVersion}。`;

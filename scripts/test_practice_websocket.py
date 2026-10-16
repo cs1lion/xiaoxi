@@ -83,7 +83,7 @@ class PracticeWebSocketTests(unittest.IsolatedAsyncioTestCase):
                         orchestrator=SimpleNamespace(stream_respond=stream, proactive_turn=proactive,
                                                      state={"proactivity_enabled": False},
                                                      set_proactivity=Mock(),
-                executive_route=lambda text, executive=None: None))
+                executive_route=lambda text, executive=None, memory_enabled=False: None))
         modules = {}
         for name, attrs in {
             "practice_ws_test.speech.practice": {"PracticeSession": TestPractice},

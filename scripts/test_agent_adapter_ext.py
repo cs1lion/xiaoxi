@@ -107,6 +107,29 @@ class SpinningAdapter(RecordingAdapter):
     adapter_type = "mock_spinning"
 
 
+class SlowAdapter(RecordingAdapter):
+    """执行中会真的 await：用来验证并发下只有一个执行体起身。"""
+
+    adapter_type = "mock_slow"
+
+    async def execute(self, task_spec):
+        context = task_spec.get("context") or {}
+        if context.get("env", {}).get("MOCK_ADAPTER") != "1":
+            raise AdapterError("prepare_context 的产出没有传进 execute")
+        await asyncio.sleep(0.05)
+        for event in type(self).default_events:
+            yield event
+
+
+class ArtifactThenErrorAdapter(RecordingAdapter):
+    """先交差再报错：这一版不算数。"""
+
+    adapter_type = "mock_artifact_then_error"
+    default_events = [make_event("progress", step_idx=1, text="干了一半的活"),
+                      artifact_event(GOOD_ARTIFACT),
+                      make_event("error", step_idx=2, text="干到一半崩了")]
+
+
 class BrokenStartAdapter(RecordingAdapter):
     adapter_type = "mock_broken_start"
 
@@ -122,6 +145,8 @@ class BrandNewAdapter(RecordingAdapter):
 
 register_adapter("mock_recording", RecordingAdapter)
 register_adapter("mock_spinning", SpinningAdapter)
+register_adapter("mock_slow", SlowAdapter)
+register_adapter("mock_artifact_then_error", ArtifactThenErrorAdapter)
 register_adapter("mock_broken_start", BrokenStartAdapter)
 register_adapter("brand_new_type", BrandNewAdapter)
 
@@ -310,8 +335,83 @@ def test_manual_adapter_is_honest() -> None:
     result = asyncio.run(service.run_commission(commission["id"]))
     check("没有执行体就转 blocked", result["commission"]["status"] == "blocked")
     check("不伪造 artifact", result["verdict"] is None)
-    check("说清是没交差", "没交差" in result["commission"]["blocked_question"])
+    check("请示说清是没有执行体，不用含糊的'没交差'",
+          "没有配置执行体" in result["commission"]["blocked_question"])
     check("遥测里没有假 span", service.commission_usage(commission["id"])["calls"] == 0)
+    service.close()
+
+
+def test_delegate_drives_execution() -> None:
+    print("[delegate drives execution]")
+    # 正常委派：服务端自己驱动到终态，调用方不需要再触发一次。
+    RecordingAdapter.instances = []
+    service = build_service([MOCK_AGENT])
+    result = asyncio.run(service.delegate("整理 mock 产出"))
+    check("委派即跑完", result["status"] == "ready_to_report", result["status"])
+    check("只建了一个执行体", len(RecordingAdapter.instances) == 1,
+          str(len(RecordingAdapter.instances)))
+    check("三句话卡落库",
+          service.commission(result["commission_id"])["delivery"]["summary"].startswith("Mock 适配器"))
+    service.close()
+
+    # manual 缺省：明确阻塞等人工，不卡在"干活中"
+    service = build_service([])
+    result = asyncio.run(service.delegate("整理便笺标题"))
+    check("没有执行体就转 blocked", result["status"] == "blocked", result["status"])
+    check("请示说清没有执行体",
+          "没有配置执行体" in service.commission(result["commission_id"])["blocked_question"])
+    service.close()
+
+    # 满载无将：仍然只留痕不外抛
+    service = build_service([MOCK_AGENT])
+    roster = dict(service.evaluator.roster)
+    roster["agents"] = []
+    service.dispatcher.roster = roster
+    result = asyncio.run(service.delegate("整理 mock 产出"))
+    check("没将可派转 blocked", result["status"] == "blocked", result["status"])
+    service.close()
+
+
+def test_concurrent_runs_do_not_duplicate() -> None:
+    print("[concurrent runs]")
+    RecordingAdapter.instances = []
+    service = build_service([{"id": "slow", "name": "慢工", "adapter": "mock_slow",
+                              "strengths": ["mock产出"], "cost_tier": "cheap", "max_concurrent": 2,
+                              "eval_commands": ["required_fields", "artifacts_exist"]}])
+    commission = service.open("并发的活", "同一票同时跑两次")
+    service.dispatch(commission["id"], intent="mock产出")
+    service.start(commission["id"])
+
+    async def twice():
+        return await asyncio.gather(service.run_commission(commission["id"]),
+                                    service.run_commission(commission["id"]),
+                                    return_exceptions=True)
+
+    outcomes = asyncio.run(twice())
+    check("只有一个执行体起身", len(RecordingAdapter.instances) == 1,
+          str(len(RecordingAdapter.instances)))
+    check("其中一个被租约挡下", any(isinstance(item, ValueError)
+                                  and "already_running" in str(item) for item in outcomes),
+          str([type(item).__name__ for item in outcomes]))
+    check("票只被提交一次", service.commission(commission["id"])["status"] == "ready_to_report")
+    service.close()
+
+
+def test_partial_artifact_is_not_success() -> None:
+    print("[partial artifact]")
+    service = build_service([{"id": "half", "name": "半吊子", "adapter": "mock_artifact_then_error",
+                              "strengths": ["mock产出"], "cost_tier": "cheap", "max_concurrent": 2,
+                              "eval_commands": ["required_fields", "artifacts_exist"]}])
+    commission = service.open("会炸的活", "先交差再报错")
+    service.dispatch(commission["id"], intent="mock产出")
+    service.start(commission["id"])
+    result = asyncio.run(service.run_commission(commission["id"]))
+    check("交了又报错不当成功", result["commission"]["status"] == "blocked",
+          result["commission"]["status"])
+    check("失败原因点名部分产物", (result["failure"] or "").startswith("partial_artifact"),
+          str(result["failure"]))
+    check("没有送进初审室", result["verdict"] is None)
+    check("请示说明还有部分产物", "部分产物" in result["commission"]["blocked_question"])
     service.close()
 
 
@@ -330,6 +430,8 @@ def main() -> int:
     for test in (test_registry_basics, test_base_contract_is_enforced,
                  test_registry_driven_dispatch, test_zero_touch_new_adapter_type,
                  test_failure_paths, test_manual_adapter_is_honest,
+                 test_delegate_drives_execution, test_concurrent_runs_do_not_duplicate,
+                 test_partial_artifact_is_not_success,
                  test_adapter_bindings_are_readable):
         test()
     print(f"\n=== {passed} passed, {len(failed)} failed ===")

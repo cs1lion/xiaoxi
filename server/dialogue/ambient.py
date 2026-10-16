@@ -17,13 +17,16 @@ SUPERVISOR_ACTIONS = ("ledger_glance", "monitor_glance", "pen_tap")
 AMBIENT_DEFAULTS: dict[str, Any] = {
     "enabled": True,
     "micro_act_seconds": 20,
-    "mumble_seconds": 45,
+    "mumble_seconds": 28,
     "proactive_seconds": 90,
     "dedupe_window_seconds": 300,
     "respect_typing": True,
     "quiet_mode_default": False,
     "require_authorization": True,
-    "mumble_voice": False,
+    "mumble_voice": True,
+    "voice_backoff": 2.0,
+    "voice_backoff_max_seconds": 240,
+    "cycle_reset_seconds": 5,
 }
 
 
@@ -66,6 +69,39 @@ def select_tier(idle_seconds: Any, cfg: dict[str, Any] | None = None, *,
 
 def new_event_id(prefix: str = "amb") -> str:
     return f"{prefix}_{uuid.uuid4().hex[:12]}"
+
+
+def backoff_threshold(base: Any, cycle: Any, *, factor: Any = 2.0,
+                      max_seconds: Any = 240.0) -> float:
+    """Idle threshold for the `cycle`-th voiced opener in one idle period.
+
+    First contact keeps `base` (25~30s by config); every later opener in the
+    same idle period multiplies it by `factor` and clamps at `max_seconds`, so
+    a long silence never turns into nagging. The caller resets the cycle when
+    the user becomes active again ("quiet for half a minute and she will
+    always reach out first").
+    """
+    try:
+        value = float(base)
+    except (TypeError, ValueError):
+        value = 28.0
+    try:
+        count = max(0, int(cycle))
+    except (TypeError, ValueError):
+        count = 0
+    try:
+        rate = float(factor)
+    except (TypeError, ValueError):
+        rate = 2.0
+    try:
+        cap = float(max_seconds)
+    except (TypeError, ValueError):
+        cap = 240.0
+    if rate < 1.0:
+        rate = 1.0
+    if cap < value:
+        cap = value
+    return min(cap, value * (rate ** count))
 
 
 def build_micro_act(*, action: str, reason: str, source_refs: list[str] | None = None,
@@ -134,6 +170,6 @@ def choose_content(*, discovery: Any = None, mood: Any = None, spark: Any = None
     return None, []
 
 
-__all__ = ["AMBIENT_DEFAULTS", "SUPERVISOR_ACTIONS", "TIERS", "ambient_cfg", "build_micro_act",
-           "build_mumble",
-           "build_proactive", "choose_content", "new_event_id", "select_tier"]
+__all__ = ["AMBIENT_DEFAULTS", "SUPERVISOR_ACTIONS", "TIERS", "ambient_cfg", "backoff_threshold",
+           "build_micro_act",
+           "build_mumble", "build_proactive", "choose_content", "new_event_id", "select_tier"]

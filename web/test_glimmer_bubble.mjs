@@ -54,3 +54,19 @@ test("poll expires naturally past expires_at", () => {
   assert.equal(expired.length, 1);
   assert.equal(expired[0].text, "这行能更干净点……");
 });
+
+test("update refreshes the same bubble and can extend its life", () => {
+  const g = createGlimmer();
+  assert.equal(g.show(mumble()), true);
+  assert.equal(g.update("换了半句", 5000), true);
+  assert.equal(g.current.text, "换了半句");
+  assert.ok(g.current.expires_at > 1000, "ttl 顺延：口头微光说完才淡出");
+  assert.equal(g.update("   "), false, "空文本不刷新");
+  assert.equal(g.current.text, "换了半句");
+});
+
+test("update on a hidden bubble is a no-op", () => {
+  const g = createGlimmer();
+  assert.equal(g.update("看不见"), false);
+  assert.equal(g.status, "hidden");
+});

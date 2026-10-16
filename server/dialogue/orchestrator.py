@@ -89,6 +89,26 @@ def telemetry_query_intent(text: str) -> bool:
     return isinstance(text, str) and bool(_TELEMETRY.search(text))
 
 
+_STARMAP_VIEW = re.compile(
+    r"(?:打开|翻开|看看|给我看|指给我|翻出来)\s*(?:一下)?\s*(?:我的|你的|小溪的)?\s*(?:星图|脑内宇宙)|"
+    r"\bstarmap\b", re.I)
+
+
+_NOTES_VIEW = re.compile(
+    r"(?:打开|翻开|看看|给我看|指给我|翻出来)\s*(?:一下)?\s*(?:我的|你的|小溪的)?\s*(?:笔记|便笺)|"
+    r"\bnotes\b", re.I)
+
+
+def notes_view_intent(text: str) -> bool:
+    """看笔记/便笺：定位侧栏行动面板。"""
+    return isinstance(text, str) and bool(_NOTES_VIEW.search(text))
+
+
+def starmap_view_intent(text: str) -> bool:
+    """看星图：打开全屏星图视图（不走台账，与督办互不干涉）。"""
+    return isinstance(text, str) and bool(_STARMAP_VIEW.search(text))
+
+
 def acceptance_intent(text: str) -> str | None:
     """验收反馈：'accept' / 'reject' / None。只在有待验收督办时才被调用。"""
     if not isinstance(text, str) or not text.strip():
@@ -108,6 +128,10 @@ def commission_progress_line() -> str:
 
 def telemetry_token_bloat_line() -> str:
     return stage_sample_line("telemetry_token_bloat")
+
+
+def spinning_intercept_line() -> str:
+    return stage_sample_line("spinning_intercept_mumble")
 
 
 def spinning_intercept_line() -> str:
@@ -172,6 +196,10 @@ from ..speech.tts import micro_pause, split_for_speech_micro, tts
 _MICRO_ACTIONS = ("glance_away", "tilt_head", "stretch", "fidget", "thoughtful", "soft_blink")
 from .performance import (MOTION_INSTRUCTION, MotionMetadataFilter,
                           performance_plan, slice_performance, strip_motion_metadata)
+from .aqi_blocks import (AQI_BLOCK_INSTRUCTION, AqiBlockFilter, alert_card,
+                         aqi_blocks_message, block_layout, compose_accept_card,
+                         compose_choice, compose_memory_card, compose_metric_flame,
+                         compose_progress_strip, note_snippet, strip_aqi_blocks)
 
 REFUSE_KEYWORDS = pacing_cfg()["cooldown"]["on_refuse_keywords"]
 
@@ -193,6 +221,9 @@ class TurnResult:
     proactive: bool = False
     context_usage: dict[str, Any] = field(default_factory=dict)
     spark_id: int | None = None
+    # 协议 §23.6：self_topic 轮次把 surfaced spark 原文挂在这里，供主动汇报
+    # 随路组装 note_snippet 顿悟卡（app.py 消费）；没有 spark 就是 None。
+    spark: dict[str, Any] | None = None
 
 
 def sanitize(text: str, *, preserve_brackets: bool = False) -> str:
@@ -231,6 +262,8 @@ _EMOTION_TAG = re.compile(rf"^\s*[\[【]({'|'.join(EMOTIONS)})[\]】]\s*")
 
 # 让模型自己报情绪。靠关键词猜永远只能覆盖"哈哈""哼"这类显式标记，
 # 而毒舌/收敛这类语气是没有关键词的 —— 而语气恰恰要传给 TTS。
+# Voice-First 交互范式（协议 §23）：口头只有 1~2 句口语，状态/选项/卡片数据
+# 走 <aqi-block> 尾部积木，由服务端过滤器剥离后独立下发，绝不进 TTS。
 EMOTION_INSTRUCTION = (
     "输出格式：先用 [情绪] 开头标注你此刻真实的说话情绪，再正常说话。\n"
     f"情绪只能从这几个里选一个：{'、'.join(EMOTIONS)}\n"
@@ -238,12 +271,13 @@ EMOTION_INSTRUCTION = (
     "[收敛]抱歉，我不该那么说。\n"
     "标签之后正常说话，只允许下述保留的 motion 元数据。\n"
     + MOTION_INSTRUCTION
+    + AQI_BLOCK_INSTRUCTION
 )
 
 
 def parse_emotion(raw: str) -> tuple[str, str]:
     """Pull the leading [emotion] tag off the reply. Falls back to the heuristic."""
-    raw = strip_motion_metadata(raw)
+    raw = strip_motion_metadata(strip_aqi_blocks(raw))
     match = _EMOTION_TAG.match(raw)
     if match:
         return match.group(1), raw[match.end() :].strip()
@@ -495,6 +529,9 @@ class Orchestrator:
         user_message_id = store_message(session_id, "user", user_text, "voice")
         turn_context = self._turn_context(user_text, session_id, recent)
         messages = turn_context['messages']
+        # 协议 §23.4：用户显式查看的便笺由服务端组装 note_snippet 积木（真实
+        # 选定版本正文），与模型可能自带的积木在发射前去重（同 kind 只留一个）。
+        note_block = self._note_block(turn_context['data'])
 
         yield {"type": "thinking"}
 
@@ -525,7 +562,11 @@ class Orchestrator:
                   "limit_reached": False, "generation_failed": False,
                   "audio_failed": 0, "audio_succeeded": 0, "plan_sent": False,
                   # 首包激进切分只作用于每轮第一个微句，之后恢复 12-35 字目标。
-                  "first_chunk_pending": True}
+                  "first_chunk_pending": True,
+                  # 协议 §23：模型自带的 <aqi-block> 积木 + 服务端组装的便笺积木
+                  # + 闲聊兜底的真实记忆积木（三者同 kind 只留一个，见发射处）。
+                  "aqi_blocks": [], "note_block": note_block,
+                  "memory_block": self._memory_block(turn_context['data'])}
         sentence_annotations: list[Any] = []
         seq_counter = [0]
 
@@ -610,6 +651,20 @@ class Orchestrator:
             closers = {"[": "]", "【": "】", "(": ")", "（": "）"}
             source = None
             motion_filter = MotionMetadataFilter()
+            # 协议 §23.4：<aqi-block> 先于 motion 过滤——标签里的 JSON 标点
+            # 永远碰不到句子/括号解析，更不会进 pending（即不会进 TTS）。
+            aqi_filter = AqiBlockFilter()
+
+            def feed_char(char: str) -> None:
+                """一个原始字符过两级保留命名空间过滤，再进句子解析。"""
+                for kind, value in aqi_filter.feed(char):
+                    if kind == "aqi":
+                        # 解析失败的块是 None：整体丢弃，文字语音不受影响。
+                        if not stopped and isinstance(value, dict):
+                            holder["aqi_blocks"].append(value)
+                        continue
+                    for text_char in value:
+                        consume_tokens(motion_filter.feed(text_char))
 
             def consume_char(char: str) -> None:
                 nonlocal pending, leading, tag, tag_candidate, bracket_text, stopped
@@ -677,6 +732,11 @@ class Orchestrator:
 
             def finish_pending() -> None:
                 nonlocal pending
+                # 收尾顺序：先放行被过滤器扣留的半截开签（如裸 "<"），
+                # 再放行 motion 半截标签；未闭合的 <aqi-block> 在此被整体扣留。
+                for kind, value in aqi_filter.finish():
+                    for text_char in value:
+                        consume_tokens(motion_filter.feed(text_char))
                 consume_tokens(motion_filter.finish())
                 # Suppress only an unfinished known emotion metadata prefix.
                 if bracket_text and not (tag_candidate and any(e.startswith(tag) for e in EMOTIONS)):
@@ -690,7 +750,7 @@ class Orchestrator:
                     if stopped:
                         break
                     for char in delta:
-                        consume_tokens(motion_filter.feed(char))
+                        feed_char(char)
                         if stopped:
                             break
                     if stopped:
@@ -710,6 +770,21 @@ class Orchestrator:
                     if close is not None:
                         await close()
                 finally:
+                    # 协议 §23.4：聚合为一条 aqi_blocks 消息，先于 done 下发。
+                    # 同 kind 去重链：模型自带 note_snippet > 用户显式查看的便笺 >
+                    # 闲聊兜底的记忆卡——且记忆卡只在整轮没有任何积木时补，
+                    # 不与督办卡/模型卡同轮叠加（一张卡一个意思，不刷屏）。
+                    blocks = list(holder.get("aqi_blocks") or [])
+                    if not any(block.get("kind") == "note_snippet" for block in blocks):
+                        if holder.get("note_block") is not None:
+                            blocks.append(holder["note_block"])
+                        elif not blocks and holder.get("memory_block") is not None:
+                            blocks.append(holder["memory_block"])
+                    if blocks:
+                        layout = next((block_layout(block) for block in blocks
+                                       if block_layout(block)), "stage_holo")
+                        events.put_nowait(aqi_blocks_message(blocks, layout=layout,
+                                                             gaze="holo_right"))
                     audio_jobs.put_nowait(sentinel)
                     events.put_nowait({"type": "_llm_done"})
 
@@ -1044,7 +1119,8 @@ class Orchestrator:
         self.state["last_proactive_at"] = now
         self.state["proactive_count_today"] += 1
         return TurnResult(text=text, emotion=detect_emotion(text), proactive=True,
-                          spark_id=spark_id if isinstance(spark_id, int) else None)
+                          spark_id=spark_id if isinstance(spark_id, int) else None,
+                          spark=next((s for s in sparks if s.get("id") == spark_id), None))
 
     def ambient_event(self, *, idle_seconds: float, now: float | None = None) -> dict[str, Any] | None:
         """V3 three-tier non-voiced presence (§16): micro_act / mumble from real content.
@@ -1052,7 +1128,15 @@ class Orchestrator:
         Returns a connection-level event dict or None. The voiced proactive tier is
         handled by self_topic_turn; this covers the silent micro_act and the soft
         mumble bubble. It never fabricates: with no real mood/reflection/spark it
-        stays silent rather than claiming a reflection that did not happen.
+        falls back to the cold-start icebreaker (real open todos or authored
+        response_examples samples) instead of claiming a reflection that did not
+        happen — waiting minutes for the slow background loop is not an option.
+
+        Polish round (2026-10-16): the first voiced opener fires at 25~30s of
+        silence, then the required idle time backs off exponentially within one
+        idle period (reset as soon as the user is active again). Tier 3
+        (``proactive``) is covered by the same voiced companion channel so the
+        companion never goes mute between 90s and the heavyweight 900s gate.
         """
         from . import ambient
         cfg = ambient.ambient_cfg()
@@ -1064,9 +1148,27 @@ class Orchestrator:
             return None
         if now < float(self.state["proactive_suppressed_until"]):
             return None
-        tier = ambient.select_tier(idle_seconds, cfg, quiet_mode=bool(cfg.get("quiet_mode_default")))
-        if tier is None or tier == "proactive":
-            return None  # the voiced tier is delivered by self_topic_turn
+        # A fresh idle period starts whenever silence drops back near zero: the
+        # opener cycle resets, so half a quiet minute always earns a first hello.
+        if idle_seconds <= float(cfg.get("cycle_reset_seconds") or 5):
+            self.state["voice_cycle"] = 0
+        cycle = int(self.state.get("voice_cycle") or 0)
+        threshold = ambient.backoff_threshold(
+            cfg.get("mumble_seconds"), cycle,
+            factor=cfg.get("voice_backoff"), max_seconds=cfg.get("voice_backoff_max_seconds"))
+        tier_cfg = dict(cfg)
+        tier_cfg["mumble_seconds"] = threshold
+        # Tier 3 keeps its boundary but never undercuts the backed-off threshold,
+        # so a long silence still respects the cooldown instead of nagging.
+        tier_cfg["proactive_seconds"] = max(float(cfg.get("proactive_seconds") or 90), threshold)
+        tier = ambient.select_tier(idle_seconds, tier_cfg, quiet_mode=bool(cfg.get("quiet_mode_default")))
+        if tier is None:
+            return None
+        if tier == "proactive":
+            # The full proactive turn belongs to proactive_turn/self_topic_turn
+            # (900s gate); this companion channel keeps her softly present past
+            # 90s instead of leaving a silent dead zone until then.
+            tier = "mumble"
         # Dedup within an idle cycle: only escalate (micro_act -> mumble), or re-emit
         # the same/lower tier after the dedupe window; never spam one cycle.
         order = {"micro_act": 1, "mumble": 2}
@@ -1111,15 +1213,81 @@ class Orchestrator:
         except Exception:
             spark = None
         text, refs = ambient.choose_content(discovery=discovery, mood=mood, spark=spark)
+        reason = f"idle_{int(idle_seconds)}s"
         if not text:
-            return None  # nothing real to murmur; stay silent
+            # 冷启动破冰兜底：后台慢环还没产出 reflection/mood/spark 时，用最近
+            # 真实待办或配置里的自然破冰语料开口，绝不死等几分钟后台慢环跑完。
+            text, refs = self._ambient_icebreaker()
+            reason = f"icebreaker_{int(idle_seconds)}s"
+        if not text:
+            return None  # nothing real anywhere; stay silent
         self.state["last_ambient_tier"] = "mumble"
         self.state["last_ambient_at"] = now
-        return ambient.build_mumble(text=text, reason=f"idle_{int(idle_seconds)}s",
+        self.state["voice_cycle"] = cycle + 1
+        return ambient.build_mumble(text=text, reason=reason,
                                     voice=bool(cfg.get("mumble_voice", False)),
                                     bubble=text, source_refs=refs, now=now)
 
+    def _ambient_icebreaker(self) -> tuple[str, list[str]]:
+        """Cold-start opener: (text, source_refs) from real data, or ("", []).
+
+        Prefers a real open todo from the ledger (she genuinely remembers it),
+        then an authored idle_proactive sample from config/response_examples.json.
+        Both are traceable; neither claims a reflection or a gift that never
+        happened. The samples are original fictional persona lines, never user
+        experiences, so they must not be written into user memory.
+        """
+        try:
+            todos = manager.store.list_memories(kind="todo", limit=1)
+        except Exception:
+            todos = []
+        if todos:
+            value = (getattr(todos[0], "value", "") or "").strip()
+            if value:
+                return (f"（翻出小本本）你之前记的「{value[:24]}」，不急，哪天想推进了跟我说一声。",
+                        [f"memory:{todos[0].id}"])
+        line = stage_sample_line("idle_proactive")
+        if line:
+            return line, ["config:response_examples.json"]
+        return "", []
+
     # ---------------- V3 内阁总管：台前快环 ----------------
+    @staticmethod
+    def _note_block(data: dict[str, Any]) -> dict[str, Any] | None:
+        """协议 §23.4：用户显式查看的便笺 → note_snippet 积木（真实选定版本正文）。
+
+        只读 `_turn_context` 已经过的活动资料（`note_data` 带 ref 与截断标记），
+        不另起查询；便笺不存在或被预算省略时返回 None——没有真实数据不发积木。
+        """
+        activity = data.get('activity_data') if isinstance(data, dict) else None
+        if not isinstance(activity, dict):
+            return None
+        note = activity.get('note_data')
+        if not isinstance(note, dict) or not note.get('body'):
+            return None
+        ref = note.get('ref') if isinstance(note.get('ref'), dict) else {}
+        identifier = ref.get('id') or note.get('id')
+        if not isinstance(identifier, str) or not identifier:
+            return None
+        return note_snippet(note['body'], title=note.get('title'), ref=f"note:{identifier}")
+
+    @staticmethod
+    def _memory_block(data: dict[str, Any]) -> dict[str, Any] | None:
+        """协议 §23.4：闲聊兜底——本轮上下文真实检索到的高置信记忆 → note_snippet。
+
+        只读 `_turn_context` 已经过的长期记忆投影（`long_term_memory.stated`，
+        即本轮注入 prompt 的真实记忆），不另起查询；没有 stated 命中时返回
+        None——闲聊无卡是可以的，拿推测记忆充数不行。
+        """
+        memory = data.get('long_term_memory') if isinstance(data, dict) else None
+        if not isinstance(memory, dict):
+            return None
+        for record in memory.get('stated') or []:
+            card = compose_memory_card(record)
+            if card is not None:
+                return card
+        return None
+
     def _supervising(self) -> bool:
         """True when at least one commission is actually RUNNING (never guessed)."""
         executive = getattr(self, "executive", None)
@@ -1130,16 +1298,68 @@ class Orchestrator:
         except Exception:
             return False
 
-    def executive_route(self, text: str, executive) -> dict[str, Any] | None:
+    @staticmethod
+    def _ui_nav(kind: str, route: dict[str, Any]) -> dict[str, Any]:
+        """把台前意图翻成一条 ui_nav 领航载荷（协议§二十四）。
+
+        纯数据、零副作用：领航只告诉前端"开哪块、指给谁看"；
+        注视点名取自 avatar 配置的 gaze.targets（check_protocol 静态核对），不发明坐标。
+        未识别的 kind 一律收手，默认"视线收回"，不瞎动界面。
+        定位目标卡的 commission_id 从 route 里取：调用方统一用 "commission_id" 键，
+        缺省时回落 "latest"（指到最近一张卡），不猜具体哪一单。
+        """
+        nav: dict[str, Any] = {"target_view": "close", "gaze_target": "viewer"}
+        commission_id = str(route.get("commission_id") or "") or None
+        if kind in ("progress", "accept"):
+            nav.update(target_view="ops", focus_id=commission_id or "latest",
+                       gaze_target="side")
+            if kind == "accept":
+                nav["sub_action"] = "open_preview"
+        elif kind == "reject":
+            nav.update(target_view="ops", focus_id=commission_id or "latest",
+                       sub_action="highlight_rubrics", gaze_target="side")
+        elif kind == "telemetry":
+            nav.update(target_view="ops", sub_action="highlight_telemetry", gaze_target="side")
+        elif kind == "delegation":
+            # 派单是后台慢环，此刻台账里还没这一单的行：先指到最近一张卡，
+            # delegate() 建好单后抽屉轮询会把它顶上来。
+            nav.update(target_view="ops", focus_id="latest", sub_action="focus_latest",
+                       gaze_target="side")
+        elif kind == "clarify":
+            nav.update(target_view="ops", focus_id="latest", sub_action="focus_latest",
+                       gaze_target="side")
+        elif kind == "starmap_view":
+            nav.update(target_view="starmap", gaze_target="side")
+        elif kind == "notes_view":
+            # 侧栏行动面板不属于抽屉视图，导航走 threads；focus_id 定位最近一张共同事项卡。
+            nav.update(target_view="threads", focus_id="latest", sub_action="focus_latest",
+                       gaze_target="side")
+        return nav
+
+    def executive_route(self, text: str, executive, *, memory_enabled: bool = False) -> dict[str, Any] | None:
         """Decide the front-of-house action for one utterance, or None for normal chat.
 
         Intent alone never routes: every branch also requires real ledger state, so
         an ordinary "好了吗" cannot hijack a normal conversation. The returned dict
         is {"kind", "text", ...}; `text` is a real config sample or a report built
-        from real spans, never a fabricated promise.
+        from real spans, never a fabricated promise. Voice-First 打磨轮（协议 §23）：
+        命中分支同时挂 `aqi_blocks`——全部由真实台账/战况数据组装，没有真实数据
+         时该键为空列表，调用方不发积木，不拿占位卡充数。每条命中的路由都附挂
+         `ui_nav`（协议 §24）：随路的界面领航，前端据此自动拉开视图并指给老板看。
         """
         if executive is None or not isinstance(text, str) or not text.strip():
             return None
+        if starmap_view_intent(text) and memory_enabled:
+            # 看星图不读台账，台账在忙也照开；台词照旧是真实陈述（星图本来就是
+            # 真实记忆图谱的可视化，不是承诺）。
+            return {"kind": "starmap_view",
+                    "text": "星图给你开好了。亮得最凶的那几颗星，是咱们最近才一起想起来的。",
+                    "ui_nav": self._ui_nav("starmap_view", {})}
+        if notes_view_intent(text) and memory_enabled:
+            # 看笔记/便笺：拉侧栏行动面板指给老板看最近一张共同事项卡。
+            return {"kind": "notes_view",
+                    "text": "翻出来了。最近那张，就是咱们一起理过的那份。",
+                    "ui_nav": self._ui_nav("notes_view", {})}
         try:
             pending = executive.pending_reports()
             running = executive.open_commissions()
@@ -1151,31 +1371,59 @@ class Orchestrator:
                 # 手上不止一单时，凭"最近更新那一单"下手很容易砍错人：不猜，问一句。
                 titles = "、".join(f"《{item.get('title') or '未命名'}》" for item in pending[:3])
                 more = "等" if len(pending) > 3 else ""
+                choice = compose_choice(pending)
                 return {"kind": "clarify",
                         "text": f"你手上等着验收的有 {len(pending)} 单：{titles}{more}。说个名字我就知道是哪一单。",
-                        "commission_ids": [item["id"] for item in pending[:3]]}
+                        "commission_ids": [item["id"] for item in pending[:3]],
+                        "aqi_blocks": [choice] if choice else [],
+                        "ui_nav": self._ui_nav("clarify", {})}
             target = pending[0]
             if verdict == "accept":
                 line = commission_progress_line() or eval_self_reflection_line()
+                card = compose_accept_card(target)
                 return {"kind": "accept", "text": line, "commission_id": target["id"],
-                        "agent_name": self._agent_name(executive, target)}
+                        "agent_name": self._agent_name(executive, target),
+                        "aqi_blocks": [card] if card else [],
+                        "ui_nav": self._ui_nav("accept", {"commission_id": target["id"]})}
             if verdict == "reject":
                 # 第三次被打回换一套说法：前两次她还得意，第三次该委屈了。
                 count = int((target.get("audit") or {}).get("boss_reject_count") or 0) + 1
                 line = audit_reject_pout_line() if count >= 3 else audit_reject_line()
+                card = alert_card(f"第 {count} 次打回", detail=text, level="warn",
+                                  actions=[{"label": "去战况抽屉看", "cmd": "ui:drawer:ops"}])
                 return {"kind": "reject", "text": line or eval_self_reflection_line(),
-                        "commission_id": target["id"], "feedback": text, "boss_reject_count": count}
+                        "commission_id": target["id"], "feedback": text, "boss_reject_count": count,
+                        "aqi_blocks": [card] if card else [],
+                        "ui_nav": self._ui_nav("reject", {"commission_id": target["id"]})}
         if telemetry_query_intent(text) and (running or pending):
-            report = telemetry_bottleneck_report(executive.telemetry_summary())
+            try:
+                summary = executive.telemetry_summary()
+                alerts = executive.spinning_alerts()
+            except Exception:
+                summary, alerts = {}, []
+            report = telemetry_bottleneck_report(summary)
             if report:
-                return {"kind": "telemetry", "text": report}
+                return {"kind": "telemetry", "text": report,
+                        "aqi_blocks": compose_metric_flame(summary, alerts=alerts),
+                        "ui_nav": self._ui_nav("telemetry", {})}
         if progress_query_intent(text) and running:
-            return {"kind": "progress", "text": commission_progress_line(), "commission_id": running[0]["id"]}
+            strip = compose_progress_strip(running)
+            route = {"kind": "progress", "text": commission_progress_line(),
+                     "commission_id": running[0]["id"],
+                     "aqi_blocks": [strip] if strip else []}
+            route["ui_nav"] = self._ui_nav("progress", route)
+            return route
         if delegation_intent(text):
             line = commission_accept_line()
             if not line:
                 return None  # no real sample: fall through to normal dialogue
-            return {"kind": "delegation", "text": line, "brief": text}
+            strip = compose_progress_strip(running)
+            route = {"kind": "delegation", "text": line, "brief": text,
+                     # 协议 §23：派单成功自动滑出战况抽屉，老板直接看见新单落位。
+                     "nav": "ops",
+                     "aqi_blocks": [strip] if strip else []}
+            route["ui_nav"] = self._ui_nav("delegation", {})
+            return route
         return None
 
     @staticmethod
@@ -1216,7 +1464,8 @@ class Orchestrator:
         return "用户允许你偶尔主动开口，但不要每次都主动，也不要连续追问。"
 
     def _postprocess(self, raw: str, *, user_text: str, emotion: str = "", response_policy: dict | None = None) -> str:
-        text = sanitize(raw)
+        # 协议 §23：非流式路径同样剥掉 <aqi-block> 尾部积木，只留口头文本。
+        text = sanitize(strip_aqi_blocks(raw))
         if emotion == "收敛":
             # 用户说过难受/不喜欢之后，收敛态不允许还挂着问句
             text = re.sub(r"[？?]+\s*$", "", text).strip()

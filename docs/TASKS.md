@@ -146,3 +146,24 @@
       花名册里已留 `cli_subproc` / `http_api` 接线示例，改成真命令即可跑，无需改 Python。
 - [ ] `POST /commissions/{id}/run` 目前只被进程内链路与测试使用；前台语音路径只接单、不驱动执行。
 - [ ] 语音路径上"收工/打回"仍只认唯一一单；多单时必须先回答澄清选择题。
+
+### 打磨轮：主动开口疏通 + 陪伴心流三态胶囊（2026-10-16）
+
+- [x] 根因诊断：`mumble_voice:false` + 冷启动无 reflection/mood/spark + 梯度3 90s 后只剩 900s 门重通道 = 真机静音断层
+- [x] `config/pacing.yaml`：`mumble_seconds` 45→28、`mumble_voice` 默认 true、新增 `voice_backoff` / `voice_backoff_max_seconds` / `cycle_reset_seconds`
+- [x] `ambient.py`：`backoff_threshold()` 纯函数（base × factor^cycle，封顶）；`AMBIENT_DEFAULTS` 同步
+- [x] `orchestrator.ambient_event`：首次有声 25~30s + 指数退避 + 周期重置；梯度3 陪伴通道接管（无静音断层）；`_ambient_icebreaker` 冷启动破冰（真实待办 → `idle_proactive` 原创样本，均可溯）
+- [x] `app.py`：开启主动模式重置连接空闲计时；有声 mumble 先发连接级气泡再走 `deliver_reply` 真声；录音/播放/活跃轮次重检先于 `begin()`
+- [x] UI：双 Switch 移除，`#memoryToggle` / `#proactiveToggle` 隐藏布尔位保留（协议零破坏）；composer 区新增三态胶囊（✨ 灵动伴随 / 🌙 静默旁观 / 🍃 无痕闲聊，毛玻璃微光 + 呼吸圆点）
+- [x] `app.js`：三态状态机（胶囊是布尔位纯视图）、`persistMemoryToggle` 复用、确认气泡 + 微表情（点头/开心/眨眼）、心跳 45s→15s、心流打字静音守卫
+- [x] 测试：`test_ambient_tiers.py` +4、`test_ambient_orchestration.py` 重写为 15 例、新增 `scripts/test-presence-capsule-browser.mjs` 9 断言；`test-ui-browser.mjs` / `test-voice-browser.mjs` 的 Switch 操作改胶囊点击
+- [x] 文档：PROTOCOL §16.2 增补"首次有声搭话与冷启动破冰"；TESTING.md 增补黄金命令
+
+### 打磨轮：Voice-First 动态积木（协议 §23，2026-10-18）
+
+**用户派单：** 小溪默认交互彻底告别文字聊天回复，改为"简短口语语音 + 动态生成式 UI 积木（Aqi-Blocks）"唯一默认方式；四步微创方案（协议契约 → 后端分流直出 → 前端去文字框化 → 测试回归）。
+
+- [x] ① 协议契约：PROTOCOL.md §23（消息形状 / 六种积木 Schema / cmd 白名单 / 流式分流规则 / aqi_action 回传）；`check_protocol.py` 第七类漂移（积木 kind 三方认账）
+- [x] ② 后端：`server/dialogue/aqi_blocks.py`（六构造器保守校验 + `compose_*` 快环直出 + `AqiBlockFilter` 字符级截留）；`orchestrator.py` 系统 Prompt 约束口头 1~2 句 + `stream_respond` 标签分流（标签前实时进 TTS、聚合一条先于 done）+ 六类快环路由全挂真实数据积木；`app.py` `aqi_action` 入口 + 星图摘录随路下发
+- [x] ③ 前端：`web/blocks.js` 原生渲染器（毛玻璃微光 / 红金青呼吸态 / 只走 textContent）；`web/app.js` Holo-Deck + `drawer_ops` 双落点 + nav 抽屉联动 + 视线联动 + 五类 cmd 闭环 + 去文字框化（`VOICE_FIRST` 默认开，bot 气泡不再出场，口头台词住头顶微光）；`companion.css` / `style.css` / `executive.js` 联动样式与高亮
+- [x] ④ 测试回归：`test_aqi_blocks.py` 31 例全绿；`web/test_blocks.mjs` 4 例；新增 `scripts/test-aqi-blocks-browser.mjs` 9 断言（6 积木 DOM / 五类 cmd / nav+drawer_ops / gaze / 6 张上限 / 陈旧轮次丢弃 / XSS）；`test-ui-browser.mjs` 断言改微光气泡；`check_protocol.py` + 全套回归绿灯

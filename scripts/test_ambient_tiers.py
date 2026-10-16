@@ -81,5 +81,31 @@ class ChooseContentTest(unittest.TestCase):
         self.assertEqual(A.choose_content(discovery={"text": ""}, mood=None, spark=None, child_seed=None), (None, []))
 
 
+class BackoffThresholdTest(unittest.TestCase):
+    def test_first_contact_keeps_base(self):
+        self.assertEqual(A.backoff_threshold(28, 0), 28.0)
+        self.assertEqual(A.backoff_threshold(28, 0, factor=2.0, max_seconds=240), 28.0)
+
+    def test_exponential_backoff_and_cap(self):
+        self.assertEqual(A.backoff_threshold(28, 1), 56.0)
+        self.assertEqual(A.backoff_threshold(28, 2), 112.0)
+        self.assertEqual(A.backoff_threshold(28, 3), 224.0)
+        self.assertEqual(A.backoff_threshold(28, 4, max_seconds=240), 240.0)  # 448 → capped
+        self.assertEqual(A.backoff_threshold(28, 9, max_seconds=240), 240.0)
+
+    def test_bad_input_falls_back_safely(self):
+        self.assertEqual(A.backoff_threshold(None, 0), 28.0)
+        self.assertEqual(A.backoff_threshold("x", "y"), 28.0)
+        self.assertEqual(A.backoff_threshold(28, -3), 28.0)
+        self.assertEqual(A.backoff_threshold(28, 1, factor=0.1), 28.0)  # factor<1 视作 1
+
+    def test_defaults_match_pacing_contract(self):
+        self.assertEqual(A.AMBIENT_DEFAULTS["mumble_seconds"], 28)
+        self.assertTrue(A.AMBIENT_DEFAULTS["mumble_voice"])
+        self.assertEqual(A.AMBIENT_DEFAULTS["voice_backoff"], 2.0)
+        self.assertEqual(A.AMBIENT_DEFAULTS["voice_backoff_max_seconds"], 240)
+        self.assertEqual(A.AMBIENT_DEFAULTS["cycle_reset_seconds"], 5)
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)
