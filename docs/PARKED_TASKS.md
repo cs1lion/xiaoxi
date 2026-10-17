@@ -113,3 +113,9 @@
 ## F. Role 0 工程基建待办（回归评测集落地时登记，暂不做）
 - v0.7 打标后删除 `docs/AGENT_PLAYBOOK.md` 中「打磨轮临时授权」整段。
 - 评估在 CI 中按 diff 路径机械校验角色白名单（目前白名单只靠自觉）。
+
+## G. 回归评测 live 实跑暴露的待办（2026-10-17，`evals/results/20261017T023407Z.json`）
+- **emotion-tag-retention-live 真实缺陷**：10 次实跑 3 次失败，缺失集中在第 3/4 轮（回复空字符串或多轮后标签格式漂移），与 README 记录的"多轮后指令遗忘"吻合。修法（缩短示例间隔 / 每轮重申格式）需另派任务单，不在评测基建任务里顺手改。
+- **accuracy-over-persona-live 正则漏配**：模型原文语义正确（"不是，是球体"），但未命中 `evals/cases/accuracy-over-persona-live.yaml` 的正则词表。需扩展该用例的 `regex_any` 词表（这是修评测，不是修模型），改前先抽查 `evals/results/` 原文。
+- **runner live 口径**：当前 live 层为装配级（`build_messages` + `LLM.complete`），不含生产全链路（`_render_turn_context` 动态段 / pacing 后处理 / 历史裁剪）。若要验端到端，需评估把 runner 升到 `Orchestrator.respond()` 的隔离桩改造。
+- **前轮遗留 `scripts/test_voice_turns.py` 2 个 TimeoutError**（proactive socket 相关）：收进 `733b891 chore(wip)` 后首次暴露，§23.6 新增后台函数与旧测试隔离桩未对齐，需另派单修复。

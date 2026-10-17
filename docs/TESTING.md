@@ -20,6 +20,7 @@
 
 - **offline 层**：无网络、无 Key、确定性，记忆库强制 `:memory:`。已纳入上面的全局门禁与 CI，失败即非零退出码。涉及记忆装配 / Prompt / 模型切换的改动必须跑。
 - **live 层**：真实模型，需显式 `--live` 且配置 `LLM_API_KEY`；无 Key 或 Mock 模式时自动跳过并明示，退出码仍为 0（不算失败）。换模型或改 Prompt 装配逻辑时手动跑一次，每次运行把每条用例每次的原始回复和判定写入 `evals/results/`（gitignore，只存回复与判定，不存 prompt 与凭据），并打印通过率表。live 的「是否编造」第一版用正则判断，有误判风险，必须抽查落盘的原始回复。
+- **live 层的装配口径（重要）**：live 用例走 `build_messages` + `EMOTION_INSTRUCTION` + 真实检索的"装配级"调用（`LLM.complete`），**不是**生产全链路 `Orchestrator.respond()`（少了 `_render_turn_context` 动态段、pacing 后处理、历史裁剪）。live 结果代表"Prompt 装配逻辑没改坏"，不代表端到端行为；要验全链路需另起浏览器回归。2026-10-17 实跑记录：emotion-tag-retention-live 10 次中 3 次缺标签（第 3/4 轮起，回复为空字符串），为真实缺陷（多轮指令遗忘），待另派任务单修复。
 - **xfail**：`status: xfail` 的用例照常运行并在汇报中列出，但不计入失败（必须写 `reason`）。
 - **新增用例**：每次出幻觉事故就加一条 YAML。字段见 `evals/cases/` 现例；`checks` 支持 `contains / not_contains / regex_any / not_regex / custom`，custom 判定函数写在 `evals/checks.py`，用例里以 `evals.checks:<函数名>` 引用。预置状态写 `setup.memories`，用户轮次写 `turns`，live 默认跑 `runs: 3` 次，通过线由 `pass_rule: all | min_rate:0.8` 控制。`origin` 必填（来源实验 / 事故 / commit）。
 
