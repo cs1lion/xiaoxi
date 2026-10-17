@@ -57,7 +57,7 @@ class AgentLoop:
     def __init__(self, model: Callable[[dict[str, Any]], Awaitable[dict[str, Any]]],
                  tools: list[Tool], runtime: RuntimeStore, *, max_steps=4,
                  max_tools=3, timeout=30.0, clock=time.time,
-                 input_ttl=900.0, max_input_rounds=8):
+                 input_ttl=900.0, max_input_rounds=8, planner: Any = None):
         self.model = model
         self.tools = {tool.name: tool for tool in tools}
         self.runtime = runtime
@@ -67,21 +67,49 @@ class AgentLoop:
         self.clock = clock
         self.input_ttl = input_ttl
         self.max_input_rounds = max_input_rounds
+        # planner: 可选调用器，接收 {'goal': str, 'tools': [...]} 返回计划规格 dict。
+        # 不给就退回原来的自由 decide/act 行为——既有调用方一行不用改。
+        self.planner = planner
 
     @staticmethod
     def action_hash(action: dict[str, Any]) -> str:
         return hashlib.sha256(json.dumps(action, sort_keys=True, ensure_ascii=False,
                                          separators=(',', ':'), allow_nan=False).encode()).hexdigest()
 
+    async def _build_plan(self, safe_text: str, context: dict[str, Any]) -> tuple[Any, str | None]:
+        """向 planner 取一份计划并收敛成可执行 Plan；失败返回 (None, 原因)。
+
+        计划失败**不阻塞任务**：退回自由 decide/act，理由记进 trace。
+        自进化要的是少而准的计划，不是每次都强制拆解。
+        """
+        if self.planner is None:
+            return None, 'no_planner'
+        try:
+            raw = self.planner({'goal': safe_text, 'context': context,
+                                'tools': [tool.spec() for tool in self.tools.values()]})
+            if hasattr(raw, '__await__'):
+                raw = await raw
+        except Exception as exc:  # a broken planner must not kill the run
+            return None, f'planner_error:{type(exc).__name__}'
+        from .planning import normalize_plan
+        plan, reason = normalize_plan(raw, goal=safe_text, max_steps=self.max_steps)
+        if plan is not None and _plan_is_trivial(plan):
+            # 一步、没有验收条件、没有执行器要求的"计划"不比自由循环多知道任何事——
+            # 把它当成计划只会改变既有语义而不增加可追踪性。按无计划处理。
+            return None, 'plan_trivial'
+        # checkpoint 是 JSON：存 dict，不存 dataclass。
+        return (plan.as_dict() if plan is not None else None), reason
+
     async def start(self, user_text: str, context: dict[str, Any] | None = None) -> dict[str, Any]:
         from .context import _text
         safe_text = _text(user_text, 12000)
+        plan, plan_reason = await self._build_plan(safe_text, context or {})
         state = {'user_text': safe_text, 'context': context or {}, 'observations': [],
                  'steps': 0, 'step_limit': self.max_steps, 'tool_count': 0,
                  'pending_action': None, 'input_rounds': 0,
                  'latest_user_text': safe_text,
                  'input_history': [{'role': 'user', 'content': safe_text}],
-                 'completed_actions': {}}
+                 'completed_actions': {}, 'plan': plan, 'plan_reason': plan_reason}
         run_id = self.runtime.create(state)
         return await self._guarded(run_id, state)
 
@@ -124,11 +152,32 @@ class AgentLoop:
             return self._result(run_id, 'cancelled', '已取消，没有执行这个操作。', state)
         return await self._guarded(run_id, state, approved_action=action)
 
+    async def resume_plan(self, run_id: str, *, context: dict[str, Any] | None = None) -> dict[str, Any]:
+        """从中断处继续推进计划：沿用已保存的 observations/steps/plan，不重跑。
+
+        与 `resume` 的区别：这里没有待确认动作，只是重新进入推进循环。
+        恢复的安全性由 `_execute` 的"先落检查点再产生副作用"和
+        `completed_actions` 去重共同保证——已成功的 mutation 不会被重放。
+        """
+        run = self.runtime.get(run_id)
+        if run['status'] in ('completed', 'cancelled', 'waiting_confirmation', 'waiting_input'):
+            raise ValueError(f'run_not_resumable:{run["status"]}')
+        state = run['state']
+        if context is not None:
+            state['context'] = context
+        # 步骤计数从检查点继续，因此恢复不会获得新的步数预算。
+        state['step_limit'] = max(state.get('step_limit', self.max_steps), state.get('steps', 0))
+        return await self._guarded(run_id, state)
+
     async def _guarded(self, run_id, state, approved_action=None):
         try:
             async with asyncio.timeout(self.timeout):
                 if approved_action is not None:
                     await self._execute(run_id, state, approved_action)
+                    # 刚批准并执行完的这个动作，成果必须记到它所属的那一步上。
+                    # 不记就直接 _advance 的话，循环会把同一步当成还没跑，再问模型
+                    # 要一次动作——于是同一步被问两遍，已成功的执行也拿不到验收。
+                    self._credit_running_step(run_id, state)
                 return await self._advance(run_id, state)
         except asyncio.CancelledError:
             self.runtime.save(run_id, 'interrupted', state)
@@ -150,6 +199,12 @@ class AgentLoop:
             raise asyncio.CancelledError
 
     async def _advance(self, run_id, state):
+        if state.get('plan') is not None:
+            return await self._advance_plan(run_id, state, state['plan'])
+        return await self._advance_free(run_id, state)
+
+    async def _advance_free(self, run_id, state):
+        """没有计划时的自由 decide/act：模型自己决定下一步。"""
         while state['steps'] < state.get('step_limit', self.max_steps):
             self._raise_if_cancelling()
             state['steps'] += 1
@@ -208,6 +263,224 @@ class AgentLoop:
         self.runtime.save(run_id, 'limit_reached', state)
         return self._result(run_id, 'limit_reached', '已到本轮处理上限，先停在这里。已有结果见下方。', state)
 
+    async def _advance_plan(self, run_id, state, plan_dict):
+        """计划驱动的一轮：按依赖顺序推进下一步，验收通过才算这一步完成。
+
+        与自由 decide/act 共用 `_execute`（因此共用确认门、事件流水、
+        "先落检查点再产生副作用"的不重放保证）。差别只在：谁来定下一步
+        （计划，不是模型自由发挥），以及凭什么算完成（acceptance，不是 success）。
+        """
+        from .planning import plan_from_dict, plan_report, plan_status_line, record_attempt
+
+        plan = plan_from_dict(plan_dict)
+        if plan is None:
+            # 检查点里的计划读不回来：按无计划退回自由循环，不假装还在推进。
+            state['plan'] = None
+            state['plan_reason'] = 'plan_unreadable'
+            self.runtime.save(run_id, 'running', state)
+            return await self._advance_free(run_id, state)
+
+        while state['steps'] < state.get('step_limit', self.max_steps):
+            self._raise_if_cancelling()
+            step = plan.next_step()
+            if step is None:
+                break
+            if step.status == 'failed' and step.exhausted:
+                # 重试余量用完：这一步及其后继都停下来，交给人决定。
+                blocked = [item for item in plan.steps if item.status == 'failed']
+                state['plan'] = plan.as_dict()
+                self.runtime.save(run_id, 'blocked', state)
+                self.runtime.event(run_id, 'plan_blocked', {
+                    'step': step.id, 'reason': step.failure})
+                text = plan_status_line(plan)
+                return {**self._result(run_id, 'blocked', text, state),
+                        'plan': plan_report(plan)}
+            state['steps'] += 1
+            plan = self._mark(plan, step.id, 'running')
+            state['plan'] = plan.as_dict()
+            self.runtime.save(run_id, 'running', state)
+            self.runtime.event(run_id, 'plan_step_started',
+                               {'step': step.id, 'title': step.title, 'attempt': step.attempts + 1})
+
+            decision = await self.model({
+                'user_text': state['user_text'], 'context': state['context'],
+                'latest_user_text': state.get('latest_user_text', state['user_text']),
+                'input_history': state.get('input_history', []),
+                'observations': state['observations'],
+                'tools': [t.spec() for t in self.tools.values()],
+                'remaining_tools': self.max_tools - state['tool_count'],
+                'plan': {'goal': plan.goal, 'step': {'id': step.id, 'title': step.title,
+                                                     'expected': step.expected,
+                                                     'input': step.step_input,
+                                                     'acceptance': list(step.acceptance)},
+                         'counts': plan.counts()},
+            })
+            self._raise_if_cancelling()
+            if not isinstance(decision, dict):
+                raise ValueError('invalid_decision')
+            action = decision.get('action')
+            if action in ('final', 'clarify'):
+                text = decision.get('text')
+                if not isinstance(text, str) or not text.strip() or len(text) > 12000:
+                    raise ValueError('invalid_final')
+                if action == 'clarify':
+                    state['last_clarification'] = text
+                    state.setdefault('input_history', []).append({'role': 'assistant', 'content': text})
+                    expires_at = self.runtime.wait_for_input(run_id, state, self.input_ttl)
+                    self.runtime.event(run_id, 'input_required', {'text': text, 'expires_at': expires_at})
+                    return {**self._result(run_id, 'waiting_input', text, state),
+                            'input_expires_at': expires_at}
+                # 计划还没走完就说"做完了"：只有当前这一步是**最后一步待办**时，
+                # 才把这个回答当作它的产出（包尾步骤本来就可以只是"说一句话"）。
+                # 否则还有别的步骤等着，这是提前收工——按阻塞交回，不当成完成。
+                pending = [item for item in plan.steps if item.status not in ('done', 'skipped')]
+                if len(pending) == 1 and pending[0].id == (plan.next_step().id if plan.next_step() else None):
+                    plan, verdict, why = record_attempt(
+                        plan, pending[0].id,
+                        receipt={'status': 'succeeded', 'data': {'text': text}},
+                        observation_index=len(state['observations']))
+                    state['plan'] = plan.as_dict()
+                    state['observations'].append({'tool': 'final', 'status': 'succeeded',
+                                                  'data': {'text': text}})
+                    self.runtime.event(run_id, 'plan_step_finished',
+                                       {'step': pending[0].id, 'verdict': verdict, 'why': why})
+                    if plan.is_complete:
+                        self.runtime.save(run_id, 'completed', state)
+                        return self._result(run_id, 'completed', text, state)
+                    state['plan'] = plan.as_dict()
+                    self.runtime.save(run_id, 'blocked', state)
+                    return {**self._result(run_id, 'blocked', plan_status_line(plan), state),
+                            'plan': plan_report(plan)}
+                state['plan'] = plan.as_dict()
+                self.runtime.save(run_id, 'blocked', state)
+                self.runtime.event(run_id, 'plan_blocked', {'reason': 'premature_final'})
+                return {**self._result(run_id, 'blocked', plan_status_line(plan), state),
+                        'plan': plan_report(plan)}
+            if action != 'tool_call' or set(decision) - {'action', 'tool', 'arguments'}:
+                plan, _status, why = record_attempt(plan, step.id, receipt={
+                    'status': 'failed', 'error_code': 'invalid_arguments'},
+                    observation_index=len(state['observations']))
+                state['plan'] = plan.as_dict()
+                state['observations'].append({'tool': '?', 'status': 'failed',
+                                              'error_code': 'invalid_arguments'})
+                self.runtime.event(run_id, 'plan_step_finished',
+                                   {'step': step.id, 'verdict': why})
+                continue
+            if state['tool_count'] >= self.max_tools:
+                break
+            tool = self.tools.get(decision.get('tool'))
+            if tool is None:
+                receipt = {'status': 'failed', 'error_code': 'unknown_tool'}
+                plan, _status, why = record_attempt(plan, step.id, receipt=receipt,
+                                                    observation_index=len(state['observations']))
+                state['plan'] = plan.as_dict()
+                state['observations'].append({'tool': str(decision.get('tool')), **receipt})
+                self.runtime.event(run_id, 'plan_step_finished', {'step': step.id, 'verdict': why})
+                continue
+            try:
+                tool.validate(decision.get('arguments'))
+                self.action_hash(decision)
+            except (ValueError, TypeError):
+                receipt = {'status': 'failed', 'error_code': 'invalid_arguments'}
+                plan, _status, why = record_attempt(plan, step.id, receipt=receipt,
+                                                    observation_index=len(state['observations']))
+                state['plan'] = plan.as_dict()
+                state['observations'].append({'tool': tool.name, **receipt})
+                self.runtime.event(run_id, 'plan_step_finished', {'step': step.id, 'verdict': why})
+                continue
+            if tool.mutation and self.action_hash(decision) in state.get('completed_actions', {}):
+                receipt = {'status': 'skipped', 'error_code': 'already_executed',
+                           'receipt_index': state['completed_actions'][self.action_hash(decision)]}
+                plan, _status, why = record_attempt(plan, step.id, receipt=receipt,
+                                                    observation_index=len(state['observations']))
+                state['plan'] = plan.as_dict()
+                state['observations'].append({'tool': tool.name, **receipt})
+                self.runtime.event(run_id, 'plan_step_finished', {'step': step.id, 'verdict': why})
+                continue
+            index = len(state['observations'])
+            if tool.mutation:
+                state['pending_action'] = decision
+                confirmation = self.runtime.confirmation(run_id, self.action_hash(decision))
+                state['confirmation_id'] = confirmation['id']
+                state['plan'] = plan.as_dict()
+                self.runtime.save(run_id, 'waiting_confirmation', state)
+                self.runtime.event(run_id, 'confirmation_required',
+                                   {'tool': tool.name, 'id': confirmation['id']})
+                return {**self._result(run_id, 'waiting_confirmation', '先确认一下这个操作的内容。', state),
+                        'confirmation': {**confirmation, 'tool': tool.name,
+                                         'arguments': decision['arguments']},
+                        'plan_step': step.id,
+                        # 带上计划进度：前端要能说"第 2/4 步要你确认"，而不是只弹一句
+                        # "先确认一下这个操作的内容"——那会让用户不知道自己在批什么。
+                        'plan': plan_report(plan)}
+            await self._execute(run_id, state, decision)
+            receipt = state['observations'][-1] if state['observations'] else None
+            plan, verdict, why = record_attempt(plan, step.id, receipt=receipt,
+                                                observation_index=index)
+            state['plan'] = plan.as_dict()
+            self.runtime.event(run_id, 'plan_step_finished',
+                               {'step': step.id, 'verdict': verdict, 'why': why})
+
+        # 预算/步数用尽而退出循环时，可能还有一步被标成 running 却没跑完。
+        # 不把它退回 pending，最终回报就会漏掉这一步——报告会假装无事发生。
+        plan = self._revert_running(plan)
+        state['plan'] = plan.as_dict()
+        if plan.is_complete:
+            # 计划走完但模型没给总结：用证据自己报，不虚构。
+            report = plan_report(plan)
+            self.runtime.save(run_id, 'completed', state)
+            self.runtime.event(run_id, 'plan_completed', {'counts': report['counts']})
+            text = self._plan_final_text(report)
+            return {**self._result(run_id, 'completed', text, state), 'plan': report}
+        self.runtime.save(run_id, 'blocked', state)
+        self.runtime.event(run_id, 'plan_blocked', {'reason': 'budget_or_dependency'})
+        return {**self._result(run_id, 'blocked', plan_status_line(plan), state),
+                'plan': plan_report(plan)}
+
+    @staticmethod
+    def _mark(plan, step_id, status):
+        from .planning import PlanStep, replace
+        return replace(plan, steps=tuple(replace(item, status=status) if item.id == step_id else item
+                                         for item in plan.steps))
+
+    @staticmethod
+    def _revert_running(plan):
+        """把还没跑完的 running 步骤退回 pending，让回报不漏步、不谎报。"""
+        from .planning import replace
+        return replace(plan, steps=tuple(
+            replace(item, status='pending') if item.status == 'running' else item
+            for item in plan.steps))
+
+    def _credit_running_step(self, run_id, state):
+        """把刚执行完的那次结果记到处于 running 的步骤上（审批通过后调用）。"""
+        from .planning import plan_from_dict, record_attempt
+        plan = plan_from_dict(state.get('plan'))
+        if plan is None or not state['observations']:
+            return
+        running = [item for item in plan.steps if item.status == 'running']
+        if len(running) != 1:
+            return
+        receipt = state['observations'][-1]
+        plan, verdict, why = record_attempt(plan, running[0].id, receipt=receipt,
+                                            observation_index=len(state['observations']) - 1)
+        state['plan'] = plan.as_dict()
+        self.runtime.event(run_id, 'plan_step_finished',
+                           {'step': running[0].id, 'verdict': verdict, 'why': why})
+
+    @staticmethod
+    def _plan_final_text(report) -> str:
+        """没有模型总结时的兜底回报：只说事实，不添油加醋。"""
+        counts = report['counts']
+        parts = [f"「{report['goal']}」办完了：{counts['done']} 步完成"]
+        if counts['failed']:
+            parts.append(f"{counts['failed']} 步失败")
+        if counts['skipped']:
+            parts.append(f"{counts['skipped']} 步未执行")
+        text = '，'.join(parts) + '。'
+        if report['risks']:
+            text += '还需要你定：' + '；'.join(report['risks'][:3])
+        return text
+
     async def _execute(self, run_id, state, action):
         self._raise_if_cancelling()
         tool = self.tools[action['tool']]
@@ -257,19 +530,149 @@ REFLECT_SYSTEM = """你是角色本人，在一次安静的后台自进化里，
 3. 只输出 JSON：
 {"reflection":{"title":"短标题","narrative":"第一人称私密感悟","discovery":"一个新发现/矛盾/盲点/跨领域联系","source_refs":["材料的 ref"]},
  "child_seeds":[{"title":"短标题","question":"一个真正不同的新问题","reason":"为什么派生这个问题","source_refs":["材料的 ref"]}],
- "epiphany_edges":[{"source_ref":" ref","target_ref":" ref","reason":"两段为何真的相关"}]}
+ "epiphany_edges":[{"source_ref":" ref","target_ref":" ref","reason":"两段为何真的相关"}],
+ "lessons":[{"trigger":"当……时","action":"……","cues":["会命中的关键词"],"source_refs":["材料的 ref"]}]}
 4. 必须派生 1~2 个真正不同的新问题，不要换句话重复原问题。
 5. epiphany 边只在不同来源/时间/问题确实有语义关联时才给；不要为了让图好看而随机连。
-6. narrative 不超过 240 字，discovery 不超过 120 字，question 不超过 200 字；没有值得连的就不给 epiphany_edges。"""
+6. narrative 不超过 240 字，discovery 不超过 120 字，question 不超过 200 字；没有值得连的就不给 epiphany_edges。
+7. lessons 可选，0~2 条：只有材料里出现了**可重复的相处模式**才写。trigger 写具体情境（不超过 80 字），action 写下次可以照做的做法（不超过 160 字），cues 给 1~4 个短关键词用于匹配未来对话。不要写人格设定、用户事实、安全/授权规则；没有就省略。"""
 
 
 REFLECT_MAX_NARRATIVE = 240
 REFLECT_MAX_DISCOVERY = 120
 REFLECT_MIN_CHILDREN = 1
 REFLECT_MAX_CHILDREN = 2
-
-
 MAX_DELTA_FEEDBACK = 2000
+
+
+def _plan_is_trivial(plan) -> bool:
+    """一步且不带任何验收/执行器/依赖信息的计划，等于没有计划。
+
+    这是"简单任务不会被过度拆解"的落地方式：拆不出信息量的单步计划直接退回
+    自由 decide/act，既有语义一行不变。多步、或带验收条件的单步，才值得追踪。
+    """
+    if len(plan.steps) != 1:
+        return False
+    step = plan.steps[0]
+    if step.executor or step.depends_on:
+        return False
+    # {"status":"succeeded"} 就是"worker 自己说成功"，不带来任何额外信息；
+    # 模型常给单步闲聊计划补这一条，不能因此把问候也变成计划驱动。
+    extra = [rule for rule in step.acceptance
+             if set(rule) != {'status'} or rule.get('status') != 'succeeded']
+    return not extra
+# 派生理由必须说清"为什么这是个新问题"，不能拿模板句糊弄。
+REFLECT_MIN_REASON = 8
+REFLECT_TEMPLATE_REASONS = ("由本次反思派生", "派生自本次反思", "基于反思", "新问题")
+# 空洞泛化：听起来像结论，实际上没有可验证的方向。命中即拒——
+# 自进化要的是"能接着查的具体问题"，不是"值得进一步研究"这种废话。
+REFLECT_HOLLOW_PATTERNS = (
+    "进一步深入研究", "深入研究", "探索更多", "更多可能性", "多种可能", "有待进一步",
+    "持续关注", "值得关注", "引人深思", "耐人寻味", "总而言之", "综上所述",
+    "我们需要更加", "应该更加重视", "具有重要价值", "有重要意义", "颇有意义",
+)
+
+
+def _is_hollow(text: str) -> bool:
+    """True when a field is only a hollow generalization (no concrete direction).
+
+    只看套话模式，不设长度下限：一句短短的发现（"他会累"）完全可以是具体的，
+    拿字数筛它会把真东西误杀。长度属于各字段自己的约束。
+    """
+    stripped = (text or "").strip()
+    if not stripped:
+        return True
+    return any(pattern in stripped for pattern in REFLECT_HOLLOW_PATTERNS)
+
+
+def validate_reflection_payload(payload: Any, material: list[dict[str, Any]] | None = None
+                                ) -> tuple[dict[str, Any] | None, str | None]:
+    """Gate a reflection payload (§14.2/§14.3): (normalized, None) or (None, reason).
+
+    A valid reflection needs a narrative + discovery, 1~2 genuinely-questioned child
+    seeds whose derivation is actually explained, and at least one source ref that
+    points at material this cycle really read. Missing/oversized/hollow/untraceable
+    output is rejected so the caller can retry or fail without ever digesting the seed.
+
+    ``material`` is the list ``gather_reflection_material`` produced; passing it turns
+    "source_refs must be non-empty strings" into "source_refs must resolve to real
+    evidence", which is the V2 traceability rule.
+    """
+    if not isinstance(payload, dict):
+        return None, "payload_not_object"
+    refl = payload.get("reflection")
+    if not isinstance(refl, dict):
+        return None, "reflection_missing"
+    narrative, discovery = refl.get("narrative"), refl.get("discovery")
+    if (not isinstance(narrative, str) or not narrative.strip()
+            or len(narrative.strip()) > REFLECT_MAX_NARRATIVE):
+        return None, "narrative_invalid"
+    if (not isinstance(discovery, str) or not discovery.strip()
+            or len(discovery.strip()) > REFLECT_MAX_DISCOVERY):
+        return None, "discovery_invalid"
+    if _is_hollow(discovery):
+        return None, "discovery_hollow"
+    title = refl.get("title")
+    title = title.strip()[:40] if isinstance(title, str) and title.strip() else discovery.strip()[:40]
+    raw_refs = refl.get("source_refs")
+    source_refs = ([r.strip() for r in raw_refs if isinstance(r, str) and r.strip()]
+                   if isinstance(raw_refs, list) else [])
+    if not source_refs:
+        return None, "source_refs_missing"
+    if material is not None:
+        available = {item.get("ref") for item in material if isinstance(item, dict)}
+        if not any(ref in available for ref in source_refs):
+            return None, "source_refs_untraceable"
+    children = payload.get("child_seeds")
+    if not isinstance(children, list) or not (REFLECT_MIN_CHILDREN <= len(children) <= REFLECT_MAX_CHILDREN):
+        return None, "child_seeds_count"
+    norm_children: list[dict[str, Any]] = []
+    for child in children:
+        if not isinstance(child, dict):
+            return None, "child_invalid"
+        question = child.get("question")
+        if not isinstance(question, str) or not question.strip() or len(question.strip()) > 200:
+            return None, "child_question_invalid"
+        if _is_hollow(question):
+            return None, "child_question_hollow"
+        ctitle = child.get("title")
+        ctitle = ctitle.strip()[:40] if isinstance(ctitle, str) and ctitle.strip() else question.strip()[:40]
+        reason = child.get("reason")
+        if not isinstance(reason, str) or not reason.strip():
+            return None, "child_reason_missing"
+        reason = reason.strip()[:200]
+        # 模板句等于没说：模型必须自己讲清这个新问题新在哪里。
+        if len(reason) < REFLECT_MIN_REASON or reason in REFLECT_TEMPLATE_REASONS:
+            return None, "child_reason_template"
+        craw = child.get("source_refs")
+        cref = ([r.strip() for r in craw if isinstance(r, str) and r.strip()]
+                if isinstance(craw, list) else [])
+        norm_children.append({"title": ctitle, "question": question.strip(), "reason": reason, "source_refs": cref})
+    edges: list[dict[str, str]] = []
+    raw_edges = payload.get("epiphany_edges")
+    if isinstance(raw_edges, list):
+        for edge in raw_edges:
+            if not isinstance(edge, dict):
+                continue
+            src, tgt, why = edge.get("source_ref"), edge.get("target_ref"), edge.get("reason")
+            if (isinstance(src, str) and src.strip() and isinstance(tgt, str) and tgt.strip()
+                    and src.strip() != tgt.strip() and isinstance(why, str) and why.strip()):
+                edges.append({"source_ref": src.strip(), "target_ref": tgt.strip(), "reason": why.strip()[:200]})
+    # Lessons are additive: an invalid/unverifiable lesson is dropped, never a
+    # reason to throw away an otherwise valid reflection.
+    from ..memory.lessons import validate_lesson
+    available = ({item.get("ref") for item in material if isinstance(item, dict)}
+                 if material is not None else None)
+    lessons: list[dict[str, Any]] = []
+    raw_lessons = payload.get("lessons")
+    if isinstance(raw_lessons, list):
+        for item in raw_lessons[:2]:
+            proposal = validate_lesson(item, material_refs=available)
+            if proposal is not None:
+                lessons.append(proposal)
+    return ({"reflection": {"title": title, "narrative": narrative.strip(), "discovery": discovery.strip(),
+                            "source_refs": source_refs},
+             "child_seeds": norm_children, "epiphany_edges": edges, "lessons": lessons}, None)
 
 
 @dataclass(frozen=True)
@@ -312,63 +715,6 @@ def capture_eval_delta(*, commission: dict[str, Any], boss_feedback: str,
                      audit_layer=str(audit.get("layer") or "none"),
                      audit_findings=findings,
                      learned_rubric_id=rubric["id"] if isinstance(rubric, dict) else None)
-
-
-def validate_reflection_payload(payload: Any) -> tuple[dict[str, Any] | None, str | None]:
-    """Gate a reflection payload (§14.2/§14.3): (normalized, None) or (None, reason).
-
-    A valid reflection needs a narrative + discovery and 1~2 genuinely-questioned
-    child seeds. Missing/oversized/duplicate-shaped output is rejected so the caller
-    can retry or fail without ever digesting the seed.
-    """
-    if not isinstance(payload, dict):
-        return None, "payload_not_object"
-    refl = payload.get("reflection")
-    if not isinstance(refl, dict):
-        return None, "reflection_missing"
-    narrative, discovery = refl.get("narrative"), refl.get("discovery")
-    if (not isinstance(narrative, str) or not narrative.strip()
-            or len(narrative.strip()) > REFLECT_MAX_NARRATIVE):
-        return None, "narrative_invalid"
-    if (not isinstance(discovery, str) or not discovery.strip()
-            or len(discovery.strip()) > REFLECT_MAX_DISCOVERY):
-        return None, "discovery_invalid"
-    title = refl.get("title")
-    title = title.strip()[:40] if isinstance(title, str) and title.strip() else discovery.strip()[:40]
-    raw_refs = refl.get("source_refs")
-    source_refs = ([r.strip() for r in raw_refs if isinstance(r, str) and r.strip()]
-                   if isinstance(raw_refs, list) else [])
-    children = payload.get("child_seeds")
-    if not isinstance(children, list) or not (REFLECT_MIN_CHILDREN <= len(children) <= REFLECT_MAX_CHILDREN):
-        return None, "child_seeds_count"
-    norm_children: list[dict[str, Any]] = []
-    for child in children:
-        if not isinstance(child, dict):
-            return None, "child_invalid"
-        question = child.get("question")
-        if not isinstance(question, str) or not question.strip() or len(question.strip()) > 200:
-            return None, "child_question_invalid"
-        ctitle = child.get("title")
-        ctitle = ctitle.strip()[:40] if isinstance(ctitle, str) and ctitle.strip() else question.strip()[:40]
-        reason = child.get("reason")
-        reason = reason.strip()[:200] if isinstance(reason, str) and reason.strip() else "由本次反思派生"
-        craw = child.get("source_refs")
-        cref = ([r.strip() for r in craw if isinstance(r, str) and r.strip()]
-                if isinstance(craw, list) else [])
-        norm_children.append({"title": ctitle, "question": question.strip(), "reason": reason, "source_refs": cref})
-    edges: list[dict[str, str]] = []
-    raw_edges = payload.get("epiphany_edges")
-    if isinstance(raw_edges, list):
-        for edge in raw_edges:
-            if not isinstance(edge, dict):
-                continue
-            src, tgt, why = edge.get("source_ref"), edge.get("target_ref"), edge.get("reason")
-            if (isinstance(src, str) and src.strip() and isinstance(tgt, str) and tgt.strip()
-                    and src.strip() != tgt.strip() and isinstance(why, str) and why.strip()):
-                edges.append({"source_ref": src.strip(), "target_ref": tgt.strip(), "reason": why.strip()[:200]})
-    return ({"reflection": {"title": title, "narrative": narrative.strip(), "discovery": discovery.strip(),
-                            "source_refs": source_refs},
-             "child_seeds": norm_children, "epiphany_edges": edges}, None)
 
 
 class SelfEvolutionCycle:
@@ -577,7 +923,7 @@ class SelfEvolutionCycle:
                 trace['error'] = f'{type(exc).__name__}: {exc}'
                 last_reason = 'model_call_failed'
                 continue
-            normalized, reason = validate_reflection_payload(raw_payload)
+            normalized, reason = validate_reflection_payload(raw_payload, material)
             if normalized is not None:
                 last_reason = 'ok'
                 break
@@ -602,8 +948,17 @@ class SelfEvolutionCycle:
         if not child_ids:
             return {'status': 'failed', 'reason': 'no_distinct_child', 'events': [], 'trace': trace}
 
+        # Procedural memory: the reflection's own principles become bounded,
+        # evidence-linked "when X, do Y" lessons. Optional and additive; a
+        # malformed lesson never fails a reflection that otherwise passed.
+        from ..memory import lessons as lesson_mod
+        lesson_counts = lesson_mod.record_lessons(
+            self.store, normalized.get('lessons') or [],
+            material_refs={item['ref'] for item in material}, now=now)
+        trace['lessons'] = lesson_counts
+
         status_changes: list[dict[str, str]] = []
-        if seed_mod.transition_seed(self.store, seed['id'], 'digested') is not None:
+        if seed_mod.transition_seed(self.store, seed['id'], 'digested', now=now) is not None:
             status_changes.append({'seed_id': seed['id'], 'from': seed['status'], 'to': 'digested'})
         edges_created = 0
         for item in material:

@@ -69,6 +69,19 @@ class MemoryManager:
         """
         epoch, floor = self.store.write_state()
         expected_epoch = epoch if write_epoch is None else write_epoch
+        if self.enabled and type(user_message_id) is int and user_message_id > 0:
+            # The previous turn's memories get their reward from this user
+            # message. Off the fast path: extraction already runs async, and a
+            # feedback failure must never suppress memory extraction.
+            try:
+                from .feedback import settle_pending
+                outcome = settle_pending(self.store, session_id=session_id,
+                                         current_message_id=user_message_id)
+                if trace is not None:
+                    trace['feedback_settled'] = outcome.get('settled', 0)
+            except Exception as exc:
+                if trace is not None:
+                    trace['feedback_error'] = f'{type(exc).__name__}: {exc}'
         if (not self.enabled or type(expected_epoch) is not int or expected_epoch != epoch
                 or type(user_message_id) is not int or user_message_id <= floor):
             if trace is not None:
@@ -239,6 +252,17 @@ class MemoryManager:
             return ""
         block, _ids, _found = self.retriever.build_context(query, subject=subject)
         return block
+
+    def lessons_for(self, query: str) -> list[dict[str, Any]]:
+        """Procedural lessons matching this turn; [] when memory/lessons are off.
+
+        Only lessons that fit the injection budget are returned, so usage
+        telemetry (`mark_used`) records exactly what the model actually saw.
+        """
+        if not self.enabled:
+            return []
+        from .lessons import renderable_lessons, retrieve_lessons
+        return renderable_lessons(retrieve_lessons(self.store, query))
 
     def context_with_status(self, query: str, *, subject: str | None = None) -> tuple[str, bool]:
         if not self.enabled:

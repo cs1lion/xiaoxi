@@ -51,6 +51,30 @@ def similarity(a: str, b: str) -> float:
     return difflib.SequenceMatcher(None, na, nb).ratio()
 
 
+def _bigrams(text: str) -> set[str]:
+    normalized = _normalize(text)
+    if len(normalized) <= 1:
+        return {normalized} if normalized else set()
+    return {normalized[i:i + 2] for i in range(len(normalized) - 1)}
+
+
+def question_novelty(parent_question: str, child_question: str) -> float:
+    """Fraction of the child's content the parent does not already contain, in [0,1].
+
+    为什么不用相似度阈值判新颖：字符级相似度分不开"换措辞的近义复述"和
+    "只差一个字的敷衍"——实测前者 0.82、后者 0.89，阈值怎么调都错。
+    这里改问一个更直接的问题：**子问题里有多大比例的内容是父问题没有的？**
+    实测同主题新角度 0.89、真正不同 0.72，而近义复述 0.29、逐字照抄 0.00，
+    两类之间有明显空档。它仍然是词汇层面的代理，不是语义理解，所以只当
+    一道闸门用；真正的新颖性由模型在 reason 里说清、由纵向评测复核。
+    """
+    child = _bigrams(child_question)
+    if not child:
+        return 0.0
+    parent = _bigrams(parent_question)
+    return len(child - parent) / len(child)
+
+
 def _dedupe_threshold() -> float:
     from ..config import memory_cfg
     value = ((memory_cfg().get("self_evolution") or {}).get("similarity_dedupe", 0.86))
@@ -58,6 +82,15 @@ def _dedupe_threshold() -> float:
         return min(1.0, max(0.0, float(value)))
     except (TypeError, ValueError):
         return 0.86
+
+
+def _novelty_threshold() -> float:
+    from ..config import memory_cfg
+    value = ((memory_cfg().get("self_evolution") or {}).get("child_novelty_min", 0.45))
+    try:
+        return min(1.0, max(0.0, float(value)))
+    except (TypeError, ValueError):
+        return 0.45
 
 
 def find_duplicate_seed(store: MemoryStore, question: str, *,
@@ -146,9 +179,15 @@ def fork_child_seed(store: MemoryStore, parent_id: str, *, title: str, question:
                     now_iso: str | None = None, heat: float = 0.5) -> dict[str, Any] | None:
     """Create a genuinely different child seed and wire the parent link + edge.
 
-    Refuses near-duplicates of existing seeds (returns None) so the graph cannot
-    grow a swarm of restatements. Records the parent's child id and a persisted
-    parent_child edge carrying the fork reason.
+    Two independent gates, because string similarity alone cannot judge novelty:
+    1. near-duplicate of any existing seed (incl. the parent) is refused, so the
+       graph cannot grow a swarm of restatements;
+    2. the child must introduce content the parent does not already have
+       (``question_novelty``) — a reworded copy of the parent question is refused
+       even though its character ratio may sit below the dedupe threshold.
+
+    Refusal returns None; the caller turns "no child created" into a failed cycle
+    that never digests the seed, per the V2 hard rule.
     """
     parent = store.get_seed(parent_id)
     if parent is None:
@@ -158,6 +197,8 @@ def fork_child_seed(store: MemoryStore, parent_id: str, *, title: str, question:
     if not question:
         return None
     if find_duplicate_seed(store, question) is not None:
+        return None
+    if question_novelty(parent.get("question", ""), question) < _novelty_threshold():
         return None
     from .diary import local_date
     child_id = stable_seed_id(f"{parent_id}:{question}")
@@ -185,8 +226,14 @@ def fork_child_seed(store: MemoryStore, parent_id: str, *, title: str, question:
     return store.get_seed(child_id)
 
 
-def transition_seed(store: MemoryStore, seed_id: str, target: str) -> dict[str, Any] | None:
-    """Apply a lifecycle transition if allowed; returns the updated seed or None."""
+def transition_seed(store: MemoryStore, seed_id: str, target: str,
+                    *, now: float | None = None) -> dict[str, Any] | None:
+    """Apply a lifecycle transition if allowed; returns the updated seed or None.
+
+    ``now`` stamps ``last_reflected_at``. Without it the field stayed None forever,
+    which silently disabled the "least recently reflected first" tie-break in
+    ``pick_seed_to_reflect`` — heat alone cannot spread attention across the tree.
+    """
     seed = store.get_seed(seed_id)
     if seed is None or target not in SEED_STATES:
         return None
@@ -202,7 +249,7 @@ def transition_seed(store: MemoryStore, seed_id: str, target: str) -> dict[str, 
                       related_refs=seed.get("related_refs") or [],
                       reflections=seed.get("reflections") or [],
                       created_at=seed["created_at"],
-                      last_reflected_at=seed.get("last_reflected_at"),
+                      last_reflected_at=seed.get("last_reflected_at") if now is None else float(now),
                       version=int(seed.get("version", 1)) + 1)
     return store.get_seed(seed_id)
 
@@ -267,5 +314,6 @@ def gather_reflection_material(store: MemoryStore, *, seed: dict[str, Any],
 __all__ = [
     "SEED_STATES", "SEED_TRANSITIONS", "bootstrap_seeds", "find_duplicate_seed", "fork_child_seed",
     "gather_reflection_material", "load_initial_seeds", "migrate_legacy_seeds",
-    "pick_seed_to_reflect", "seed_transition_allowed", "similarity", "stable_seed_id", "transition_seed",
+    "pick_seed_to_reflect", "question_novelty", "seed_transition_allowed", "similarity",
+    "stable_seed_id", "transition_seed",
 ]

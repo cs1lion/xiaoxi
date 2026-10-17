@@ -123,6 +123,20 @@ retrieval:
   similarity_weight: 0.40
   min_score: 0.12             # 低于此分视为"没找到"，宁可不注入
   max_inject_chars: 600
+  # MemRL 式二阶段检索：相关性先过门槛，再用历史有用度做有界重排。
+  # 0 = 关闭；0.30 表示有用度最多把分数乘 0.7~1.3，不能把不相关记忆捞进来。
+  utility_weight: 0.30
+  utility_prior_strength: 3.0  # Q 向 0.5 收缩的强度：前几次反馈不会一家独大
+
+# ---------- 结果反馈：用下一轮用户反应校准记忆有用度 ----------
+feedback:
+  enabled: true
+  utility_alpha: 0.30          # Q <- Q + alpha * (reward - Q)
+  utility_prior_strength: 3.0
+  max_settle_age_hours: 12     # 超过这个时长的"下一轮"不再算作对本轮的反馈
+  min_overlap: 0.12            # 用户原话与记忆内容的最小字符二元组重合度
+  # 只有明确的"记得没错 / 不对 / 我早就不……"才算奖励或惩罚；
+  # 沉默、继续话题、单纯"嗯"都不更新 Q。宁可少学，不把噪声固化成偏好。
 
 # ---------- 后台自进化（协议第十二节，默认全关） ----------
 # 关闭时自治循环不运行、不开口，行为与现在完全一致。开启后循环只在用户空闲
@@ -142,8 +156,24 @@ self_evolution:
   max_model_calls_per_cycle: 2  # 单轮自进化模型调用上限（反思 + 可选审美整理）
   max_retries: 2             # 反思失败的重试上限；超过则该轮记为 failed，不消化种子
   similarity_dedupe: 0.86    # 子种子与既有种子相似度阈值，超过判重跳过（防近义繁殖）
+  child_novelty_min: 0.45     # 子种子新颖度下限：子问题内容中父问题没有的占比。
+                              # 相似度阈值分不开"换措辞的近义复述"(0.82)和"只差一个字的敷衍"(0.89)，
+                              # 所以这里改问"子问题新在哪里"——实测同主题新角度 0.89、真正不同 0.72，
+                              # 而近义复述 0.29、逐字照抄 0.00，两类之间有空档。仍是词汇代理，不是语义理解。
   mood:
     enabled: true            # 心境惯性状态机（PROTOCOL.md §15）
     default_ttl_minutes: 30  # 心境余温默认有效期；只作控制阀门，表达仍靠自然语言叙事
   circadian:
     timezone: "Asia/Shanghai"  # 真实时间用配置时区；不得把服务器时区直接当用户时区
+
+# ---------- 程序性记忆：从相处里长出来的"当 X，就 Y" ----------
+# EvolveR/ACE/MemSkill 的共同结构：小而可审计的条目 + 逐条有帮助/有害计数 +
+# 近义合并与按证据退役。它不是第二套人格，也不写进用户事实。
+lessons:
+  enabled: true
+  max_active: 24               # 活跃条目上限；超出按有用度与更新时间退役
+  max_inject: 3                # 单轮最多注入几条
+  max_inject_chars: 320        # 注入块的总字符预算（含边界说明）
+  min_similarity: 0.12         # 没有 cue 命中时，trigger 与当前话的最小相似度
+  dedupe_similarity: 0.72      # 近义条目合并阈值，防止换措辞繁殖
+  retire_harmful: 2            # 有害计数达到该值且多于有帮助计数 → 退役

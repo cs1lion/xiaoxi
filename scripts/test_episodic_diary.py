@@ -230,7 +230,7 @@ class DiarySynthesisTests(unittest.IsolatedAsyncioTestCase):
                 db.execute("PRAGMA user_version = 3")
             reopened = MemoryStore(str(path))
             try:
-                self.assertEqual(reopened._query("PRAGMA user_version")[0][0], 3)
+                self.assertEqual(reopened._query("PRAGMA user_version")[0][0], 4)
                 self.assertIsNotNone(reopened.get_message(7))
                 for table in ("diaries", "drifts", "sparks", "self_state"):
                     self.assertTrue(reopened._query(

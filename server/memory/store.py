@@ -23,7 +23,8 @@ PERSISTED_EDGE_KINDS = ("parent_child", "related_memory", "epiphany")
 KINDS = ("fact", "episode", "todo", "self_state")
 SOURCES = ("stated", "inferred", "uncertain")
 STATUSES = ("active", "superseded", "done", "conflict")
-SCHEMA_VERSION = 3  # Additive tables below keep this: older files gain empty
+LESSON_STATUSES = ("active", "retired")
+SCHEMA_VERSION = 4  # Additive tables below keep this: older files gain empty
 # tables on open, so the "newer schema" guard still means a real future schema.
 
 SCHEMA = """
@@ -53,7 +54,13 @@ CREATE TABLE IF NOT EXISTS memories (
     preference_level TEXT NOT NULL DEFAULT '',
     preference_scope TEXT NOT NULL DEFAULT '',
     preference_as_of REAL,
-    retired_by_message_id INTEGER
+    retired_by_message_id INTEGER,
+    -- MemRL-style utility: Q in [0,1] and how many outcome signals produced it.
+    -- Retrieval shrinks Q toward the neutral prior while n is small, so one
+    -- lucky/unlucky turn can never dominate relevance.
+    utility REAL NOT NULL DEFAULT 0.5,
+    utility_n INTEGER NOT NULL DEFAULT 0,
+    last_reward_at REAL
 );
 CREATE INDEX IF NOT EXISTS idx_mem_status ON memories(status);
 CREATE INDEX IF NOT EXISTS idx_mem_kind ON memories(kind);
@@ -82,6 +89,46 @@ CREATE TABLE IF NOT EXISTS memory_control (
     write_floor INTEGER NOT NULL DEFAULT 0
 );
 INSERT OR IGNORE INTO memory_control(id, write_epoch, write_floor) VALUES (1, 0, 0);
+
+-- One row per user turn that actually injected memories/lessons. The next user
+-- message supplies the outcome signal. Utility is updated only after it arrives.
+-- This is an audit trail as much as a reward table: deleting a memory does not
+-- rewrite history, and an unsettled turn can always be explained.
+CREATE TABLE IF NOT EXISTS memory_usage (
+    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+    session_id      TEXT NOT NULL,
+    user_message_id INTEGER NOT NULL,
+    memory_ids      TEXT NOT NULL DEFAULT '[]',
+    lesson_ids      TEXT NOT NULL DEFAULT '[]',
+    created_at      REAL NOT NULL,
+    settled_at      REAL,
+    reward          REAL,
+    reward_reason   TEXT NOT NULL DEFAULT '',
+    reward_detail   TEXT NOT NULL DEFAULT '[]'
+);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_usage_turn ON memory_usage(session_id, user_message_id);
+CREATE INDEX IF NOT EXISTS idx_usage_open ON memory_usage(settled_at);
+
+-- Procedural memory (EvolveR / ACE / MemSkill): reusable "when X, do Y" lessons
+-- distilled from reflection. They never mix with subject="user" facts and are
+-- retired by evidence, not by a fixed lifetime.
+CREATE TABLE IF NOT EXISTS lessons (
+    id            INTEGER PRIMARY KEY AUTOINCREMENT,
+    trigger       TEXT NOT NULL,
+    action        TEXT NOT NULL,
+    cues          TEXT NOT NULL DEFAULT '[]',
+    scope         TEXT NOT NULL DEFAULT 'dialogue',
+    source        TEXT NOT NULL DEFAULT 'reflection',
+    evidence_refs TEXT NOT NULL DEFAULT '[]',
+    helpful       INTEGER NOT NULL DEFAULT 0,
+    harmful       INTEGER NOT NULL DEFAULT 0,
+    status        TEXT NOT NULL DEFAULT 'active',
+    created_at    REAL NOT NULL,
+    updated_at    REAL NOT NULL,
+    last_used_at  REAL,
+    use_count     INTEGER NOT NULL DEFAULT 0
+);
+CREATE INDEX IF NOT EXISTS idx_lesson_status ON lessons(status);
 
 CREATE TABLE IF NOT EXISTS diaries (
     id            INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -264,6 +311,9 @@ class Memory:
     preference_scope: str = ""
     preference_as_of: float | None = None
     retired_by_message_id: int | None = None
+    utility: float = 0.5
+    utility_n: int = 0
+    last_reward_at: float | None = None
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
@@ -317,7 +367,12 @@ class MemoryStore:
             if existing > SCHEMA_VERSION:
                 raise RuntimeError(f"memory database schema v{existing} is newer than supported v{SCHEMA_VERSION}")
             # executescript commits an open transaction; execute each statement instead.
-            for statement in SCHEMA.split(";"):
+            # Strip whole-line SQL comments first: a semicolon inside prose (we hit
+            # "outcome signal; utility ...") would otherwise become a statement
+            # boundary and fail with a misleading "near utility" syntax error.
+            schema_sql = "\n".join(
+                line for line in SCHEMA.splitlines() if not line.lstrip().startswith("--"))
+            for statement in schema_sql.split(";"):
                 if statement.strip():
                     db.execute(statement)
             columns = {row["name"] for row in db.execute("PRAGMA table_info(memories)")}
@@ -333,6 +388,9 @@ class MemoryStore:
                 "preference_scope": "TEXT NOT NULL DEFAULT ''",
                 "preference_as_of": "REAL",
                 "retired_by_message_id": "INTEGER",
+                "utility": "REAL NOT NULL DEFAULT 0.5",
+                "utility_n": "INTEGER NOT NULL DEFAULT 0",
+                "last_reward_at": "REAL",
             }
             for name, definition in additions.items():
                 if name not in columns:
@@ -658,6 +716,7 @@ class MemoryStore:
         with self._transaction(track_write=True, invalidate=True) as db:
             db.execute("UPDATE memories SET supersedes = NULL WHERE supersedes = ?", (memory_id,))
             cur = db.execute("DELETE FROM memories WHERE id = ?", (memory_id,))
+        self._scrub_deleted_indexes()
         return cur.rowcount > 0
 
     def delete_all(self, *, kind: str | None = None, subject: str | None = None) -> int:
@@ -673,6 +732,7 @@ class MemoryStore:
             db.execute("UPDATE memories SET supersedes = NULL WHERE supersedes IN (" +
                        sql.replace("DELETE FROM", "SELECT id FROM", 1) + ")", params)
             cur = db.execute(sql, params)
+        self._scrub_deleted_indexes()
         return cur.rowcount
 
     def delete_key(self, key: str, *, kind: str | None = None, subject: str | None = None,
@@ -692,17 +752,254 @@ class MemoryStore:
             db.execute("UPDATE memories SET supersedes = NULL WHERE supersedes IN (" +
                        sql.replace("DELETE FROM", "SELECT id FROM", 1) + ")", params)
             cur = db.execute(sql, params)
+        self._scrub_deleted_indexes()
         return cur.rowcount
 
-    def mark_used(self, ids: list[int]) -> None:
-        if not ids:
+    def _scrub_deleted_indexes(self) -> None:
+        """Hard deletion leaves no id behind in audit/lesson provenance.
+
+        Usage rows and lesson evidence contain ids, never memory text, but an
+        id that can still be joined back is still an index. After any delete we
+        drop refs to rows that no longer exist; the surrounding turn audit stays.
+        """
+        with self._transaction(track_write=True) as db:
+            known = {int(row[0]) for row in db.execute("SELECT id FROM memories")}
+            for row in db.execute("SELECT id, memory_ids, reward_detail FROM memory_usage"):
+                old_ids = _json_list(row["memory_ids"])
+                memory_ids = [i for i in old_ids if type(i) is int and i in known]
+                deleted = {i for i in old_ids if i not in known}
+                old_detail = _json_list(row["reward_detail"])
+                detail = [item for item in old_detail
+                          if not (isinstance(item, dict) and item.get("id") in deleted)]
+                if memory_ids != old_ids:
+                    db.execute("UPDATE memory_usage SET memory_ids = ? WHERE id = ?",
+                               (json.dumps(memory_ids, separators=(",", ":")), row["id"]))
+                if len(detail) != len(old_detail):
+                    db.execute("UPDATE memory_usage SET reward_detail = ? WHERE id = ?",
+                               (json.dumps(detail, ensure_ascii=False, separators=(",", ":")),
+                                row["id"]))
+            known_refs = {f"memory:{i}" for i in known}
+            for row in db.execute("SELECT id, evidence_refs FROM lessons"):
+                refs = _json_list(row["evidence_refs"])
+                kept = [ref for ref in refs
+                        if not (isinstance(ref, str) and ref.startswith("memory:")
+                                and ref not in known_refs)]
+                if kept != refs:
+                    db.execute("UPDATE lessons SET evidence_refs = ? WHERE id = ?",
+                               (json.dumps(kept, ensure_ascii=False, separators=(",", ":")),
+                                row["id"]))
+
+    def mark_used(self, ids: list[int], *, session_id: str | None = None,
+                  lesson_ids: list[int] | None = None) -> None:
+        """Record injection for outcome learning, not just a counter.
+
+        ``session_id`` binds this turn's memories to the saved user message so
+        the *next* user message can supply a reward (MemRL's runtime signal).
+        Without it the call keeps the old behaviour: counters only.
+        """
+        memory_ids = [i for i in (ids or []) if type(i) is int and i > 0]
+        lesson_ids = [i for i in (lesson_ids or []) if type(i) is int and i > 0]
+        if not memory_ids and not lesson_ids:
             return
         now = time.time()
         with self._transaction(track_write=True) as db:
-            db.executemany(
-                "UPDATE memories SET last_used_at = ?, use_count = use_count + 1 WHERE id = ?",
-                [(now, i) for i in ids],
-            )
+            if memory_ids:
+                db.executemany(
+                    "UPDATE memories SET last_used_at = ?, use_count = use_count + 1 WHERE id = ?",
+                    [(now, i) for i in memory_ids],
+                )
+            if lesson_ids:
+                db.executemany(
+                    "UPDATE lessons SET last_used_at = ?, use_count = use_count + 1 WHERE id = ?",
+                    [(now, i) for i in lesson_ids],
+                )
+        if session_id and (memory_ids or lesson_ids):
+            self.record_usage(session_id=session_id, memory_ids=memory_ids,
+                              lesson_ids=lesson_ids, now=now)
+
+    # ---------- memory utility / outcome feedback ----------
+    @staticmethod
+    def _merge_ids(existing: Any, extra: Any) -> list[int]:
+        merged: list[int] = []
+        for value in list(existing or []) + list(extra or []):
+            if type(value) is int and value > 0 and value not in merged:
+                merged.append(value)
+        return merged
+
+    def latest_user_message_id(self, session_id: str) -> int | None:
+        rows = self._query(
+            "SELECT MAX(id) FROM messages WHERE session_id = ? AND role = 'user'", (session_id,))
+        return int(rows[0][0]) if rows and rows[0][0] is not None else None
+
+    def next_user_message(self, session_id: str, after_message_id: int) -> dict[str, Any] | None:
+        rows = self._query(
+            """SELECT id, session_id, role, text, mode, created_at FROM messages
+               WHERE session_id = ? AND role = 'user' AND id > ?
+               ORDER BY id ASC LIMIT 1""", (session_id, int(after_message_id)))
+        return dict(rows[0]) if rows else None
+
+    def record_usage(self, *, session_id: str, memory_ids: list[int],
+                     lesson_ids: list[int] | None = None, now: float | None = None) -> int | None:
+        """Bind injected ids to the session's current user message (idempotent)."""
+        message_id = self.latest_user_message_id(session_id)
+        if message_id is None:
+            return None
+        stamp = time.time() if now is None else float(now)
+        with self._transaction(track_write=True) as db:
+            row = db.execute(
+                "SELECT id, memory_ids, lesson_ids FROM memory_usage WHERE session_id = ? AND user_message_id = ?",
+                (session_id, message_id)).fetchone()
+            if row is None:
+                cursor = db.execute(
+                    """INSERT INTO memory_usage(session_id, user_message_id, memory_ids,
+                                                lesson_ids, created_at)
+                       VALUES (?, ?, ?, ?, ?)""",
+                    (session_id, message_id,
+                     json.dumps(self._merge_ids([], memory_ids), separators=(",", ":")),
+                     json.dumps(self._merge_ids([], lesson_ids), separators=(",", ":")),
+                     stamp))
+                return int(cursor.lastrowid)
+            merged_memory = self._merge_ids(_json_list(row["memory_ids"]), memory_ids)
+            merged_lesson = self._merge_ids(_json_list(row["lesson_ids"]), lesson_ids)
+            db.execute(
+                """UPDATE memory_usage SET memory_ids = ?, lesson_ids = ? WHERE id = ?""",
+                (json.dumps(merged_memory, separators=(",", ":")),
+                 json.dumps(merged_lesson, separators=(",", ":")), row["id"]))
+            return int(row["id"])
+
+    def pending_usage(self, *, session_id: str, before_message_id: int) -> list[dict[str, Any]]:
+        rows = self._query(
+            """SELECT * FROM memory_usage WHERE session_id = ? AND user_message_id < ?
+               AND settled_at IS NULL ORDER BY user_message_id ASC""",
+            (session_id, int(before_message_id)))
+        records = []
+        for row in rows:
+            record = dict(row)
+            record["memory_ids"] = _json_list(record.get("memory_ids"))
+            record["lesson_ids"] = _json_list(record.get("lesson_ids"))
+            records.append(record)
+        return records
+
+    def settle_usage(self, usage_id: int, *, reward: float | None, reason: str,
+                     detail: list[dict[str, Any]] | None = None,
+                     now: float | None = None) -> bool:
+        stamp = time.time() if now is None else float(now)
+        with self._transaction(track_write=True) as db:
+            cursor = db.execute(
+                """UPDATE memory_usage SET settled_at = ?, reward = ?, reward_reason = ?,
+                   reward_detail = ? WHERE id = ? AND settled_at IS NULL""",
+                (stamp, reward, str(reason or "")[:80],
+                 json.dumps(detail or [], ensure_ascii=False, separators=(",", ":")),
+                 int(usage_id)))
+        return cursor.rowcount > 0
+
+    def reinforce_memory(self, memory_id: int, *, reward: float, alpha: float,
+                         now: float | None = None) -> float | None:
+        """EMA/Monte-Carlo update of Q: Q <- Q + alpha * (r - Q)."""
+        try:
+            r = min(1.0, max(0.0, float(reward)))
+            a = min(1.0, max(0.0, float(alpha)))
+        except (TypeError, ValueError):
+            return None
+        stamp = time.time() if now is None else float(now)
+        with self._transaction(track_write=True) as db:
+            cursor = db.execute(
+                """UPDATE memories SET utility = MIN(1.0, MAX(0.0, utility + ? * (? - utility))),
+                   utility_n = utility_n + 1, last_reward_at = ? WHERE id = ?""",
+                (a, r, stamp, int(memory_id)))
+            if cursor.rowcount <= 0:
+                return None
+            row = db.execute("SELECT utility FROM memories WHERE id = ?", (int(memory_id),)).fetchone()
+        return float(row[0]) if row is not None else None
+
+    def get_many(self, ids: list[int]) -> list[Memory]:
+        wanted = [i for i in (ids or []) if type(i) is int and i > 0]
+        if not wanted:
+            return []
+        placeholders = ",".join("?" for _ in wanted)
+        rows = self._query(f"SELECT * FROM memories WHERE id IN ({placeholders})", wanted)
+        return [Memory(**dict(row)) for row in rows]
+
+    # ---------- procedural lessons ----------
+    def add_lesson(self, *, trigger: str, action: str, cues: list[str] | None = None,
+                   scope: str = "dialogue", source: str = "reflection",
+                   evidence_refs: list[str] | None = None,
+                   status: str = "active", now: float | None = None) -> int | None:
+        if status not in LESSON_STATUSES:
+            raise ValueError("invalid lesson status")
+        stamp = time.time() if now is None else float(now)
+        with self._transaction(track_write=True) as db:
+            cursor = db.execute(
+                """INSERT INTO lessons(trigger, action, cues, scope, source, evidence_refs,
+                                       status, created_at, updated_at)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                (trigger, action,
+                 json.dumps([cue for cue in (cues or [])], ensure_ascii=False, separators=(",", ":")),
+                 scope, source,
+                 json.dumps([ref for ref in (evidence_refs or [])], ensure_ascii=False,
+                            separators=(",", ":")),
+                 status, stamp, stamp))
+            return int(cursor.lastrowid)
+
+    def get_lesson(self, lesson_id: int) -> dict[str, Any] | None:
+        rows = self._query("SELECT * FROM lessons WHERE id = ?", (int(lesson_id),))
+        return self._lesson_row(rows[0]) if rows else None
+
+    def list_lessons(self, *, status: str | None = "active", limit: int = 100) -> list[dict[str, Any]]:
+        sql = "SELECT * FROM lessons"
+        params: list[Any] = []
+        if status is not None:
+            sql += " WHERE status = ?"
+            params.append(status)
+        sql += " ORDER BY updated_at DESC, id DESC LIMIT ?"
+        params.append(max(1, int(limit)))
+        return [self._lesson_row(row) for row in self._query(sql, params)]
+
+    @staticmethod
+    def _lesson_row(row: sqlite3.Row) -> dict[str, Any]:
+        record = dict(row)
+        record["cues"] = [cue for cue in _json_list(record.get("cues")) if isinstance(cue, str)]
+        record["evidence_refs"] = [ref for ref in _json_list(record.get("evidence_refs"))
+                                   if isinstance(ref, str)]
+        return record
+
+    def merge_lesson_evidence(self, lesson_id: int, evidence_refs: list[str],
+                              *, now: float | None = None) -> bool:
+        stamp = time.time() if now is None else float(now)
+        with self._transaction(track_write=True) as db:
+            row = db.execute("SELECT evidence_refs FROM lessons WHERE id = ?", (int(lesson_id),)).fetchone()
+            if row is None:
+                return False
+            merged = list(dict.fromkeys(_json_list(row[0]) + list(evidence_refs or [])))
+            db.execute("UPDATE lessons SET evidence_refs = ?, updated_at = ? WHERE id = ?",
+                       (json.dumps(merged, ensure_ascii=False, separators=(",", ":")), stamp,
+                        int(lesson_id)))
+        return True
+
+    def feedback_lesson(self, lesson_id: int, *, helpful: bool,
+                        now: float | None = None) -> dict[str, Any] | None:
+        stamp = time.time() if now is None else float(now)
+        column = "helpful" if helpful else "harmful"
+        with self._transaction(track_write=True) as db:
+            cursor = db.execute(
+                f"UPDATE lessons SET {column} = {column} + 1, updated_at = ? WHERE id = ?",
+                (stamp, int(lesson_id)))
+            if cursor.rowcount <= 0:
+                return None
+        return self.get_lesson(lesson_id)
+
+    def set_lesson_status(self, lesson_id: int, status: str,
+                          *, now: float | None = None) -> bool:
+        if status not in LESSON_STATUSES:
+            raise ValueError("invalid lesson status")
+        stamp = time.time() if now is None else float(now)
+        with self._transaction(track_write=True) as db:
+            cursor = db.execute("UPDATE lessons SET status = ?, updated_at = ? WHERE id = ?",
+                                (status, stamp, int(lesson_id)))
+        return cursor.rowcount > 0
+
+    def count_active_lessons(self) -> int:
+        return int(self._query("SELECT COUNT(*) FROM lessons WHERE status = 'active'")[0][0])
 
     def set_status(self, memory_id: int, status: str) -> None:
         if status not in STATUSES:

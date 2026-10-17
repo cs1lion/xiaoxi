@@ -69,6 +69,27 @@ class MemoryRetriever:
         age = max(0.0, now - memory.updated_at)
         return math.pow(0.5, age / half_life)
 
+    def _utility_factor(self, memory: Memory) -> float:
+        """Bounded multiplier from learned usefulness, neutral at n=0.
+
+        MemRL's two-phase retrieval normalises a Q score and mixes it with
+        similarity. We keep relevance as the gate and use Q as a [1-w, 1+w]
+        multiplier instead, so a memory that once helped can never outrank a
+        genuinely more relevant one merely because of its history. Shrinkage
+        toward 0.5 by observation count stops one turn from dominating.
+        """
+        weight = float(self.cfg.get("utility_weight", 0.0) or 0.0)
+        if weight <= 0:
+            return 1.0
+        weight = min(0.5, max(0.0, weight))
+        prior = max(0.5, float(self.cfg.get("utility_prior_strength", 3.0) or 3.0))
+        observations = max(0, int(getattr(memory, "utility_n", 0) or 0))
+        if observations <= 0:
+            return 1.0
+        q = min(1.0, max(0.0, float(getattr(memory, "utility", 0.5) or 0.5)))
+        shrunk = (q * observations + 0.5 * prior) / (observations + prior)
+        return 1.0 - weight + weight * 2.0 * shrunk
+
     def search(
         self,
         query: str,
@@ -112,6 +133,9 @@ class MemoryRetriever:
             score *= 0.5 + 0.5 * memory.confidence
             if score < min_score:
                 continue
+            # Phase B (MemRL): re-rank only candidates that already passed the
+            # relevance gate. Utility is bounded and cannot create relevance.
+            score *= self._utility_factor(memory)
             out.append((memory, score))
 
         out.sort(key=lambda pair: pair[1], reverse=True)

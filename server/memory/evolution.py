@@ -29,6 +29,17 @@ SELF_EVOLUTION_DEFAULTS: dict[str, Any] = {
     "idle_minutes": 240,
     "max_per_day": 3,
     "allow_sources": ["taste", "worldview", "spark"],
+    # 下面几个键必须登记在这里：self_evolution_cfg() 只放行 defaults 里有的键，
+    # 漏登记 = memory.yaml 里写了也静默失效。max_model_calls_per_cycle / max_retries
+    # 正是靠 _reflect 从 cfg 读的，之前就因为没登记而变成死配置（默认值恰好相等，
+    # 所以一直看不出症状）。默认值与既有代码里的硬编码回落保持一致，行为不变。
+    "max_reflection_inputs": 12,
+    "max_model_calls_per_cycle": 2,
+    "max_retries": 2,
+    "similarity_dedupe": 0.86,
+    # 子种子新颖度下限：子问题的内容里必须有多大比例是父问题没有的。
+    # 相似度阈值分不开"换措辞的近义复述"和"只差一个字的敷衍"，所以另立一道闸门。
+    "child_novelty_min": 0.45,
 }
 
 OPENING_SYSTEM = """你是角色本人，现在用户没说话，你想主动开口说一句。

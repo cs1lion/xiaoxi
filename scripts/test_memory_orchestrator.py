@@ -22,6 +22,7 @@ else:
     from test_memory_evidence import MemoryManager, MemoryStore, candidate
 from server.interaction.broker import ContextBroker
 from server.interaction.preferences import PreferenceStore
+from server.memory import lessons
 
 
 production = importlib.import_module("server.dialogue.orchestrator")
@@ -102,6 +103,29 @@ class OrchestratorEvidenceTests(unittest.IsolatedAsyncioTestCase):
         if stream:
             return [event async for event in self.orch.stream_respond(session_id=sid, user_text=text)]
         return await self.orch.respond(session_id=sid, user_text=text)
+
+    async def test_procedural_lesson_is_injected_and_feedback_retires_it(self):
+        cfg = dict(lessons.LESSON_DEFAULTS)
+        cfg.update({"enabled": True, "max_active": 6, "max_inject": 3, "max_inject_chars": 320,
+                    "min_similarity": 0.12, "dedupe_similarity": 0.72, "retire_harmful": 2})
+        with patch("server.memory.lessons.lessons_cfg", return_value=cfg):
+            lessons.record_lessons(
+                self.store,
+                [{"trigger": "当用户在深夜说累时", "action": "先接住情绪，不急着给方案",
+                  "cues": ["好累", "深夜"], "source_refs": ["diary:2026-10-13"]}],
+                material_refs={"diary:2026-10-13"})
+            lesson = self.store.list_lessons(status="active")[0]
+            await self.run_turn("今天好累啊")
+            injected = [message["content"] for message in self.prompts[-1]
+                        if message["role"] == "system"
+                        and "过往相处里总结的做法" in message["content"]]
+            self.assertEqual(len(injected), 1)
+            self.assertIn("先接住情绪", injected[0])
+            self.assertEqual(self.store.get_lesson(lesson["id"])["use_count"], 1)
+
+            await self.run_turn("不用安慰我，直接说怎么解决")
+            await self.orch.drain()
+            self.assertEqual(self.store.get_lesson(lesson["id"])["harmful"], 1)
 
     async def test_text_original_is_linked_and_recalled_in_new_session(self):
         await self.run_turn("我在甲公司工作")

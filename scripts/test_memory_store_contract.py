@@ -88,7 +88,7 @@ class MemoryStoreContracts(unittest.TestCase):
                 shutil.copyfile(original, copied)
                 migrated = MemoryStore(str(copied))
                 try:
-                    self.assertEqual(migrated._query("PRAGMA user_version")[0][0], 3)
+                    self.assertEqual(migrated._query("PRAGMA user_version")[0][0], 4)
                     rows = migrated.list_memories(status=None, limit=20)
                     self.assertEqual({memory.id for memory in rows}, {9, 17})
                     current = migrated.get(17)
@@ -138,11 +138,11 @@ class MemoryStoreContracts(unittest.TestCase):
     def test_future_schema_is_rejected_without_reset(self):
         with tempfile.TemporaryDirectory() as folder:
             path = Path(folder) / "future.db"
-            legacy_database(path, 4)
+            legacy_database(path, 5)
             with self.assertRaisesRegex(RuntimeError, "newer"):
                 MemoryStore(str(path))
             with closing(sqlite3.connect(path)) as db, db:
-                self.assertEqual(db.execute("PRAGMA user_version").fetchone()[0], 4)
+                self.assertEqual(db.execute("PRAGMA user_version").fetchone()[0], 5)
                 self.assertEqual(db.execute("SELECT value FROM memories WHERE id=17").fetchone()[0],
                                  "在甲公司工作")
                 self.assertNotIn("evidence_state", {row[1] for row in db.execute("PRAGMA table_info(memories)")})
@@ -174,7 +174,7 @@ class MemoryStoreContracts(unittest.TestCase):
                 self.assertEqual((after['identity_slot'], after['preference_target'], after['preference_level'],
                                   after['preference_scope'], after['preference_as_of']), ('','','','',None))
                 self.assertEqual(migrated.write_state(), (3,43))
-                self.assertEqual(migrated._query('PRAGMA user_version')[0][0], 3)
+                self.assertEqual(migrated._query('PRAGMA user_version')[0][0], 4)
             finally:
                 migrated.close()
 
@@ -197,7 +197,7 @@ class MemoryStoreContracts(unittest.TestCase):
                                  (43, "在甲公司工作", "linked", "add", None))
                 older = reopened.add_message("old-session", "user", "新记录")
                 self.assertGreater(older, 43)
-                self.assertEqual(reopened._query("PRAGMA user_version")[0][0], 3)
+                self.assertEqual(reopened._query("PRAGMA user_version")[0][0], 4)
             finally:
                 reopened.close()
 
