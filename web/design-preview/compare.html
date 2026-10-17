@@ -1,0 +1,78 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>设计方向对比 · 基线 / A / B / C</title>
+<style>
+  body{margin:0;background:#0c1220;color:#e8e4d9;font:14px/1.6 "PingFang SC","Microsoft YaHei",system-ui,sans-serif}
+  header{display:flex;align-items:center;gap:14px;padding:12px 20px;border-bottom:1px solid #28355a;position:sticky;top:0;background:#0c1220;z-index:2;flex-wrap:wrap}
+  h1{font-size:15px;margin:0;font-weight:600}
+  header p{margin:0;font-size:12.5px;color:#a6afc6}
+  header .sp{flex:1}
+  header button{font:inherit;font-size:13px;padding:6px 14px;border-radius:999px;border:1px solid #28355a;background:#1a2440;color:#e8e4d9;cursor:pointer}
+  header button.on{background:#c9a227;border-color:#c9a227;color:#141c2e}
+  .grid{display:grid;grid-template-columns:1fr 1fr;gap:14px;padding:14px}
+  .cell{display:flex;flex-direction:column;gap:6px}
+  .cell h2{margin:0;font-size:13px;font-weight:600;display:flex;gap:8px;align-items:baseline}
+  .cell h2 small{color:#a6afc6;font-weight:400;font-size:12px}
+  .cell h2 a{margin-left:auto;font-size:12px;color:#d9b44a;text-decoration:none}
+  .frame-wrap{border:1px solid #28355a;border-radius:12px;overflow:hidden;background:#141c2e;display:grid;place-items:start center}
+  iframe{border:0;display:block;background:#141c2e}
+  /* 桌面：1440×900 缩放到列宽 */
+  .grid.desktop iframe{width:1440px;height:900px;transform-origin:top left}
+  /* 窄屏：390×844 不缩放，直接看真实断点 */
+  .grid.narrow{grid-template-columns:repeat(4,minmax(0,1fr))}
+  .grid.narrow iframe{width:390px;height:844px}
+  @media(max-width:900px){.grid,.grid.narrow{grid-template-columns:1fr}}
+</style>
+</head>
+<body>
+<header>
+  <h1>VRM 助手 · 下一版 UI 方向对比</h1>
+  <p>同一份内容，四种构图。桌面帧为 1440×900 缩放显示；窄屏帧为 390×844 原尺寸。</p>
+  <span class="sp"></span>
+  <button id="btnDesktop" class="on">桌面 1440</button>
+  <button id="btnNarrow">窄屏 390</button>
+</header>
+<div class="grid desktop" id="grid">
+  <section class="cell">
+    <h2>基线 <small>当前版本复刻</small><a href="baseline.html" target="_blank" rel="noopener">单独打开 ↗</a></h2>
+    <div class="frame-wrap"><iframe src="baseline.html" title="基线"></iframe></div>
+  </section>
+  <section class="cell">
+    <h2>A · Midnight Living Stage <small>舞台属于她</small><a href="dir-a-midnight.html" target="_blank" rel="noopener">单独打开 ↗</a></h2>
+    <div class="frame-wrap"><iframe src="dir-a-midnight.html" title="方向 A"></iframe></div>
+  </section>
+  <section class="cell">
+    <h2>B · Ambient Companion <small>一个房间，不是仪表盘</small><a href="dir-b-ambient.html" target="_blank" rel="noopener">单独打开 ↗</a></h2>
+    <div class="frame-wrap"><iframe src="dir-b-ambient.html" title="方向 B"></iframe></div>
+  </section>
+  <section class="cell">
+    <h2>C · Precision Cockpit <small>每条状态都有位置</small><a href="dir-c-cockpit.html" target="_blank" rel="noopener">单独打开 ↗</a></h2>
+    <div class="frame-wrap"><iframe src="dir-c-cockpit.html" title="方向 C"></iframe></div>
+  </section>
+</div>
+<script>
+  const grid = document.getElementById('grid');
+  const btns = [document.getElementById('btnDesktop'), document.getElementById('btnNarrow')];
+  function fit(){
+    if (grid.classList.contains('narrow')) return; // 窄屏不缩放
+    for (const wrap of grid.querySelectorAll('.frame-wrap')){
+      const frame = wrap.querySelector('iframe');
+      const scale = Math.min(1, wrap.clientWidth / 1440);
+      frame.style.transform = `scale(${scale})`;
+      wrap.style.height = (900 * scale) + 'px';
+    }
+  }
+  btns[0].onclick = () => { grid.className = 'grid desktop'; btns[0].classList.add('on'); btns[1].classList.remove('on');
+    for (const w of grid.querySelectorAll('.frame-wrap')) w.style.height = '';
+    fit(); };
+  btns[1].onclick = () => { grid.className = 'grid narrow'; btns[1].classList.add('on'); btns[0].classList.remove('on');
+    for (const f of grid.querySelectorAll('iframe')) f.style.transform = '';
+    for (const w of grid.querySelectorAll('.frame-wrap')) w.style.height = ''; };
+  addEventListener('resize', fit);
+  fit();
+</script>
+</body>
+</html>

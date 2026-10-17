@@ -1,0 +1,83 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>基线 · 当前版本</title>
+<!-- 直接复用生产 style.css，静态复刻 index.html 骨架，作为对照基线 -->
+<link rel="stylesheet" href="../style.css" />
+<link rel="stylesheet" href="../companion.css" />
+<style>
+  /* 预览专用：静态占位立绘，替代真实 SVG/VRM 渲染 */
+  .preview-figure { width:100%; height:100%; display:grid; place-items:end center; }
+  .preview-figure svg { height:100%; width:auto; }
+</style>
+</head>
+<body>
+<div class="app">
+  <aside class="side" aria-label="记忆与偏好">
+    <div class="brand">
+      <div class="avatar" aria-hidden="true">栖</div>
+      <div><h1>阿栖</h1><p>在你身边 · 已连接</p></div>
+    </div>
+    <div class="side-intro"><span class="eyebrow">你的安静角落</span><p>琐碎的小事，也值得被记住。</p></div>
+    <section class="panel">
+      <h2>关于你的记忆 <span class="section-mark">01</span></h2>
+      <div class="row add"><input aria-label="手动添加记忆" placeholder="告诉阿栖一件小事…" /><button>记下</button></div>
+      <div class="mem-list">
+        <div class="mem"><span class="val">最近在准备英语面试，周三下午练习过一次</span><div class="meta"><span class="tag">你提过</span><span>3 天前</span></div></div>
+        <div class="mem"><span class="val">晚上十一点后不想被提醒任务</span><div class="meta"><span class="tag inferred">推测</span><span>上周</span></div></div>
+      </div>
+      <div class="row foot"><span>2 条</span><button class="ghost">刷新</button><button class="danger ghost">清空</button></div>
+    </section>
+    <p class="side-footer">慢慢来，我们不赶时间。<span aria-hidden="true">✳</span></p>
+  </aside>
+  <main class="stage">
+    <header class="topbar">
+      <button class="ghost sidebar-toggle">记忆与偏好</button>
+      <div class="connection" role="status"><span class="dot on"></span><span>已连接</span></div>
+      <span class="spacer"></span>
+      <button class="ghost">一起写</button>
+      <button class="ghost" aria-label="设置">⚙</button>
+    </header>
+    <div class="room-label"><span class="room-line"></span> 一段只属于你的时间 <span aria-hidden="true">✧</span></div>
+    <div class="avatar-stage" aria-hidden="true">
+      <div class="preview-figure">
+        <svg viewBox="0 0 120 200" aria-hidden="true">
+          <ellipse cx="60" cy="188" rx="34" ry="7" fill="#060a1466"/>
+          <path d="M60 22c14 0 22 11 22 26 0 10-4 18-10 22l14 8c10 6 16 16 16 28v78H18v-78c0-12 6-22 16-28l14-8c-6-4-10-12-10-22 0-15 8-26 22-26z" fill="#3d4f74"/>
+          <circle cx="60" cy="46" r="20" fill="#4a5f8c"/>
+          <path d="M40 40c2-12 10-20 20-20s18 8 20 20c-4-8-10-12-20-12s-16 4-20 12z" fill="#e8c26a" opacity=".8"/>
+        </svg>
+      </div>
+    </div>
+    <p class="interaction-state">正在听你说…</p>
+    <div class="chat" role="log" aria-label="对话记录">
+      <section class="welcome">
+        <h2>把今天，<br>轻轻放在<span class="title-highlight">这里</span><span class="heading-dot">。</span></h2>
+        <p>聊一件开心的小事，或什么都不想做。<br>不用组织好语言，想到哪里就说到哪里。</p>
+        <div class="suggestions" aria-label="开始聊天的灵感">
+          <button>✦ 分享今天的小事 <span aria-hidden="true">↗</span></button>
+          <button>☾ 陪我放空一会儿 <span aria-hidden="true">↗</span></button>
+          <button>☰ 理一理待办事项 <span aria-hidden="true">↗</span></button>
+        </div>
+        <span class="welcome-note">从一句「嗨」开始，也很好。</span>
+      </section>
+    </div>
+    <div class="composer">
+      <div class="subtitle"></div>
+      <div class="meter" aria-hidden="true"><div class="meter-fill"></div></div>
+      <div class="mode-strip"><span class="mode-chip is-on">连续对话</span></div>
+      <button class="presence-capsule is-lively" type="button"><span class="presence-orb"></span><span class="presence-glyph">✨</span><span class="presence-label">灵动伴随</span></button>
+      <div class="capsule">
+        <button class="mic" type="button">🎙 <span class="mic-label">按住说话</span></button>
+        <button class="capsule-stop" type="button">■ <span class="capsule-stop-label">停止</span></button>
+        <div class="input-wrap"><input id="textInput" aria-label="给阿栖的消息" placeholder="想说什么，都可以…" /><button type="button" aria-label="发送">↑</button></div>
+        <button class="capsule-drawer" type="button" aria-label="工作台">▤</button>
+      </div>
+      <div class="composer-foot"><p class="hint">连续对话：开口即录，停顿约一秒发送；建议戴耳机。</p></div>
+    </div>
+  </main>
+</div>
+</body>
+</html>

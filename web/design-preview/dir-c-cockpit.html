@@ -1,0 +1,205 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>方向 C · Precision Cockpit</title>
+<style>
+/* ============ 方向 C：精密任务工作台 ============
+   北极星：她不只是陪你聊，还在替你推进事；每条状态都有位置，每个位置都可扫读。
+   骨架：三栏仪器布局。左栏=导航+任务清单；顶栏=任务状态条（当前执行、进度、等待你）；
+   中央=对话与快捷操作，网格对齐；右栏=角色锚点+运行指标。
+   视觉：克制的技术细线、等宽数字、8px 网格、只用一处金色给「需要你看」的事。 */
+:root{
+  --bg:#121a2b; --panel:#1b2639; --raise:#223047; --sunken:#0e1524;
+  --line:#2a3852; --line-strong:#3d4f72;
+  --text:#e9e6dc; --muted:#a2abc0; --faint:#9aa3ba;
+  --gold:#d9b44a; --gold-deep:#c9a227; --ok:#8fd0b2; --danger:#e08b7a;
+  --mono:ui-monospace,SFMono-Regular,Menlo,monospace;
+  --ease:cubic-bezier(.22,1,.36,1);
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--text);font:14px/1.6 "PingFang SC","Microsoft YaHei",system-ui,sans-serif}
+button,input{font:inherit;color:inherit;border:1px solid var(--line);border-radius:8px;background:var(--panel);padding:9px 12px;min-height:40px}
+button{cursor:pointer;transition:background .15s var(--ease),border-color .15s var(--ease),transform .15s var(--ease)}
+button:hover{background:#252d22;border-color:var(--line-strong)}
+button:active{transform:scale(.97)}
+:focus-visible{outline:2px solid var(--gold);outline-offset:2px}
+
+.c-app{display:grid;grid-template-columns:264px minmax(0,1fr) 300px;grid-template-rows:56px minmax(0,1fr);height:100dvh}
+
+/* —— 顶栏：任务状态条，贯穿三栏 —— */
+.c-topbar{grid-column:1/-1;display:flex;align-items:center;gap:18px;padding:0 20px;border-bottom:1px solid var(--line);background:var(--sunken);font-size:13px;color:var(--muted)}
+.c-brand{display:flex;align-items:center;gap:9px;color:var(--text)}
+.c-mark{display:grid;place-items:center;width:32px;height:32px;border-radius:9px 9px 9px 3px;background:linear-gradient(145deg,#2a3852,#3d4f72);font-family:serif;font-size:16px}
+.c-brand strong{font-size:14px;letter-spacing:.1em}
+.c-sep{width:1px;height:22px;background:var(--line)}
+.c-run{display:flex;align-items:center;gap:9px;min-width:0}
+.c-run .pulse{flex:none;width:7px;height:7px;border-radius:50%;background:var(--gold);animation:c-pulse 2s var(--ease) infinite}
+@keyframes c-pulse{0%,100%{opacity:.4}50%{opacity:1}}
+.c-run span{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.c-progress{flex:none;width:110px;height:3px;border-radius:2px;background:var(--raise);overflow:hidden}
+.c-progress i{display:block;height:100%;width:64%;background:linear-gradient(90deg,var(--gold-deep),var(--gold))}
+.c-topbar .grow{flex:1}
+.c-wait{flex:none;display:flex;align-items:center;gap:7px;color:var(--gold)}
+.c-wait b{font-family:var(--mono);font-weight:600}
+.c-topbtn{flex:none;background:transparent;border-color:transparent;color:var(--muted);font-size:13px;padding:6px 9px;min-height:36px}
+.c-topbtn:hover{background:var(--raise);color:var(--text)}
+
+/* —— 左栏：导航 + 任务清单 —— */
+.c-side{border-right:1px solid var(--line);background:#162032;overflow-y:auto;padding:16px 14px}
+.c-navh{margin:0 0 8px;font-size:11px;letter-spacing:.16em;color:var(--faint)}
+.c-nav{display:grid;gap:2px;margin-bottom:20px}
+.c-nav button{display:flex;align-items:center;gap:9px;text-align:left;font-size:13px;padding:8px 10px;background:transparent;border-color:transparent;color:var(--muted);min-height:38px}
+.c-nav button:hover{background:var(--raise);color:var(--text)}
+.c-nav button.on{background:var(--raise);color:var(--text);border-left:2px solid var(--gold)}
+.c-nav button .n{margin-left:auto;font-family:var(--mono);font-size:11px;color:var(--faint)}
+.c-task{border:1px solid var(--line);border-radius:10px;padding:10px 11px;margin-bottom:8px;background:var(--panel);font-size:13px}
+.c-task .h{display:flex;justify-content:space-between;gap:8px}
+.c-task .h b{font-weight:600;overflow-wrap:anywhere}
+.c-pill{flex:none;font-size:11px;font-family:var(--mono);padding:1px 8px;border-radius:999px;background:var(--raise);color:var(--muted)}
+.c-task[data-s="run"] .c-pill{background:#2a2c22;color:var(--gold)}
+.c-task[data-s="wait"]{border-color:#6b5c28}
+.c-task[data-s="wait"] .c-pill{background:var(--gold);color:#141c2e}
+.c-task small{display:block;margin-top:5px;color:var(--muted);font-size:12px}
+.c-task .bar{height:3px;border-radius:2px;background:var(--sunken);margin-top:8px;overflow:hidden}
+.c-task .bar i{display:block;height:100%;background:var(--gold)}
+
+/* —— 中央：对话 —— */
+.c-main{display:flex;flex-direction:column;min-width:0;min-height:0}
+.c-scroll{flex:1;min-height:0;overflow-y:auto;padding:24px 40px 16px;display:flex;flex-direction:column}
+.c-scroll::before{content:"";margin:auto 0 0}
+.c-scroll::after{content:"";margin:0 0 auto}
+.c-welcome h2{font-family:"Songti SC","Noto Serif CJK SC",serif;font-size:clamp(24px,2vw,32px);font-weight:400;line-height:1.4;margin:0 0 10px}
+.c-welcome h2 em{font-style:normal;color:var(--gold)}
+.c-welcome p{color:var(--muted);margin:0 0 16px;max-width:32em}
+/* 快捷操作：两列网格，像指令面板，而不是灵感列表 */
+.c-sugs{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:8px;max-width:520px}
+.c-sugs button{display:flex;align-items:center;gap:9px;text-align:left;font-size:13px;padding:10px 12px;background:var(--panel)}
+.c-sugs button small{margin-left:auto;font-family:var(--mono);font-size:11px;color:var(--faint)}
+.c-note{margin-top:12px;font-size:12.5px;color:var(--faint)}
+.c-composer{margin:0 26px 12px}
+.c-capsule{display:flex;align-items:center;gap:6px;padding:6px 8px;background:var(--panel);border:1px solid var(--line);border-radius:12px;box-shadow:0 8px 24px -14px #060a14aa}
+.c-capsule:focus-within{border-color:var(--gold);box-shadow:0 0 0 3px #c9a22726}
+.c-mic{display:inline-flex;align-items:center;gap:7px;background:var(--raise);border-color:transparent;border-radius:8px;padding:0 13px;font-size:13px}
+.c-inputwrap{position:relative;flex:1;display:flex}
+.c-inputwrap input{flex:1;width:0;background:transparent;border-color:transparent;padding:9px 42px 9px 8px}
+.c-send{position:absolute;right:4px;top:50%;transform:translateY(-50%);width:34px;min-width:34px;height:34px;min-height:34px;padding:0;border-radius:8px;background:var(--raise);border-color:transparent;color:var(--muted)}
+.c-foot{display:flex;justify-content:space-between;margin:5px 6px 0;font-size:12px;color:var(--faint)}
+.c-foot span:last-child{font-family:var(--mono)}
+
+/* —— 右栏：角色锚点 + 运行指标 —— */
+.c-right{border-left:1px solid var(--line);background:#16203200;display:flex;flex-direction:column;min-height:0;overflow-y:auto}
+.c-anchor{position:relative;display:grid;place-items:end center;height:240px;flex:none;border-bottom:1px solid var(--line);
+  background:radial-gradient(58% 70% at 50% 42%,#2c3c6229,transparent 70%)}
+.c-anchor svg{height:200px;width:auto}
+.c-anchor .sh{position:absolute;bottom:10px;left:50%;transform:translateX(-50%);width:130px;height:16px;border-radius:50%;background:radial-gradient(ellipse,#05080f99 25%,transparent 70%)}
+.c-anchor .tag{position:absolute;top:10px;left:12px;font-size:11px;letter-spacing:.14em;color:var(--faint)}
+.c-anchor .st{position:absolute;top:10px;right:12px;font-size:12px;color:var(--gold)}
+.c-metrics{padding:14px}
+.c-metrics h3{margin:0 0 10px;font-size:11px;letter-spacing:.16em;color:var(--faint);font-weight:600}
+.c-mgrid{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:16px}
+.c-metric{border:1px solid var(--line);border-radius:8px;padding:8px 10px;background:var(--panel)}
+.c-metric small{display:block;font-size:11px;color:var(--muted)}
+.c-metric b{font-family:var(--mono);font-size:15px;font-weight:600;font-variant-numeric:tabular-nums}
+.c-log{font-size:12.5px;border-top:1px solid var(--line);padding-top:10px;display:grid;gap:7px}
+.c-log div{display:grid;grid-template-columns:52px 1fr;gap:8px;color:var(--muted)}
+.c-log time{font-family:var(--mono);color:var(--faint)}
+.c-log .ok{color:var(--ok)}
+
+@media(max-width:1100px){
+  .c-app{grid-template-columns:220px minmax(0,1fr) 240px}
+  .c-scroll{padding-inline:24px}
+}
+@media(max-width:860px){
+  .c-app{grid-template-columns:minmax(0,1fr);grid-template-rows:52px minmax(0,1fr)}
+  .c-side{display:none}
+  .c-right{display:none}
+  .c-wait{display:none}
+  .c-progress{width:64px}
+  .c-scroll{padding:20px 20px 12px}
+  .c-composer{margin:0 10px max(12px,env(safe-area-inset-bottom))}
+  .c-mic .lbl{display:none}
+}
+@media(prefers-reduced-motion:reduce){*{animation:none!important;transition:none!important}}
+</style>
+</head>
+<body>
+<div class="c-app">
+  <header class="c-topbar">
+    <div class="c-brand"><div class="c-mark">栖</div><strong>阿栖</strong></div>
+    <span class="c-sep"></span>
+    <div class="c-run"><span class="pulse"></span><span>执行中 · 整理本周待办清单</span><span class="c-progress"><i></i></span><span style="font-family:var(--mono)">64%</span></div>
+    <span class="grow"></span>
+    <span class="c-wait"><b>1</b> 件事等你确认</span>
+    <button class="c-topbtn">一起写</button>
+    <button class="c-topbtn" aria-label="设置">⚙</button>
+  </header>
+
+  <aside class="c-side" aria-label="导航与任务">
+    <h2 class="c-navh">导航</h2>
+    <nav class="c-nav">
+      <button class="on">◈ 对话 <span class="n">F1</span></button>
+      <button>▤ 工作台 <span class="n">F2</span></button>
+      <button>✦ 记忆 <span class="n">2</span></button>
+      <button>✎ 一起写</button>
+    </nav>
+    <h2 class="c-navh">任务</h2>
+    <div class="c-task" data-s="run"><div class="h"><b>整理本周待办</b><span class="c-pill">RUN</span></div><small>小溪 · 已收集 7 条</small><div class="bar"><i style="width:64%"></i></div></div>
+    <div class="c-task" data-s="wait"><div class="h"><b>面试练习回顾</b><span class="c-pill">WAIT</span></div><small>等你确认是否保存到记忆</small></div>
+    <div class="c-task" data-s="done"><div class="h"><b>周三练习提醒</b><span class="c-pill">DONE</span></div><small>昨天 21:00 已送达</small></div>
+  </aside>
+
+  <main class="c-main">
+    <div class="c-scroll">
+      <section class="c-welcome">
+        <h2>把今天，轻轻放在<em>这里</em>。</h2>
+        <p>聊一件开心的小事，或什么都不想做。不用组织好语言，想到哪里就说到哪里。</p>
+        <div class="c-sugs">
+          <button>✦ 分享今天的小事 <small>↗</small></button>
+          <button>☾ 陪我放空一会儿 <small>↗</small></button>
+          <button>☰ 理一理待办事项 <small>↗</small></button>
+          <button>◷ 看看任务进展 <small>↗</small></button>
+        </div>
+        <p class="c-note">从一句「嗨」开始，也很好。</p>
+      </section>
+    </div>
+    <div class="c-composer">
+      <div class="c-capsule">
+        <button class="c-mic">🎙 <span class="lbl">按住说话</span></button>
+        <div class="c-inputwrap"><input aria-label="给阿栖的消息" placeholder="想说什么，都可以…" /><button class="c-send" aria-label="发送">↑</button></div>
+        <button class="c-mic" aria-label="停止" style="min-width:40px;padding:0 10px">■</button>
+      </div>
+      <div class="c-foot"><span>连续对话 · 开口即录</span><span>CTX 12.4k / 32k</span></div>
+    </div>
+  </main>
+
+  <aside class="c-right" aria-label="角色与运行状态">
+    <div class="c-anchor">
+      <span class="tag">AVATAR</span><span class="st">聆听中</span>
+      <svg viewBox="0 0 120 200" aria-hidden="true">
+        <path d="M60 22c14 0 22 11 22 26 0 10-4 18-10 22l14 8c10 6 16 16 16 28v78H18v-78c0-12 6-22 16-28l14-8c-6-4-10-12-10-22 0-15 8-26 22-26z" fill="#40538a"/>
+        <circle cx="60" cy="46" r="20" fill="#52689e"/>
+        <path d="M40 40c2-12 10-20 20-20s18 8 20 20c-4-8-10-12-20-12s-16 4-20 12z" fill="#e8c26a" opacity=".85"/>
+      </svg>
+      <div class="sh"></div>
+    </div>
+    <div class="c-metrics">
+      <h3>运行状态</h3>
+      <div class="c-mgrid">
+        <div class="c-metric"><small>连接</small><b class="ok" style="color:var(--ok)">LIVE</b></div>
+        <div class="c-metric"><small>本轮延迟</small><b>1.8s</b></div>
+        <div class="c-metric"><small>进行中的单</small><b>2</b></div>
+        <div class="c-metric"><small>今日 Token</small><b>41k</b></div>
+      </div>
+      <h3>最近动态</h3>
+      <div class="c-log">
+        <div><time>21:04</time><span class="ok">待办清单初稿完成，等你过目</span></div>
+        <div><time>20:47</time><span>派单：整理本周待办 → 小溪</span></div>
+        <div><time>20:12</time><span>记住：晚上十一点后不提醒任务</span></div>
+      </div>
+    </div>
+  </aside>
+</div>
+</body>
+</html>

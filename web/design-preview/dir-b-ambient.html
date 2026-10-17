@@ -1,0 +1,183 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>方向 B · Ambient Companion</title>
+<style>
+/* ============ 方向 B：陪伴型助手空间 ============
+   北极星：不是仪表盘，是一个房间；她坐在房间里，话从房间里长出来。
+   骨架：去面板化。左栏收成一条细轨；角色居中偏右、体量最大；
+   欢迎语与对话贴着角色左侧流动，像对她说话；输入条悬浮在房间底部中央。
+   材质：呼吸光 + 极轻视差层 + 暖色温偏移，不用卡片堆层级。 */
+:root{
+  --bg:#161d2e; --panel:#1f2a42; --raise:#27354f;
+  --line:#2c3a58; --line-strong:#41537a;
+  --text:#efe9db; --muted:#aab3c6; --faint:#8f98ae;
+  --gold:#d9b44a; --gold-deep:#c9a227; --star:#eec978; --danger:#e08b7a;
+  --ease:cubic-bezier(.22,1,.36,1);
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--text);font:14px/1.7 "PingFang SC","Microsoft YaHei",system-ui,sans-serif}
+button,input{font:inherit;color:inherit;border:1px solid var(--line);border-radius:12px;background:var(--panel);padding:9px 12px;min-height:44px}
+button{cursor:pointer;transition:background .2s var(--ease),border-color .2s var(--ease),transform .2s var(--ease)}
+button:hover{background:#2b2c23;border-color:var(--line-strong)}
+button:active{transform:scale(.97)}
+:focus-visible{outline:2px solid var(--gold);outline-offset:2px}
+
+.b-app{position:relative;display:grid;grid-template-columns:76px minmax(0,1fr);height:100dvh;overflow:hidden}
+
+/* 房间的暖光与呼吸：两层缓慢明暗的大色温场，不动元素本身 */
+.b-glow{position:absolute;inset:0;pointer-events:none;z-index:0;
+  background:
+    radial-gradient(46% 60% at 66% 42%, #3a4f7e2e, transparent 70%),
+    radial-gradient(34% 40% at 30% 78%, #c9a22714, transparent 70%)}
+.b-glow.breath{animation:b-breathe 7s ease-in-out infinite}
+@keyframes b-breathe{0%,100%{opacity:.75}50%{opacity:1}}
+
+/* —— 细轨导航：只剩品牌与入口，记忆面板收进弹出层（预览中静态展示） —— */
+.b-rail{position:relative;z-index:3;display:flex;flex-direction:column;align-items:center;gap:14px;padding:20px 0;border-right:1px solid #232f4c;background:#141b2c}
+.b-mark{display:grid;place-items:center;width:42px;height:42px;border-radius:14px 14px 14px 4px;background:linear-gradient(145deg,#2c3a58,#41537a);font-family:serif;font-size:21px}
+.b-rail button{width:44px;min-width:44px;height:44px;min-height:44px;padding:0;background:transparent;border-color:transparent;color:var(--muted);border-radius:12px;font-size:17px}
+.b-rail button:hover{background:var(--panel);color:var(--text)}
+.b-rail .foot{margin-top:auto;font-size:16px;color:var(--gold)}
+
+/* —— 房间主区 —— */
+.b-room{position:relative;z-index:1;display:flex;flex-direction:column;min-width:0}
+.b-topbar{position:relative;z-index:3;display:flex;align-items:center;gap:10px;padding:12px 30px;color:var(--muted);font-size:13px}
+.b-dot{width:6px;height:6px;border-radius:50%;background:var(--gold);box-shadow:0 0 0 4px #c9a22722}
+.b-topbar .grow{flex:1}
+.b-ghost{background:transparent;border-color:transparent;color:var(--muted);font-size:13px;padding:7px 10px}
+.b-ghost:hover{background:var(--panel);color:var(--text)}
+
+/* 角色：房间的主人，居中偏右，背后一轮安静的呼吸光晕 */
+.b-figure-zone{position:absolute;inset:0;display:grid;place-items:center;pointer-events:none;z-index:1}
+.b-halo{position:absolute;width:460px;height:460px;border-radius:50%;
+  background:radial-gradient(circle,#4a629c30,transparent 62%);animation:b-breathe 7s ease-in-out infinite}
+.b-halo.warm{width:300px;height:300px;transform:translateY(24%);
+  background:radial-gradient(circle,#c9a2271c,transparent 66%);animation-delay:-3.5s}
+.b-figure{position:relative;transform:translateX(16%)}
+.b-figure svg{height:min(52dvh,400px);width:auto;display:block}
+.b-ground{position:absolute;bottom:14%;left:50%;transform:translateX(calc(-50% + 16%));width:190px;height:22px;border-radius:50%;
+  background:radial-gradient(ellipse,#0a0f1c99 25%,transparent 70%)}
+
+/* 对话内容：贴着角色左侧的一条安静文本流，不用气泡框围住欢迎语 */
+.b-flow{position:relative;z-index:2;flex:1;min-height:0;overflow-y:auto;padding:20px 30px 20px 8%}
+.b-flow::before{content:"";display:block;height:12dvh}
+.b-convo{max-width:430px}
+.b-welcome h2{font-family:"Songti SC","Noto Serif CJK SC",serif;font-size:clamp(30px,2.8vw,42px);font-weight:400;line-height:1.45;letter-spacing:.02em;margin:0 0 16px}
+.b-welcome h2 em{font-style:normal;color:var(--gold)}
+.b-welcome p{color:var(--muted);margin:0 0 20px;max-width:26em}
+/* 快捷操作：不再是按钮列，是一行轻声的建议，hover 才立起来 */
+.b-sugs{display:flex;flex-direction:column;gap:2px;max-width:300px}
+.b-sugs button{display:flex;gap:10px;text-align:left;font-size:13.5px;padding:10px 4px;background:transparent;border-color:transparent;border-bottom:1px solid #26334f;color:var(--text);border-radius:0;min-height:40px}
+.b-sugs button:hover{background:transparent;border-bottom-color:var(--gold);color:var(--star);transform:translateX(4px)}
+.b-sugs button span:last-child{margin-left:auto;color:var(--faint)}
+.b-note{margin-top:16px;font-size:13px;color:var(--muted)}
+.b-state{margin-top:26px;font-size:13px;color:var(--star);display:flex;align-items:center;gap:8px}
+.b-state i{width:7px;height:7px;border-radius:50%;background:var(--star);animation:b-breathe 3.2s ease-in-out infinite}
+
+/* 输入：悬浮在房间底部中央的一枚软胶囊，是全页唯一「实」的控件 */
+.b-composer{position:relative;z-index:3;margin:0 auto 18px;width:min(640px,calc(100% - 40px))}
+.b-strip{display:flex;justify-content:center;gap:6px;padding-bottom:8px;font-size:12px;color:var(--muted)}
+.b-chip{border:1px solid var(--line);border-radius:999px;padding:3px 10px;background:#1f2a42cc}
+.b-capsule{display:flex;align-items:center;gap:6px;padding:8px 10px;background:#1f2a42e6;border:1px solid var(--line);border-radius:999px;box-shadow:0 14px 40px -12px #060a14aa;backdrop-filter:blur(8px)}
+.b-capsule:focus-within{border-color:var(--gold);box-shadow:0 0 0 3px #c9a22726,0 14px 40px -12px #060a14aa}
+.b-mic{display:inline-flex;align-items:center;gap:7px;background:var(--raise);border-color:transparent;border-radius:999px;padding:0 15px;font-size:13px}
+.b-inputwrap{position:relative;flex:1;display:flex}
+.b-inputwrap input{flex:1;width:0;background:transparent;border-color:transparent;padding:10px 44px 10px 8px}
+.b-send{position:absolute;right:4px;top:50%;transform:translateY(-50%);width:36px;min-width:36px;height:36px;min-height:36px;padding:0;border-radius:50%;background:var(--raise);border-color:transparent;color:var(--muted)}
+.b-hint{margin:6px 0 0;text-align:center;font-size:12.5px;color:var(--faint)}
+
+/* 记忆弹出层（静态展示细轨展开的样子） */
+.b-peek{position:absolute;left:88px;top:84px;z-index:4;width:250px;padding:14px;border:1px solid var(--line);border-radius:16px;background:#1f2a42f2;box-shadow:0 18px 50px #060a1480;font-size:13px}
+.b-peek h3{margin:0 0 10px;font-size:13px;color:var(--muted);letter-spacing:.1em;font-weight:600}
+.b-peek .m{padding:7px 0;border-bottom:1px solid var(--line)}
+.b-peek small{display:block;color:var(--muted);font-size:12px;margin-top:3px}
+
+@media(max-width:1100px){.b-flow{padding-left:6%}.b-figure{transform:translateX(24%)}.b-figure svg{height:min(44dvh,330px)}}
+@media(max-width:760px){
+  .b-app{grid-template-columns:1fr}
+  .b-rail{position:fixed;left:0;right:0;top:0;flex-direction:row;padding:8px 14px;border-right:0;border-bottom:1px solid #232f4c;z-index:6}
+  .b-rail .foot{display:none}
+  .b-peek{display:none}
+  .b-room{height:100dvh;padding-top:60px}
+  .b-figure-zone{place-items:start center;padding-top:8dvh}
+  .b-figure{transform:none;opacity:.9}
+  .b-figure svg{height:30dvh}
+  .b-halo{width:280px;height:280px}
+  .b-ground{bottom:auto;top:34dvh;transform:translateX(-50%);width:130px;height:15px}
+  .b-flow{padding:20px 22px 12px}
+  .b-flow::before{height:26dvh}
+  .b-composer{width:calc(100% - 20px);margin-bottom:max(12px,env(safe-area-inset-bottom))}
+  .b-mic .lbl{display:none}
+}
+@media(prefers-reduced-motion:reduce){*{animation:none!important;transition:none!important}}
+</style>
+</head>
+<body>
+<div class="b-app">
+  <div class="b-glow breath" aria-hidden="true"></div>
+  <nav class="b-rail" aria-label="主导航">
+    <div class="b-mark">栖</div>
+    <button aria-label="记忆">✦</button>
+    <button aria-label="一起写">✎</button>
+    <button aria-label="工作台">▤</button>
+    <button aria-label="设置">⚙</button>
+    <span class="foot" aria-hidden="true">✳</span>
+  </nav>
+
+  <main class="b-room">
+    <header class="b-topbar">
+      <span class="b-dot"></span><span>已连接</span>
+      <span class="grow"></span>
+      <span>灵动伴随</span>
+    </header>
+
+    <div class="b-figure-zone" aria-hidden="true">
+      <div class="b-halo"></div>
+      <div class="b-halo warm"></div>
+      <div class="b-figure">
+        <svg viewBox="0 0 120 200">
+          <path d="M60 22c14 0 22 11 22 26 0 10-4 18-10 22l14 8c10 6 16 16 16 28v78H18v-78c0-12 6-22 16-28l14-8c-6-4-10-12-10-22 0-15 8-26 22-26z" fill="#46598a"/>
+          <circle cx="60" cy="46" r="20" fill="#5a76a8"/>
+          <path d="M40 40c2-12 10-20 20-20s18 8 20 20c-4-8-10-12-20-12s-16 4-20 12z" fill="#eec978" opacity=".85"/>
+        </svg>
+      </div>
+      <div class="b-ground"></div>
+    </div>
+
+    <div class="b-flow">
+      <div class="b-convo">
+        <section class="b-welcome">
+          <h2>把今天，<br>轻轻放在<em>这里</em>。</h2>
+          <p>聊一件开心的小事，或什么都不想做。不用组织好语言，想到哪里就说到哪里。</p>
+          <div class="b-sugs">
+            <button>✦ 分享今天的小事 <span>↗</span></button>
+            <button>☾ 陪我放空一会儿 <span>↗</span></button>
+            <button>☰ 理一理待办事项 <span>↗</span></button>
+          </div>
+          <p class="b-note">从一句「嗨」开始，也很好。</p>
+          <p class="b-state"><i></i>正在听你说…</p>
+        </section>
+      </div>
+    </div>
+
+    <div class="b-composer">
+      <div class="b-strip"><span class="b-chip">连续对话</span></div>
+      <div class="b-capsule">
+        <button class="b-mic">🎙 <span class="lbl">按住说话</span></button>
+        <div class="b-inputwrap"><input aria-label="给阿栖的消息" placeholder="想说什么，都可以…" /><button class="b-send" aria-label="发送">↑</button></div>
+      </div>
+      <p class="b-hint">开口即录，停顿约一秒发送；建议戴耳机。</p>
+    </div>
+  </main>
+
+  <aside class="b-peek" aria-label="记忆速览">
+    <h3>关于你的记忆</h3>
+    <div class="m">最近在准备英语面试<small>你提过 · 3 天前</small></div>
+    <div class="m">晚上十一点后不想被提醒任务<small>推测 · 上周</small></div>
+  </aside>
+</div>
+</body>
+</html>

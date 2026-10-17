@@ -1,0 +1,34 @@
+/* Midnight Living Stage · 状态光场（配合 stage-fx.js 的粒子画布）
+ * 状态全部来自 #avatarStage[data-interaction]（app.js 真实写入），
+ * 用 .stage:has(...) 调光场强度；reduced-motion 时画布不启动，这里的光场即最终效果。 */
+
+#stageFx { position:absolute; inset:0; z-index:0; pointer-events:none; }
+
+/* 立绘身后的环境光场：强度按状态分档，默认安静 */
+.avatar-stage::after {
+  opacity: var(--halo-o, 1);
+  transition: opacity .6s var(--ease);
+}
+.stage:has(#avatarStage[data-interaction="listening"]) { --halo-o: 1.35; }
+.stage:has(#avatarStage[data-interaction="speaking"])  { --halo-o: 1.2; }
+.stage:has(#avatarStage[data-interaction="thinking"]),
+.stage:has(#avatarStage[data-interaction="preparing"]) { --halo-o: 1.1; }
+.stage:has(#avatarStage[data-interaction="yielding"]),
+.stage:has(#avatarStage[data-interaction="unavailable"]) { --halo-o: .55; }
+
+/* 空闲 / 连续监听：低强度呼吸光（reduced-motion 下静止在 1） */
+@media (prefers-reduced-motion: no-preference) {
+  .stage:has(#avatarStage[data-interaction="idle"]) .avatar-stage::after,
+  .stage:has(#avatarStage[data-interaction="monitoring"]) .avatar-stage::after {
+    animation: stage-breathe 6.5s var(--ease) infinite;
+  }
+  @keyframes stage-breathe { 0%,100% { opacity:.85; } 50% { opacity:1.1; } }
+}
+
+/* 失败 / 不可用：不做报警灯，只把光场压暗，状态文案与控件照常表达 */
+.stage:has(#avatarStage[data-interaction="unavailable"]) #stageFx { display:none; }
+
+/* 脚下光池随状态轻微回应：倾听时暖一点，其余时间保持安静 */
+.avatar-stage::before { transition: opacity .6s var(--ease); }
+.stage:has(#avatarStage[data-interaction="listening"]) .avatar-stage::before { opacity: 1.25; }
+.stage:has(#avatarStage[data-interaction="unavailable"]) .avatar-stage::before { opacity: .6; }

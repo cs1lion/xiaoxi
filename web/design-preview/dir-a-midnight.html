@@ -1,0 +1,190 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>方向 A · Midnight Living Stage</title>
+<style>
+/* ============ 方向 A：午夜数字工作室 ============
+   北极星：舞台属于她，界面是观众席。
+   骨架：右侧 42% 是贯穿上下的「舞台区」——地平面、脚下投影、局部光场；
+   左侧是内容列（欢迎 / 对话 / 输入），顶栏退成一条安静的状态线。 */
+:root{
+  --bg:#101828; --bg-deep:#0c1220; --panel:#1a2440; --raise:#22304e;
+  --line:#28355a; --line-strong:#3b4d78;
+  --text:#ece8dc; --muted:#a6afc6; --faint:#8b94ac;
+  --gold:#d9b44a; --gold-deep:#c9a227; --star:#e8c26a; --danger:#e08b7a;
+  --ease:cubic-bezier(.22,1,.36,1);
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--text);font:14px/1.65 "PingFang SC","Microsoft YaHei",system-ui,sans-serif}
+button,input{font:inherit;color:inherit;border:1px solid var(--line);border-radius:10px;background:var(--panel);padding:9px 12px;min-height:44px}
+button{cursor:pointer;transition:background .16s var(--ease),border-color .16s var(--ease),transform .16s var(--ease)}
+button:hover{background:#242c22;border-color:var(--line-strong)}
+button:active{transform:scale(.97)}
+:focus-visible{outline:2px solid var(--gold);outline-offset:2px}
+
+.a-app{display:grid;grid-template-columns:288px minmax(0,1fr) minmax(380px,42%);height:100dvh}
+
+/* —— 左栏：记忆，压暗一级，把光让给舞台 —— */
+.a-side{padding:28px 20px 16px;border-right:1px solid var(--line);background:#141d33;overflow-y:auto}
+.a-brand{display:flex;gap:11px;align-items:center}
+.a-mark{display:grid;place-items:center;width:44px;height:44px;border-radius:14px 14px 14px 4px;background:linear-gradient(145deg,#2a3854,#3d4f74);font-family:serif;font-size:22px}
+.a-brand h1{margin:0;font-size:19px;font-weight:600;letter-spacing:.12em}
+.a-brand p{margin:0;font-size:12px;color:var(--muted)}
+.a-side .eyebrow{display:block;margin:30px 0 6px;font-size:11px;letter-spacing:.18em;color:var(--muted)}
+.a-side .intro{margin:0 0 22px;font-size:13px;color:var(--muted)}
+.a-panel{background:#1a2440b8;border:1px solid var(--line);border-radius:16px;padding:15px}
+.a-panel h2{display:flex;justify-content:space-between;margin:0 0 12px;font-size:14px}
+.a-panel h2 span{color:var(--muted);font-size:12px;font-weight:400}
+.a-addrow{display:flex;gap:8px;margin-bottom:12px}
+.a-addrow input{flex:1;width:0;font-size:13px}
+.a-addrow button{font-size:13px;padding:8px}
+.a-mem{position:relative;padding:8px 0 8px 16px;border-bottom:1px solid var(--line);font-size:13px}
+.a-mem::before{content:"";position:absolute;left:2px;top:16px;width:5px;height:5px;border-radius:50%;background:var(--star);opacity:.75}
+.a-mem small{display:block;margin-top:4px;color:var(--muted);font-size:12px}
+
+/* —— 中列：内容与输入 —— */
+.a-main{position:relative;display:flex;flex-direction:column;min-width:0;border-right:1px solid var(--line)}
+.a-topbar{display:flex;align-items:center;gap:10px;min-height:60px;padding:8px 28px;color:var(--muted);font-size:13px;border-bottom:1px solid #1e2a48}
+.a-dot{width:6px;height:6px;border-radius:50%;background:var(--gold);box-shadow:0 0 0 4px #c9a22722}
+.a-topbar .grow{flex:1}
+.a-ghost{background:transparent;border-color:transparent;color:var(--muted);font-size:13px;padding:7px 10px}
+.a-ghost:hover{background:var(--bg-deep);color:var(--text)}
+.a-scroll{flex:1;min-height:0;overflow-y:auto;display:flex;flex-direction:column;padding:26px 44px 18px}
+.a-scroll::before{content:"";margin:auto 0 0}
+.a-scroll::after{content:"";margin:0 0 auto}
+.a-welcome h2{font-family:"Songti SC","Noto Serif CJK SC",serif;font-size:clamp(28px,2.4vw,38px);font-weight:400;line-height:1.4;letter-spacing:.03em;margin:0 0 14px}
+.a-welcome h2 em{font-style:normal;color:var(--gold)}
+.a-welcome p{color:var(--muted);margin:0 0 16px;max-width:30em}
+.a-sugs{display:flex;flex-direction:column;gap:8px;max-width:300px}
+.a-sugs button{display:flex;gap:10px;text-align:left;font-size:13px;padding:11px 14px;background:#1a2440a0}
+.a-sugs button span:last-child{margin-left:auto;color:var(--faint)}
+.a-note{margin-top:12px;font-size:13px;color:var(--muted)}
+.a-composer{margin:0 30px 14px}
+.a-strip{display:flex;gap:6px;padding:0 6px 8px;font-size:12px;color:var(--muted)}
+.a-chip{border:1px solid var(--line);border-radius:999px;padding:3px 10px;background:var(--raise)}
+.a-capsule{display:flex;align-items:center;gap:6px;padding:7px 9px;background:var(--panel);border:1px solid var(--line);border-radius:999px;box-shadow:0 6px 26px #060a1433}
+.a-capsule:focus-within{border-color:var(--gold);box-shadow:0 0 0 3px #c9a22726}
+.a-mic{display:inline-flex;align-items:center;gap:7px;background:var(--raise);border-color:transparent;border-radius:999px;padding:0 15px;font-size:13px}
+.a-inputwrap{position:relative;flex:1;display:flex}
+.a-inputwrap input{flex:1;width:0;background:transparent;border-color:transparent;padding:10px 44px 10px 8px}
+.a-send{position:absolute;right:4px;top:50%;transform:translateY(-50%);width:36px;min-width:36px;height:36px;min-height:36px;padding:0;border-radius:50%;background:var(--raise);border-color:transparent;color:var(--muted)}
+.a-hint{margin:6px 8px 0;font-size:13px;color:var(--muted)}
+
+/* —— 右列：Living Stage —— */
+.a-stage{position:relative;display:flex;flex-direction:column;overflow:hidden;
+  background:
+    radial-gradient(60% 42% at 50% 30%, #2c3c6633, transparent 70%),
+    linear-gradient(180deg,#131c31 0%,#101828 55%,#0c1322 100%)}
+/* 地平光池：脚下的一圈暖光，把人物「放」在地面上 */
+.a-stage::before{content:"";position:absolute;left:50%;bottom:9%;width:78%;height:120px;transform:translateX(-50%);
+  background:radial-gradient(ellipse at 50% 100%, #c9a2272a, transparent 68%)}
+/* 身后局部光场：只照亮角色一轮，像工作室里的一盏灯 */
+.a-stage::after{content:"";position:absolute;left:50%;top:16%;width:340px;height:340px;transform:translateX(-50%);
+  background:radial-gradient(circle,#3d5a9440,transparent 65%)}
+.a-sparse{position:absolute;inset:0;pointer-events:none;
+  background:
+    radial-gradient(2px 2px at 18% 12%, #e8e4d9b3 55%, transparent 56%),
+    radial-gradient(2.4px 2.4px at 82% 9%, #c9a227cc 55%, transparent 56%),
+    radial-gradient(1.5px 1.5px at 66% 22%, #e8e4d98c 55%, transparent 56%),
+    radial-gradient(1.5px 1.5px at 30% 30%, #e8e4d980 55%, transparent 56%),
+    radial-gradient(1.8px 1.8px at 90% 40%, #e8e4d98c 55%, transparent 56%),
+    radial-gradient(1.4px 1.4px at 12% 55%, #c9a22780 55%, transparent 56%)}
+.a-stage-label{position:relative;z-index:2;padding:16px 24px 0;font-size:12px;letter-spacing:.16em;color:var(--muted);display:flex;justify-content:space-between}
+.a-figure{position:relative;z-index:1;flex:1;display:grid;place-items:end center;padding-bottom:8%}
+.a-figure svg{height:min(64%,430px);width:auto}
+/* 脚下投影：贴地的软椭圆，比基线的光斑更暗更实，人物才「站得住」 */
+.a-shadow{position:absolute;bottom:7.4%;left:50%;transform:translateX(-50%);width:210px;height:26px;border-radius:50%;
+  background:radial-gradient(ellipse,#05080fb0 20%,#05080f55 55%,transparent 72%)}
+.a-stage-state{position:relative;z-index:2;padding:0 24px 18px;text-align:center;font-size:13px;color:var(--star)}
+.a-stage-holo{position:absolute;z-index:3;right:18px;top:88px;width:200px;display:grid;gap:8px}
+.a-holo{padding:10px 12px;border:1px solid var(--line-strong);border-left:2px solid var(--star);border-radius:12px;background:#1a2440d9;font-size:12.5px;line-height:1.5}
+.a-holo small{display:block;color:var(--muted);font-size:12px}
+
+/* —— 窄屏：舞台退到对话背后上方，输入常驻 —— */
+@media(max-width:1100px){
+  .a-app{grid-template-columns:250px minmax(0,1fr) 320px}
+  .a-scroll{padding-inline:28px}
+}
+@media(max-width:760px){
+  .a-app{display:block;height:100dvh}
+  .a-side{display:none}
+  .a-main{height:100dvh;border-right:0}
+  .a-stage{position:fixed;inset:60px 0 auto 0;height:220px;z-index:0;border:0;
+    -webkit-mask-image:linear-gradient(180deg,#000 55%,transparent);mask-image:linear-gradient(180deg,#000 55%,transparent)}
+  .a-figure svg{height:150px}
+  .a-shadow{width:120px;height:16px;bottom:6%}
+  .a-stage::before{height:60px}
+  .a-stage-holo{display:none}
+  .a-stage-label,.a-stage-state{display:none}
+  .a-scroll{padding:180px 22px 14px}
+  .a-composer{margin:0 10px max(12px,env(safe-area-inset-bottom))}
+  .a-mic .lbl{display:none}
+}
+@media(prefers-reduced-motion:reduce){*{animation:none!important;transition:none!important}}
+</style>
+</head>
+<body>
+<div class="a-app">
+  <aside class="a-side" aria-label="记忆与偏好">
+    <div class="a-brand"><div class="a-mark">栖</div><div><h1>阿栖</h1><p>在你身边 · 已连接</p></div></div>
+    <span class="eyebrow">你的安静角落</span>
+    <p class="intro">琐碎的小事，也值得被记住。</p>
+    <section class="a-panel">
+      <h2>关于你的记忆 <span>01</span></h2>
+      <div class="a-addrow"><input aria-label="手动添加记忆" placeholder="告诉阿栖一件小事…" /><button>记下</button></div>
+      <div class="a-mem">最近在准备英语面试，周三下午练习过一次<small>你提过 · 3 天前</small></div>
+      <div class="a-mem">晚上十一点后不想被提醒任务<small>推测 · 上周</small></div>
+    </section>
+  </aside>
+
+  <main class="a-main">
+    <header class="a-topbar">
+      <span class="a-dot"></span><span>已连接</span>
+      <span class="grow"></span>
+      <button class="a-ghost">一起写</button>
+      <button class="a-ghost" aria-label="设置">⚙</button>
+    </header>
+    <div class="a-scroll">
+      <section class="a-welcome">
+        <h2>把今天，<br>轻轻放在<em>这里</em>。</h2>
+        <p>聊一件开心的小事，或什么都不想做。不用组织好语言，想到哪里就说到哪里。</p>
+        <div class="a-sugs">
+          <button>✦ 分享今天的小事 <span>↗</span></button>
+          <button>☾ 陪我放空一会儿 <span>↗</span></button>
+          <button>☰ 理一理待办事项 <span>↗</span></button>
+        </div>
+        <p class="a-note">从一句「嗨」开始，也很好。</p>
+      </section>
+    </div>
+    <div class="a-composer">
+      <div class="a-strip"><span class="a-chip">连续对话</span><span class="a-chip">灵动伴随</span></div>
+      <div class="a-capsule">
+        <button class="a-mic">🎙 <span class="lbl">按住说话</span></button>
+        <div class="a-inputwrap"><input aria-label="给阿栖的消息" placeholder="想说什么，都可以…" /><button class="a-send" aria-label="发送">↑</button></div>
+        <button class="a-mic" aria-label="工作台" style="min-width:44px;padding:0 12px">▤</button>
+      </div>
+      <p class="a-hint">连续对话：开口即录，停顿约一秒发送；建议戴耳机。</p>
+    </div>
+  </main>
+
+  <section class="a-stage" aria-label="舞台">
+    <div class="a-sparse" aria-hidden="true"></div>
+    <div class="a-stage-label"><span>STAGE · 01</span><span>✧</span></div>
+    <div class="a-stage-holo">
+      <div class="a-holo">待办梳理好了：今晚两件，明早一件。<small>小溪递来的卡片</small></div>
+    </div>
+    <div class="a-figure" aria-hidden="true">
+      <svg viewBox="0 0 120 200">
+        <path d="M60 22c14 0 22 11 22 26 0 10-4 18-10 22l14 8c10 6 16 16 16 28v78H18v-78c0-12 6-22 16-28l14-8c-6-4-10-12-10-22 0-15 8-26 22-26z" fill="#42557f"/>
+        <circle cx="60" cy="46" r="20" fill="#54709f"/>
+        <path d="M40 40c2-12 10-20 20-20s18 8 20 20c-4-8-10-12-20-12s-16 4-20 12z" fill="#e8c26a" opacity=".85"/>
+      </svg>
+    </div>
+    <div class="a-shadow" aria-hidden="true"></div>
+    <p class="a-stage-state">正在听你说…</p>
+  </section>
+</div>
+</body>
+</html>
