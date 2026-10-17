@@ -1,0 +1,14 @@
+id: fastloop-nonblocking-offline
+title: 复杂委托触发时快环立即返回语音确认，Mock 慢 Worker 验证不阻塞（事件序断言）
+layer: offline
+origin: 设计约束「快环内不得出现阻塞调用，重活一律异步卸载到慢环」
+tags: [fastloop, executive, nonblocking]
+setup: {}
+turns:
+  - 在吗
+pass_rule: all
+checks:
+  - target: prompt
+    type: custom
+    value: "evals.checks:fastloop_nonblocking"
+status: active

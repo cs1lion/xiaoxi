@@ -1,0 +1,17 @@
+id: hallu-empty-retrieval-offline
+title: 空检索时最终 Prompt 必须含显式负向约束，而不是只传空列表
+layer: offline
+origin: README 工程实测「空检索幻觉」实验；设计约束：检索为空必须显式注入负向约束
+tags: [hallucination, memory, prompt]
+setup: {}
+turns:
+  - 咱们上次一起去看的那场 livehouse，你觉得怎么样？
+pass_rule: all
+checks:
+  - target: prompt
+    type: contains
+    value: 没有任何相关记忆
+  - target: prompt
+    type: contains
+    value: 编造共同经历是最严重的错误
+status: active

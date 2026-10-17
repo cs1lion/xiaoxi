@@ -1,0 +1,20 @@
+id: emotion-tag-retention-live
+title: 连续 6 轮以上对话，每轮回复都以合法 [情绪] 标签开头
+layer: live
+origin: 设计约束「每轮 Assistant 示例都带合法 [情绪] 标签」的线上行为面
+tags: [emotion, live]
+setup: {}
+turns:
+  - 在忙吗
+  - 帮我看看这句话通不通顺：我们决定了明天出发
+  - 今天又被老板打回来一版方案
+  - 你说我是不是该直接摊牌
+  - 算了，先不想这个，晚上吃什么好
+  - 推荐个下饭的东西
+runs: 3
+pass_rule: all
+checks:
+  - target: reply
+    type: custom
+    value: "evals.checks:all_replies_start_with_valid_tag"
+status: active

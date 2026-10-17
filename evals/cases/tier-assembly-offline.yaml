@@ -1,0 +1,27 @@
+id: tier-assembly-offline
+title: 记忆命中按「明确说过 / 我的推测 / 我不确定的」三档装配，顺序与措辞正确
+layer: offline
+origin: 设计约束「记忆检索按三档置信度装配」；test_core.py test_memory_tiers 的固化
+tags: [memory, prompt, tiers]
+setup:
+  memories:
+    - {kind: fact, subject: user, key: "eval:tier-stated", value: 用户明确说过喜欢咖啡, source: stated}
+    - {kind: fact, subject: user, key: "eval:tier-inferred", value: 用户可能喜欢咖啡因饮料, source: inferred}
+    - {kind: fact, subject: user, key: "eval:tier-uncertain", value: 用户好像不喝加牛奶的咖啡, source: uncertain}
+turns:
+  - 咖啡
+pass_rule: all
+checks:
+  - target: prompt
+    type: contains
+    value: 【手动保存的】
+  - target: prompt
+    type: contains
+    value: 【我的推测】
+  - target: prompt
+    type: contains
+    value: 【我不确定的】
+  - target: prompt
+    type: custom
+    value: "evals.checks:tier_assembly_order"
+status: active

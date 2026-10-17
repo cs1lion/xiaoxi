@@ -47,7 +47,7 @@ Role 0 做架构设计与向下派单时、所有执行角色实施时，必须�
 ## Roles & Scopes (file read/write whitelists)
 
 ### Role 0 — Chief Architect
-- **Owns:** `docs/PROTOCOL.md`, `docs/AGENT_PLAYBOOK.md`, `scripts/check_protocol.py`, `server/app.py`, `web/index.html`, `web/app.js`
+- **Owns:** `docs/PROTOCOL.md`, `docs/AGENT_PLAYBOOK.md`, `scripts/check_protocol.py`, `server/app.py`, `web/index.html`, `web/app.js`, `AGENTS.md`, `REVIEW.md`, `evals/`, `scripts/run_evals.py`
 - **Duties:** protocol design and amendments, cross-role conflict arbitration,
   `[PROTOCOL_REQUEST]` triage, integration merges, release tagging.
 - **May read:** everything. **May write:** only the owned list above (plus
@@ -112,6 +112,8 @@ Role 0 做架构设计与向下派单时、所有执行角色实施时，必须�
 | `/api/memory/starmap` 请求/响应 | Role 1 | Role 3 | query 参数、nodes/edges 字段、404/空图行为 |
 | `audio.chunk` 字段与 narrate 链路 | Role 2 | Role 3 | seq/index 单调、打断后零 audio、`narrate_busy` |
 
+**收敛规则**：同一任务单审查满 3 轮，停止逐行返工，由 Role 0 重新评估方案；第 2 轮起只审新增 diff（详见 `REVIEW.md`）。
+
 ### 3. 里程碑打标（Milestone Tagging）
 
 每个 F 目标测试全绿并通过集成对齐后，Role 0 **立即**打小 tag（`v0.6-phase2-diary`
@@ -131,4 +133,5 @@ Role 0 做架构设计与向下派单时、所有执行角色实施时，必须�
 7. `docs/TESTING.md` 里属于自己角色的黄金命令全部跑通，结果附在汇报里。
 8. 对接面 payload / 类型签名写进汇报，供 Role 0 做 Integration Check。
 9. 状态变更（进行中 / 完成 / 阻塞）报告给 Role 0，由 Role 0 更新 `docs/TASKS.md`。
+10. 涉及记忆装配 / Prompt / 模型切换的改动，必须跑离线评测（`scripts\run_evals.py`）；换模型或改 Prompt 装配逻辑还需手动跑一次 live 评测（`--live`）并附结果。
 

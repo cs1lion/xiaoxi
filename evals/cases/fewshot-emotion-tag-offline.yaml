@@ -1,0 +1,14 @@
+id: fewshot-emotion-tag-offline
+title: 每条 Assistant few-shot 示例都带合法 [情绪] 标签（合法集合从 config 读取）
+layer: offline
+origin: 设计约束「每轮 Assistant 示例都带合法 [情绪] 标签」
+tags: [prompt, emotion, fewshot]
+setup: {}
+turns:
+  - 在吗
+pass_rule: all
+checks:
+  - target: prompt
+    type: custom
+    value: "evals.checks:fewshot_emotion_tags"
+status: active

@@ -45,6 +45,9 @@ jobs:
       - name: 协议契约检查（静态，零依赖）
         run: python scripts/check_protocol.py
 
+      - name: 回归评测（离线层，evals/cases）
+        run: python scripts/run_evals.py
+
       - name: Python 测试（逐脚本运行，跳过计通过）
         run: |
           failed=0

@@ -1,0 +1,14 @@
+id: hard-delete-offline
+title: 记忆删除是 SQLite 物理硬删除：行无、检索空、历史清、索引无残留
+layer: offline
+origin: 设计约束「记忆删除是 SQLite 物理硬删除，不留索引」；test_core.py test_memory_lifecycle 的固化
+tags: [memory, deletion, sqlite]
+setup: {}
+turns:
+  - 我周五去哪出差？
+pass_rule: all
+checks:
+  - target: prompt
+    type: custom
+    value: "evals.checks:hard_delete"
+status: active

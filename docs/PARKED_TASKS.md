@@ -109,3 +109,7 @@
   - F3 autonomous idle loop (assistant/loop.py): curiosity driven self-reading/reflection; Self-Taste / Worldview; proactive topics.
   - F4 star-map memory: backend graph memory + star graph view.
 - Role 3 (Star-Map/companion UI) handles frontend graph views; Role 0 holds PROTOCOL.md / app.py / web entry + gates contract amendments.
+
+## F. Role 0 工程基建待办（回归评测集落地时登记，暂不做）
+- v0.7 打标后删除 `docs/AGENT_PLAYBOOK.md` 中「打磨轮临时授权」整段。
+- 评估在 CI 中按 diff 路径机械校验角色白名单（目前白名单只靠自觉）。
