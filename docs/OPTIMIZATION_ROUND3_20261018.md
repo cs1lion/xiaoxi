@@ -186,16 +186,25 @@ taskkill //F //PID <占用 8000 的 PID> && .\.venv\Scripts\python.exe scripts\r
    request 记录在重放时被判成"参数不同"。这类问题只在**部署瞬间**发作：
    正在重试中的任务会集体失败，而开发机上永远复现不了。
 
-**仍需决策（不是代码问题）：**
+**已把"现状"写死在代码里（不改行为，只消除误读）：**
+
+- **`build_proactive()`**：docstring 写明它当前**没有调用方且这是有意的**，
+  并解释协议 §16.2 的梯度 3 落地为"继续产出有声 mumble" + "900s 门的完整主动轮次"，
+  不是独立 WS 事件。同时警告：不要为了让它被调用而重新引入 90s 静音断层。
+- **`curiosity_reflection` 的丢弃点**：`app.py` 的注释现在点名它是唯一会走到
+  "不发"分支的事件、为什么不能直接发、映射需要什么协议变更。之前只写
+  "其余带 type 的事件不发"，下一个人看到时无从判断这是遗漏还是决定。
+
+**仍需 Role 0 / 产品决策：**
 
 - **心境写入方**。`AUTONOMOUS_MIND_V2.md` §3.3 说心境记录"产生原因与来源引用、
   近期相关互动/后台思考摘要"，最自然的写入点是成功的 reflection。但"每轮反思都
   改写心境"会让 §15.1 的"心境惯性"退化成"每轮情绪重置"——恰恰违反它要解决的问题。
-  需要定的是**什么条件下才写**（例如只在该轮 discovery 触及用户处境时），
-  这是产品判断。
-- **`curiosity_reflection` 的归宿**。它携带 `child_seed_ids` / `reflection_id`，
-  与协议 §十 的 `self_evolution{kind:taste|worldview|spark}` 不是一回事。
-  要么扩 kind 取值域，要么给它单独登记一个事件——两条路都要改协议。
-- **`proactive` 事件**。`build_proactive()` 无人调用是有意的（proactive 梯度被
-  改写成 mumble，见 §16 注释），但函数留着会被误读成"应该发"。要么删，
-  要么在 docstring 里写明它当前不参与调度。
+  需要定的是**什么条件下才写**（例如只在该轮 discovery 触及用户处境时）。
+- **`curiosity_reflection` 是否升级为协议事件**。已确认技术上是安全的：
+  `CHANGE_KINDS` 同时驱动事件 kind 取值域与 `allow_sources` 过滤，但
+  `plan_state_changes()` 只对 `taste`/`worldview` 分支读 `allow_sources`，
+  所以加 `child_seed` 不会改变状态变更行为。缺的只是协议 §十 的取值域定义。
+- **`proactive` 事件是否补上**。协议 §16.2 写"梯度 3 proactive（默认空闲 90s）"，
+  同节"首次有声搭话"又写"梯度 3 由陪伴通道接管"。两段描述的是同一件事的
+  不同侧面，读起来像矛盾——协议本身该收敛措辞。

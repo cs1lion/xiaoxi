@@ -521,8 +521,14 @@ async def _maybe_self_evolution(conn: Connection) -> None:
                 payload = self_evolution_payload(event)
                 if payload is not None:
                     await conn.send(payload)
-            # 其余带 type 的事件（如 V2 思想引擎的 curiosity_reflection）不是协议
-            # 登记过的 WS 事件，不发——自造事件比少发一个事件更难查。
+            # 其余带 type 的事件不发。当前唯一会走到这里的是 V2 思想引擎的
+            # `curiosity_reflection`：它携带 child_seed_ids / reflection_id，
+            # 与协议 §十 的 self_evolution{kind:taste|worldview|spark} 不是一回事。
+            # 直接发等于自造 WS 事件（前端对未知 type 安全忽略，两边都看不出来）；
+            # 映射成 self_evolution 又得先给 change.kind 加 `child_seed` 取值——
+            # 那是协议变更，归 Role 0。在此之前宁可不发，也不要发一个语义不对的。
+            # 前端因此收不到"我刚想通一件事"的信号；星图仍会显示新节点。
+            # 见 docs/OPTIMIZATION_ROUND3_20261018.md §9。
     except asyncio.CancelledError:
         raise
     except Exception:
