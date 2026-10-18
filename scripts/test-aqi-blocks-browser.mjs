@@ -23,7 +23,14 @@ await mkdir(out, { recursive: true });
 
 const browser = await chromium.launch({ headless: true });
 const errors = [];
-const page = await browser.newPage({ viewport: { width: 1440, height: 1000 } });
+// 关掉动效：`.aqi-block` 有 0.32s 的 `aqi-card-in` 入场动画（companion.css 与
+// almanac.css 都定义了，且都认 `prefers-reduced-motion: reduce`）。Playwright 的
+// click 要求元素在连续两帧里位置不变，动画期间框体一直在动。整门派生时 CPU
+// 被占满，稳定性检查能拖过 15s 超时——2026-10-18 在 27 道门禁全套跑时
+// 观察到一次 `#holoDeck ... .aqi-action` 点击超时，单独跑 45 次均不复现。
+// 关动效不削弱断言：卡片仍必须可见、仍必须真的接收指针事件（不是 force 点击），
+// 验的还是"这张卡点得动"。
+const page = await browser.newPage({ viewport: { width: 1440, height: 1000 }, reducedMotion: "reduce" });
 page.setDefaultTimeout(15000);
 page.on("pageerror", (error) => errors.push(error.message));
 
