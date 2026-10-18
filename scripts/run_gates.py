@@ -99,6 +99,16 @@ GATES: dict[str, dict[str, object]] = {
         "cmd": [str(PY), "scripts/test_agent_loop.py"],
         "skip_regex": r"^\s*SKIP",
     },
+    "llm_client": {
+        "cmd": [str(PY), "scripts/test_llm_client.py"],
+        "skip_regex": r"^\s*SKIP",
+    },
+    "evolution_quality_report": {
+        # 评测报告不是回归门禁，但它在 Windows GBK 控制台崩过一次；
+        # 收进来是为了让"报告跑得完"本身成为一条断言。
+        "cmd": [str(PY), "scripts/eval_self_evolution_quality.py"],
+        "skip_regex": r"^\s*SKIP",
+    },
     # ---- 浏览器门禁：环境不满足时 SKIP 且退出 0，是本次要盯住的那一类 ----
     "ui_browser": {
         "cmd": ["node", "scripts/test-ui-browser.mjs"],
@@ -125,7 +135,8 @@ GATES: dict[str, dict[str, object]] = {
 # 这些门禁的本体是纯逻辑单测，不需要本地服务，永远必须真跑。
 ALWAYS_REQUIRED = ("protocol", "core", "evals", "npm", "executive_v3", "adapter_ext",
                    "codex_shim", "claude_shim", "gateway", "task_planning", "cross_day",
-                   "thread_conversation", "self_evolution", "agent_loop")
+                   "thread_conversation", "self_evolution", "agent_loop", "llm_client",
+                   "evolution_quality_report")
 
 
 def run_gate(name: str, spec: dict) -> dict:

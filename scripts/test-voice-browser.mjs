@@ -165,6 +165,10 @@ try {
   await page.locator('#presenceCapsule').click();
   await page.locator('details.preferences > summary').click();
   checks.push('natural default, speech choices, retained preference and server acknowledgement');
+  // 这一下把面板关上。若哪次改动让它开着，后面所有 #sendBtn 点击都会超时，
+  // 而报错信息指向的是"设置面板拦截指针事件"，很容易误判成产品缺陷。
+  assert.equal(await page.evaluate(() => !!document.getElementById('settingsPanel').open), false,
+    'closing the preferences panel here keeps every later composer click reachable');
   await page.locator('#bargeToggle').click();
   await page.waitForFunction(()=>voiceHarness.processors.some(p=>p.onaudioprocess));
   await feed(2,0);
@@ -224,6 +228,32 @@ try {
   await feed(.8,.15);
   const fourth = (await sent()).filter(e=>e.type==='start').at(-1);
   await page.locator('details.preferences > summary').click();
+  /* 面板开着的时候 composer 必须仍然可点——这条不变量曾经被破坏过：
+   * .settings-body 的 max-height 过大，面板底沿压住 #sendBtn，后面每一处
+   * click 全部超时（2026-10-17 实测；acc0c72 用 max-height:calc(100dvh - 260px)
+   * 修掉）。当时没有任何断言守着它，所以修完也无法知道有没有退回去。
+   * 同时量几何与真实命中点：只看矩形会漏掉"压住了但 z 序在上"的情况，
+   * 只看命中点会漏掉溢出视口。面板从此处一直开到文末，正好是测量时机。 */
+  const panelVsComposer = await page.evaluate(() => {
+    const panel = document.getElementById('settingsBody').getBoundingClientRect();
+    const send = document.getElementById('sendBtn').getBoundingClientRect();
+    const hit = document.elementFromPoint(send.x + send.width / 2, send.y + send.height / 2);
+    return {
+      panelOpen: !!document.getElementById('settingsPanel').open,
+      panelBottom: Math.round(panel.bottom),
+      sendTop: Math.round(send.top),
+      hitInsideSend: !!hit && document.getElementById('sendBtn').contains(hit),
+      noSideOverflow: document.documentElement.scrollWidth <= window.innerWidth,
+    };
+  });
+  assert.equal(panelVsComposer.panelOpen, true, 'this check runs with the panel open');
+  assert.ok(panelVsComposer.panelBottom < panelVsComposer.sendTop,
+    `settings panel (bottom ${panelVsComposer.panelBottom}) must stay above the composer ` +
+    `(top ${panelVsComposer.sendTop}), or #sendBtn cannot be clicked`);
+  assert.ok(panelVsComposer.hitInsideSend,
+    'the element under the send button centre must be inside #sendBtn, not the settings panel');
+  assert.ok(panelVsComposer.noSideOverflow, 'an open settings panel must not overflow sideways');
+  checks.push('an open settings panel never covers the composer send button');
   await page.selectOption('#duplexMode','speaker');
   assert.notEqual(fourth.turn_id,third.turn_id,'speech during playback starts a new turn');
   assert.ok((await sent()).some(e=>e.type==='barge_in'&&e.turn_id===third.turn_id));
