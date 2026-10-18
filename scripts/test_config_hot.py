@@ -118,6 +118,33 @@ class ConfigHotTest(unittest.TestCase):
         self.assertTrue(H.refresh())
         self.assertEqual(H.refresh(), [])  # unchanged mtime -> no recompute
 
+    def test_orphan_override_is_named_not_silently_ignored(self) -> None:
+        """MANAGED 之外的 `.local.yaml` 必须被点名，不能静默失效。
+
+        协议 §17 的覆盖范围列了 `seeds.yaml` 与 `response_examples.json`，
+        但两者既不在 MANAGED 里、读取方也绕开了 *_cfg()。用户认真写一份覆盖，
+        线上毫无变化且无日志——这正是要告警的那类静默失败。
+
+        断言走 `install()` 这条路，不是直接调辅助函数：直接调的话，把 install()
+        里的接线删掉测试照样绿（第一版就这么写的，等于白钉）。
+        """
+        H._warned_orphans.clear()
+        H.install()
+        self.assertEqual(H.warn_orphan_overrides(), [],
+                         "临时目录里只有 MANAGED 内的覆盖，不该有孤儿")
+
+        orphan = self.dir / "seeds.local.yaml"
+        orphan.write_text("seeds: []\n", encoding="utf-8")
+        try:
+            H._warned_orphans.clear()
+            H.install()
+            self.assertIn("seeds.local.yaml", H._warned_orphans,
+                          "install() 必须点名孤儿覆盖，否则它静默失效")
+            # 已报过的别再报：否则每个 tick 刷一遍日志
+            self.assertEqual(H.warn_orphan_overrides(), [])
+        finally:
+            orphan.unlink()
+
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)

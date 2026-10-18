@@ -26,8 +26,35 @@ _lock = threading.Lock()
 _snapshots: dict[str, dict[str, Any]] = {}
 _mtimes: dict[Path, float] = {}
 _installed = False
+_warned_orphans: set[str] = set()
 _watcher: threading.Thread | None = None
 _stop = threading.Event()
+
+
+def warn_orphan_overrides() -> list[str]:
+    """点名"写了但不生效"的 `.local.yaml`。
+
+    `MANAGED` 之外的文件即使存在也不会被合并：协议 §17 的覆盖范围里列了
+    `seeds.yaml` 与 `response_examples.json`，但这两者既不在 `MANAGED` 里、
+    读取方也绕开了 `*_cfg()`（`seeds.py` 直接读 `CONFIG_DIR / "seeds.yaml"`，
+    `response_examples.json` 更不是 YAML，`_deep_merge` 处理不了）。
+    结果是用户认真写了一份覆盖，线上毫无变化，也没有任何日志。
+
+    这里不改变"哪些文件生效"——那是产品决策——只把静默失败变成一次明确告警。
+    返回本次新发现的孤儿文件名；每个文件只报一次，不每 tick 刷屏。
+    """
+    orphans: list[str] = []
+    for path in sorted(CONFIG_DIR.glob("*" + LOCAL_SUFFIX)):
+        managed = path.name[:-len(LOCAL_SUFFIX)] + ".yaml"
+        if managed in MANAGED or path.name in _warned_orphans:
+            continue
+        _warned_orphans.add(path.name)
+        orphans.append(path.name)
+        logger.warning(
+            "config_hot: %s 不在热重载覆盖范围内（MANAGED=%s），这份覆盖不会生效。"
+            "要么把它加进 MANAGED 并让读取方走 *_cfg()，要么删掉它。",
+            path.name, ",".join(MANAGED))
+    return orphans
 
 
 def _local_path(name: str) -> Path:
@@ -96,6 +123,7 @@ def install() -> list[str]:
             _snapshots[name] = compute(name)
             _mtimes[_local_path(name)] = _mtime(_local_path(name))
         _installed = True
+    warn_orphan_overrides()
     return list(MANAGED)
 
 
