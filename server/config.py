@@ -95,6 +95,22 @@ def avatar_cfg() -> dict[str, Any]:
     return _live("avatar.yaml", _avatar_base)
 
 
+@lru_cache(maxsize=1)
+def _seeds_base() -> dict[str, Any]:
+    return _load_yaml("seeds.yaml")
+
+
+def seeds_cfg() -> dict[str, Any]:
+    """初始好奇心种子池（协议 §14.1）。
+
+    协议 §17 的覆盖范围里写着 `seeds.yaml`，但此前它既不在 config_hot 的
+    `MANAGED` 里、读取方也绕开了访问器（`seeds.load_initial_seeds()` 直接读盘），
+    于是 `config/seeds.local.yaml` 写了也不生效，且没有任何日志。这里补上访问器，
+    读取方改走它之后覆盖才真正可用。
+    """
+    return _live("seeds.yaml", _seeds_base)
+
+
 DEFAULTS: dict[str, Any] = {
     "db_path": os.getenv("DB_PATH", str(DATA_DIR / "memory.db")),
     "llm_provider": os.getenv("LLM_PROVIDER", "openai"),

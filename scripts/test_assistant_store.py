@@ -4,6 +4,7 @@ Run: python scripts/test_assistant_store.py
 """
 import concurrent.futures
 from contextlib import closing
+import json
 from pathlib import Path
 import sqlite3
 import sys
@@ -50,6 +51,44 @@ class AssistantStoreTests(unittest.TestCase):
             self.store.create_task("different", request_id="task-1")
         with self.assertRaises(ValueError):
             self.store.create_reminder("submit", self.now + 11, task["id"], "reminder-1")
+
+    def test_create_task_accepts_a_deadline(self):
+        """`create_task` 必须能一次带上 `due_at`（UTC 秒）。
+
+        早先只有 `update_task` 认这个字段，创建时没有口子——「明天下午三点」
+        只能写进 description，任务本身没有截止时间，卡片也排不了序。
+        校验与 update 走同一条 `_timestamp` 规则。
+        """
+        task = self.store.create_task("评审", "明天下午三点的评审", due_at=self.now + 3600)
+        self.assertEqual(task["due_at"], self.now + 3600)
+        self.assertEqual(task["status"], "open")
+        # 时点不明确就该省略，不能塞一个猜出来的值
+        self.assertIsNone(self.store.create_task("没有截止时间")["due_at"])
+        for bad in ("明天", True, float("nan")):
+            with self.assertRaises(ValueError, msg=repr(bad)):
+                self.store.create_task("坏时点", due_at=bad)
+
+    def test_deadline_does_not_break_replay_of_older_requests(self):
+        """升级前落库的 request 记录必须仍能重放。
+
+        幂等指纹原先只有 `{title, description}`。如果新代码无条件把
+        `due_at: None` 也记进去，升级前写入的那条记录在重放时会被判成
+        "参数不同"，把一次正常的重试变成 ValueError——正在重试中的任务
+        会在部署瞬间集体失败。
+        """
+        first = self.store.create_task("report", "weekly", request_id="legacy-1")
+        with self.store._transaction() as db:
+            db.execute("UPDATE requests SET arguments=? WHERE request_id='legacy-1'",
+                       (json.dumps({"title": "report", "description": "weekly"}, sort_keys=True),))
+        replayed = self.store.create_task("report", "weekly", request_id="legacy-1")
+        self.assertEqual(replayed["id"], first["id"], "旧记录必须原样重放")
+
+        # 带截止时间的请求自己仍然幂等；改了时点才算不同参数
+        a = self.store.create_task("评审", due_at=self.now + 60, request_id="with-due")
+        b = self.store.create_task("评审", due_at=self.now + 60, request_id="with-due")
+        self.assertEqual(a["id"], b["id"])
+        with self.assertRaises(ValueError):
+            self.store.create_task("评审", due_at=self.now + 61, request_id="with-due")
 
     def test_version_conflict_and_task_states(self):
         task = self.store.create_task("task")

@@ -63,7 +63,12 @@ class AssistantService:
             self.context_builder = ContextBuilder(memory_manager, self.store)
         self.tools = [
             Tool('task.list', '查看任务，不修改', {}, (), self.store.list_tasks),
-            Tool('task.create', '创建明确任务', {'title': str, 'description': str}, ('title',), self.store.create_task, True),
+            # due_at 是 UTC Unix 秒数；时点不明确就省略，不要把猜测写进截止时间。
+            # 早先没有这个参数，「明天下午三点」只能塞进 description，任务本身
+            # 没有截止时间，卡片也排不了序。
+            Tool('task.create', '创建明确任务，due_at为UTC Unix秒数（时点不明确则省略）',
+                 {'title': str, 'description': str, 'due_at': float}, ('title',),
+                 self.store.create_task, True),
             Tool('task.update', '更新指定任务，状态 open/in_progress/waiting/done/cancelled',
                  {'task_id': str, 'changes': dict}, ('task_id', 'changes'), self.store.update_task, True),
             Tool('reminder.list', '查看提醒', {}, (), self.store.list_reminders),

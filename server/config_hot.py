@@ -19,7 +19,8 @@ from .config import CONFIG_DIR, _deep_merge, _load_yaml
 
 logger = logging.getLogger(__name__)
 
-MANAGED = ("persona.yaml", "memory.yaml", "pacing.yaml", "avatar.yaml", "agents_roster.yaml")
+MANAGED = ("persona.yaml", "memory.yaml", "pacing.yaml", "avatar.yaml",
+           "agents_roster.yaml", "seeds.yaml")
 LOCAL_SUFFIX = ".local.yaml"
 
 _lock = threading.Lock()
@@ -34,14 +35,15 @@ _stop = threading.Event()
 def warn_orphan_overrides() -> list[str]:
     """点名"写了但不生效"的 `.local.yaml`。
 
-    `MANAGED` 之外的文件即使存在也不会被合并：协议 §17 的覆盖范围里列了
-    `seeds.yaml` 与 `response_examples.json`，但这两者既不在 `MANAGED` 里、
-    读取方也绕开了 `*_cfg()`（`seeds.py` 直接读 `CONFIG_DIR / "seeds.yaml"`，
-    `response_examples.json` 更不是 YAML，`_deep_merge` 处理不了）。
-    结果是用户认真写了一份覆盖，线上毫无变化，也没有任何日志。
+    `MANAGED` 之外的文件即使存在也不会被合并。协议 §17 的覆盖范围里还列了
+    `response_examples.json`，它不是 YAML（`_deep_merge` 处理不了），至今
+    也没有覆盖通道——写一份 `response_examples.local.yaml` 只会静默失效。
 
     这里不改变"哪些文件生效"——那是产品决策——只把静默失败变成一次明确告警。
     返回本次新发现的孤儿文件名；每个文件只报一次，不每 tick 刷屏。
+
+    2026-10-18：`seeds.yaml` 已补进 `MANAGED` 并改走 `seeds_cfg()`，
+    不再是孤儿；这个函数留着守剩下的那个。
     """
     orphans: list[str] = []
     for path in sorted(CONFIG_DIR.glob("*" + LOCAL_SUFFIX)):

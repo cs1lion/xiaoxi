@@ -171,19 +171,37 @@ class AssistantStore:
             db.execute("INSERT INTO requests VALUES (?, ?, ?, ?)",
                        (operation, request_id, json.dumps(arguments, sort_keys=True), json.dumps(result)))
 
-    def create_task(self, title, description="", request_id=None):
+    def create_task(self, title, description="", request_id=None, *, due_at=None):
+        """Create a task. `due_at` is UTC Unix seconds or None (no deadline).
+
+        为什么要有：`update_task` 早就接受 `due_at`，表里也有这一列，但创建时
+        没有这个口子——于是「把明天下午三点的评审加到待办里」只能把时点写进
+        description，任务本身没有截止时间，卡片也排不了序。这里只补上创建口，
+        校验复用 `_timestamp`（与 update 同一条规则），不新增字段。
+
+        `due_at` 只能按关键字传：`request_id` 一直是第三个位置参数
+        （`create_task("report", "weekly", "task-1")` 在测试与调用点里都有），
+        把它挤到第四位会让既有调用把 request_id 当成时间戳。
+        """
         self._text(title, "title", True)
         self._text(description, "description")
+        if due_at is not None:
+            due_at = self._timestamp(due_at, "due_at")
         arguments = {"title": title, "description": description}
+        # 只有真的要写截止时间时才把它记进幂等指纹。永远带上 `due_at: None`
+        # 会让升级前落库的 request 记录（`{title, description}`）在重放时
+        # 被判成"参数不同"，把一次正常的重试变成 ValueError。
+        if due_at is not None:
+            arguments["due_at"] = due_at
         with self._transaction() as db:
             replay = self._replay(db, "create_task", request_id, arguments)
             if replay is not None:
                 return replay
             now, task_id = self._now(), uuid4().hex
             db.execute("""INSERT INTO tasks
-                (id,title,description,status,timezone,created_at,updated_at,version)
-                VALUES (?, ?, ?, 'open', ?, ?, ?, 1)""",
-                       (task_id, title, description, self._prefs(db)["timezone"], now, now))
+                (id,title,description,status,timezone,created_at,updated_at,due_at,version)
+                VALUES (?, ?, ?, 'open', ?, ?, ?, ?, 1)""",
+                       (task_id, title, description, self._prefs(db)["timezone"], now, now, due_at))
             result = self._row(db, "tasks", task_id)
             self._remember(db, "create_task", request_id, arguments, result)
             return result

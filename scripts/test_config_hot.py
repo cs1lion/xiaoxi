@@ -30,11 +30,14 @@ class ConfigHotTest(unittest.TestCase):
         # V3 花名册也进了 MANAGED；临时目录里必须有一份，否则 install() 读不到文件。
         (self.dir / "agents_roster.yaml").write_text(
             "version: 2\nagents: []\nseed_rules: []\ndispatch: {}\n", encoding="utf-8")
+        # seeds.yaml 同理：协议 §17 的覆盖范围包含它，2026-10-18 起进了 MANAGED。
+        (self.dir / "seeds.yaml").write_text(
+            "seeds:\n  - id: seed_base\n    question: 基础问题？\n", encoding="utf-8")
         self._old_c, self._old_h = C.CONFIG_DIR, H.CONFIG_DIR
         C.CONFIG_DIR = self.dir
         H.CONFIG_DIR = self.dir
         for loader in (C._persona_base, C._memory_base, C._pacing_base, C._avatar_base,
-                       C._agents_roster_base):
+                       C._agents_roster_base, C._seeds_base):
             loader.cache_clear()
         H.stop_watcher()
         H._snapshots.clear()
@@ -45,7 +48,7 @@ class ConfigHotTest(unittest.TestCase):
         H.stop_watcher()
         C.CONFIG_DIR, H.CONFIG_DIR = self._old_c, self._old_h
         for loader in (C._persona_base, C._memory_base, C._pacing_base, C._avatar_base,
-                       C._agents_roster_base):
+                       C._agents_roster_base, C._seeds_base):
             loader.cache_clear()
         H._snapshots.clear()
         H._mtimes.clear()
@@ -133,17 +136,43 @@ class ConfigHotTest(unittest.TestCase):
         self.assertEqual(H.warn_orphan_overrides(), [],
                          "临时目录里只有 MANAGED 内的覆盖，不该有孤儿")
 
-        orphan = self.dir / "seeds.local.yaml"
-        orphan.write_text("seeds: []\n", encoding="utf-8")
+        orphan = self.dir / "response_examples.local.yaml"
+        orphan.write_text("samples: []\n", encoding="utf-8")
         try:
             H._warned_orphans.clear()
             H.install()
-            self.assertIn("seeds.local.yaml", H._warned_orphans,
+            self.assertIn("response_examples.local.yaml", H._warned_orphans,
                           "install() 必须点名孤儿覆盖，否则它静默失效")
             # 已报过的别再报：否则每个 tick 刷一遍日志
             self.assertEqual(H.warn_orphan_overrides(), [])
         finally:
             orphan.unlink()
+
+    def test_seeds_override_reaches_the_reader(self) -> None:
+        """`seeds.local.yaml` 必须真的改变读取结果（协议 §17）。
+
+        2026-10-18 前 `seeds.yaml` 不在 MANAGED、读取方也直接读盘，覆盖写了不生效。
+        这里断言的是**读取方**看得到覆盖，不是"快照里有这份数据"——
+        只断言快照的话，读取方不接访问器时测试照样绿。
+        """
+        from server.memory.seeds import load_initial_seeds
+
+        H.install()
+        self.assertEqual([s["id"] for s in load_initial_seeds()], ["seed_base"])
+
+        H._local_path("seeds.yaml").write_text(
+            "seeds:\n  - id: seed_from_override\n    question: 覆盖里的问题？\n", encoding="utf-8")
+        self._bump("seeds.yaml")
+        H.refresh()
+        # 覆盖的是顶层 seeds 列表：_deep_merge 对非 dict 直接替换，符合预期
+        self.assertEqual([s["id"] for s in load_initial_seeds()], ["seed_from_override"],
+                         "seeds.local.yaml 写了必须生效")
+
+        H._local_path("seeds.yaml").unlink()
+        self._bump("seeds.yaml")
+        H.refresh()
+        self.assertEqual([s["id"] for s in load_initial_seeds()], ["seed_base"],
+                         "删掉覆盖要回到基础配置")
 
 
 if __name__ == "__main__":

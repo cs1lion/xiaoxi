@@ -162,6 +162,40 @@ taskkill //F //PID <占用 8000 的 PID> && .\.venv\Scripts\python.exe scripts\r
 | `mood.default_ttl_minutes` 无正确消费者 | 它是"新建心境的默认存活时长"，`decay_mood` 的 `easing_seconds` 是第二段衰减窗口 | 语义不同，硬接上去比不接更糟。等写入方落地一起定 |
 | `curiosity_reflection` 不是协议事件 | V2 思想引擎产出它，但协议 §十 没登记 | 发它等于自造 WS 事件。要么改协议，要么让它映射到 `self_evolution` 的 kind——需要 Role 0 决定 |
 | `proactive` 事件无人发 | `ambient.build_proactive()` 定义了，但 orchestrator 把 proactive 梯度改写成 mumble（见 §16 注释） | 是协议与实现的有意分歧，不是 bug；删函数或补事件都要先定语义 |
-| `seeds.local.yaml` / `response_examples.local.yaml` 不生效 | 已加告警（§config_hot），但覆盖本身仍不生效 | 把两者加进 MANAGED 需要读取方先改走 `*_cfg()`；改协议范围是 Role 0 的事 |
-| `task.create` 没有 `due_at` | 「明天下午三点」只能进 description | 扩 schema 要改协议 §25 与前端卡片，不在修 bug 的范围 |
+| `response_examples.local.yaml` 不生效 | 已加告警（§config_hot），但覆盖本身仍不生效 | `response_examples.json` 不是 YAML，`_deep_merge` 处理不了；要么加 JSON 覆盖通道，要么把协议 §17 的范围收窄 |
 
+## 9. 收尾：第二轮遗留问题的处理
+
+§8 的六条里，三条已修、三条仍需决策。
+
+**已修：**
+
+| 项 | 改动 | 证据 |
+|---|---|---|
+| `seeds.local.yaml` 不生效 | `seeds.yaml` 进 `MANAGED`；`seeds.load_initial_seeds()` 改走新增的 `config.seeds_cfg()` | `test_config_hot.test_seeds_override_reaches_the_reader`：覆盖生效、删除回退。变异验证：读取方改回直接读盘 → 该测试失败 |
+| `task.create` 没有 `due_at` | `AssistantStore.create_task(..., *, due_at=None)`；工具签名加可选 `due_at: float` | `test_assistant_store.test_create_task_accepts_a_deadline`：写入、省略、拒非法值 |
+| 同一改动的兼容风险 | `due_at` 只在**非 None** 时进幂等指纹 | `test_deadline_does_not_break_replay_of_older_requests`：升级前落库的 request 仍可重放。变异验证：无条件记录 → 该测试失败 |
+
+`due_at` 这条有两个值得记的坑：
+
+1. **位置参数**。`request_id` 一直是第三个位置参数
+   （`create_task("report", "weekly", "task-1")`），新参数必须放在 `*` 之后，
+   否则既有调用会把 `request_id` 当时间戳——`test_idempotent_create_survives_restart`
+   立刻抓到。
+2. **幂等指纹**。无条件把 `due_at: None` 记进 arguments，会让升级前写入的
+   request 记录在重放时被判成"参数不同"。这类问题只在**部署瞬间**发作：
+   正在重试中的任务会集体失败，而开发机上永远复现不了。
+
+**仍需决策（不是代码问题）：**
+
+- **心境写入方**。`AUTONOMOUS_MIND_V2.md` §3.3 说心境记录"产生原因与来源引用、
+  近期相关互动/后台思考摘要"，最自然的写入点是成功的 reflection。但"每轮反思都
+  改写心境"会让 §15.1 的"心境惯性"退化成"每轮情绪重置"——恰恰违反它要解决的问题。
+  需要定的是**什么条件下才写**（例如只在该轮 discovery 触及用户处境时），
+  这是产品判断。
+- **`curiosity_reflection` 的归宿**。它携带 `child_seed_ids` / `reflection_id`，
+  与协议 §十 的 `self_evolution{kind:taste|worldview|spark}` 不是一回事。
+  要么扩 kind 取值域，要么给它单独登记一个事件——两条路都要改协议。
+- **`proactive` 事件**。`build_proactive()` 无人调用是有意的（proactive 梯度被
+  改写成 mumble，见 §16 注释），但函数留着会被误读成"应该发"。要么删，
+  要么在 docstring 里写明它当前不参与调度。

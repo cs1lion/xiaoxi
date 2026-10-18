@@ -109,13 +109,16 @@ def find_duplicate_seed(store: MemoryStore, question: str, *,
 
 
 def load_initial_seeds() -> list[dict[str, Any]]:
-    """Read config/seeds.yaml; a missing/invalid file degrades to [] (never raises)."""
-    from ..config import CONFIG_DIR
-    import yaml
-    path = CONFIG_DIR / "seeds.yaml"
+    """Read the seed pool; a missing/invalid file degrades to [] (never raises).
+
+    走 `config.seeds_cfg()` 而不是直接读盘：协议 §17 的覆盖范围包含
+    `seeds.yaml`，只有经过访问器才能拿到 config_hot 合并后的快照。
+    直接读盘时 `seeds.local.yaml` 写了也不生效，且没有任何日志。
+    """
+    from ..config import seeds_cfg
     try:
-        data = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
-    except (OSError, yaml.YAMLError):
+        data = seeds_cfg()
+    except Exception:  # missing file / malformed YAML / unreadable dir
         return []
     seeds = data.get("seeds") if isinstance(data, dict) else None
     if not isinstance(seeds, list):
