@@ -1,0 +1,101 @@
+{
+  "code_forge": {
+    "id": "code_forge",
+    "displayName": "炼码工坊",
+    "zone": "industry",
+    "footprint": {
+      "w": 5,
+      "h": 4
+    },
+    "clearMargin": 1,
+    "door": {
+      "x": 2,
+      "y": 4
+    },
+    "workSpots": [
+      {
+        "x": 2,
+        "y": 2
+      }
+    ],
+    "chimney": {
+      "x": 3.6,
+      "y": 0.4
+    },
+    "accent": "smoke",
+    "boundTask": "code",
+    "palette": {
+      "body": 9067076,
+      "roof": 4147786,
+      "trim": 13208383,
+      "window": 15777904
+    },
+    "silhouette": "gable"
+  },
+  "star_archive": {
+    "id": "star_archive",
+    "displayName": "星图书阁",
+    "zone": "scholarly",
+    "footprint": {
+      "w": 4,
+      "h": 4
+    },
+    "clearMargin": 1,
+    "door": {
+      "x": 1,
+      "y": 4
+    },
+    "workSpots": [
+      {
+        "x": 1,
+        "y": 2
+      }
+    ],
+    "chimney": {
+      "x": 3.2,
+      "y": 0.5
+    },
+    "accent": "pages",
+    "boundTask": "research",
+    "palette": {
+      "body": 7043690,
+      "roof": 3095347,
+      "trim": 9412746,
+      "window": 15918000
+    },
+    "silhouette": "tower"
+  },
+  "ink_house": {
+    "id": "ink_house",
+    "displayName": "抄书斋",
+    "zone": "living",
+    "footprint": {
+      "w": 4,
+      "h": 3
+    },
+    "clearMargin": 1,
+    "door": {
+      "x": 1,
+      "y": 3
+    },
+    "workSpots": [
+      {
+        "x": 1,
+        "y": 1
+      }
+    ],
+    "chimney": {
+      "x": 3.2,
+      "y": 0.4
+    },
+    "accent": "ink",
+    "boundTask": "writing",
+    "palette": {
+      "body": 8020562,
+      "roof": 4865849,
+      "trim": 13082730,
+      "window": 16177568
+    },
+    "silhouette": "flat"
+  }
+}

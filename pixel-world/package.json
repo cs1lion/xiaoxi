@@ -1,0 +1,23 @@
+{
+  "name": "xiaoxi-pixel-world",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "description": "艾尔的世界 · 神谕沙盒原型（Phaser 3 + Vite + TypeScript）",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc --noEmit && vite build",
+    "preview": "vite preview",
+    "check": "tsc --noEmit",
+    "test": "node --test test/*.test.ts",
+    "test:browser": "node scripts/smoke.mjs"
+  },
+  "dependencies": {
+    "phaser": "3.90.0"
+  },
+  "devDependencies": {
+    "@types/node": "^24.19.2",
+    "typescript": "5.9.3",
+    "vite": "8.3.4"
+  }
+}

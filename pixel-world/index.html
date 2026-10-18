@@ -1,0 +1,119 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>莞尔的世界 · 神谕沙盒</title>
+    <style>
+      :root {
+        color-scheme: dark;
+        --ink: #e8e2d2;
+        --dim: #8e968c;
+        --panel: #171b18;
+        --line: #2b322c;
+        --amber: #e3a13c;
+      }
+      * { box-sizing: border-box; }
+      body {
+        margin: 0;
+        min-height: 100vh;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        gap: 14px;
+        padding: 28px 16px 40px;
+        background: #0c0f0d;
+        color: var(--ink);
+        font: 13px/1.6 ui-monospace, "Cascadia Mono", "Noto Sans Mono CJK SC", monospace;
+      }
+      header { text-align: center; }
+      h1 { margin: 0; font-size: 15px; font-weight: 600; letter-spacing: 0.08em; }
+      header p { margin: 4px 0 0; color: var(--dim); font-size: 12px; }
+      #app {
+        line-height: 0;
+        border: 1px solid var(--line);
+        box-shadow: 0 0 0 1px #000, 0 18px 40px rgba(0, 0, 0, 0.5);
+      }
+      #app canvas { display: block; image-rendering: pixelated; }
+      .oracle {
+        width: 720px;
+        max-width: 100%;
+        display: grid;
+        gap: 8px;
+        padding: 12px;
+        background: var(--panel);
+        border: 1px solid var(--line);
+      }
+      .row { display: flex; gap: 8px; flex-wrap: wrap; }
+      input {
+        flex: 1;
+        min-width: 0;
+        padding: 7px 9px;
+        background: #0f1310;
+        border: 1px solid var(--line);
+        color: var(--ink);
+        font: inherit;
+      }
+      input:focus { outline: 1px solid var(--amber); border-color: var(--amber); }
+      button {
+        padding: 7px 11px;
+        background: #1e2620;
+        border: 1px solid var(--line);
+        color: var(--ink);
+        font: inherit;
+        white-space: nowrap;
+        cursor: pointer;
+      }
+      button:hover { border-color: var(--amber); color: var(--amber); }
+      button.primary { background: #2d2618; border-color: #5a4a26; }
+      #status {
+        padding: 8px 12px;
+        width: 720px;
+        max-width: 100%;
+        background: var(--panel);
+        border: 1px solid var(--line);
+        color: var(--ink);
+        font-size: 12px;
+      }
+      #reply {
+        min-height: 1.6em;
+        color: var(--dim);
+        font-size: 12px;
+      }
+      #reply.bad { color: #c8876a; }
+      footer { color: #5d675e; font-size: 11px; text-align: center; max-width: 480px; }
+    </style>
+  </head>
+  <body>
+    <header>
+      <h1>莞尔的世界</h1>
+      <p>她不知道屏幕的存在，只知道神谕从祭坛落下来。</p>
+    </header>
+
+    <div id="app"></div>
+
+    <div id="status" role="status">世界正在醒来…</div>
+
+    <form class="oracle" id="oracle">
+      <div class="row">
+        <input id="utterance" autocomplete="off" placeholder="对世界说一句话：帮我写个爬虫 / 查一下资料 / 交付" />
+        <button class="primary" type="submit">降下神谕</button>
+      </div>
+      <div class="row">
+        <button type="button" data-kind="code">派活：写代码</button>
+        <button type="button" data-kind="research">派活：查资料</button>
+        <button type="button" data-kind="writing">派活：整理便笺</button>
+        <button type="button" id="finish">现实完成：交付</button>
+      </div>
+      <div id="reply" role="status" aria-live="polite"></div>
+    </form>
+
+    <footer>
+      世界逻辑与渲染分离：画面只读世界快照，命令经队列在下一拍统一结算。
+      点按钮和打字走同一条神谕通道。
+    </footer>
+
+
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>
