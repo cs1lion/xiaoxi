@@ -36,7 +36,10 @@ sys.path.insert(0, str(ROOT))
 from server.config import avatar_cfg, persona_cfg  # noqa: E402
 
 # 这些"type"是服务端内部数据结构 / 别的子协议，不是 /ws 的消息
-NOT_PROTOCOL = {"json_object", "pcm", "ok"}
+#  - json_object / pcm / ok：OpenAI 兼容响应与二进制帧
+#  - _audio_done / _llm_done：orchestrator 内部的流水线控制事件，从不出现在 WS 上
+#  - server_vad：发给上游 ASR 的 turn_detection 配置值，不是消息类型
+NOT_PROTOCOL = {"json_object", "pcm", "ok", "_audio_done", "_llm_done", "server_vad"}
 
 PARAMS_JS = ROOT / "web" / "avatar" / "params.js"
 APP_JS = ROOT / "web" / "app.js"
@@ -100,20 +103,30 @@ def emitted_types() -> dict[str, set[str]]:
 
 
 def frontend_cases() -> dict[str, set[str]]:
-    """从 app.js 的 switch 里抽出每个 case 分支读了哪些 msg.<字段>。"""
-    text = APP_JS.read_text(encoding="utf-8")
-    start = text.find("switch (msg.type)")
-    if start < 0:
-        raise SystemExit(f"{APP_JS} 里找不到 switch (msg.type)")
-    end = text.find("\n};", start)
-    body = text[start:end if end > 0 else len(text)]
+    """从 app.js 里抽出前端每个 msg.type 分支读了哪些 msg.<字段>。
 
+    两种派发风格都要认：`switch (msg.type)` 的 case，以及散落在文件里的
+    `msg.type === "x"` / `case "x"` 判断。app.js 把 micro_act / mumble 放在
+    switch 之前的 if-else 链里处理（协议 §16 三梯度），只看 switch 会把它们
+    误列进"前端未处理"——那份清单是给人排查用的，不可靠比没有更糟：
+    真正没接的事件会淹在一堆假阳性里。
+    """
+    text = APP_JS.read_text(encoding="utf-8")
     cases: dict[str, set[str]] = {}
-    marks = [(m.start(), m.group(1)) for m in re.finditer(r'''case ["']([a-z_]+)["']:''', body)]
-    for i, (pos, name) in enumerate(marks):
-        stop = marks[i + 1][0] if i + 1 < len(marks) else len(body)
-        fields = set(re.findall(r"\bmsg\.([a-z_]+)", body[pos:stop]))
-        cases.setdefault(name, set()).update(fields)
+    start = text.find("switch (msg.type)")
+    if start >= 0:
+        end = text.find("\n};", start)
+        body = text[start:end if end > 0 else len(text)]
+        marks = [(m.start(), m.group(1)) for m in re.finditer(r'''case ["']([a-z_]+)["']:''', body)]
+        for i, (pos, name) in enumerate(marks):
+            stop = marks[i + 1][0] if i + 1 < len(marks) else len(body)
+            fields = set(re.findall(r"\bmsg\.([a-z_]+)", body[pos:stop]))
+            cases.setdefault(name, set()).update(fields)
+    # switch 之外的相等判断：这里只记录"这个 type 前端接了"，**不抽字段**。
+    # if-else 链的判断点之间隔着别的函数，按位置切会把无关的 msg.X 读法算到
+    # 这个 case 头上，制造假阳性。字段级核对只信 switch——那里的边界是确定的。
+    for match in re.finditer(r'''msg\.type\s*===\s*["']([a-z_]+)["']''', text):
+        cases.setdefault(match.group(1), set())
     return cases
 
 

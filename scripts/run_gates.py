@@ -103,6 +103,14 @@ GATES: dict[str, dict[str, object]] = {
         "cmd": [str(PY), "scripts/test_llm_client.py"],
         "skip_regex": r"^\s*SKIP",
     },
+    "self_evolution_send": {
+        "cmd": [str(PY), "scripts/test_self_evolution_send.py"],
+        "skip_regex": r"^\s*SKIP",
+    },
+    "config_hot": {
+        "cmd": [str(PY), "scripts/test_config_hot.py"],
+        "skip_regex": r"^\s*SKIP",
+    },
     "evolution_quality_report": {
         # 评测报告不是回归门禁，但它在 Windows GBK 控制台崩过一次；
         # 收进来是为了让"报告跑得完"本身成为一条断言。
@@ -136,7 +144,7 @@ GATES: dict[str, dict[str, object]] = {
 ALWAYS_REQUIRED = ("protocol", "core", "evals", "npm", "executive_v3", "adapter_ext",
                    "codex_shim", "claude_shim", "gateway", "task_planning", "cross_day",
                    "thread_conversation", "self_evolution", "agent_loop", "llm_client",
-                   "evolution_quality_report")
+                   "self_evolution_send", "config_hot", "evolution_quality_report")
 
 
 def run_gate(name: str, spec: dict) -> dict:

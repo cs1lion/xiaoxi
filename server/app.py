@@ -24,6 +24,10 @@ from .memory.manager import manager
 from .memory.store import store
 from .speech.asr import recognizer, to_wav_bytes
 
+# 自进化通道允许发出的 WS 事件类型（协议 §十）。白名单之外的一个都不发：
+# 自造事件比少发一个事件更难查——前端对未知 type 安全忽略，于是两边都看不出来。
+SELF_EVOLUTION_WS_EVENTS = frozenset({"self_evolution"})
+
 ensure_dirs()
 
 app = FastAPI(title="聊天角色系统", version="0.1.0")
@@ -485,7 +489,7 @@ async def _maybe_self_evolution(conn: Connection) -> None:
     """One bounded idle self-evolution cycle; events are quiet and connection-level."""
     try:
         from .assistant.loop import SelfEvolutionCycle
-        from .memory.evolution import self_evolution_cfg, self_evolution_payload
+        from .memory.evolution import self_evolution_cfg
         if not self_evolution_cfg().get("enabled"):
             return
         idle_seconds = time.time() - conn.last_spoke_at
@@ -497,10 +501,28 @@ async def _maybe_self_evolution(conn: Connection) -> None:
         outcome = await cycle.reflect(idle_seconds=idle_seconds)
         if outcome.get("status") in ("skipped", "failed"):
             outcome = await cycle.run(idle_seconds=idle_seconds)
-        for change in outcome.get("events") or []:
-            payload = self_evolution_payload(change)
-            if payload is not None and not conn.closed:
-                await conn.send(payload)
+        for event in outcome.get("events") or []:
+            if not isinstance(event, dict) or conn.closed:
+                continue
+            # `events` 里已经是组装好的 WS 事件（run() 与 reflect() 各自调过
+            # self_evolution_payload / 直接给出完整事件）。这里**不能再翻译一次**：
+            # self_evolution_payload() 只认裸 change（顶层有 kind），拿一个已经
+            # 带 type 的事件进去会返回 None。2026-10-18 修：此前正是这么写的，
+            # 于是每一条自进化通知都被静默丢弃——协议 §十 的 self_evolution
+            # 事件一个都没发出去，前端 noteSelfEvolution() 从未触发。
+            if event.get("type") in SELF_EVOLUTION_WS_EVENTS:
+                # 只放行协议形状完整的事件：change 必须是对象。缺了它，
+                # 消费方读 change.kind 会拿到 None——又一种静默退化。
+                if isinstance(event.get("change"), dict):
+                    await conn.send(event)
+            elif "type" not in event:
+                # 裸 change：按协议 §十 的形状组装（kind 只允许 taste/worldview/spark）。
+                from .memory.evolution import self_evolution_payload
+                payload = self_evolution_payload(event)
+                if payload is not None:
+                    await conn.send(payload)
+            # 其余带 type 的事件（如 V2 思想引擎的 curiosity_reflection）不是协议
+            # 登记过的 WS 事件，不发——自造事件比少发一个事件更难查。
     except asyncio.CancelledError:
         raise
     except Exception:

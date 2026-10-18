@@ -10,9 +10,29 @@
 
 ```bash
 .\.venv\Scripts\python.exe scripts\check_protocol.py   # 协议漂移 + REST 接缝，必须 PASS
-.\.venv\Scripts\python.exe scripts\test_core.py        # 基线 38 passed / 0 failed，零回归
+.\.venv\Scripts\python.exe scripts\test_core.py        # 基线 40 passed / 0 failed，零回归
 .\.venv\Scripts\python.exe scripts\run_evals.py        # 回归评测离线层，失败即非零退出码
 ```
+
+### 门禁报告（一条命令确认"每道门都真的跑过"）
+
+```bash
+.\.venv\Scripts\python.exe scripts\run_gates.py                 # 23 道门全跑，跳过即失败
+.\.venv\Scripts\python.exe scripts\run_gates.py --allow-skip    # 跳过只告警（兼容旧口径）
+.\.venv\Scripts\python.exe scripts\run_gates.py --only protocol,core,evals
+```
+
+为什么单独立这个命令：若干回归脚本在环境不满足时会打印 `SKIP` 并以 0 退出
+（`test-ui-nav-browser.mjs` 在 8000 未起时就是这样；`test-body-coordination-browser.mjs`
+等缺本地夹具时同理）。逐条看退出码全是绿的，但那一轮其实什么都没验。
+`run_gates.py` 把每条命令的退出码与输出一起收上来，命中 `SKIP` 的门禁单独列一行并
+以非零退出——**绿必须来自真跑过，不能来自没跑**。
+
+浏览器门禁需要本地服务在 8000；服务未起时先
+`.\.venv\Scripts\python.exe scripts\run.py --port 8000`。
+
+改动 `web/` 前端文件后必须杀掉旧服务进程再重启，否则 `StaticFiles` 缓存的目录
+列表会让新增前端文件持续 404，浏览器回归会假失败。
 
 ## 回归评测（evals/）
 
@@ -60,13 +80,23 @@ node scripts\test-ui-nav-browser.mjs                             # 领航浏览�
 cd agent-runtime
 npm install --ignore-scripts
 node --experimental-strip-types selftest.ts                   # 硬崩溃后续跑 + 重复投递幂等
-node --experimental-strip-types test-model-run.ts             # 模型驱动：artifact + usage 落进运行日志（假端点）
+node --experimental-strip-types test-model-run.ts             # 模型驱动：artifact + usage + 密件落在 instructions
+node --experimental-strip-types test-nudge.ts                 # 只答散文不交差时，催一次能救回来
+node --experimental-strip-types test-write-file.ts            # write_file：目录内放行、逃逸全拒、模型驱动真写出文件
+node --experimental-strip-types test-handin.ts                # 交差时 ref 规范化：双反斜杠还原、没写过的文件拒收
+node --experimental-strip-types test-approval-chain.ts        # 审批全链：拦下→登记→按单放行→不跨单泄漏
+node --experimental-strip-types test-tier-model.ts            # cost_tier → 模型映射（含 conversation 上真选中）
 node --experimental-strip-types test-background.ts            # 后台任务：每步 checkpoint、不挡空闲等待
 node --experimental-strip-types test-approval.ts              # 审批门：未批准阻断且对模型可见，批准后放行
 node --experimental-strip-types test-live-tools.ts            # 真实端点是否透传 tools（无 LLM_API_KEY 则 SKIP）
 node --experimental-strip-types test-openai-tools.ts          # 自定义 OpenAI 兼容端点的流式/中文/工具调用/usage
 node --experimental-strip-types reference/24-child-tasks.ts   # 官方示例：failFast / abort 级联 / 重启续跑
 ```
+
+> `XIAOXI_MAX_TOKENS`（默认 8000）是慢环的 completion 预算，**不要**用 `.env` 的
+> `LLM_MAX_TOKENS`（那是快环短回复的 400）：推理型模型会把 1200 全烧在 reasoning 上，
+> 返回 `finish_reason:"length"`、正文空、无工具调用，整单以"执行体没交差"失败，
+> 而失败信息里 `said` 也是空的，看不出是预算问题。
 
 ## Role 1（记忆 / 日记 / 自进化 / 星图底层）
 
@@ -154,7 +184,23 @@ node web\starmap\test_starmap.mjs        # 第一阶段新建：数据桥接/检
 npm run test:voice                       # 播放链路零回归
 node scripts\test-workspace-browser.mjs  # 主工作台零回归
 node scripts\test-ui-browser.mjs         # UI 契约零回归
+node --experimental-default-type=module --test web\avatar\test_stage_camera.js  # 双态镜头与默认表情（零 DOM）
 ```
+
+星图手帐视觉层（`web/almanac.css`）改动后，除了上面四行，还要跑：
+
+```bash
+BASE_URL=http://127.0.0.1:8010/ node scripts\test-ui-browser.mjs        # 加载新样式后的 UI 契约
+node scripts\test-companion-browser.mjs                                  # 共同事项纸上便签
+node scripts\test-presence-capsule-browser.mjs                           # 三态胶囊落在胶囊栏
+node scripts\test-aqi-blocks-browser.mjs                                 # 积木卡墨色小卡
+BASE_URL=http://127.0.0.1:8010/ node scripts\test-ui-nav-browser.mjs    # 领航回归
+node scripts\test-voice-browser.mjs                                      # 语音轮次（设置面板不得遮住输入区）
+```
+
+> 设置面板的 `max-height` 必须给输入区留出空间：实测 1440×1000 与 390×844 下
+> 面板底沿与 `.composer` 顶沿之间要保持 15px 以上，否则 `#sendBtn` 被
+> `.settings-section` 拦截点击，语音回归会超时。
 
 浏览器手验（桌面 + 移动视口）不属于自动测试，但验收标准里要求：星图非空白、节点可点、讲述可播放可打断，附截图。
 
@@ -168,7 +214,21 @@ node scripts\test-ui-browser.mjs         # UI 契约零回归
 .\.venv\Scripts\python.exe scripts\test_claude_worker_shim.py     # 16 项：五种事件 + artifact
 .\.venv\Scripts\python.exe scripts\test_workbuddy_worker_shim.py  # 34 项：工具、失败、隔离
 .\.venv\Scripts\python.exe scripts\test_dsh_worker_shim.py        # 43 项：多步 token、失败、超时
+.\.venv\Scripts\python.exe scripts\test_acceptance_dispatch.py    # 52 项：验收条件 + 有界重试 + 反馈回写
 ```
+
+## 语音交付（2026-10-18）
+
+供应商在每个音频块前后各垫约 0.36s / 0.38s 静音，与 `pacing.yaml` 设计的呼吸停顿
+叠加后，实际句间空隙达 0.9~1.1s。`tts_trim_silence` 按 WAV 修剪首尾静音，
+让设计的 pause 成为真实停顿（实测固定开销 0.879s → 0.355s）。
+
+```bash
+.\.venv\Scripts\python.exe scripts\test_tts_trim_silence.py      # 11 项：修剪、边缘保留、容器不变、缓存键分格式
+```
+
+关掉修剪：`TTS_TRIM_SILENCE=false`。阈值与保留边缘由 `TTS_TRIM_THRESHOLD`
+（默认 0.012）与 `TTS_TRIM_PAD_MS`（默认 60）控制。
 
 真实调用会花 token，按需手动跑，不进门禁：
 
