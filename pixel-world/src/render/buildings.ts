@@ -138,13 +138,15 @@ export function updateBuilding(
   const activity = workstation?.activity ?? { kind: 'idle' as const };
   const working = activity.kind === 'operating';
   const cooling = activity.kind === 'cooling';
+  const broken = activity.kind === 'overheating';
+  const busy = working || broken;
 
   view.container.setDepth(altitude + view.baseY);
-  view.nameLabel.setAlpha(working ? 1 : 0.72);
-  view.chimney.setAlpha(working ? 1 : 0);
+  view.nameLabel.setAlpha(busy ? 1 : 0.72);
+  view.chimney.setAlpha(busy ? 1 : 0);
 
   view.progress.clear();
-  view.progress.setVisible(working || cooling);
+  view.progress.setVisible(working || cooling || broken);
   const width = building.footprint.w * TILE_PX - 8;
   if (working) {
     const filled = Math.round((width - 2) * (workstation?.progress ?? 0));
@@ -157,6 +159,12 @@ export function updateBuilding(
     view.progress.fillRect(5, -7, Math.max(1, filled), 1);
   } else if (cooling) {
     view.progress.fillStyle(UI.ember, 0.8);
+    view.progress.fillRect(4, -8, width, 3);
+  } else if (broken) {
+    // 故障：整条线闪红，不表示进度，只表示"这台机器坏了"。
+    view.progress.fillStyle(0x8f3b2f, 0.9);
+    view.progress.fillRect(4, -8, width, 3);
+    view.progress.fillStyle(0xd9583f, 0.5 + 0.5 * Math.sin(scene.time.now / 120));
     view.progress.fillRect(4, -8, width, 3);
   }
 }

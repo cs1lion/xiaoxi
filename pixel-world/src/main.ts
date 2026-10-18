@@ -35,6 +35,7 @@ const game = new Phaser.Game({
 // 场景配置要等 Game 建好之后才能 push：payload 在 init 里读。
 game.scene.add('SandboxScene', SandboxScene, true, {
   world,
+  blueprints,
   villagerName: '莞尔',
 });
 

@@ -7,18 +7,33 @@
 export interface OracleApi {
   /** 只表示这句话认没认出。世界是否照办在下一个逻辑拍结算，结果走 onResult。 */
   readonly say: (text: string) => { readonly ok: boolean; readonly message: string };
-  readonly dispatch: (kind: 'code' | 'research' | 'writing', summary: string) => void;
+  readonly dispatch: (kind: 'code' | 'research' | 'writing' | 'quick', summary: string) => void;
   readonly finish: () => void;
+  readonly build: (prefabId: string) => void;
+  readonly feed: (message: {
+    readonly type: 'task.assigned';
+    readonly taskId: string;
+    readonly taskKind: 'code' | 'research' | 'writing' | 'quick';
+    readonly summary: string;
+  }) => { readonly ok: boolean; readonly message: string };
   /** 命令结算结果。返回取消订阅函数。 */
   readonly onResult: (listener: (result: { ok: boolean; message: string }) => void) => () => void;
   /** 世界状态一行字。像素画面不画中文，这行归纸面。 */
   readonly onStatus: (listener: (line: string) => void) => () => void;
+  readonly report: () => ReportApi;
+}
+
+export interface ReportApi {
+  readonly headline: string;
+  readonly lines: readonly string[];
+  readonly date: string;
 }
 
 const BUTTON_TEXT: Record<string, string> = {
   code: '帮我写一段代码',
   research: '帮我查一下资料',
   writing: '帮我整理一下便笺',
+  quick: '顺手看一眼',
 };
 
 export function bindOraclePanel(getApi: () => OracleApi | undefined): void {
@@ -27,9 +42,34 @@ export function bindOraclePanel(getApi: () => OracleApi | undefined): void {
   const reply = document.querySelector<HTMLDivElement>('#reply');
   const status = document.querySelector<HTMLDivElement>('#status');
   const finish = document.querySelector<HTMLButtonElement>('#finish');
-  if (form === null || input === null || reply === null || status === null || finish === null) {
+  const paperHeadline = document.querySelector<HTMLHeadingElement>('#paper-headline');
+  const paperLines = document.querySelector<HTMLUListElement>('#paper-lines');
+  const paperDate = document.querySelector<HTMLSpanElement>('#paper-date');
+  if (
+    form === null ||
+    input === null ||
+    reply === null ||
+    status === null ||
+    finish === null ||
+    paperHeadline === null ||
+    paperLines === null ||
+    paperDate === null
+  ) {
     return;
   }
+
+  const paintPaper = (api: OracleApi): void => {
+    const report = api.report();
+    paperHeadline.textContent = report.headline;
+    paperDate.textContent = report.date;
+    paperLines.replaceChildren(
+      ...report.lines.map((line) => {
+        const item = document.createElement('li');
+        item.textContent = line;
+        return item;
+      }),
+    );
+  };
 
   const show = (ok: boolean, message: string): void => {
     reply.textContent = message;
@@ -43,10 +83,15 @@ export function bindOraclePanel(getApi: () => OracleApi | undefined): void {
       requestAnimationFrame(subscribe);
       return;
     }
-    api.onResult((result) => show(result.ok, result.message));
+    api.onResult((result) => {
+      show(result.ok, result.message);
+      paintPaper(api);
+    });
     api.onStatus((line) => {
       status.textContent = line;
+      paintPaper(api);
     });
+    paintPaper(api);
   };
   subscribe();
 
@@ -68,10 +113,25 @@ export function bindOraclePanel(getApi: () => OracleApi | undefined): void {
   for (const button of form.querySelectorAll<HTMLButtonElement>('button[data-kind]')) {
     button.addEventListener('click', () => {
       const kind = button.dataset.kind;
-      if (kind !== 'code' && kind !== 'research' && kind !== 'writing') return;
-      submit(BUTTON_TEXT[kind]);
+      const text = kind === undefined ? undefined : BUTTON_TEXT[kind];
+      if (text === undefined) return;
+      submit(text);
     });
   }
 
   finish.addEventListener('click', () => submit('交付'));
+
+  const rain = document.querySelector<HTMLButtonElement>('#rain');
+  const clear = document.querySelector<HTMLButtonElement>('#clear');
+  rain?.addEventListener('click', () => submit('下雨了'));
+  clear?.addEventListener('click', () => submit('放晴吧'));
+
+  for (const button of form.querySelectorAll<HTMLButtonElement>('button[data-build]')) {
+    button.addEventListener('click', () => {
+      const api = getApi();
+      const prefabId = button.dataset.build;
+      if (api === undefined || prefabId === undefined) return;
+      api.build(prefabId);
+    });
+  }
 }

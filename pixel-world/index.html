@@ -81,6 +81,39 @@
         font-size: 12px;
       }
       #reply.bad { color: #c8876a; }
+      #paper {
+        width: 720px;
+        max-width: 100%;
+        padding: 14px 18px 16px;
+        background: #e8e2d2;
+        color: #24211b;
+        font-family: "Noto Serif SC", Songti SC, serif;
+      }
+      #paper .masthead {
+        display: flex;
+        align-items: baseline;
+        justify-content: space-between;
+        padding-bottom: 6px;
+        border-bottom: 1px solid #b8ae94;
+      }
+      #paper .name {
+        font-size: 13px;
+        font-weight: 700;
+        letter-spacing: 0.3em;
+      }
+      #paper .date { font-size: 11px; color: #6b6252; }
+      #paper h2 {
+        margin: 10px 0 6px;
+        font-size: 17px;
+        font-weight: 600;
+      }
+      #paper ul {
+        margin: 0;
+        padding-left: 1.1em;
+        font-size: 13px;
+        line-height: 1.85;
+      }
+      #paper li::marker { color: #9a8f74; }
       footer { color: #5d675e; font-size: 11px; text-align: center; max-width: 480px; }
     </style>
   </head>
@@ -103,10 +136,25 @@
         <button type="button" data-kind="code">派活：写代码</button>
         <button type="button" data-kind="research">派活：查资料</button>
         <button type="button" data-kind="writing">派活：整理便笺</button>
+        <button type="button" data-kind="quick">顺手看一眼</button>
         <button type="button" id="finish">现实完成：交付</button>
+      </div>
+      <div class="row">
+        <button type="button" data-build="workshop_plot">世界法则：扩建一栋工坊</button>
+        <button type="button" id="rain">世界法则：下雨</button>
+        <button type="button" id="clear">世界法则：放晴</button>
       </div>
       <div id="reply" role="status" aria-live="polite"></div>
     </form>
+
+    <section id="paper" aria-live="polite">
+      <div class="masthead">
+        <span class="name">神谕日报</span>
+        <span class="date" id="paper-date"></span>
+      </div>
+      <h2 id="paper-headline">世界刚醒来</h2>
+      <ul id="paper-lines"></ul>
+    </section>
 
     <footer>
       世界逻辑与渲染分离：画面只读世界快照，命令经队列在下一拍统一结算。

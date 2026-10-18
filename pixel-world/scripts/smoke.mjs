@@ -127,6 +127,75 @@ try {
   const manual = await waitFor((s) => s.villager.mode === 'delivering', '人工交付也能结束这单');
   check(manual.tasks[1]?.status === 'done', '人工交付写进台账');
 
+  await waitFor((s) => s.villager.mode === 'idle', '交付完回到日常');
+
+  // 日常：没人派活时她自己换地方，状态行说得出她在做什么。
+  const routine = await waitFor(
+    (s) => typeof s.villager.routine === 'string' && s.villager.routine.length > 0,
+    '日常作息给出了一句可读的状态',
+    15000,
+  );
+  check(routine.villager.mode === 'idle', '日常状态不是被神谕打断的');
+
+  // 短活原地办：不占铺子。
+  await page.click('button[data-kind="quick"]');
+  const quick = await waitFor((s) => s.villager.mode === 'working', '短活当场开始');
+  check(
+    quick.workstations.every((w) => w.activity.kind !== 'operating'),
+    '短活没占用任何铺子',
+  );
+  await waitFor((s) => s.villager.mode === 'idle', '短活自己结束');
+
+  // 世界法则：下雨 → 她躲雨 → 雨停
+  await page.click('#rain');
+  const raining = await waitFor((s) => s.weather === 'rain', '神谕让世界下雨了');
+  check(raining.villager.umbrella === true, '下雨时她撑起伞');
+  check(raining.villager.mode === 'sheltering', '户外的她当场跑去躲雨');
+  await page.waitForTimeout(500);
+  await page.screenshot({ path: `${OUT}/04-rain.png` });
+  await waitFor((s) => s.villager.mode === 'idle', '跑到屋檐下停住');
+  await page.click('#clear');
+  await waitFor((s) => s.weather === 'clear', '神谕让天放晴');
+
+  // 造物主：扩建一栋，施工期间不接活，落成后进世界。
+  const beforeBuild = await state();
+  await page.click('button[data-build="workshop_plot"]');
+  const building = await waitFor(
+    (s) => s.buildings.length === beforeBuild.buildings.length + 1,
+    '造物主落下一栋新楼',
+  );
+  check(building.constructions.length === 1, '新楼处于施工中');
+  check(building.roads.length > beforeBuild.roads.length, '新楼自动铺出了一条路');
+  await page.screenshot({ path: `${OUT}/05-build.png` });
+  await waitFor((s) => s.constructions.length === 0, '施工结束，新楼落成');
+
+  // 信仰：再交付两单，攒满里程碑，世界多一件东西。
+  for (let i = 0; i < 2; i += 1) {
+    await page.click('button[data-kind="quick"]');
+    await waitFor((s) => s.villager.mode === 'working', `第 ${i + 1} 单短活开始`);
+    await waitFor((s) => s.villager.mode === 'idle', `第 ${i + 1} 单短活结束`);
+  }
+  const withProp = await waitFor((s) => s.props.length > 0, '神恩攒够，世界多了一件东西');
+  check(withProp.faith.milestones === 1, '里程碑记了一次');
+  await page.waitForTimeout(400);
+  await page.screenshot({ path: `${OUT}/06-faith.png` });
+
+  // 日报是纸面，读得到，且写的是真发生过的事。
+  const paper = await page.evaluate(() => window.Oracle.report());
+  check(paper.lines.some((line) => line.includes('交付')), '日报写了交付数');
+  const paperText = await page.textContent('#paper');
+  check(paperText.includes(paper.headline), '报纸把标题渲染到了纸面上');
+  check(paperText.includes('神恩') || paperText.includes('路灯'), '报纸写了落地的东西');
+
+  // 桥接：外部消息进世界，结果能从快照里读回来。
+  const bridged = await page.evaluate(async () => {
+    const before = window.Oracle.view().tasks.length;
+    window.Oracle.feed({ type: 'task.assigned', taskId: 'ext-1', taskKind: 'quick', summary: '外部派来的小事' });
+    await new Promise((resolve) => setTimeout(resolve, 500));
+    return { before, after: window.Oracle.view().tasks.length };
+  });
+  check(bridged.after === bridged.before + 1, '外部 Agent 的消息进了同一条命令队列');
+
   check(errors.length === 0, '全程无 JS 报错');
   console.log(`\n神谕闭环：${checks.length} 项通过`);
   for (const label of checks) console.log(`  ok  ${label}`);

@@ -2,23 +2,73 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { parseBlueprintTable, validateCoverage, BlueprintError } from '../src/world/blueprints.ts';
-import { buildWorld, assertWorldInvariants, WorldSetupError, ALTAR, GRID_WIDTH } from '../src/world/setup.ts';
+import {
+  ALTAR,
+  buildWorld,
+  assertWorldInvariants,
+  placeBlueprint,
+  WorldSetupError,
+  type BuiltWorld,
+} from '../src/world/setup.ts';
 import { Simulation } from '../src/world/simulation.ts';
 import { parseOracle } from '../src/world/oracle.ts';
-
+import { TASK_PROFILES } from '../src/world/tasks.ts';
+import { MILESTONE_POINTS, POINTS_PER_TASK } from '../src/world/faith.ts';
+import { stepWeather, rainWeather, clearWeather, RAIN_DURATION_MS } from '../src/world/weather.ts';
 
 const raw = JSON.parse(
   readFileSync(new URL('../src/world/prefabs.json', import.meta.url), 'utf8'),
 ) as Record<string, Record<string, unknown>>;
 const blueprints = parseBlueprintTable(raw);
 
-function fixedRandom(value: number): () => number {
-  return () => value;
+const STEP = 100;
+
+interface Rig {
+  readonly sim: Simulation;
+  readonly world: BuiltWorld;
+  tick(ms: number): void;
+  runUntil(predicate: () => boolean, limitMs?: number): void;
+  state(): ReturnType<Simulation['snapshot']>;
 }
 
-test('生产蓝图表能解析，且每种活恰好一栋铺子', () => {
-  assert.equal(blueprints.size, 3);
+function makeRig(): Rig {
+  const world = buildWorld(blueprints);
+  const sim = new Simulation({
+    grid: world.grid,
+    buildings: world.buildings,
+    altar: ALTAR,
+    villagerName: '莞尔',
+    spawnBuilding: (prefabId, instanceId) => {
+      const blueprint = blueprints.get(prefabId);
+      if (blueprint === undefined) return null;
+      return placeBlueprint(world.grid, blueprint, instanceId, ALTAR);
+    },
+  });
+  const rig: Rig = {
+    sim,
+    world,
+    tick(ms: number) {
+      sim.update(ms);
+    },
+    runUntil(predicate, limitMs = 60_000) {
+      let elapsed = 0;
+      while (!predicate()) {
+        if (elapsed >= limitMs) throw new Error(`超时：状态 ${JSON.stringify(sim.snapshot().villager)}`);
+        sim.update(STEP);
+        elapsed += STEP;
+      }
+    },
+    state: () => sim.snapshot(),
+  };
+  return rig;
+}
+
+// ------------------------------------------------------------------ blueprints
+
+test('生产蓝图表能解析，每种活恰好一栋铺子，扩建样板不占名额', () => {
+  assert.equal(blueprints.size, 4);
   assert.deepEqual(validateCoverage(blueprints), []);
+  assert.equal(blueprints.get('workshop_plot')?.boundTask, null);
 });
 
 test('蓝图 id 与键名不符时拒绝加载', () => {
@@ -29,22 +79,29 @@ test('蓝图 id 与键名不符时拒绝加载', () => {
 });
 
 test('门口落在占地内时拒绝加载', () => {
-  const bad = {
-    ...raw.code_forge,
-    door: { x: 1, y: 1 },
-  };
-  assert.throws(() => parseBlueprintTable({ code_forge: bad }), BlueprintError);
+  assert.throws(
+    () => parseBlueprintTable({ code_forge: { ...raw.code_forge, door: { x: 1, y: 1 } } }),
+    BlueprintError,
+  );
 });
 
 test('铺子与活对不上时拒绝加载', () => {
-  const bad = {
-    ...raw.code_forge,
-    boundTask: 'research',
-  };
-  assert.throws(() => parseBlueprintTable({ code_forge: bad }), BlueprintError);
+  assert.throws(
+    () => parseBlueprintTable({ code_forge: { ...raw.code_forge, boundTask: 'research' } }),
+    BlueprintError,
+  );
 });
 
-test('世界能把三栋铺子摆进各自分区，且都能从祭坛走到', () => {
+test('接活的铺子开在住宅区时拒绝加载', () => {
+  assert.throws(
+    () => parseBlueprintTable({ code_forge: { ...raw.code_forge, zone: 'living' } }),
+    BlueprintError,
+  );
+});
+
+// ---------------------------------------------------------------------- world
+
+test('世界能把三栋接活的铺子摆进各自分区，且都能从祭坛走到', () => {
   const world = buildWorld(blueprints);
   assert.equal(world.buildings.length, 3);
   assert.equal(new Set(world.buildings.map((b) => b.zone)).size, 3);
@@ -59,90 +116,133 @@ test('世界越出预算时拒绝开工', () => {
   );
 });
 
+test('造物主能落一栋新楼并铺一条从门口通往祭坛的小径', () => {
+  const world = buildWorld(blueprints);
+  const plot = blueprints.get('workshop_plot');
+  assert.ok(plot);
+  const spawned = placeBlueprint(world.grid, plot, 'plot#1', ALTAR);
+  assert.ok(spawned);
+  assert.ok(spawned.road.length > 0, '应该铺了路');
+  assert.ok(spawned.road.every((cell) => world.grid.zoneOf(cell) !== 'altar'), '路不铺进祭坛');
+});
+
+test('空地用完时造物主返回 null，不留下半个建筑', () => {
+  const world = buildWorld(blueprints);
+  const plot = blueprints.get('workshop_plot');
+  assert.ok(plot);
+
+  let placed = 0;
+  while (placeBlueprint(world.grid, plot, `plot#${placed + 1}`, ALTAR) !== null) {
+    placed += 1;
+    assert.ok(placed < 20, '分区容量应该有上限');
+  }
+  assert.ok(placed > 0, '至少能扩建一栋');
+
+  const before = world.grid.countOccupied();
+  assert.equal(placeBlueprint(world.grid, plot, 'overflow', ALTAR), null);
+  assert.equal(world.grid.countOccupied(), before, '失败的落位不许改账本');
+});
+
+// --------------------------------------------------------------------- oracle
+
 test('神谕按动词收敛，认不出的落 unknown', () => {
-  assert.deepEqual(parseOracle('帮我写个爬虫'), { kind: 'dispatch', taskKind: 'code', summary: '帮我写个爬虫' });
-  assert.deepEqual(parseOracle('查一下天气'), { kind: 'dispatch', taskKind: 'research', summary: '查一下天气' });
+  assert.deepEqual(parseOracle('帮我写个爬虫'), {
+    kind: 'dispatch',
+    taskKind: 'code',
+    summary: '帮我写个爬虫',
+  });
+  assert.equal(parseOracle('查一下天气').kind, 'dispatch');
   assert.equal(parseOracle('整理一下便笺').kind, 'dispatch');
   assert.equal(parseOracle('交付').kind, 'complete');
+  assert.deepEqual(parseOracle('下雨了'), { kind: 'weather', weather: 'rain' });
+  assert.deepEqual(parseOracle('放晴吧'), { kind: 'weather', weather: 'clear' });
   assert.equal(parseOracle('今天真好看').kind, 'unknown');
   assert.equal(parseOracle('   ').kind, 'unknown');
 });
 
-interface Rig {
-  readonly sim: Simulation;
-  readonly buildings: ReturnType<typeof buildWorld>['buildings'];
-  tick(ms: number): void;
-}
-
-function makeRig(): Rig {
-  const world = buildWorld(blueprints);
-  const sim = new Simulation({
-    grid: world.grid,
-    buildings: world.buildings,
-    altar: ALTAR,
-    villagerName: '莞尔',
-    random: fixedRandom(0.5),
-  });
-  return {
-    sim,
-    buildings: world.buildings,
-    tick(ms: number) {
-      sim.update(ms);
-    },
-  };
-}
-
-test('空闲时在祭坛附近走动，不会离开可走区', () => {
-  const rig = makeRig();
-  for (let i = 0; i < 200; i += 1) rig.tick(100);
-  const snap = rig.sim.snapshot();
-  assert.equal(snap.villager.mode, 'idle');
-  assert.ok(snap.villager.pos.x > 0 && snap.villager.pos.x < GRID_WIDTH - 1);
+test('「顺手」走原地短活，不抢长活的活', () => {
+  const quick = parseOracle('顺手查一下今天几号');
+  assert.equal(quick.kind, 'dispatch');
+  assert.equal(quick.kind === 'dispatch' && quick.taskKind, 'quick');
+  const long = parseOracle('查一下季度资料');
+  assert.equal(long.kind === 'dispatch' && long.taskKind, 'research');
 });
+
+// ------------------------------------------------------------------- everyday
+
+test('没人管的时候她也过日子：离开祭坛再回来', () => {
+  const rig = makeRig();
+  rig.runUntil(() => rig.state().villager.routine !== null, 5000);
+  const first = rig.state().villager;
+  assert.notEqual(first.routine, null);
+  const start = first.pos;
+  rig.tick(4000);
+  const later = rig.state().villager.pos;
+  assert.ok(
+    Math.hypot(later.x - start.x, later.y - start.y) > 0.5 || rig.state().villager.routine !== null,
+    '她应该换过地方',
+  );
+});
+
+test('日常不会自己走进铺子，铺子只在接活时运转', () => {
+  const rig = makeRig();
+  for (let i = 0; i < 200; i += 1) rig.tick(STEP);
+  const state = rig.state();
+  assert.equal(state.villager.mode, 'idle');
+  assert.ok(state.workstations.every((w) => w.activity.kind === 'idle'));
+});
+
+// ---------------------------------------------------------------------- work
 
 test('神谕下达后：行礼 → 走进铺子 → 铺子开工', () => {
   const rig = makeRig();
-  const forge = rig.buildings.find((b) => b.boundTask === 'code');
+  const forge = rig.world.buildings.find((b) => b.boundTask === 'code');
   assert.ok(forge);
 
   rig.sim.enqueue({ kind: 'dispatch', taskKind: 'code', summary: '写一个脚本' });
   const result = rig.sim.update(16);
   assert.equal(result[0].ok, true);
-  assert.equal(rig.sim.snapshot().villager.mode, 'saluting');
+  assert.equal(rig.state().villager.mode, 'saluting');
 
   rig.tick(800);
-  assert.equal(rig.sim.snapshot().villager.mode, 'toWork');
+  assert.equal(rig.state().villager.mode, 'toWork');
 
-  for (let i = 0; i < 100 && rig.sim.snapshot().villager.mode !== 'working'; i += 1) {
-    rig.tick(100);
-  }
-  const working = rig.sim.snapshot();
-  assert.equal(working.villager.mode, 'working');
+  rig.runUntil(() => rig.state().villager.mode === 'working');
+  const working = rig.state();
   assert.equal(working.villager.visible, false, '进屋干活时人不该在门外');
   const activity = working.workstations.find((w) => w.buildingId === forge.instanceId)?.activity;
   assert.equal(activity?.kind, 'operating');
 });
 
-test('活干完之后铺子冒一阵冷却，人走到门口交付，再回到祭坛', () => {
+test('活干完之后铺子冷却，人走到门口交付，再回到祭坛', () => {
   const rig = makeRig();
-  const forge = rig.buildings.find((b) => b.boundTask === 'code');
+  const forge = rig.world.buildings.find((b) => b.boundTask === 'code');
   assert.ok(forge);
   rig.sim.enqueue({ kind: 'dispatch', taskKind: 'code', summary: '写一个脚本' });
 
-  for (let i = 0; i < 400 && rig.sim.snapshot().villager.mode !== 'delivering'; i += 1) {
-    rig.tick(100);
-  }
-  const delivered = rig.sim.snapshot();
-  assert.equal(delivered.villager.mode, 'delivering');
+  rig.runUntil(() => rig.state().villager.mode === 'delivering');
+  const delivered = rig.state();
   assert.equal(delivered.villager.visible, true);
   assert.equal(delivered.tasks[0].status, 'done');
-  const activity = delivered.workstations.find((w) => w.buildingId === forge.instanceId)?.activity;
-  assert.equal(activity?.kind, 'cooling');
+  assert.equal(
+    delivered.workstations.find((w) => w.buildingId === forge.instanceId)?.activity.kind,
+    'cooling',
+  );
 
-  for (let i = 0; i < 400 && rig.sim.snapshot().villager.mode !== 'idle'; i += 1) {
-    rig.tick(100);
-  }
-  assert.equal(rig.sim.snapshot().villager.mode, 'idle');
+  rig.runUntil(() => rig.state().villager.mode === 'idle');
+  assert.equal(rig.state().villager.taskId, null);
+});
+
+test('短活原地办，不进铺子', () => {
+  const rig = makeRig();
+  rig.sim.enqueue({ kind: 'dispatch', taskKind: 'quick', summary: '顺手看一眼' });
+  rig.sim.update(16);
+  const starting = rig.state();
+  assert.equal(starting.villager.mode, 'working');
+  assert.ok(starting.workstations.every((w) => w.activity.kind === 'idle'), '没有铺子开工');
+
+  rig.runUntil(() => rig.state().villager.mode === 'idle', TASK_PROFILES.quick.estimateMs + 2000);
+  assert.equal(rig.state().tasks[0].status, 'done');
 });
 
 test('手上有活时不接新神谕，世界状态不变', () => {
@@ -155,46 +255,91 @@ test('手上有活时不接新神谕，世界状态不变', () => {
   rig.sim.enqueue({ kind: 'dispatch', taskKind: 'research', summary: '查一下' });
   const result = rig.sim.update(16);
   assert.equal(result[0].ok, false);
-  assert.equal(rig.sim.snapshot().tasks.length, 1);
+  assert.equal(rig.state().tasks.length, 1);
 });
 
 test('空手时交付被拒绝', () => {
   const rig = makeRig();
   rig.sim.enqueue({ kind: 'complete' });
-  const result = rig.sim.update(16);
-  assert.equal(result[0].ok, false);
+  assert.equal(rig.sim.update(16)[0].ok, false);
 });
 
 test('每条命令只在 update 开头结算一次', () => {
   const rig = makeRig();
   rig.sim.enqueue({ kind: 'dispatch', taskKind: 'code', summary: '写一个脚本' });
-  assert.equal(rig.sim.snapshot().villager.mode, 'idle', '入队瞬间世界不动');
+  assert.equal(rig.state().villager.mode, 'idle', '入队瞬间世界不动');
   rig.sim.update(16);
-  assert.equal(rig.sim.snapshot().villager.mode, 'saluting');
+  assert.equal(rig.state().villager.mode, 'saluting');
 });
 
-test('同样的随机种子跑出同样的世界', () => {
-  const a = makeRig();
-  const b = makeRig();
-  for (let i = 0; i < 100; i += 1) {
-    a.tick(100);
-    b.tick(100);
+// ------------------------------------------------------------------- weather
+
+test('下雨：户外的人当场改主意去躲雨，天晴后恢复日常', () => {
+  const rig = makeRig();
+  rig.sim.enqueue({ kind: 'setWeather', weather: 'rain' });
+  const result = rig.sim.update(16);
+  assert.equal(result[0].ok, true);
+  assert.equal(rig.state().weather, 'rain');
+  assert.equal(rig.state().villager.mode, 'sheltering');
+  assert.equal(rig.state().villager.umbrella, true);
+
+  rig.runUntil(() => rig.state().villager.mode === 'idle', 20_000);
+  assert.equal(rig.state().villager.routine, '在屋檐下看雨');
+
+  rig.sim.enqueue({ kind: 'setWeather', weather: 'clear' });
+  rig.sim.update(16);
+  assert.equal(rig.state().weather, 'clear');
+});
+
+test('雨会自己停，不需要第二条神谕', () => {
+  const rig = makeRig();
+  rig.sim.enqueue({ kind: 'setWeather', weather: 'rain' });
+  rig.sim.update(16);
+  rig.runUntil(() => rig.state().weather === 'clear', RAIN_DURATION_MS + 5000);
+  assert.equal(rig.state().weather, 'clear');
+});
+
+test('天气浓淡是渐变的，不会一帧切完', () => {
+  let state = rainWeather(0);
+  state = stepWeather(state, 100);
+  assert.ok(state.intensity > 0 && state.intensity < 1, '刚下雨时还没拉满');
+  assert.equal(stepWeather(clearWeather(), 100).intensity, 0);
+});
+
+// ----------------------------------------------------------------------- faith
+
+test('交付攒够里程碑，世界里多一件东西，且不重复', () => {
+  const rig = makeRig();
+  const tasks = Math.ceil(MILESTONE_POINTS / POINTS_PER_TASK);
+  for (let i = 0; i < tasks; i += 1) {
+    rig.sim.enqueue({ kind: 'dispatch', taskKind: 'quick', summary: `小事 ${i}` });
+    rig.runUntil(() => rig.state().villager.mode === 'working', 5000);
+    rig.runUntil(() => rig.state().villager.mode === 'idle', 10_000);
   }
-  assert.deepEqual(a.sim.snapshot().villager.pos, b.sim.snapshot().villager.pos);
+  const state = rig.state();
+  assert.equal(state.faith.milestones, 1);
+  assert.equal(state.props.length, 1);
+  assert.ok(state.props[0].id.startsWith('prop-'));
 });
 
-test('缺一栋铺子时神谕无法落地', () => {
-  const world = buildWorld(blueprints);
-  const stripped = world.buildings.filter((b) => b.boundTask !== 'research');
-  const sim = new Simulation({
-    grid: world.grid,
-    buildings: stripped,
-    altar: ALTAR,
-    villagerName: '莞尔',
-    random: fixedRandom(0.5),
-  });
-  sim.enqueue({ kind: 'dispatch', taskKind: 'research', summary: '查' });
-  const result = sim.update(16);
-  assert.equal(result[0].ok, false);
-  assert.equal(sim.snapshot().villager.mode, 'idle');
+// ------------------------------------------------------------------ creator
+
+test('造物主能扩建一栋新楼，施工期间它不接活', () => {
+  const rig = makeRig();
+  rig.sim.enqueue({ kind: 'build', prefabId: 'workshop_plot', instanceId: 'plot#1' });
+  const result = rig.sim.update(16);
+  assert.equal(result[0].ok, true);
+  assert.equal(rig.state().buildings.length, 4);
+  assert.equal(rig.state().constructions.length, 1);
+  assert.ok(rig.state().roads.length > 0, '新楼带出一条路');
+
+  rig.runUntil(() => rig.state().constructions.length === 0, 10_000);
+  assert.equal(rig.state().constructions.length, 0);
+});
+
+test('同一种铺子不能建第二栋', () => {
+  const rig = makeRig();
+  rig.sim.enqueue({ kind: 'build', prefabId: 'code_forge', instanceId: 'forge#2' });
+  assert.equal(rig.sim.update(16)[0].ok, false);
+  assert.equal(rig.state().buildings.length, 3);
 });

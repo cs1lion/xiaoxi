@@ -68,6 +68,7 @@ export function updateVillager(
   const bob = villager.mode === 'saluting' ? -2 : 0;
   const hop = villager.mode === 'delivering' ? -1 : 0;
   drawBody(view.body, villager.facing, bob + hop);
+  if (villager.umbrella) drawUmbrella(view.body);
 
   view.bubble.setVisible(villager.bubble !== null);
   if (villager.bubble !== null) view.bubble.setText(villager.bubble);
@@ -76,6 +77,16 @@ export function updateVillager(
 
   const walking = villager.mode === 'toWork' || villager.mode === 'toAltar';
   view.shadow.setAlpha(walking ? 0.28 : 0.35);
+}
+
+/** 伞只在下雨且她在户外时出现；世界给的事实，渲染层不自己判断天气。 */
+function drawUmbrella(g: Phaser.GameObjects.Graphics): void {
+  g.fillStyle(0x8c4a3a, 1);
+  g.fillRect(-7, -30, 14, 3);
+  g.fillStyle(0xa85c46, 1);
+  g.fillRect(-5, -32, 10, 2);
+  g.fillStyle(0x3a2d26, 1);
+  g.fillRect(0, -27, 1, 8);
 }
 
 function drawBody(

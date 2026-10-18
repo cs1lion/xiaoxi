@@ -231,7 +231,8 @@ export class WorldGrid {
     return candidates[Math.floor(random() * candidates.length)];
   }
 
-  private nearestWalkable(goal: GridPoint): GridPoint | null {
+  /** 离目标最近的一块可走空地。作息落点用它兜底。 */
+  nearestWalkable(goal: GridPoint): GridPoint | null {
     let best: GridPoint | null = null;
     let bestDistance = Number.POSITIVE_INFINITY;
     for (let y = 0; y < this.height; y += 1) {

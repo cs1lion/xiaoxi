@@ -1,10 +1,11 @@
 /** 蓝图注册表。JSON 是外部数据，在边界解析成强类型；解析失败直接抛，不带着半个世界开工。 */
 
+import { WORKSHOP_TASKS } from './tasks.ts';
 import type {
   PrefabBlueprint,
   Silhouette,
   ZoneId,
-  TaskKind,
+  WorkshopTask,
   WorkAccent,
 } from './types.ts';
 
@@ -16,9 +17,12 @@ const ZONES: readonly ZoneId[] = [
   'agriculture',
   'living',
 ];
-const TASKS: readonly TaskKind[] = ['code', 'research', 'writing'];
+const TASKS: readonly WorkshopTask[] = WORKSHOP_TASKS;
 const ACCENTS: readonly WorkAccent[] = ['smoke', 'pages', 'ink'];
 const SILHOUETTES: readonly Silhouette[] = ['gable', 'tower', 'flat'];
+
+/** 能落工坊的分区。住宅区只放不接活的建筑。 */
+const workshopZones: readonly ZoneId[] = ['industry', 'scholarly', 'agriculture'];
 
 export class BlueprintError extends Error {}
 
@@ -33,7 +37,8 @@ export function parseBlueprint(id: string, raw: unknown): PrefabBlueprint {
   const zone = requireOneOf(raw, 'zone', ZONES, fail);
   const accent = requireOneOf(raw, 'accent', ACCENTS, fail);
   const silhouette = requireOneOf(raw, 'silhouette', SILHOUETTES, fail);
-  const boundTask = requireOneOf(raw, 'boundTask', TASKS, fail);
+  const boundTask =
+    raw.boundTask === null ? null : requireOneOf(raw, 'boundTask', TASKS, fail);
   const footprint = requireSize(raw, 'footprint', fail);
   const clearMargin = requireNonNegativeInt(raw, 'clearMargin', fail);
   const door = requirePoint(raw, 'door', fail);
@@ -49,6 +54,9 @@ export function parseBlueprint(id: string, raw: unknown): PrefabBlueprint {
   if (boundTask === 'code' && accent !== 'smoke') fail('代码活必须冒烟');
   if (boundTask === 'research' && accent !== 'pages') fail('查资料必须翻纸');
   if (boundTask === 'writing' && accent !== 'ink') fail('写字必须落墨');
+  if (boundTask !== null && !workshopZones.includes(zone)) {
+    return fail(`${boundTask} 的铺子不该开在 ${zone} 区`);
+  }
 
   const upgradeTo = raw.upgradeTo;
   if (upgradeTo !== undefined && typeof upgradeTo !== 'string') {
@@ -82,13 +90,14 @@ export function parseBlueprintTable(raw: unknown): ReadonlyMap<string, PrefabBlu
   return out;
 }
 
-/** 每种活都必须有且只有一栋铺子，否则神谕落不下去。 */
+/** 每种活恰好一栋常驻铺子。不接活的建筑不参与这条检查。 */
 export function validateCoverage(
   table: ReadonlyMap<string, PrefabBlueprint>,
 ): readonly string[] {
   const problems: string[] = [];
+  const workshops = [...table.values()].filter((bp) => bp.boundTask !== null);
   for (const task of TASKS) {
-    const matches = [...table.values()].filter((bp) => bp.boundTask === task);
+    const matches = workshops.filter((bp) => bp.boundTask === task);
     if (matches.length !== 1) {
       problems.push(`任务 ${task} 绑定了 ${matches.length} 栋铺子，必须恰好 1 栋`);
     }

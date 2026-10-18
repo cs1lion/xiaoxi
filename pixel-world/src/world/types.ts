@@ -31,8 +31,11 @@ export interface TileCell {
   occupant: string | null;
 }
 
-/** 神谕能派的三类活；每一类绑定一种铺子。 */
-export type TaskKind = 'code' | 'research' | 'writing';
+/** 神谕能派的活。前三种入驻铺子，`quick` 在原地做完。 */
+export type TaskKind = 'code' | 'research' | 'writing' | 'quick';
+
+/** 需要铺子承接的活。`quick` 故意不在里面。 */
+export type WorkshopTask = Exclude<TaskKind, 'quick'>;
 
 /** 铺子干活时冒出来的东西（纯视觉，由渲染层解释）。 */
 export type WorkAccent = 'smoke' | 'pages' | 'ink';
@@ -55,7 +58,8 @@ export interface PrefabBlueprint {
   readonly chimney: Vec2;
   readonly accent: WorkAccent;
   readonly silhouette: Silhouette;
-  readonly boundTask: TaskKind;
+  /** null 表示这栋楼不接活，只占地方（扩建样板、装饰建筑）。 */
+  readonly boundTask: WorkshopTask | null;
   readonly palette: {
     readonly body: number;
     readonly roof: number;
@@ -65,24 +69,35 @@ export interface PrefabBlueprint {
   readonly upgradeTo?: string;
 }
 
+export type Weather = 'clear' | 'rain';
+
 export type VillagerMode =
   | 'idle'
   | 'saluting'
   | 'toWork'
   | 'working'
   | 'delivering'
-  | 'toAltar';
+  | 'toAltar'
+  | 'sheltering';
 
-export type TaskStatus = 'assigned' | 'in_progress' | 'done';
+export type TaskStatus = 'assigned' | 'in_progress' | 'done' | 'failed';
 
 export interface TaskRecord {
   readonly id: string;
   readonly kind: TaskKind;
   readonly summary: string;
-  readonly buildingId: string;
+  /** 原地做的活没有铺子。 */
+  readonly buildingId: string | null;
   status: TaskStatus;
   readonly createdAt: number;
   completedAt: number | null;
+}
+
+/** 每类活的时长与场地。短的原地做，长的进城。 */
+export interface TaskProfile {
+  readonly estimateMs: number;
+  readonly venue: 'workshop' | 'in_place';
+  readonly label: string;
 }
 
 export interface PlacedBuilding {
@@ -97,7 +112,7 @@ export interface PlacedBuilding {
   readonly chimney: Vec2;
   readonly accent: WorkAccent;
   readonly silhouette: Silhouette;
-  readonly boundTask: TaskKind;
+  readonly boundTask: WorkshopTask | null;
   readonly palette: PrefabBlueprint['palette'];
 }
 
@@ -108,6 +123,12 @@ export type WorkstationActivity =
       readonly taskId: string;
       readonly startedAt: number;
       readonly estimateMs: number;
+    }
+  | {
+      /** 工具报错后的滑稽故障态，黑烟，不会自己恢复。 */
+      readonly kind: 'overheating';
+      readonly taskId: string;
+      readonly since: number;
     }
   | { readonly kind: 'cooling'; readonly taskId: string; readonly until: number };
 
@@ -120,6 +141,24 @@ export interface WorkstationSnapshot {
   readonly progress: number;
 }
 
+/** 在建工地。期间不能接活，画成脚手架。 */
+export interface ConstructionSnapshot {
+  readonly buildingId: string;
+  readonly displayName: string;
+  readonly remainingMs: number;
+  readonly totalMs: number;
+}
+
+/** 累积式改变：交付多了，世界多一件东西。不可花掉、不贬值。 */
+export type PropKind = 'lamp' | 'tree' | 'banner';
+
+export interface WorldProp {
+  readonly id: string;
+  readonly kind: PropKind;
+  readonly at: GridPoint;
+  readonly label: string;
+}
+
 export interface VillagerSnapshot {
   readonly name: string;
   readonly mode: VillagerMode;
@@ -128,6 +167,10 @@ export interface VillagerSnapshot {
   readonly visible: boolean;
   readonly taskId: string | null;
   readonly bubble: string | null;
+  /** 没活干时她在做什么，给纸面状态行用。 */
+  readonly routine: string | null;
+  /** 下雨时渲染层给她打把伞；世界不判断"她淋不淋湿"。 */
+  readonly umbrella: boolean;
 }
 
 export interface WorldSnapshot {
@@ -135,9 +178,15 @@ export interface WorldSnapshot {
   readonly villager: VillagerSnapshot;
   readonly buildings: readonly PlacedBuilding[];
   readonly workstations: readonly WorkstationSnapshot[];
+  readonly constructions: readonly ConstructionSnapshot[];
   readonly tasks: readonly TaskRecord[];
+  readonly props: readonly WorldProp[];
+  readonly roads: readonly GridPoint[];
   readonly altar: GridPoint;
   readonly events: readonly WorldEvent[];
+  readonly weather: Weather;
+  /** 交付积累的信仰点数与已达成的世界记忆数。 */
+  readonly faith: { readonly points: number; readonly milestones: number };
 }
 
 /** 神谕解析结果。世界只认这几种动词，别的都落到 unknown。 */
