@@ -406,6 +406,38 @@ class Orchestrator:
             result['status'] = 'found'
         return result
 
+    @staticmethod
+    def _circadian_and_mood(*, enabled: bool) -> tuple[str, str]:
+        """V2 §15 的两段背景：时段自然语言 + 心境余温。两者都允许失败成 ""。
+
+        为什么值得单独一个函数：`persona.circadian_context()` 与
+        `persona.mood_narrative()` 早就写好了，`dynamic_prompt()` 也一直认
+        `circadian` / `mood` 两个参数，但从来没有人把它们接起来——结果是
+        §15 在协议里写着、在 config 里配着，线上却一点效果都没有。
+        这里只补上那一根线，不新增事件、不改协议字段。
+
+        任何异常都降级成 ""：时段与心境是背景，不是回复的前提。
+        """
+        if not enabled:
+            return "", ""
+        circadian = ""
+        mood = ""
+        try:
+            from ..memory.evolution import self_evolution_cfg
+            from ..persona import circadian_context
+            zone = (self_evolution_cfg().get("circadian") or {}).get("timezone")
+            circadian = circadian_context(str(zone or "Asia/Shanghai"))
+        except Exception:
+            circadian = ""
+        try:
+            from ..memory.diary import decay_mood
+            from ..persona import mood_narrative
+            record = decay_mood(manager.store)
+            mood = mood_narrative(record if isinstance(record, dict) else None)
+        except Exception:
+            mood = ""
+        return circadian, mood
+
     def _render_turn_context(self, data: dict[str, Any]) -> list[dict[str, str]]:
         """Render only the dynamic portion counted by the shared character cap."""
         messages = [{'role': 'system', 'content': self.composer.render(data['response_policy'])}]
@@ -422,7 +454,7 @@ class Orchestrator:
         dynamic = dynamic_prompt(memory_found=memory['status'] in ('found', 'disabled', 'omitted_by_budget'),
             current_state=state['current_state'], user_state_note=state['user_state_note'],
             proactivity=state['proactivity'], emotion_instruction=EMOTION_INSTRUCTION,
-            bias_block=bias)
+            bias_block=bias, circadian=data.get('circadian') or '', mood=data.get('mood') or '')
         if dynamic:
             if memory['status'] == 'omitted_by_budget':
                 dynamic += '\n本轮检索记忆因补充上下文预算省略；不能据此断言经历没有发生，也不能补写缺失内容。'
@@ -486,9 +518,13 @@ class Orchestrator:
         procedural = (manager.lessons_for(user_text)
                       if enabled and callable(getattr(manager, 'lessons_for', None)) else [])
         session = self.session_state(session_id)
+        # V2 §15：昼夜节律与心境惯性。**在这里算一次**，不放在 _render_turn_context 里
+        # ——后者同时被 limit_context 当测量函数反复调用，那边只能读、不能写。
+        # 心境衰减是幂等的状态迁移，但也没必要为了量一次长度就写几回库。
+        circadian, mood = self._circadian_and_mood(enabled=enabled)
         data = {'response_policy': bundle['response_policy'], 'companion_thread': thread,
                 'activity_data': activity, 'long_term_memory': self._memory_records(block, enabled=enabled),
-                'procedural_lessons': procedural,
+                'procedural_lessons': procedural, 'circadian': circadian, 'mood': mood,
                 'history': [dict(message) for message in recent if message.get('role') in ('user', 'assistant')],
                 'state': {key: session[key] for key in ('current_state', 'user_state_note')}}
         data['state']['proactivity'] = self._proactive_note()

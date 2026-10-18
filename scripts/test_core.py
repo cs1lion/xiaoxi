@@ -180,6 +180,88 @@ def test_empty_reply_guard() -> None:
     check("兜底不改情绪判定", result.emotion == "base", result.emotion)
 
 
+def test_circadian_and_mood_reach_the_prompt() -> None:
+    """协议 §15 的两段背景必须真的进动态提示词。
+
+    2026-10-18 发现：`persona.circadian_context()` / `mood_narrative()` 写完了、
+    `dynamic_prompt()` 也一直认 `circadian` / `mood` 参数，但
+    `_render_turn_context()` 从来没传过——§15 在协议里写着、在 config 里配着，
+    线上一点效果都没有。
+
+    这条测试走**真实接线**（`_render_turn_context` 的渲染结果），不是直接调辅助
+    函数——直接调的话，把接线删掉测试照样绿，那就白钉了。
+    """
+    print("[protocol 15]")
+    orch = Orchestrator()
+    store.delete_all()
+
+    def render(**extra):
+        """按 _turn_context 的产物形状造一份最小 data，交给真实渲染函数。"""
+        data = {
+            'response_policy': {'intent': 'chat'},
+            'long_term_memory': {'status': 'found', 'enabled': True,
+                                 'stated': [], 'inferred': [], 'uncertain': []},
+            'state': {'current_state': '', 'user_state_note': '', 'proactivity': ''},
+            'circadian': '', 'mood': '', 'history': [],
+            **extra,
+        }
+        return '\n'.join(m['content'] for m in orch._render_turn_context(data))
+
+    circadian, mood = orch._circadian_and_mood(enabled=True)
+    check("时段背景非空（配置了时区）", bool(circadian.strip()), repr(circadian[:40]))
+    check("时段背景声明自己只是背景", "不是要你演" in circadian, circadian[:80])
+
+    plain = render()
+    check("没接线字段时动态块里没有时段背景", "现在是" not in plain)
+    wired = render(circadian=circadian, mood=mood)
+    check("接线后时段背景进入动态提示词", circadian[:20] in wired)
+    check("时段背景排在记忆块之前（保住缓存前缀）",
+          wired.index(circadian[:20]) < wired.find("记忆使用规则")
+          if "记忆使用规则" in wired else True)
+
+    # 关键一步：走**真实装配入口**，确认那两个字段真的被填上。
+    # 只渲染自己造的 data 钉不住"接线存在"——把 _turn_context 里的赋值删掉，
+    # 上面的断言照样全绿。
+    turn = orch._turn_context("在吗", "core-p15", [])
+    check("_turn_context 填上了时段背景",
+          bool(str(turn['data'].get('circadian') or '').strip()),
+          repr(str(turn['data'].get('circadian'))[:40]))
+    check("_turn_context 填上了心境字段（无记录时为空字符串）",
+          turn['data'].get('mood') == "", repr(turn['data'].get('mood')))
+    rendered = '\n'.join(m['content'] for m in turn['messages'])
+    check("真实装配的提示词里能看到时段背景",
+          str(turn['data']['circadian'])[:20] in rendered)
+
+    # 心境写入后必须能被读出来，并且过期后自然衰减（§15.1：只作阀门，不突然反向）
+    now = time.time()
+    store.save_mood(narrative="总觉得缺个关键环节", reason="逻辑卡点", state="active",
+                    expires_at=now + 3600)
+    _c, live_mood = orch._circadian_and_mood(enabled=True)
+    check("有活跃心境时注入余温", "缺个关键环节" in live_mood, live_mood)
+    check("余温要求不演成相反性格", "别演成相反的性格" in live_mood, live_mood)
+    check("心境余温也进入动态提示词", live_mood[:20] in render(circadian=circadian, mood=live_mood))
+    with_mood = orch._turn_context("在吗", "core-p15", [])
+    check("有心境时真实装配也带上余温", "缺个关键环节" in with_mood['data'].get('mood', ''),
+          repr(with_mood['data'].get('mood'))[:60])
+
+    from server.memory.diary import decay_mood
+    decay_mood(store, now=now + 3601, easing_seconds=100)
+    _c, eased = orch._circadian_and_mood(enabled=True)
+    check("过期后转 easing 仍带余温", "缺个关键环节" in eased, eased)
+    decay_mood(store, now=now + 3702, easing_seconds=100)
+    _c, resolved = orch._circadian_and_mood(enabled=True)
+    check("二次过期后 resolved 不再注入", resolved == "", repr(resolved))
+    after_resolve = orch._turn_context("在吗", "core-p15", [])
+    check("resolved 之后真实装配不再带余温",
+          "缺个关键环节" not in after_resolve['data'].get('mood', ''),
+          repr(after_resolve['data'].get('mood'))[:60])
+
+    off_circadian, off_mood = orch._circadian_and_mood(enabled=False)
+    check("记忆关闭时两段都为空", off_circadian == "" and off_mood == "",
+          f"{off_circadian!r} {off_mood!r}")
+    store.delete_all()
+
+
 def main() -> int:
     for test in (
         test_sanitize,
@@ -192,6 +274,7 @@ def main() -> int:
         test_tts_split,
         test_proactivity_gate,
         test_empty_reply_guard,
+        test_circadian_and_mood_reach_the_prompt,
     ):
         test()
     print(f"\n=== {passed} passed, {len(failed)} failed ===")
