@@ -208,3 +208,108 @@ taskkill //F //PID <占用 8000 的 PID> && .\.venv\Scripts\python.exe scripts\r
 - **`proactive` 事件是否补上**。协议 §16.2 写"梯度 3 proactive（默认空闲 90s）"，
   同节"首次有声搭话"又写"梯度 3 由陪伴通道接管"。两段描述的是同一件事的
   不同侧面，读起来像矛盾——协议本身该收敛措辞。
+
+## 10. 视觉层缺口：四个"类加了、CSS 没有"的效应
+
+扫 `web/*.js` 里 `classList.add/toggle` 的目标，逐个对生产 CSS 找规则，发现
+**四个类被加上、注释里写着会产生什么视觉效果、但任何样式表里都没有对应规则**：
+
+| 类 | 加在哪儿 | 注释/协议声称的效果 | 实际 |
+|---|---|---|---|
+| `nav-spotlight` | `executive.js` 三处，各 1600ms 后移除 | "点亮 `.nav-spotlight` 动效" | 无任何视觉变化 |
+| `is-highlighted` | `executive.js:167` | "协议 §23：ref 命中这一单时**描金边**" | 金边从未出现 |
+| `editor-discussion-message` | `app.js:289` 稿件讨论轮的气泡 | 与普通 bot 气泡区分 | 气泡外观完全一样 |
+| `--aqi-i`（CSS 变量） | `blocks.js` 每张卡 | `NOTES.md`："第 3 张卡实测 delay 90ms" | 错峰一次都没发生（已删，见 §11） |
+
+这不是"样式没调好"，是**视觉层整块没落地**：JS 把状态类加对了、协议把效果写对了、
+测试的名字里也带了效果名，但中间那一层 CSS 不存在。
+
+**测试为什么没抓到**：断言的都是"类加上没有"或"事件发没有"，不是"看得见没有"。
+`classList.add` 永远成功，所以这类断言恒绿。
+
+**本轮做了什么**：只做不引入新设计决策的部分——
+
+1. `--aqi-i` 死接线删除（§11）；
+2. 两个测试的 `pass()` 标签改成实际验的内容，不再把没验的效果写进名字
+   （`test-ui-nav-browser` 的 nav-spotlight、`test-aqi-blocks-browser` 的金边）；
+3. 四处缺口连同"测试为何恒绿"一起记录在这里。
+
+**没有做的**：补四个视觉效果。`is-highlighted` 的"描金边"甚至已经有现成的
+`--aqi-accent: #e8c26a` 金 token，三行 CSS 就能实现——但"高亮长什么样、
+多久、和 hover/focus 怎么共存"是设计判断，该走项目的视觉审计流程
+（`docs/UI_VISUAL_AUDIT.md` / oil-ui skill），不该在修死代码时顺手定掉。
+
+## 11. 另外两处本轮修掉的
+
+### `--aqi-i` 死接线（视觉层缺口的第一例）
+
+`web/design-preview/NOTES.md` 记录"阶梯入场：按批写入 `--aqi-i`，CSS
+`animation-delay: calc(var(--aqi-i)*45ms)`，第 3 张卡实测 delay 90ms"，
+`blocks.js` 也确实写了这个变量。但 `companion.css` 与 `almanac.css` 里都
+**没有消费它的规则**——原型里量到的 90ms 是对的，生产里错峰一次都没发生。
+
+删除 `card.style.setProperty("--aqi-i", ...)` 与随之无用的 `stagger` 计数器，
+注释改成真相（含恢复方法）。`NOTES.md` 加 2026-10-18 更正。
+
+没有选择"补上 CSS 把功能做出来"：视觉改动该走视觉审计流程，不该在修死代码时
+顺手加一个没人要的动画，而且它会重新引入下面这个刚修掉的点击时序依赖。
+
+### `blocks_browser` 点击超时 flake
+
+27 道门禁全套跑时失败一次：
+
+    locator.click: Timeout 15000ms exceeded.
+      - waiting for locator('#holoDeck .aqi-block[data-kind="spotlight_card"] .aqi-action')
+
+之后单独跑 45 次（含 6 次并行）全部通过——同一份代码、同一个文件。
+所以这是**负载相关的偶发，不是确定性回归**。修的时候也说清楚：
+没能复现，就无法证明修好了它。下面是机制判断，不是实证结论。
+
+机制：`.aqi-block` 有 `animation:aqi-card-in .32s ... both`，动画期间
+`transform: translateY(8px) scale(.98)` → `none`，框体一直在动。Playwright 的
+click 要求元素在连续两帧里位置不变。全套跑时 CPU 被其它门禁占满，帧间隔拉长，
+稳定性检查就可能拖过 15s。
+
+修法用项目自己的逃生口：`prefers-reduced-motion: reduce`。两份 CSS 都为它写了
+`.aqi-block{animation:none}`，所以这不是新 hack，是既有约定——
+`test-ui-browser.mjs` 早就在用 `emulateMedia({reducedMotion:'reduce'})`，
+52 个浏览器测试里 13 个用 `newPage({reducedMotion})`。只有
+`test-aqi-blocks-browser.mjs` 这个**唯一会点 `.aqi-action` 的门禁**漏了它。
+
+不削弱断言：卡片仍必须可见、仍必须真的接收指针事件，**没有**用 `force: true`。
+改后 5 次运行 13 项全过，全套 28/28 全绿。
+
+（avatar/gesture 那一类测试用 `reducedMotion:'no-preference'`，因为它们要的正是
+动画——同一个开关，按测试目的取相反的值。）
+
+## 12. 一个由并行改动引入的红门禁（不是本轮改的，但抓到了）
+
+`blocks_browser` 在 28/28 全绿之后转红，失败在新加的"心流防打扰"步骤——
+点击 `#textInput` 被 `<summary>选择、创建与对话关联</summary>` 拦截。
+
+**定位过程**（换 `blocks.js` 版本、开关 `reducedMotion`、量几何）：
+
+- 换回改动前的 `blocks.js`：照样红 → 不是本轮改的；
+- 量到的几何（1440×1000）：
+
+      #textInput          y=467..511
+      summary(共同事项面板) y=478..502   ← 压在输入框上
+      #holoDeck           y=526, 高 474, 底 1489（视口只有 1000）
+
+- 根因：`almanac.css` 的 `.holo-deck{max-height:none}` 让卡片堆可以无限长，
+  同时 `.chat` 的 `max-height` 刚从 `46vh` 调到 `52vh`（同一文件的并行改动，
+  16:51）。两者相加，`.editorial` 这一列在 1000px 高的视口里放不下，
+  `.workspace` 溢出后共同事项面板盖到了输入框上——**用户打不了字**。
+
+**这不是测试 flake，是一条抓对了的红**：新测试步骤正确地报出了一个真实的
+P0 级界面缺陷（输入框不可点）。之所以之前是绿的，因为那条步骤和那次 CSS 调整
+都是这期间才进来的。
+
+**没有由本轮修**：`almanac.css` 是别人正在改的文件（16:51 还在动），
+此时插手极可能冲突。修法也不止一种——给 deck 限高、把 `.chat` 调回去、
+或者恢复 `companion.css` 里 `.holo-deck` 原有的绝对定位，三者涉及不同的
+版面取舍，该由改这份样式的人定。此处只把证据与根因留下。
+
+顺带说明：本轮给 `test-aqi-blocks-browser.mjs` 加的 `reducedMotion:'reduce'`
+对这条红**无效**（几何问题是布局，不是动画时序），但它在没有这条步骤时
+确实消掉过一次真实的点击超时，所以保留。
