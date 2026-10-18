@@ -365,7 +365,11 @@ class TTSEngine:
         return audio
 
     def _cache_key(self, text: str, profile: dict[str, Any]) -> str:
-        return hashlib.sha1(f"{self.engine}|{profile}|{text}".encode("utf-8")).hexdigest()
+        # The wire format decides the bytes (trimming re-encodes to WAV), so it
+        # belongs in the key. Without it, toggling tts_trim_silence on a warm
+        # cache hands back the other format's bytes.
+        wire = "wav" if settings.tts_trim_silence and self.engine == "stepaudio" else settings.tts_format
+        return hashlib.sha1(f"{self.engine}|{wire}|{profile}|{text}".encode("utf-8")).hexdigest()
 
     def word_timings(self, text: str, emotion: str = "base", *,
                      profile: dict[str, Any] | None = None) -> list[dict[str, Any]]:
