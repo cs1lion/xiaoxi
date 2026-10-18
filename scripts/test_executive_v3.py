@@ -248,7 +248,8 @@ def test_memory_block_survives_serialization() -> None:
 def test_roster_selection_and_capacity() -> None:
     print("[roster selection]")
     roster = load_roster()
-    check("花名册三个 Agent", len(roster["agents"]) == 3)
+    check("花名册三个内置 Agent 都在",
+          {worker["id"] for worker in roster_agents(roster)} >= {"scribe", "builder", "scout"})
     check("旧键 workers 仍被识别", roster_agents({"workers": roster["agents"]}) == roster["agents"])
     check("三条种子铁律", len(roster["seed_rules"]) == 3)
     full = {worker["id"]: worker.get("max_concurrent", 2) for worker in roster_agents(roster)}
@@ -393,6 +394,12 @@ def test_evaluator_layers() -> None:
     bloated = evaluator.review(commission=commission, artifact=GOOD_ARTIFACT, packet=packet,
                                usage={"calls": 9, "prompt_tokens": 5000})
     check("Token 膨胀被打回", any(f["rule_id"] == "prompt_token_bloat" for f in bloated["findings"]))
+    phantom = dict(GOOD_ARTIFACT, artifacts=[{"kind": "file", "ref": "does-not-exist.txt",
+                                              "preview": ""}])
+    ghost = evaluator.review(commission=commission, artifact=phantom, packet=packet,
+                             usage={"calls": 1, "prompt_tokens": 10})
+    check("文件成果不存在被打回", not ghost["passed"] and any(
+        f["rule_id"] == "no_unwired_dry_run" for f in ghost["findings"]))
     no_usage = evaluator.review(commission=commission, artifact=GOOD_ARTIFACT, packet=packet)
     check("没有 span 不妄判膨胀", no_usage["passed"])
     topbar = dict(GOOD_ARTIFACT, touched_ui=["topbar"])
@@ -528,7 +535,9 @@ def test_delegate_without_worker() -> None:
 
 def test_real_usage_and_partial_failure() -> None:
     print("[real usage in the audit]")
-    # 超预算：dispatcher 链路必须拿真实用量去审，而不是因为没有 usage 就放行
+    # 超预算：dispatcher 链路必须拿真实用量去审，而不是因为没有 usage 就放行。
+    # 打回后 delegate 有界自动重做：每次重做前把上一轮批注写回密件，第三次仍
+    # 不过就转 blocked 请示——重做上限与 Evaluator.MAX_RETRY 同一个数。
     bloated = [
         make_event("progress", step_idx=1, text="读完派单密件，开始整理"),
         token_event(model="stub-model", prompt_tokens=99999, completion_tokens=200,
@@ -537,15 +546,26 @@ def test_real_usage_and_partial_failure() -> None:
     ]
     service = build_stub_service(events=bloated)
     result = asyncio.run(service.delegate("整理 mock 产出"))
-    check("超预算被打回，不是放行", result["status"] == "running", result["status"])
-    audit = service.commission(result["commission_id"])["audit"] or {}
+    check("重试耗尽后转 blocked", result["status"] == "blocked", result["status"])
+    commission = service.commission(result["commission_id"])
+    check("初审共跑了三次（首跑 + 两次重做）", len(StubAdapter.instances) == 3,
+          str(len(StubAdapter.instances)))
+    check("重试计数停在打回上限", commission["retry_count"] == 3, str(commission["retry_count"]))
+    audit = commission["audit"] or {}
     check("打回原因是 token 膨胀",
           any(item["rule_id"] == "prompt_token_bloat" for item in audit.get("findings", [])),
           str(audit.get("findings")))
     check("用量标注为已核对", (audit.get("usage") or {}).get("budget_checked") is True,
           str(audit.get("usage")))
-    check("用量数字是真实的", (audit.get("usage") or {}).get("prompt_tokens") == 99999,
+    check("用量数字是三次真实 span 的累计", (audit.get("usage") or {}).get("prompt_tokens") == 299997,
           str(audit.get("usage")))
+    first_packet = StubAdapter.instances[0].prepared[0]
+    second_packet = StubAdapter.instances[1].prepared[0]
+    third_packet = StubAdapter.instances[2].prepared[0]
+    check("首次派单没有上一轮批注", first_packet.get("feedback") == "")
+    check("第一次重做带上初审批注", "prompt_token_bloat" in second_packet.get("feedback", ""),
+          second_packet.get("feedback", ""))
+    check("第二次重做仍带批注", bool(third_packet.get("feedback")))
     service.close()
 
 
@@ -783,9 +803,8 @@ def test_rest_seam() -> None:
                               if item["payload"].get("to") == "blocked"]
             check("只阻塞过一次，没有重复执行", len(blocked_events) == 1, str(len(blocked_events)))
         finally:
-            # 自归档：这张票跑完使命即终。单例库是真实运行库，blocked/drafting 的
-            # 遗留会按 agent 占满产能（select_agent 全员满载 → no_worker_available），
-            # 本测试第二次起就自己毒死自己。done 是各状态的合法迁移目标。
+            # 自归档：这张票跑完使命即终。单例库是真实运行库，残留会堆在抽屉里，
+            # 也会在下次启动时被重启收口翻出来。done 是各状态的合法迁移目标。
             try:
                 service.ledger.transition(repeat_id, "done")
             except Exception:

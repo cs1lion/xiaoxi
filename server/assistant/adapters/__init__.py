@@ -17,6 +17,7 @@ from . import manual as _manual  # noqa: F401  (manual 是缺省执行体)
 from . import cli_subproc as _cli_subproc  # noqa: F401
 from . import http_api as _http_api  # noqa: F401
 from . import mcp as _mcp  # noqa: F401
+from . import durable as _durable  # noqa: F401
 
 __all__ = ["EVENT_TYPES", "TERMINAL_EVENTS", "AdapterError", "BaseWorkerAdapter",
            "UnknownAdapterError", "adapter_types", "artifact_event", "create_adapter",

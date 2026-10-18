@@ -30,6 +30,25 @@ COST_SCORE = {"cheap": 1.0, "medium": 0.6, "high": 0.3}
 MAX_OBJECTIVE = 400
 MAX_DELIVERABLE = 400
 MAX_CONSTRAINTS = 6
+MAX_ACCEPTANCE_RULES = 6
+MAX_ACCEPTANCE_RULE_CHARS = 400
+MAX_FEEDBACK_CHARS = 600
+
+# 只有活着的进程能推进的状态。它们同时是"该算进 Worker 负载"的那一批：
+# blocked 在等老板、ready_to_report 在等验收，都不占人手；把停车场也算进
+# 并发槽，攒几单就能让选将返回 no_worker_available。
+IN_FLIGHT_STATUSES = ("briefing", "running", "auditing")
+
+
+def in_flight_load(commissions: list[dict[str, Any]]) -> dict[str, int]:
+    """按 Agent 数在手的督办，只数真的在跑的。"""
+    load: dict[str, int] = {}
+    for item in commissions:
+        if item.get("agent_id") and item.get("status") in IN_FLIGHT_STATUSES:
+            load[item["agent_id"]] = load.get(item["agent_id"], 0) + 1
+    return load
+
+
 # CommissionStore.transition 对 packet JSON 的硬限（server/interaction/threads.py）。
 # 记忆正文顶格时整包会超限，那时丢 memory_block 保 memory_refs——派单不能因为
 # 记忆太多而失败，稳定引用比正文重要。
@@ -49,6 +68,8 @@ class BriefingPacket:
     memory_refs: tuple[dict[str, Any], ...] = ()
     preferences: tuple[dict[str, Any], ...] = ()
     rubrics: tuple[dict[str, Any], ...] = ()
+    acceptance: tuple[dict[str, Any], ...] = ()
+    feedback: str = ""
     budget: dict[str, Any] = field(default_factory=dict)
     spin_guard: dict[str, Any] = field(default_factory=dict)
     memory_block: str = ""
@@ -59,7 +80,9 @@ class BriefingPacket:
         """序列化成可持久化的密件。
 
         `max_chars` 是台账的落库上限；超限时丢掉 memory_block（保留 memory_refs），
-        其余字段都有独立长度上限，丢掉正文后必定放得下。
+        其余字段都有独立长度上限，丢掉正文后必定放得下。验收规则与上一轮批注也
+        各有上限：单条超长或数量超编的规则会变成一条"无法评估"的规则，由初审
+        判失败，而不是被悄悄删掉后放行。
         """
         data = {
             "commission_id": self.commission_id,
@@ -72,6 +95,8 @@ class BriefingPacket:
             "preferences": [dict(item) for item in self.preferences],
             "memory_block": self.memory_block,
             "rubrics": [dict(item) for item in self.rubrics],
+            "acceptance": [dict(item) for item in self.acceptance],
+            "feedback": _clip(self.feedback, MAX_FEEDBACK_CHARS),
             "budget": dict(self.budget),
             "spin_guard": dict(self.spin_guard),
             "telemetry": dict(self.telemetry),
@@ -88,6 +113,36 @@ class BriefingPacket:
 
 def _clip(text: Any, limit: int) -> str:
     return text[:limit] if isinstance(text, str) else ""
+
+
+def _json_safe(value: Any, depth: int = 0) -> Any:
+    """把调用方给的验收规则收敛成可落库的 JSON 值，超长部分直接截断。"""
+    if isinstance(value, str):
+        return value[:200]
+    if value is None or isinstance(value, (bool, int, float)):
+        return value
+    if depth >= 3:
+        return None
+    if isinstance(value, dict):
+        return {str(key)[:64]: _json_safe(item, depth + 1)
+                for key, item in list(value.items())[:8]}
+    if isinstance(value, (list, tuple)):
+        return [_json_safe(item, depth + 1) for item in list(value)[:8]]
+    return None
+
+
+def _clean_acceptance(acceptance: Any) -> tuple[dict[str, Any], ...]:
+    """上限内原样收敛；超出上限的规则换成"无法评估"的 kind，初审会判失败。"""
+    items = list(acceptance) if isinstance(acceptance, (list, tuple)) else []
+    rules: list[dict[str, Any]] = []
+    for item in items[:MAX_ACCEPTANCE_RULES]:
+        clean = _json_safe(item) if isinstance(item, dict) and item else {"kind": "invalid"}
+        if len(json.dumps(clean, ensure_ascii=False)) > MAX_ACCEPTANCE_RULE_CHARS:
+            clean = {"kind": "acceptance_rule_too_large"}
+        rules.append(clean)
+    if len(items) > MAX_ACCEPTANCE_RULES:
+        rules.append({"kind": "acceptance_rule_overflow"})
+    return tuple(rules)
 
 
 def _deliverable_for(agent: dict[str, Any]) -> str:
@@ -117,6 +172,11 @@ def select_agent(roster: dict[str, Any], text: str,
     entries = roster_agents(roster)
     for worker in entries:
         if not isinstance(worker, dict) or not worker.get("id"):
+            continue
+        # Explicit opt-out for workers that need a human decision before they may
+        # touch production files (currently Codex's Windows sandbox). Missing
+        # `enabled` keeps the old behavior: every roster row is selectable.
+        if worker.get("enabled") is False:
             continue
         strengths = [str(item) for item in (worker.get("strengths") or [])]
         hits = [item for item in strengths if item and item in text]
@@ -186,16 +246,14 @@ class Dispatcher:
     def open(self, title: str, brief: str = "", thread_id: str = "") -> dict[str, Any]:
         return self.commissions.create(title, brief, thread_id)
 
-    def dispatch(self, commission_id: str, *, intent: str = "") -> tuple[dict[str, Any], BriefingPacket]:
+    def dispatch(self, commission_id: str, *, intent: str = "",
+                 acceptance: Any = None) -> tuple[dict[str, Any], BriefingPacket]:
         """DRAFTING -> BRIEFING: pack memory, pick a worker, store the packet."""
         commission = self.commissions.get(commission_id)
         if commission["status"] != "drafting":
             raise ValueError("commission_not_drafting")
         text = f"{commission['title']} {commission['brief']} {intent}".strip()
-        load: dict[str, int] = {}
-        for item in self.commissions.open_commissions():
-            if item["agent_id"]:
-                load[item["agent_id"]] = load.get(item["agent_id"], 0) + 1
+        load = in_flight_load(self.commissions.open_commissions())
         agent, ranked = select_agent(self.roster, text, load)
         if agent is None:
             raise LookupError("no_worker_available")
@@ -214,6 +272,7 @@ class Dispatcher:
             preferences=tuple({"dimension": ref.get("dimension"), "value": ref.get("value")}
                               for ref in memory_refs(memory) if ref.get("type") == "preference"),
             rubrics=rubrics,
+            acceptance=_clean_acceptance(acceptance),
             budget={"max_steps": int(dispatch_cfg.get("max_steps", 4) or 4),
                     "max_prompt_tokens": int(dispatch_cfg.get("max_prompt_tokens", 12000) or 12000),
                     "max_retry": self.evaluator.MAX_RETRY,
@@ -227,6 +286,21 @@ class Dispatcher:
         updated = self.commissions.transition(commission_id, "briefing", agent_id=packet.agent_id,
                                              packet=packet.as_stored())
         return updated, packet
+
+    def retry_with_feedback(self, commission_id: str, feedback: str) -> dict[str, Any]:
+        """RUNNING 复查：把上一轮批注写回密件，让执行体带着批注重做。
+
+        状态机没有 running->running 这条边，也不该为改写密件新开一条；这里走
+        running->auditing->running 两条既有边。中间态不写 audit，上一轮的失败
+        结论原样保留；回到 running 时把 feedback 一起落进 packet。
+        """
+        commission = self.commissions.get(commission_id)
+        if commission["status"] != "running":
+            raise ValueError("commission_not_running")
+        packet = dict(commission.get("packet") or {})
+        packet["feedback"] = _clip(feedback, MAX_FEEDBACK_CHARS)
+        self.commissions.transition(commission_id, "auditing")
+        return self.commissions.transition(commission_id, "running", packet=packet)
 
     def start(self, commission_id: str) -> dict[str, Any]:
         return self.commissions.transition(commission_id, "running")
@@ -479,10 +553,7 @@ class Dispatcher:
         if commission["status"] != "blocked":
             raise ValueError("commission_not_blocked")
         text = f"{commission['title']} {commission['brief']}".strip()
-        load: dict[str, int] = {}
-        for item in self.commissions.open_commissions():
-            if item["agent_id"]:
-                load[item["agent_id"]] = load.get(item["agent_id"], 0) + 1
+        load = in_flight_load(self.commissions.open_commissions())
         current = str(commission.get("agent_id") or "")
         if current:
             load[current] = max(load.get(current, 0), 10 ** 6)

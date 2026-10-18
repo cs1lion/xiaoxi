@@ -158,6 +158,28 @@ def test_proactivity_gate() -> None:
     store.delete_all()
 
 
+def test_empty_reply_guard() -> None:
+    print("[reply guard]")
+    import asyncio
+    from unittest.mock import patch
+    import server.dialogue.orchestrator as O
+
+    async def truncated(*args, **kwargs):
+        # 推理把 1200 token 全吃光：正文为空，finish_reason=length。
+        return {"text": "", "finish_reason": "length", "usage": {}, "reasoning": "…"}
+
+    async def also_empty(*args, **kwargs):
+        return ""
+
+    orch = Orchestrator()
+    with patch.object(O.llm, "complete_raw", truncated), \
+         patch.object(O.llm, "complete", also_empty), \
+         patch.object(orch, "_spawn_extraction", lambda **kwargs: None):
+        result = asyncio.run(orch.respond(user_text="在吗", mode="voice", session_id="guard-test"))
+    check("截断后仍有可听见的回复", bool(result.text.strip()), repr(result.text))
+    check("兜底不改情绪判定", result.emotion == "base", result.emotion)
+
+
 def main() -> int:
     for test in (
         test_sanitize,
@@ -169,6 +191,7 @@ def main() -> int:
         test_prompt,
         test_tts_split,
         test_proactivity_gate,
+        test_empty_reply_guard,
     ):
         test()
     print(f"\n=== {passed} passed, {len(failed)} failed ===")

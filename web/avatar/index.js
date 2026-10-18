@@ -638,6 +638,9 @@ case "emotion":
 
 const rms = this._readRms();
     const speaking = this.lip.speaking;
+    // The stage close-up follows the lip clock: the same fact that moves the
+    // mouth, not a separate UI timer that could drift out of sync.
+    this.svg.setSpeaking?.(speaking);
     const usesCalibratedLids = this.svg.eyeLidMode !== 'native' && this.svg.getEyeCapabilities?.().profile === 'seed-lids';
     this.eyeExpression.setProfile(usesCalibratedLids ? 'seed-lids' : 'native');
     this.emotion.setEyeLidProfile(usesCalibratedLids ? 'seed-lids' : 'native');
@@ -951,6 +954,15 @@ export const avatar = new Avatar();
 
 /* 启动：先拿姿态契约，装载之前不要开始任何驱动。 */
 export async function boot(containerId = "avatarStage") {
+  /* The stage backdrop sheet is not linked from index.html after the redesign;
+   * the avatar owns the stage, so it loads the sheet once here. */
+  if (!document.querySelector('link[data-avatar-stage-fx]')) {
+    const link = document.createElement("link");
+    link.rel = "stylesheet";
+    link.href = "/static/stage-fx.css";
+    link.dataset.avatarStageFx = "";
+    document.head.appendChild(link);
+  }
   const res = await fetch("/api/avatar");
   const cfg = await res.json();
   avatar.configure(cfg);

@@ -1,0 +1,173 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>小溪 · 界面方向比较 2026.10.17</title>
+<style>
+:root{
+  --bg:#f6f6f3; --card:#fffefb; --ink:#161614; --ink2:#454540; --muted:#7c7c72;
+  --line:#d9d9d1; --line2:#e7e7e0;
+  --sans:"Noto Sans SC","PingFang SC","Microsoft YaHei",sans-serif;
+  --serif:"Noto Serif SC","Source Han Serif SC","STSong","SimSun",serif;
+  --mono:"Consolas","SFMono-Regular","Menlo",monospace;
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--ink);font:13px/1.7 var(--sans);-webkit-font-smoothing:antialiased}
+a{color:inherit}
+.page{max-width:1360px;margin:0 auto;padding:38px 36px 64px}
+header.top{display:grid;grid-template-columns:1fr auto;gap:30px;align-items:end;padding-bottom:24px;border-bottom:1px solid var(--ink)}
+.kicker{font:9px var(--mono);letter-spacing:.22em;color:var(--muted);margin:0 0 12px}
+h1{margin:0;font:600 34px/1.25 var(--serif);letter-spacing:.02em}
+.lede{margin:10px 0 0;max-width:640px;font-size:13px;line-height:1.85;color:var(--ink2)}
+.meta{text-align:right;font:10px var(--mono);line-height:2;color:var(--muted);letter-spacing:.08em}
+.meta b{color:var(--ink);font-weight:400}
+.note{display:flex;gap:10px;align-items:flex-start;margin:16px 0 0;padding:10px 12px;border:1px solid var(--line);background:var(--card);font-size:11.5px;line-height:1.7;color:var(--muted)}
+.note b{color:var(--ink2);font-weight:600;white-space:nowrap}
+.grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:24px;margin-top:26px}
+.direction{display:flex;flex-direction:column;min-width:0;padding:18px;border:1px solid var(--line);background:var(--card)}
+.direction.recommended{border-color:var(--ink)}
+.d-head{display:flex;align-items:flex-start;gap:11px}
+.letter{display:grid;place-items:center;flex:none;width:30px;height:30px;border:1px solid var(--ink);font:600 13px var(--mono)}
+.d-head h2{margin:0;font:600 20px/1.25 var(--serif);letter-spacing:.03em}
+.d-head .en{margin:2px 0 0;font:9px var(--mono);letter-spacing:.14em;color:var(--muted);text-transform:uppercase}
+.badge{margin-left:auto;padding:3px 8px;background:var(--ink);color:var(--card);font:9px var(--mono);letter-spacing:.12em;white-space:nowrap}
+.badge.ghost{background:none;border:1px solid var(--line);color:var(--muted)}
+.concept{margin:12px 0 12px;min-height:42px;font-size:12px;line-height:1.75;color:var(--ink2)}
+.shot{display:block;border:1px solid var(--line);background:#eee;overflow:hidden;position:relative}
+.shot img{display:block;width:100%;height:auto}
+.shot::after{content:"1440 × 1000";position:absolute;right:6px;bottom:5px;padding:2px 5px;background:rgba(0,0,0,.62);color:#fff;font:8px var(--mono);letter-spacing:.08em}
+.mobile-row{display:grid;grid-template-columns:74px minmax(0,1fr);gap:12px;margin-top:12px;align-items:start}
+.phone{display:block;width:74px;border:1px solid var(--line);background:#eee}
+.phone img{display:block;width:100%;height:auto}
+.swatches{display:grid;grid-template-columns:1fr 1fr;gap:5px 10px}
+.sw{display:flex;align-items:center;gap:6px;min-width:0;font:9px var(--mono);color:var(--muted)}
+.sw i{flex:none;width:11px;height:11px;border:1px solid rgba(0,0,0,.14)}
+.sw b{font-weight:400;color:var(--ink2);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+dl{margin:13px 0 0;border-top:1px solid var(--line2)}
+dl div{display:grid;grid-template-columns:64px minmax(0,1fr);gap:8px;padding:7px 0;border-bottom:1px solid var(--line2)}
+dt{font:9px var(--mono);letter-spacing:.08em;color:var(--muted);padding-top:2px}
+dd{margin:0;font-size:11.5px;line-height:1.7;color:var(--ink2)}
+dd b{font-weight:600;color:var(--ink)}
+.code{font:10px var(--mono);color:var(--ink2)}
+.actions{display:flex;gap:12px;margin-top:12px;font:10px var(--mono);letter-spacing:.06em}
+.actions a{text-decoration:none;border-bottom:1px solid var(--ink);padding-bottom:1px}
+.bottom{display:grid;grid-template-columns:minmax(0,1.25fr) minmax(0,1fr);gap:24px;margin-top:26px;padding-top:24px;border-top:1px solid var(--ink)}
+.bottom h2{margin:0 0 8px;font:600 18px/1.4 var(--serif)}
+.bottom p{margin:0 0 8px;font-size:12px;line-height:1.8;color:var(--ink2)}
+.bottom ul{margin:8px 0 0;padding-left:18px;font-size:12px;line-height:1.8;color:var(--ink2)}
+.side-note{padding:14px 16px;border:1px solid var(--line);background:var(--card)}
+.side-note h3{margin:0 0 6px;font:600 12px/1.4 var(--sans);letter-spacing:.04em}
+.side-note p{margin:0 0 7px;font-size:11.5px;line-height:1.75;color:var(--muted)}
+.side-note code{font:10px var(--mono);background:#efefe9;padding:1px 4px}
+@media(max-width:1100px){.grid{grid-template-columns:1fr}.page{padding:26px 20px 48px}.bottom{grid-template-columns:1fr}.d-head h2{font-size:19px}.concept{min-height:0}}
+</style>
+</head>
+<body>
+<div class="page">
+  <header class="top">
+    <div>
+      <p class="kicker">XIAOXI / UI DIRECTIONS / ROUND 01</p>
+      <h1>三个方向，三种夜航</h1>
+      <p class="lede">同一份真实内容、同一个产品结构（侧栏 / 主对话 / 形象舞台 / 工作台入口 / 设置）。三份原型的骨架、字体、色彩和形象摆法各自成立，不是同一张模板换皮。目标是给“暖纸 + 苔绿”一个真正的观点，而不是换一组颜色。</p>
+    </div>
+    <div class="meta"><div><b>2026.10.17</b></div><div>1440 × 1000 / 390 × 844</div><div>STATIC PROTOTYPE</div></div>
+  </header>
+
+  <div class="note"><b>读法</b><span>下方是实际截图，不是效果图。点“打开原型”可看可缩放的真实页面；桌面图为 1440×1000，手机图为 390×844。原型未接业务状态，麦克风、发送、抽屉只保留入口。</span></div>
+
+  <div class="grid">
+    <article class="direction">
+      <div class="d-head"><span class="letter">A</span><div><h2>夜航星图</h2><p class="en">Nocturne Atlas</p></div></div>
+      <p class="concept">深墨与灰青的夜场，右侧是一扇贯通的观察窗；阿栖被窗框、月光与星座线接住，成为画面的光源，而不是右下角的贴纸。</p>
+      <a class="shot" href="dir-a-nocturne.html"><img src="shots/a-nocturne-1440x1000.png" alt="方向 A 夜航星图 桌面截图" /></a>
+      <div class="mobile-row">
+        <a class="phone" href="dir-a-nocturne.html"><img src="shots/a-nocturne-390x844.png" alt="方向 A 手机截图" /></a>
+        <div class="swatches">
+          <span class="sw"><i style="background:#070c11"></i><b>#070C11 夜色</b></span>
+          <span class="sw"><i style="background:#101e27"></i><b>#101E27 深青</b></span>
+          <span class="sw"><i style="background:#dce8e6"></i><b>#DCE8E6 星白</b></span>
+          <span class="sw"><i style="background:#83979c"></i><b>#83979C 远雾</b></span>
+          <span class="sw"><i style="background:#e7b469"></i><b>#E7B469 灯金</b></span>
+          <span class="sw"><i style="background:#2e6f72"></i><b>#2E6F72 深海</b></span>
+        </div>
+      </div>
+      <dl>
+        <div><dt>字体</dt><dd><b>Noto Serif SC 300 / 78px · 1.12</b><br>正文 Noto Sans SC 14.5 / 1.95；坐标 Consolas 10px / 字距 .18em。</dd></div>
+        <div><dt>布局</dt><dd>288px 夜航日志侧栏 + 620px 文案列 + 430px 贯通观察窗；建议项是编号星表，不是卡片；模式控件收进输入区上沿。</dd></div>
+        <div><dt>非通用</dt><dd>观察窗里的月光、窗框、星座线和她共用一套光；标题的“这里”是唯一暖色落点。</dd></div>
+        <div><dt>风险</dt><dd>暗色长文可读性要逐条验收；它离“AI 陪伴=深色发光”的行业套路最近，必须靠窗与排版拉开。</dd></div>
+      </dl>
+      <div class="actions"><a href="dir-a-nocturne.html">打开原型 ↗</a><a href="shots/a-nocturne-1440x1000.png">桌面图 ↗</a><a href="shots/a-nocturne-390x844.png">手机图 ↗</a></div>
+    </article>
+
+    <article class="direction recommended">
+      <div class="d-head"><span class="letter">B</span><div><h2>星图手帐</h2><p class="en">Star-Map Almanac</p></div><span class="badge">推荐</span></div>
+      <p class="concept">暖纸被推到“编辑物”的完成度：墨黑正文、朱砂印、旧金细线、编号章节与纸片；阿栖被装进一块深色图版，像一张被裱进手帐的印刷品。</p>
+      <a class="shot" href="dir-b-almanac.html"><img src="shots/b-almanac-1440x1000.png" alt="方向 B 星图手帐 桌面截图" /></a>
+      <div class="mobile-row">
+        <a class="phone" href="dir-b-almanac.html"><img src="shots/b-almanac-390x844.png" alt="方向 B 手机截图" /></a>
+        <div class="swatches">
+          <span class="sw"><i style="background:#f2eada"></i><b>#F2EADA 暖纸</b></span>
+          <span class="sw"><i style="background:#e9dec9"></i><b>#E9DEC9 纸背</b></span>
+          <span class="sw"><i style="background:#211c16"></i><b>#211C16 墨</b></span>
+          <span class="sw"><i style="background:#6d5f4a"></i><b>#6D5F4A 灰褐</b></span>
+          <span class="sw"><i style="background:#a93a2a"></i><b>#A93A2A 朱砂</b></span>
+          <span class="sw"><i style="background:#9b7a3e"></i><b>#9B7A3E 旧金</b></span>
+        </div>
+      </div>
+      <dl>
+        <div><dt>字体</dt><dd><b>Noto Serif SC 600 / 70px · 1.16</b><br>正文 Noto Serif SC 15 / 1.95；界面标签 Noto Sans SC 12；页码与图版号 Consolas 9 至 10。</dd></div>
+        <div><dt>布局</dt><dd>300px 索引侧栏 + 34px 竖排书口 + 主栏 + 400px 图版；纸片“共同事项”叠在正文流里，建议项是一/二/三编号条目，不是圆角卡。</dd></div>
+        <div><dt>非通用</dt><dd>深色图版与暖纸的高反差、朱砂印、旧金细线、竖排书口，共同把“手帐”做成结构，不是贴一张纸纹。</dd></div>
+        <div><dt>风险</dt><dd>朱砂与旧金一旦用多就会滑向“国风模板”；必须把彩色面积压在 10% 以内，靠字级和留白撑住。</dd></div>
+      </dl>
+      <div class="actions"><a href="dir-b-almanac.html">打开原型 ↗</a><a href="shots/b-almanac-1440x1000.png">桌面图 ↗</a><a href="shots/b-almanac-390x844.png">手机图 ↗</a></div>
+    </article>
+
+    <article class="direction">
+      <div class="d-head"><span class="letter">C</span><div><h2>苔庭</h2><p class="en">Moss Courtyard</p></div></div>
+      <p class="concept">把现有苔绿推到深苔、粉笔白与陶土：右侧是一座拱形庭院，阿栖站在石台上；标题用粗黑无衬线压住画面，建议项变成三块错落的踏步石。</p>
+      <a class="shot" href="dir-c-courtyard.html"><img src="shots/c-courtyard-1440x1000.png" alt="方向 C 苔庭 桌面截图" /></a>
+      <div class="mobile-row">
+        <a class="phone" href="dir-c-courtyard.html"><img src="shots/c-courtyard-390x844.png" alt="方向 C 手机截图" /></a>
+        <div class="swatches">
+          <span class="sw"><i style="background:#121b15"></i><b>#121B15 苔底</b></span>
+          <span class="sw"><i style="background:#26382b"></i><b>#26382B 苔墙</b></span>
+          <span class="sw"><i style="background:#f1ede0"></i><b>#F1EDE0 粉笔白</b></span>
+          <span class="sw"><i style="background:#e4decb"></i><b>#E4DECB 石面</b></span>
+          <span class="sw"><i style="background:#c4714f"></i><b>#C4714F 陶土</b></span>
+          <span class="sw"><i style="background:#8fa07c"></i><b>#8FA07C 地衣</b></span>
+        </div>
+      </div>
+      <dl>
+        <div><dt>字体</dt><dd><b>Noto Sans SC 800 / 94px · .98</b><br>小标题 Noto Serif SC 38；正文 Noto Sans SC 14.5 / 1.85；标签 Consolas 9 至 10。</dd></div>
+        <div><dt>布局</dt><dd>300px 苔墙侧栏 + 文案列 + 420px 拱庭；标题三行、踏步石错落；输入区是一整块陶土，不再出现两枚漂浮胶囊。</dd></div>
+        <div><dt>非通用</dt><dd>拱庭不是卡片：它有石台、藤影、月光和一个人；踏步石用不规则圆角与错位，替代通用卡片列。</dd></div>
+        <div><dt>风险</dt><dd>舞台体量与陶土输入区都偏重，长对话/多状态时容易抢内容；这是三者里最“海报”、最需要克制落地的方向。</dd></div>
+      </dl>
+      <div class="actions"><a href="dir-c-courtyard.html">打开原型 ↗</a><a href="shots/c-courtyard-1440x1000.png">桌面图 ↗</a><a href="shots/c-courtyard-390x844.png">手机图 ↗</a></div>
+    </article>
+  </div>
+
+  <section class="bottom">
+    <div>
+      <h2>推荐 B：星图手帐</h2>
+      <p>它把“暖纸”从默认的米色底升级成一套可执行的编辑语言：字级差最大、层级最清楚，形象第一次真正成为构图的一部分；同时保留了用户已经接受的温度。A 是更强的氛围，但最接近上一轮已经试过又被撤回的深色舞台；C 最有颜色性格，却最容易在长对话里变成海报。</p>
+      <ul>
+        <li>先落 B 的 token、字体与三栏骨架，再替换形象舞台；不要先做全局换色。</li>
+        <li>把 <code>#modeStrip</code> 与 <code>#presenceCapsule</code> 收成一行“此刻 + 连续对话”，底层状态源不变。</li>
+        <li>图版先接现有 SVG/VRM canvas，保留深色内衬与暖光；等渲染层稳定后再加真实投影。</li>
+      </ul>
+    </div>
+    <div class="side-note">
+      <h3>证据与文件</h3>
+      <p>截图：<code>shots/</code>（A/B/C × 1440×1000 / 390×844）。</p>
+      <p>布局读数：<code>metrics.json</code>（字号、字重、行高、字距、色值、盒子；两档均无横向溢出）。</p>
+      <p>生产改动清单与方向卡全文：<code>docs/UI_DIRECTIONS_20261017.md</code>。</p>
+      <p>限制：静态原型，不接麦克风/发送/设置/抽屉的真实状态；中文断行与字体回退按本机 Noto Serif SC / Noto Sans SC 验证。</p>
+    </div>
+  </section>
+</div>
+</body>
+</html>

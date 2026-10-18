@@ -173,6 +173,22 @@ class CrossDayCompanionTests(unittest.IsolatedAsyncioTestCase):
                 self.assertTrue(self.service.should_route(phrase, 'day2-chat'),
                                 f'「{phrase}」应被识别为继续共同事项')
 
+    async def test_day2_explicit_forms_route_but_ordinary_questions_do_not(self):
+        """词法门只收显式接续/修正/下一步指令；普通提问和日常说法仍走闲聊。"""
+        await self._build_day1()
+        self.reopen()
+        for phrase in ('下一步做什么？', '下一步是什么', '下一步该做什么',
+                       '改天再聊', '改天吧', '继续加油', '继续努力',
+                       '他说“改成步行”', '要不周六步行吧，我觉得走路挺好'):
+            with self.subTest(phrase=phrase):
+                self.assertFalse(self.service.should_route(phrase, 'day2-chat'),
+                                 f'「{phrase}」不是对事项的指令，不能被劫走')
+        for phrase in ('下一步先订地铁票', '下一步：订地铁票', '改步行',
+                       '地铁也不行了，改步行', '设置下一步'):
+            with self.subTest(phrase=phrase):
+                self.assertTrue(self.service.should_route(phrase, 'day2-chat'),
+                                f'「{phrase}」是对当前事项的显式指令')
+
     async def test_day2_restores_even_without_a_prior_explicit_selection(self):
         """跨天恢复不能依赖「昨天恰好选过那个事项」——新会话/清空选择也要能接上。"""
         await self._build_day1()
@@ -290,6 +306,12 @@ class CrossDayCompanionTests(unittest.IsolatedAsyncioTestCase):
         await self.record('地铁也不行了，改步行', 'day3-chat')
 
         seen = await self._run_one_turn('那我们周六怎么走')
+        latest = self.decisions()[-1]['text']
+        # 没有注入上下文时 json.dumps(None) 会让下面的"不能包含"全部空转，先钉住
+        # 真实形状：这一轮确实带着当前事项和最新决定。
+        self.assertIsNotNone(seen['thread'], '这一轮必须注入当前共同事项')
+        self.assertEqual(seen['thread']['title'], '周六出行计划')
+        self.assertIn(latest, [e['text'] for e in seen['thread']['events']])
         # (1) 喂给模型的上下文带的是最新决定
         injected = json.dumps(seen['thread'], ensure_ascii=False)
         self.assertIn('周六改成步行', injected, '注入回答的上下文必须是最新决定')
@@ -297,11 +319,18 @@ class CrossDayCompanionTests(unittest.IsolatedAsyncioTestCase):
         self.assertNotIn('周六改坐地铁', injected, '上下文不能带被再次修订的中间决定')
         # (2) 随路积木同样只认最新决定
         self.assertTrue(seen['blocks'], '这一轮应当产出随路积木')
+        self.assertEqual(seen['block_event']['source'], 'chat', '慢环积木来源应为 chat')
+        self.assertEqual(seen['block_event']['layout'], 'stage_holo', '默认落在主舞台')
+        self.assertEqual([b['text'] for b in seen['blocks'] if b['kind'] == 'note_snippet'],
+                         [latest], '积木正文必须与台账当前决定逐字一致')
         rendered = json.dumps(seen['blocks'], ensure_ascii=False)
         self.assertIn('周六改成步行', rendered, '积木内容应来自最新决定')
         self.assertNotIn('周六骑共享单车', rendered, '积木不能带已作废的旧决定')
         self.assertNotIn('周六改坐地铁', rendered, '积木不能带被再次修订的中间决定')
         # (3) 标签 JSON 绝不进语音：嘴里说的那一句里没有积木原文
+        self.assertIn('周六', seen['spoken'], '口述要回应这次周六出行')
+        self.assertNotIn('周六骑共享单车', seen['spoken'], '口述不能复述旧决定')
+        self.assertNotIn('周六改坐地铁', seen['spoken'], '口述不能复述中间决定')
         for banned in ('aqi-block', '"kind"', '{'):
             self.assertNotIn(banned, seen['spoken'], '积木标签不能漏进口述')
 
@@ -319,6 +348,8 @@ class CrossDayCompanionTests(unittest.IsolatedAsyncioTestCase):
         captured = {}
         from unittest.mock import patch
         from server.dialogue import orchestrator as O
+        # app.py wires the global orchestrator to the live service. The test must
+        # do the same, or the spy sees a broker with no selected matter.
         original_context = O.orchestrator._turn_context
 
         def spy_context(user_text, session_id, recent):
@@ -326,13 +357,23 @@ class CrossDayCompanionTests(unittest.IsolatedAsyncioTestCase):
             captured['data'] = data
             return data
 
-        with patch.object(O.llm, 'stream', stream),                 patch.object(O.tts, 'synthesize', synthesize),                 patch.object(O.orchestrator, '_turn_context', spy_context):
+        with (patch.object(O.orchestrator, 'context_broker', self.service.context_broker),
+              patch.object(O.orchestrator, 'activity_facade', self.service.activity, create=True),
+              patch.object(O.llm, 'stream', stream),
+              patch.object(O.tts, 'synthesize', synthesize),
+              patch.object(O.orchestrator, '_turn_context', spy_context)):
             events = [event async for event in O.orchestrator.stream_respond(
                 session_id='day3-chat', user_text=utterance)]
+        captured_turn = captured.get('data') or {}
+        injected = captured_turn.get('data') or {}
         return {
             'spoken': ''.join(e['delta'] for e in events if e['type'] == 'text_delta'),
             'blocks': [b for e in events if e['type'] == 'aqi_blocks' for b in e['blocks']],
-            'data': captured.get('data'),
+            'block_event': next((e for e in events if e['type'] == 'aqi_blocks'), None),
+            'data': captured_turn,
+            # _turn_context returns {'messages', 'usage', 'used_ids', 'data'};
+            # the companion thread lives inside the inner data payload.
+            'thread': injected.get('companion_thread'),
         }
 
     # ---------- 共用 fixture ----------

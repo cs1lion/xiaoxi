@@ -118,7 +118,11 @@ emotions:
     arousal: 0.25
     valence: 0.15
     blend: 0.6
-    shift: { ParamMouthForm: 0.18, ParamEyeLOpen: 0.97, ParamEyeROpen: 0.97 }
+    # 默认读“平静、愿意听”：嘴角略上（MouthForm → lip_up），眉内端轻抬。
+    # 数值经 arousal 增益（0.45+0.55×0.25≈0.59）后才落到模型上，所以这里
+    # 看着比最终姿态大；写成 0.18 时嘴线在 1440 舞台里几乎不可见。
+    shift: { ParamMouthForm: 0.55, ParamBrowLY: 0.24, ParamBrowRY: 0.20,
+             ParamEyeLOpen: 0.97, ParamEyeROpen: 0.97 }
 
   调侃:
     # arousal 唤醒度 0..1；valence 效价 -1..1。
@@ -550,6 +554,17 @@ touch:
 # 每个参数缺省时 render/vrm.js 退回与原构图逐字节一致的常量，
 # 外部 .vrm 因此也能获得同一套舞台处理。
 stage:
+  # 双态镜头（2026-10-17 视觉轮）：静默是中景"她在这里"，开口时推近到近景，
+  # 让 1440 页面里的脸宽从约 58px 到 90px 以上。yaw 是绕焦点的轻微 3/4 角，
+  # 把正面发缝从画面中线挪开；enter/exit 是各自的时间常数（秒），
+  # 进入比退出快——"凑过来听你说话"比"退回去"更主动。
+  camera:
+    enter: 0.32
+    exit: 0.72
+    idle: { yaw: 6, centerY: 0.0 }
+    # width/height 是模型身高的比例。width 决定距离：0.22 在 240px 舞台里
+    # 给到约 95px 脸宽；height 只要不低于 width 项即可，留出头顶与锁骨。
+    speaking: { width: 0.22, height: 0.30, centerY: 0.05, yaw: 9 }
   framing:
     headroom: 0.12                   # 头顶留白（相对身高）
     chest: 0.43                      # 构图下沿在头下多少（相对身高）
@@ -561,7 +576,32 @@ stage:
   lights:
     rim_color: "#bfd8ff"             # 边缘光：冷色轮廓，把肩线和发丝从背景里剥出来
     rim_intensity: 0.9
-    rim_position: [-1.6, 2.4, -2.2]  # 后侧上方，只勾边不改整体明暗
+    rim_position: [1.9, 2.2, -2.4]    # 右后上方：只勾右肩与发缘，不参与正面塑形
+    # 演出打光（主舞台/实验室 presentation）：暖主光在左前上方，冷补光在右前，
+    # 冷轮廓灯从右后勾边。补光只把阴影从死黑里拉起来，强度低于主光。
+    presentation:
+      ambient: 1.05
+      key_color: "#ffd9bc"
+      key_intensity: 1.65
+      key_position: [-2.2, 2.1, 2.6]
+      fill_color: "#b9d4ea"
+      fill_intensity: 0.5
+      fill_position: [2.2, 1.2, 2.2]
+      rim_scale: 1.5
+  # MToon 材质微调：发丝的冷色参数化轮廓光、更软的脸部卡通分界、
+  # 更细的轮廓线。只在 Daily 造型上生效，外部 .vrm 保持自己的材质意图。
+  look:
+    hair_rim: { color: "#a9c9e8", strength: 1.0, fresnel: 3.4, lift: 0.05, mix: 0.7 }
+    hair_outline: 0.0008
+    face_outline: 0.0009
+    face_toony: 0.62
+  # 默认表情（只在资产真有这些 morph 时生效，见 render/stage.js）：
+  # mouth_wide 把嘴线横向拉开一点，mouse_open 留一道很浅的唇缝——
+  # 静止时嘴线才有可见的暗部。这里不用任何资产没有的通道。
+  expression:
+    morphs:
+      mouth_wide: 0.24
+      mouse_open: 0.05
   dof:
     enabled: true                    # 呼吸景深：镜头沿光轴极缓慢推拉（非真实散景）
     period: 6.3                      # 周期（秒）：避开呼吸 4.1s 与头发慢漂 7.3s 的整数倍

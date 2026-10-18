@@ -74,7 +74,10 @@ def load_ws():
     # 摸头回应被 _run_turn / websocket_endpoint spawn，隔离环境里 executive=None、
     # 懒导入失败，两者都落进自身 except 安全返回，但名字必须编译进来才不至于
     # 在调用点炸 NameError 把整轮语音流程带崩（done 事件永不到达 → 超时）。
-    names = {"VoiceTurn", "Connection", "_present_reply", "_confirm_action", "_run_turn", "_transcribe_turn", "_proactive_check", "websocket_endpoint", "proactive_socket", "_maybe_diary", "_maybe_self_evolution", "_narrate_turn", "_node_snippet", "_aqi_action", "_executive_delegate", "_executive_finish", "_touch_reply"}
+    # _send_proactive_blocks 是协议 §23.6 主动轮随路积木，被 _proactive_check 调用。
+    # 不编译进来时该调用点在隔离环境里 NameError，被 _proactive_check 的 except 吞掉，
+    # turn_started 永不到达——proactive 两条测试表现为超时而不是失败原因。
+    names = {"VoiceTurn", "Connection", "_present_reply", "_confirm_action", "_run_turn", "_transcribe_turn", "_proactive_check", "websocket_endpoint", "proactive_socket", "_maybe_diary", "_maybe_self_evolution", "_narrate_turn", "_node_snippet", "_aqi_action", "_executive_delegate", "_executive_finish", "_touch_reply", "_send_proactive_blocks"}
     nodes = []
     for node in tree.body:
         if isinstance(node, (ast.ClassDef, ast.AsyncFunctionDef)) and node.name in names:
@@ -111,6 +114,8 @@ def load_ws():
                tts=SimpleNamespace(engine='silent'), deliver_reply=module.deliver_reply,
                aqi_blocks_message=blocks_module.aqi_blocks_message,
                note_snippet=blocks_module.note_snippet,
+               compose_spinning_card=blocks_module.compose_spinning_card,
+               compose_delivery_card=blocks_module.compose_delivery_card,
                to_wav_bytes=lambda audio, rate: audio.tobytes())
     exec(compile(ast.Module(body=nodes, type_ignores=[]), str(path), "exec"), env)
     return env

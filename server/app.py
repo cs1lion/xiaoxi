@@ -61,6 +61,10 @@ from .memory.api import create_diary_router, create_starmap_router
 app.include_router(create_diary_router(manager))
 app.include_router(create_starmap_router(manager))
 _scheduler_task: asyncio.Task | None = None
+# 启动期续跑的督办：create_task 的返回值必须有人拿住，否则可能被回收。
+_startup_tasks: set[asyncio.Task] = set()
+# 慢环执行内核（agent-runtime sidecar）。默认不启用，见 config 的 durable 段。
+_durable_supervisor = None
 
 
 @app.websocket('/ws/interpret')
@@ -1180,16 +1184,69 @@ async def scenarios() -> Any:
 app.mount("/static", AppStaticFiles(directory=str(ROOT / "web")), name="static")
 
 
+async def _start_durable_if_enabled() -> None:
+    """按 config 的 durable 段拉起慢环执行内核；默认不启用，失败不阻断主服务。"""
+    global _durable_supervisor
+    from .config import agents_roster_cfg
+    from .assistant.durable_supervisor import DurableSupervisor
+
+    cfg = ((agents_roster_cfg() or {}).get("durable") or {})
+    if not cfg.get("enabled"):
+        return
+    supervisor = DurableSupervisor(
+        directory=cfg.get("directory") or "data/durable",
+        node=str(cfg.get("node") or "node"),
+        startup_timeout=float(cfg.get("startup_timeout") or 15.0),
+        auto_restart=bool(cfg.get("auto_restart", True)),
+    )
+    try:
+        await supervisor.start()
+        if cfg.get("patrol_seconds"):
+            await supervisor.start_patrol(float(cfg["patrol_seconds"]))
+        bound = executive.bind_durable(
+            supervisor.config(),
+            apply_to=cfg.get("switch_agents") or None,
+        )
+        print(f"[durable] 执行内核就绪 {supervisor.endpoint}；已绑定 {bound} 个 Worker")
+        if cfg.get("shadow"):
+            from .assistant.durable_shadow import DurableShadow
+            shadow = DurableShadow(endpoint=supervisor.endpoint, token=supervisor.token,
+                                   log_path=cfg.get("shadow_log") or "data/durable-shadow.jsonl")
+            executive.shadow = shadow.run
+            print(f"[durable] shadow 已开，对照日志 {shadow.log_path}")
+        _durable_supervisor = supervisor
+    except Exception as exc:
+        # 配置开了但内核起不来：不阻断主服务。派单会转 BLOCKED 并明说不可用。
+        print(f"[durable] 执行内核不可用：{exc}")
+        try:
+            await supervisor.stop()
+        except Exception:
+            pass
+
+
 @app.on_event("startup")
 async def startup() -> None:
     global _scheduler_task
     orchestrator.set_proactivity(False)
+    # 先把执行内核绑好，再收口续跑；否则重派出去的 durable 单没有端点可用。
+    await _start_durable_if_enabled()
+    # 重启收口要排在调度器之前：先把上次没跑完的单转成请示状态或重新派出，
+    # 否则它们会一直占着 worker 的并发槽，新单直接没人接。
+    recovered = executive.recover_interrupted()
     _scheduler_task = asyncio.create_task(scheduler(assistant))
+    for commission_id in recovered["resumed"]:
+        task = asyncio.create_task(executive.resume(commission_id))
+        _startup_tasks.add(task)
+        task.add_done_callback(_startup_tasks.discard)
 
 
 @app.on_event("shutdown")
 async def shutdown() -> None:
+    global _durable_supervisor
     editor_insights.close()
+    if _durable_supervisor is not None:
+        await _durable_supervisor.stop()
+        _durable_supervisor = None
     if _scheduler_task is not None:
         _scheduler_task.cancel()
         try:

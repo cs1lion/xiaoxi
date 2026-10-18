@@ -14,6 +14,7 @@
 <link rel="stylesheet" href="/static/experience.css" />
 <link rel="stylesheet" href="/static/companion.css" />
 <link rel="stylesheet" href="/static/note-proposals.css" />
+<link rel="stylesheet" href="/static/almanac.css" />
 <script type="importmap">
 {"imports":{"three":"/static/vendor/three/three.module.js","three/addons/":"/static/vendor/three/addons/","@pixiv/three-vrm":"/static/vendor/three-vrm/three-vrm.module.js","/static/avatar/params.js":"/static/avatar/params.js?v=20261013-neutral-1"}}
 </script>
@@ -49,6 +50,7 @@
   <main class="stage">
     <header class="topbar">
       <button class="ghost sidebar-toggle" id="sidebarToggle" aria-expanded="false" aria-controls="sidePanel"><svg class="icon" viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" aria-hidden="true" focusable="false"><path d="M4 7h16"></path><path d="M4 12h16"></path><path d="M4 17h10"></path></svg> 记忆与偏好</button>
+      <div class="masthead" aria-label="夜航手帐"><b>夜航手帐</b><span>ALMANAC OF SMALL THINGS</span></div>
       <div class="connection" role="status"><span id="statusDot" class="dot"></span><span id="status">连接中</span></div>
       <span class="spacer"></span>
       <button class="ghost" id="writingToggle" aria-expanded="false" aria-controls="work-notes">一起写</button>
@@ -106,35 +108,56 @@
       </details>
     </header>
     <section id="starmapMount" class="starmap-mount" hidden aria-label="星图记忆"></section>
-    <div class="room-label"><span class="room-line"></span> 一段只属于你的时间 <span aria-hidden="true">✧</span></div>
-    <div class="avatar-stage" id="avatarStage" aria-hidden="true"></div>
-    <!-- 协议 §23：主舞台侧翼的全息微光卡片区（Holo-Deck）。小溪递来的积木落在这里；
-         传统纯文字聊天气泡在 Voice-First 模式下不再出场，视觉重心交给卡片与抽屉。 -->
-    <section id="holoDeck" class="holo-deck" aria-label="阿栖递来的卡片" aria-live="polite" hidden></section>
-    <p id="interactionState" class="interaction-state">正在连接…</p>
-    <section id="companionMount" aria-label="正在一起做的事"></section>
-    <div class="chat" id="chat" role="log" aria-label="对话记录" aria-live="polite">
-      <section class="welcome" id="welcome">
-        <h2>把今天，<br>轻轻放在<span class="title-highlight">这里</span><span class="heading-dot">。</span></h2>
-        <p>聊一件开心的小事，或什么都不想做。<br>不用组织好语言，想到哪里就说到哪里。</p>
-        <div class="suggestions" aria-label="开始聊天的灵感">
-          <button data-prompt="今天有件小事想和你分享。"><svg class="sug-icon" viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M12 3.5l1.7 4.8 4.8 1.7-4.8 1.7L12 16.5l-1.7-4.8-4.8-1.7 4.8-1.7L12 3.5z"></path><path d="M18.8 15.5v4"></path><path d="M16.8 17.5h4"></path></svg> 分享今天的小事 <span aria-hidden="true">↗</span></button>
-          <button data-prompt="我想休息一下，陪我随便聊聊吧。"><svg class="sug-icon" viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M20.5 14.2A8.7 8.7 0 0 1 9.8 3.5 8.7 8.7 0 1 0 20.5 14.2z"></path></svg> 陪我放空一会儿 <span aria-hidden="true">↗</span></button>
-          <button data-prompt="帮我梳理一下今天要做的事情。"><svg class="sug-icon" viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M10 6h10"></path><path d="M10 12h10"></path><path d="M10 18h10"></path><path d="M4 5.8l1.3 1.3L7.8 4.6"></path><path d="M4 11.8l1.3 1.3L7.8 10.6"></path></svg> 理一理待办事项 <span aria-hidden="true">↗</span></button>
+    <div class="room-label"><span class="room-line"></span> 一段只属于你的时间 <span class="room-folio" aria-hidden="true">二〇二六 · 十月</span></div>
+    <div class="workspace">
+      <div class="folio" aria-hidden="true">夜 航 手 帐</div>
+      <div class="editorial">
+        <div class="chat" id="chat" role="log" aria-label="对话记录" aria-live="polite">
+          <section class="welcome" id="welcome">
+            <p class="kicker">卷 一 · 独 处</p>
+            <h2><span class="line">把今天，</span><span class="line">轻轻放在<span class="title-highlight">这里</span><span class="heading-dot">。</span></span></h2>
+            <p class="lede">聊一件开心的小事，或什么都不想做。<br>不用组织好语言，想到哪里就说到哪里。</p>
+            <div class="suggestions" aria-label="开始聊天的灵感">
+              <button data-prompt="今天有件小事想和你分享。"><svg class="sug-icon" viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M12 3.5l1.7 4.8 4.8 1.7-4.8 1.7L12 16.5l-1.7-4.8-4.8-1.7 4.8-1.7L12 3.5z"></path><path d="M18.8 15.5v4"></path><path d="M16.8 17.5h4"></path></svg> 分享今天的小事 <span aria-hidden="true">↗</span></button>
+              <button data-prompt="我想休息一下，陪我随便聊聊吧。"><svg class="sug-icon" viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M20.5 14.2A8.7 8.7 0 0 1 9.8 3.5 8.7 8.7 0 1 0 20.5 14.2z"></path></svg> 陪我放空一会儿 <span aria-hidden="true">↗</span></button>
+              <button data-prompt="帮我梳理一下今天要做的事情。"><svg class="sug-icon" viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M10 6h10"></path><path d="M10 12h10"></path><path d="M10 18h10"></path><path d="M4 5.8l1.3 1.3L7.8 4.6"></path><path d="M4 11.8l1.3 1.3L7.8 10.6"></path></svg> 理一理待办事项 <span aria-hidden="true">↗</span></button>
+            </div>
+            <span class="welcome-note" id="draftFeedback" role="status" aria-live="polite">从一句「嗨」开始，也很好。</span>
+          </section>
         </div>
-        <span class="welcome-note" id="draftFeedback" role="status" aria-live="polite">从一句「嗨」开始，也很好。</span>
-      </section>
+        <section id="companionMount" aria-label="正在一起做的事"></section>
+        <!-- 协议 §23：主舞台侧翼的全息微光卡片区（Holo-Deck）。小溪递来的积木落在这里；
+             传统纯文字聊天气泡在 Voice-First 模式下不再出场，视觉重心交给卡片与抽屉。 -->
+        <section id="holoDeck" class="holo-deck" aria-label="阿栖递来的卡片" aria-live="polite" hidden></section>
+      </div>
+      <div class="plate-wrap">
+        <div class="plate">
+          <div class="plate-inner">
+            <div class="plate-head"><span>PLATE / 01</span><span><b>阿栖</b> · 依窗</span></div>
+            <div class="plate-shadow" aria-hidden="true"></div>
+            <div class="avatar-stage" id="avatarStage" aria-hidden="true"></div>
+            <div class="plate-vignette" aria-hidden="true"></div>
+            <div class="plate-rule" aria-hidden="true"></div>
+            <p id="interactionState" class="interaction-state plate-cap">正在连接…</p>
+          </div>
+          <div class="plate-seal" aria-hidden="true">栖</div>
+        </div>
+        <div class="plate-meta"><span>第 01 图版</span><span><b>墨与朱</b> · 纸本</span></div>
+      </div>
     </div>
     <div class="composer">
       <button id="latestMessage" class="latest-message" hidden>回到最新 ↓</button>
       <div class="subtitle" id="subtitle" role="status" aria-live="polite"></div>
       <div class="meter" aria-hidden="true"><div class="meter-fill" id="meterFill"></div></div>
-      <div class="mode-strip" id="modeStrip"></div>
-      <button id="presenceCapsule" class="presence-capsule is-lively" type="button" aria-label="陪伴方式：灵动伴随，点击切换">
-        <span class="presence-orb" aria-hidden="true"></span>
-        <span class="presence-glyph" aria-hidden="true">✨</span>
-        <span class="presence-label">灵动伴随</span>
-      </button>
+      <div class="mode-line">
+        <span class="mode-label" aria-hidden="true">此刻</span>
+        <div class="mode-strip" id="modeStrip"></div>
+        <button id="presenceCapsule" class="presence-capsule is-lively" type="button" aria-label="陪伴方式：灵动伴随，点击切换">
+          <span class="presence-orb" aria-hidden="true"></span>
+          <span class="presence-glyph" aria-hidden="true">✨</span>
+          <span class="presence-label">灵动伴随</span>
+        </button>
+      </div>
       <div class="capsule">
         <button id="micBtn" class="mic" type="button" title="按住说话；键盘可按住空格">
           <svg class="icon" viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M12 15a3 3 0 0 0 3-3V5a3 3 0 0 0-6 0v7a3 3 0 0 0 3 3z"></path><path d="M19 11v1a7 7 0 0 1-14 0v-1"></path><line x1="12" y1="19" x2="12" y2="22"></line></svg>

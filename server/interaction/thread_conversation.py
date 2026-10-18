@@ -37,20 +37,53 @@ class ThreadConversation:
     TTL = 600
     CAPACITY = 64
     _EXPLICIT = re.compile(r'^\s*(?:记个|记录)(?:决定|问题|进展)')
-    _CONTINUE = re.compile(r'^\s*(?:继续|接着)(?:(?:聊|做|说)?(?:这件事|这个事项|当前事项|上次那件事|昨天那件事))?[。！!？?\s]*$')
+    # 允许"接着昨天的继续""继续昨天的工作""我们继续吧""继续推进"这类人话。
+    # 词法门只收显式接续：继续/接着 + 可选时间指代、对象、语气尾。普通句
+    # 如「继续加油」「继续努力」不在此列，仍走闲聊。
+    _CONTINUE = re.compile(
+        r'^\s*(?:(?:我们|咱们)\s*)?(?:继续|接着)'
+        r'(?:(?:昨天|上次|之前|刚才)(?:的)?)?'
+        r'(?:'
+        r'(?:聊|做|说)(?:这件事|这个事项|当前事项|那件事)?(?:吧)?'
+        r'|(?:那件事|这件事|这个事项|当前事项|这个|那个|工作|事情|事)(?:继续|推进|聊|做|说|吧)?'
+        r'|(?:继续|推进|吧)'
+        r')?'
+        r'[。！!？?\s]*$')
+    # 修正只认明确的改/换/取消形态；有当前事项时才生效。「改天再聊」是日常
+    # 说法，不是对事项的修正。
+    _CORRECTION = re.compile(
+        r'(?:把|将).{0,20}(?:改|换)(?:成|为|到)|'
+        r'(?:改成|改为|改到|换成|换到)|'
+        r'(?:取消|暂缓|撤回|不算|不作数|别用)(?:这个|那个|这|那|掉|了)?|'
+        r'(?:^|[，,。；;\s])(?:改|换)(?!天|日)(?:成|为|到)?[一-鿿]{1,8}$')
+    # 引用、转述、假设与否定都不是指令：不要因为句子里出现"改成"就路由。
+    _META_SPEECH = re.compile(r'[“”"\']|^\s*(?:他|她|它|别人|有人说|假设|如果|要是|扮演|想象|不要|别)')
     _REQUEST = re.compile(r'^\s*(?:(?:请|帮我)?(?:把|将).{0,80}(?:记下来|记录下来|记一下|改成|改为|改一下|修改)|'
-                          r'(?:下一步|第[一二三四五六七八九十\d]+个|这条|那条|这个决定|刚才那个|不是那个).{0,80}(?:改|记|保存)|'
-                          r'(?:请|帮我)?(?:记录|记下|保存)(?:一下)?(?:刚才|这个|这件|我们的)|'
-                          r'(?:设置|更新|修改)(?:一下)?下一步)')
+                          r'(?:第[一二三四五六七八九十\d]+个|这条|那条|这个决定|刚才那个|不是那个).{0,80}'
+                          r'(?:改|记|保存)|'
+                          r'(?:请|帮我)?(?:记录|记下|保存)(?:一下)?(?:刚才|这个|这件|我们的))')
+    # 设置下一步是显式指令；「下一步做什么/是什么」是提问，不能劫走。
+    _NEXT_STEP = re.compile(
+        r'^\s*(?:(?:请|帮我)?(?:设置|更新|修改)(?:一下)?\s*下一步'
+        r'|下一步\s*(?:[:：]\s*\S|(?:先|就|要|改成|改为|设为|设置成?|更新为?|换成)\s*\S))')
+    _NEXT_STEP_QUESTION = re.compile(
+        r'^\s*下一步\s*(?:要|该|应该)?\s*(?:做什么|干什么|怎么走|是什么|是啥|去哪|如何)')
     _FOLLOWUP = re.compile(r'^\s*(?:第[一二三四五六七八九十\d]+个|(?:这条|那条).{0,30}(?:改|记)|不是那个|改成|改为)')
 
-    def __init__(self, participation, proposals, resolver, *, clock=time.time, reference_provider=None):
+    def __init__(self, participation, proposals, resolver, *, clock=time.time,
+                 reference_provider=None, note_lookup=None, activity_provider=None):
         self.participation = participation
         self.store = participation.store
         self.proposals = proposals
         self.resolver = resolver
         self.clock = clock
         self.reference_provider = reference_provider
+        # Optional read-only note metadata accessor (get_version_info/history).
+        # Summaries use it to state which draft version the matter is pinned to.
+        self.note_lookup = note_lookup
+        # Optional snapshot provider so a continuation result carries the same
+        # activity view the client renders (note version, material refs).
+        self.activity_provider = activity_provider
         self._sessions = OrderedDict()
         self._requests = OrderedDict()
 
@@ -77,9 +110,16 @@ class ThreadConversation:
         if not isinstance(text, str):
             return False
         state = self._state(session_id)
+        correction = bool(self._CORRECTION.search(text)) and not self._META_SPEECH.search(text)
+        next_step = bool(self._NEXT_STEP.match(text)) and not self._META_SPEECH.search(text) \
+            and not self._NEXT_STEP_QUESTION.match(text)
         return bool(self._EXPLICIT.match(text) or self._CONTINUE.fullmatch(text)
-                    or self._REQUEST.search(text)
-                    or (state and (state['awaiting'] or self._FOLLOWUP.match(self._reference(text)))))
+                    or self._REQUEST.search(text) or next_step
+                    or (state and (state['awaiting'] or self._FOLLOWUP.match(self._reference(text))
+                                   or correction))
+                    # No session state yet, but a matter is explicitly selected:
+                    # "改步行" still belongs to that matter, not to open chat.
+                    or (self.participation.current() is not None and correction))
 
     @staticmethod
     def _history(history):
@@ -100,12 +140,41 @@ class ThreadConversation:
         return result
 
     @staticmethod
-    def _summary(thread):
+    def _spoken_records(thread):
+        """Decisions/questions must survive a flood of progress updates.
+
+        Taking "last 4 user_stated" lets twenty progress notes push the decision
+        and the open question out of the restore summary — the user then hears a
+        matter with no decisions. Keep all current decisions/questions and only
+        the most recent progress notes.
+        """
+        records = [e for e in thread['events'] if e['source'] == 'user_stated']
+        key = [e for e in records if e['kind'] in ('decision', 'question')][-4:]
+        progress = [e for e in records if e['kind'] == 'progress'][-2:]
+        return key + progress
+
+    def _summary(self, thread):
         lines = [f'接着「{thread["title"]}」聊。']
-        records = [e for e in thread['events'] if e['source'] == 'user_stated'][-4:]
+        records = self._spoken_records(thread)
         names = {'decision': '决定', 'question': '待确认', 'progress': '自述进展'}
         lines.extend(f'{i}. {names[e["kind"]]}：{e["text"]}' for i, e in enumerate(records, 1))
         lines.append('下一步：' + (thread['next_step'] or '还没有设置，可以一起确定。'))
+        # 恢复时必须说清"现在聊的是哪一稿"：事项钉的版本可能落后于稿子的当前版本，
+        # 这种分歧不能靠用户自己猜。没有 note_lookup 的纯逻辑测试保持原样。
+        draft = next((m for m in thread.get('materials') or [] if m.get('purpose') == 'draft'), None)
+        if draft is not None and self.note_lookup is not None:
+            try:
+                info = self.note_lookup.get_version_info(draft['note_id'], draft['version'])
+                latest = self.note_lookup.history(draft['note_id'], limit=1)
+                current = latest[0]['version'] if latest else draft['version']
+                lines.append(f'关联稿「{info["title"]}」当前版本 {current}。')
+                if current != draft['version']:
+                    lines.append(f'事项钉的是版本 {draft["version"]}；稿子已经是版本 {current}，'
+                                 '没有自动切过去。')
+                else:
+                    lines.append(f'事项钉的是版本 {draft["version"]}。')
+            except (KeyError, ValueError):
+                lines.append('关联稿已不存在，没有改用其它稿。')
         receipts = [e for e in thread['events'] if e['kind'] == 'tool_receipt'][-2:]
         for event in receipts:
             try:
@@ -168,17 +237,37 @@ class ThreadConversation:
             while len(self._requests) > self.CAPACITY:
                 self._requests.popitem(last=False)
         state = self._state(session_id)
-        follows = bool(state and (state['awaiting'] or self._FOLLOWUP.match(self._reference(text)))
-                       and not self._EXPLICIT.match(text) and not self._CONTINUE.fullmatch(text))
+        is_continue = bool(self._CONTINUE.fullmatch(text))
+        correction = bool(self._CORRECTION.search(text)) and not self._META_SPEECH.search(text)
+        follows = bool(state and (state['awaiting'] or self._FOLLOWUP.match(self._reference(text))
+                                  or correction)
+                       and not self._EXPLICIT.match(text) and not is_continue)
         thread = state['thread'] if follows else self.participation.current()
+        if follows and thread is not None:
+            # 缓存的只是上一轮开始时的快照；用户在那一轮末尾刚确认过的决定
+            # 不在里面。校验与摘录必须读当前事项，否则会误判成"要改哪一条"。
+            try:
+                thread = self.store.get(thread['id'])
+            except KeyError:
+                self._sessions.pop(session_id, None)
+                thread = None
+        if thread is None and is_continue:
+            # 只有一个事项时直接接上（新会话/清空选择不该要求重选）；
+            # 有多个候选时必须让用户选，不能替用户猜。
+            threads = self.store.list_threads()
+            thread = threads[0] if len(threads) == 1 else None
         if thread is None:
             return self._choose()
         # Capture explicit saved-version links before any model await. A reply
-        # to a clarification keeps the original links, independently of UI choice.
-        refs = [dict(ref) for ref in state.get('object_refs', [])] if follows else []
-        if (not follows and enabled and self.reference_provider is not None
-                and not self._CONTINUE.fullmatch(text)):
+        # to a clarification keeps the original links, independently of UI choice;
+        # any other turn re-reads the current draft, because the user may have
+        # advanced it since the session started.
+        if follows and state.get('awaiting'):
+            refs = [dict(ref) for ref in state.get('object_refs', [])]
+        elif enabled and self.reference_provider is not None and not is_continue:
             refs = self.reference_provider(thread['id'])
+        else:
+            refs = []
         # Fixed target survives selection changes, but deletion never revives it.
         try:
             live = self.store.get(thread['id'])
@@ -193,12 +282,20 @@ class ThreadConversation:
                 return self._result('请写出完整内容，例如「记个决定：保留文字入口」。目前没有保存。', live)
             self._remember(session_id, live, self._history(history), candidate, object_refs=refs)
             return self._result('这是待确认预览，尚未保存。核对下方内容后确认即可。', live, proposal=candidate)
-        if text.strip().rstrip('。！!?？') in ('继续', '接着', '继续这件事', '接着这件事', '继续当前事项'):
+        if is_continue:
+            # 所有"接着昨天/继续推进/我们继续吧"的变体都走确定性摘录，
+            # 不把恢复这件事交给模型（离线时模型只会说"没法安排"）。
             summary = self._summary(live)
-            records = [e for e in live['events'] if e['source'] == 'user_stated'][-4:]
+            records = self._spoken_records(live)
             self._remember(session_id, live, [{'role': 'assistant', 'content': summary}],
                            order=[e['id'] for e in records])
-            return self._result(summary, live)
+            result = self._result(summary, live)
+            if self.activity_provider is not None:
+                try:
+                    result['activity'] = self.activity_provider()
+                except Exception:  # a read-only view must never break the reply
+                    pass
+            return result
         if not enabled:
             return self._result('记忆开关已关闭，当前不把事项和聊天历史交给模型解析。可以直接编辑事项，或用「记个决定：具体内容」生成预览。', live)
         recent = self._history(state['history'] if follows else history)
@@ -207,10 +304,16 @@ class ThreadConversation:
             try:
                 focus = self.proposals.get(state['proposal']['id'])
                 if focus['version'] != state['proposal']['version']:
-                    raise KeyError('changed preview')
+                    # 候选还在，但已经被界面改成新版本：不能拿旧版本号继续改。
+                    return self._result(
+                        '刚才的候选已更新，请核对当前卡片，再明确说要改什么。', live)
             except KeyError:
-                self._sessions.pop(session_id, None)
-                return self._result('刚才的候选已更新、确认或过期。请核对当前卡片，再明确说要改什么。', live)
+                # The preview was confirmed (or expired) after the cached state was
+                # written. That is normal, not an error: the user is now asking for
+                # the next change. Drop the stale focus and resolve against the
+                # saved event instead of refusing the turn.
+                focus = None
+                state.pop('proposal', None)
         resolution_thread = self.participation.summarize(thread, query=text)
         payload = {'user_text': text, 'thread': resolution_thread,
                    'history': recent, 'focus': focus,
@@ -243,7 +346,7 @@ class ThreadConversation:
             return result
         if action == 'continue':
             summary = self._summary(live)
-            records = [e for e in live['events'] if e['source'] == 'user_stated'][-4:]
+            records = self._spoken_records(live)
             self._remember(session_id, live, [{'role': 'assistant', 'content': summary}],
                            order=[e['id'] for e in records])
             return self._result(summary, live)

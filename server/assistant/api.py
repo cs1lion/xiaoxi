@@ -202,6 +202,42 @@ def create_router(service):
         except ValueError as exc:
             raise HTTPException(409, str(exc))
 
+    @router.post('/assistant/runs/{run_id}/continue')
+    async def continue_run(run_id: str):
+        """从中断处继续推进计划（不重新开始，不重放已成功的步骤）。"""
+        try:
+            return await service.run_plan(run_id)
+        except KeyError:
+            raise HTTPException(404, 'object_not_found')
+        except ValueError as exc:
+            raise HTTPException(409, str(exc))
+
+    @router.post('/assistant/runs/{run_id}/revise')
+    async def revise_run(run_id: str, request: Request):
+        """用户改目标 / 否决某步 / 增删步骤：更新计划并留下变更记录。"""
+        data = await payload(request)
+        goal = data.get('goal')
+        drop = data.get('drop_steps')
+        add = data.get('add_steps')
+        note = data.get('note')
+        if goal is not None and (not isinstance(goal, str) or not 0 < len(goal) <= 12000):
+            raise HTTPException(400, 'invalid_goal')
+        if drop is not None and (not isinstance(drop, list)
+                                 or any(not isinstance(item, str) or not item for item in drop)):
+            raise HTTPException(400, 'invalid_drop_steps')
+        if add is not None and (not isinstance(add, list) or len(add) > 6
+                                or any(not isinstance(item, dict) for item in add)):
+            raise HTTPException(400, 'invalid_add_steps')
+        if note is not None and (not isinstance(note, str) or len(note) > 200):
+            raise HTTPException(400, 'invalid_note')
+        try:
+            return await service.revise_run_plan(run_id, goal=goal, drop_steps=drop,
+                                                 add_steps=add, note=note or '')
+        except KeyError:
+            raise HTTPException(404, 'object_not_found')
+        except ValueError as exc:
+            raise HTTPException(409, str(exc))
+
     return router
 
 

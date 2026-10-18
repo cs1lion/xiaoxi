@@ -393,10 +393,12 @@ class TelemetryGateway:
             duration_ms=_count(event.get("duration_ms"), "duration_ms"),
             status_code=_count(event.get("status_code"), "status_code"),
             error_snippet=clip_error(event.get("error")))
-        signature = event.get("signature")
-        if not isinstance(signature, str) or not signature:
-            signature = normalize_signature(event)
-        spinning = self.guard.observe(span["commission_id"], signature, agent_id=span["agent_id"])
+        # Token events are accounting, not steps. Their signature has no
+        # action/arguments/output, so a multi-step worker's 3rd usage record
+        # hashes identically to the first two and falsely trips the spinning
+        # guard. Step repetition is judged from progress events; API-call
+        # repetition is judged by TelemetryGateway.proxy.
+        spinning = {"tripped": False, "repeats": 0, "signature": ""}
         return {"span": span, "spinning": spinning}
 
     def _safe_record(self, **fields: Any) -> dict[str, Any]:

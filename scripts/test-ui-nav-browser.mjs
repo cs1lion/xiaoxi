@@ -16,7 +16,7 @@ import { mkdir, writeFile } from 'node:fs/promises';
 import assert from 'node:assert/strict';
 
 const OFFLINE = false; // true = 不依赖本地服务，走 file:// + 受控 WS（API 全存根）
-const PAGE_URL = OFFLINE ? 'file://' + process.cwd().replace(/\\/g, '/') + '/web/index.html' : 'http://127.0.0.1:8000/';
+const PAGE_URL = OFFLINE ? 'file://' + process.cwd().replace(/\\/g, '/') + '/web/index.html' : (process.env.BASE_URL || 'http://127.0.0.1:8000/');
 
 const browser = await chromium.launch({ headless: true,
   args: ['--use-fake-device-for-media-stream', '--use-fake-ui-for-media-stream'] });

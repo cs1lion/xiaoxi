@@ -18,9 +18,12 @@ selection:
   max_concurrent_default: 2   # 单个 Worker 同时在手的督办上限
 
 # ---------- 派单预算 ----------
+# 真机 CLI Agent 自带 30k+ 的系统指令与工具目录；12k 只够纯聊天。80k 让一个
+# 真实的 Claude/Codex 单在“预算检查真的跑”的前提下仍能通过，而不是一开真机就
+# 被打回或（更糟）因为没列 token_budget 而静默跳过。
 dispatch:
   max_steps: 4                # 单个 Worker 一轮最多几步
-  max_prompt_tokens: 12000    # 单个 Commission 的 Prompt Token 预算
+  max_prompt_tokens: 80000    # 单个 Commission 的 Prompt Token 预算（含 Agent 固定开销）
   max_retry: 2                # 初审打回上限；第 3 次不过转 BLOCKED 请示
   spin_guard:
     max_identical: 3          # 同一步骤签名连续重复几次算鬼打墙
@@ -79,6 +82,96 @@ agents:
     cost_tier: cheap
     max_concurrent: 2
     eval_commands: [required_fields, artifacts_exist, token_budget]
+
+  # 真机 Worker：Claude Code 经本地 Anthropic 网关执行，成果落在
+  # data/commissions/<commission_id>-<stamp>/out/，不写仓库根目录。
+  # 网关由 scripts/run.py 自动拉起（127.0.0.1:15722）；没有网关时本单会明确
+  # 阻塞为“网关不可用”，不会假装干过活。
+  - id: claude
+    name: 真机 Claude
+    adapter: cli_subproc
+    executable: "python"
+    args: ["scripts/worker_shims/claude_worker.py"]
+    timeout: 420
+    env:
+      AQI_GATEWAY_URL: "http://127.0.0.1:15722"
+      AQI_CLAUDE_MODEL: "claude-opus-5-5"
+      AQI_CLAUDE_TIMEOUT: "360"
+      AQI_WORKSPACE_ROOT: "data/commissions"
+    summary: 真机 Claude Code：读写文件、跑命令、实现与修复；成果落在独立工作目录
+    strengths: [实现, 代码, 文件, 写入, 修改, 脚本, 测试, 重构, 命令, 修复]
+    weaknesses: [不碰记忆与协议契约, 不做无法验证的审美判断]
+    cost_tier: high
+    max_concurrent: 1
+    eval_commands: [required_fields, artifacts_exist, token_budget, acceptance_met]
+
+  # WorkBuddy 5.8.3 自带 CodeBuddy CLI；shim 用 WorkBuddy.exe 以 Node 模式跑
+  # cli/dist/codebuddy-lite-wb.mjs，原生说 OpenAI Chat。走 15722 的统一网关，
+  # 不再单独依赖 15721。工具面收窄到读/写/编辑/检索，不给 Bash。
+  - id: workbuddy
+    name: 真机 WorkBuddy
+    adapter: cli_subproc
+    executable: "python"
+    args: ["scripts/worker_shims/workbuddy_worker.py"]
+    timeout: 420
+    env:
+      CODEBUDDY_BASE_URL: "http://127.0.0.1:15722/v1"
+      CODEBUDDY_API_KEY: "PROXY_MANAGED"
+      AQI_WORKBUDDY_MODEL: "step-5-preview"
+      AQI_WORKBUDDY_TIMEOUT: "300"
+      AQI_WORKSPACE_ROOT: "data/commissions"
+    summary: 真机 WorkBuddy：文档、表格、汇报、整理与信息归纳；成果落在独立工作目录
+    strengths: [文档, 表格, 汇报, 整理, 写作, 办公, 演示, 数据, 归纳, 总结, 文案]
+    weaknesses: [不跑长命令, 不改后端契约, 不做无法验证的审美判断]
+    cost_tier: medium
+    max_concurrent: 1
+    eval_commands: [required_fields, artifacts_exist, token_budget, acceptance_met]
+
+  # DeepSeek Harness 的 headless profile：自带 read/write/bash、session 与
+  # compaction，事件流最规整。走 15722 的 Anthropic 入口。
+  - id: dsh
+    name: 真机 DSH
+    adapter: cli_subproc
+    executable: "python"
+    args: ["scripts/worker_shims/dsh_worker.py"]
+    timeout: 420
+    env:
+      DEEPSEEK_BASE_URL: "http://127.0.0.1:15722"
+      DEEPSEEK_API_KEY: "local"
+      # 默认沙箱在本机拒绝写工作目录 / 起 pwsh；已验证 danger-full-access
+      # 能写文件。隔离未解决前，这条只在独立 commission 工作目录里跑。
+      DSH_PERMISSION_MODE: "danger-full-access"
+      AQI_DSH_TIMEOUT: "300"
+      AQI_WORKSPACE_ROOT: "data/commissions"
+    summary: 真机 DeepSeek Harness：多步任务、长上下文、调研、分析与代码；成果落在独立工作目录
+    strengths: [多步, 长任务, 调研, 分析, 代码, 文件, 汇总, 计划, 检索, 修复]
+    weaknesses: [不碰记忆与协议契约, 不做无法验证的审美判断]
+    cost_tier: medium
+    max_concurrent: 1
+    eval_commands: [required_fields, artifacts_exist, token_budget, acceptance_met]
+
+  # Codex 已接通（15722 的 /v1/responses 透传到 15721），但 Windows 上
+  # workspace-write 沙箱起不来，只能 danger-full-access。按 Phase A 的 D-13，
+  # 生产隔离没定之前不放进默认选将池；把 enabled 改成 true 即可启用。
+  - id: codex
+    name: 真机 Codex（待隔离决策）
+    enabled: false
+    adapter: cli_subproc
+    executable: "python"
+    args: ["scripts/worker_shims/codex_worker.py"]
+    timeout: 420
+    env:
+      AQI_GATEWAY_URL: "http://127.0.0.1:15722/v1"
+      AQI_GATEWAY_MODEL: "step-5-preview"
+      AQI_CODEX_SANDBOX: "danger-full-access"
+      AQI_CODEX_EFFORT: "low"
+      AQI_WORKSPACE_ROOT: "data/commissions"
+    summary: 真机 Codex：实现、修复与命令；当前仅探针可用，生产隔离未定
+    strengths: [实现, 代码, 修复, 命令, 测试, 脚本, 重构]
+    weaknesses: [需要 danger-full-access, 生产隔离未定]
+    cost_tier: high
+    max_concurrent: 1
+    eval_commands: [required_fields, artifacts_exist, token_budget, acceptance_met]
 
 # ---------- 适配器类型索引 ----------
 # 这里只是给人看的目录；真正的登记发生在 server/assistant/adapters/ 各模块的

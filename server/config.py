@@ -106,7 +106,9 @@ DEFAULTS: dict[str, Any] = {
     # 对话用的 token 预算，和"回复该多短"是两件事。
     # 之前从字数上限反推（400字//2+120=320），推理模型会正好在 320 被截断，
     # 结果是 finish_reason=length + 回复只剩半个字符。
-    "llm_reply_tokens": int(os.getenv("LLM_REPLY_TOKENS", "900")),
+    # 900 仍不够：2026-10-17 实测 18 轮里 1 次推理占满全部 900（正文为空），
+    # 同一组对话把上限提到 1200 后 18 轮 0 次截断。上限只是封顶，不改变正常回复的用量。
+    "llm_reply_tokens": int(os.getenv("LLM_REPLY_TOKENS", "1200")),
     "llm_reasoning_effort": os.getenv("LLM_REASONING_EFFORT", ""),
     # 重复抑制。0 = 不下发该字段。个别 OpenAI 兼容网关会因未知字段直接 400，
     # 所以默认关着，确认你的网关支持再在 .env 里开（对话建议 0.2 / 0.2）。
@@ -135,6 +137,14 @@ DEFAULTS: dict[str, Any] = {
     "tts_format": os.getenv("TTS_FORMAT", "mp3"),
     "tts_sample_rate": int(os.getenv("TTS_SAMPLE_RATE", "24000")),
     "tts_default_emotion": os.getenv("TTS_DEFAULT_EMOTION", "base"),
+    # 供应商在每个音频块前后各垫了约 0.36s / 0.38s 静音。微句链路把这段静音和
+    # pacing.yaml 里设计的呼吸停顿叠加起来，实际句间空隙达到 0.9~1.1s，人听起来
+    # 是一顿一顿的。打开时按 WAV 修剪首尾静音，让设计的 pause 成为真实停顿。
+    "tts_trim_silence": os.getenv("TTS_TRIM_SILENCE", "true").lower() in ("1", "true", "yes"),
+    # 修剪阈值（峰值幅度 0~1）与保留的边缘静音量（秒）。保留一点点边缘比切到
+    # 零更好听：硬切会把起音/收音的毛刺一起暴露出来。
+    "tts_trim_threshold": float(os.getenv("TTS_TRIM_THRESHOLD", "0.012")),
+    "tts_trim_pad_ms": int(os.getenv("TTS_TRIM_PAD_MS", "60")),
     "audio_sample_rate": 16000,
     "audio_channels": 1,
     "port": int(os.getenv("PORT", "8000")),

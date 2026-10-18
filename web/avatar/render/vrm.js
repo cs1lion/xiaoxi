@@ -11,6 +11,7 @@ import { PoseTransition } from '../drivers/pose-transition.js';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { VRMLoaderPlugin, VRMUtils } from '@pixiv/three-vrm';
 import { EXPRESSIONS, finiteClamp, mapParams, safeDelta, selectExpressions } from './vrm-mapping.js';
+import { StageCamera, resolveMorphWeights } from './stage.js';
 
 function releaseScenes(roots) {
   const geometries = new Set(), materials = new Set(), textures = new Set();
@@ -56,6 +57,7 @@ export class VrmRig {
     this.hairPhysicsEnabled = true;
     this.hairPhysicsStrength = 1;
     this.poseTransition = new PoseTransition();
+    this.stageCamera = new StageCamera();
     this._generation = 0;
     this._state = null;
   }
@@ -92,6 +94,7 @@ export class VrmRig {
       // 剥出来。强度低、角度偏，只勾边，不改整体明暗关系。参数来自
       // config/avatar.yaml 的 stage.lights，缺省即这里的常量。
       const lights = (options && options.stage && options.stage.lights) || {};
+      state.lights = lights;
       const rimAt = lights.rim_position || [-1.6, 2.4, -2.2];
       state.rim = new THREE.DirectionalLight(
         new THREE.Color(lights.rim_color || "#bfd8ff"),
@@ -178,12 +181,17 @@ export class VrmRig {
       }
       // Daily's face brightness is reversible; retain its textures, normals,
       // toon shadow thresholds and all other materials.
-      this._captureFaceShading(state);
       const stageCfg = (options && options.stage && typeof options.stage === "object") ? options.stage : {};
       state.stage = stageCfg;
+      this._captureFaceShading(state);
+      this._captureStageMaterials(state);
       state.touch = (options && options.touch && typeof options.touch === "object") ? options.touch : {};
+      this.stageCamera.configure(stageCfg);
+      this.stageCamera.reset();
+      this._captureStageMorphs(state);
       const bounds = new THREE.Box3().setFromObject(vrm.scene);
       const head = state.bones.head.node.getWorldPosition(new THREE.Vector3());
+      state.headY = head.y;
       const size = bounds.getSize(new THREE.Vector3());
       const height = Number.isFinite(size.y) && size.y > 0 ? size.y : 1.7;
       // A-5 舞台镜头构图：头顶留白与构图下沿都可配（stage.framing），
@@ -236,16 +244,27 @@ export class VrmRig {
     if (framing) {
       const halfFov = THREE.MathUtils.degToRad(camera.fov / 2);
       const crop = state.presentation && !state.eyeFocus ? 0.86 : 1;
-      const distance = Math.max(framing.height * crop / 2, framing.width / (2 * camera.aspect)) /
+      let width = framing.width;
+      let height = framing.height * crop;
+      let centerY = framing.center.y + (state.presentation && !state.eyeFocus ? framing.height * 0.035 : 0);
+      let yaw = 0;
+      if (state.stage && !state.eyeFocus && state.modelHeight) {
+        // The one source of stage framing: idle medium shot vs speaking close-up.
+        // eyeFocus keeps its calibration framing byte-for-byte.
+        const sampled = this.stageCamera.sample(state.modelHeight,
+          { width, height, centerY, headY: state.headY });
+        width = sampled.width; height = sampled.height; centerY = sampled.centerY; yaw = sampled.yaw;
+      }
+      const distance = Math.max(height / 2, width / (2 * camera.aspect)) /
         Math.tan(halfFov) + framing.depth;
-      const focus = framing.center.clone();
-      if (state.presentation && !state.eyeFocus) focus.y += framing.height * 0.035;
-      camera.position.copy(focus).add(new THREE.Vector3(0, 0, distance));
+      const focus = new THREE.Vector3(framing.center.x, centerY, framing.center.z);
+      const offset = new THREE.Vector3(Math.sin(yaw) * distance, 0, Math.cos(yaw) * distance);
+      camera.position.copy(focus).add(offset);
       camera.near = Math.max(0.001, distance / 1000);
       camera.far = Math.max(100, distance * 10);
       camera.lookAt(focus);
-      // 呼吸景深在这条基准光轴上做极缓慢的推拉（见 draw）。
-      state.dolly = { focus: focus.clone(), distance };
+      // 呼吸景深沿这条基准光轴推拉（见 draw）。
+      state.dolly = { focus: focus.clone(), distance, offset };
     }
     camera.updateProjectionMatrix();
   }
@@ -255,13 +274,29 @@ export class VrmRig {
     const s = this._state;
     if (!s?.framing) return;
     s.presentation = !!enabled;
-    s.ambient.intensity = enabled ? 1.35 : 2;
-    s.key.intensity = enabled ? 2.0 : 2.5;
-    s.key.color.set(enabled ? 0xffe5d1 : 0xffffff);
-    s.key.position.set(enabled ? -2 : 1, 2, 3);
-    s.fill.intensity = enabled ? 0.65 : 0;
-    // 边缘光在演出模式下加强一档（舞台打光），其余模式回到配置基准。
-    if (s.rim) s.rim.intensity = enabled ? s.rimBase * 1.33 : s.rimBase;
+    const lights = s.lights || {};
+    const show = lights.presentation || {};
+    if (enabled) {
+      s.ambient.intensity = Number.isFinite(show.ambient) ? show.ambient : 1.35;
+      s.key.intensity = Number.isFinite(show.key_intensity) ? show.key_intensity : 2.0;
+      s.key.color.set(show.key_color || 0xffe5d1);
+      const keyAt = show.key_position || [-2, 2, 3];
+      s.key.position.set(keyAt[0] ?? -2, keyAt[1] ?? 2, keyAt[2] ?? 3);
+      s.fill.intensity = Number.isFinite(show.fill_intensity) ? show.fill_intensity : 0.65;
+      s.fill.color.set(show.fill_color || 0xbadce8);
+      const fillAt = show.fill_position || [-2, 1, 2];
+      s.fill.position.set(fillAt[0] ?? -2, fillAt[1] ?? 1, fillAt[2] ?? 2);
+      if (s.rim) s.rim.intensity = s.rimBase * (Number.isFinite(show.rim_scale) ? show.rim_scale : 1.33);
+    } else {
+      s.ambient.intensity = 2;
+      s.key.intensity = 2.5;
+      s.key.color.set(0xffffff);
+      s.key.position.set(1, 2, 3);
+      s.fill.intensity = 0;
+      s.fill.color.set(0xbadce8);
+      s.fill.position.set(-2, 1, 2);
+      if (s.rim) s.rim.intensity = s.rimBase;
+    }
     this._frameCamera(s);
   }
 
@@ -300,10 +335,79 @@ export class VrmRig {
     return { available, enabled: available && this.faceShadingEnabled };
   }
 
+  // Resting expression morphs come from the asset's own dictionary. Unknown
+  // names are dropped, and targets bound to a VRM expression keep their driven
+  // value because this is written before expressionManager.update().
+  _captureStageMorphs(state) {
+    const requested = state.stage?.expression?.morphs || {};
+    state.stageMorphs = [];
+    const names = Object.keys(requested);
+    if (!names.length || !state.vrm?.scene) return;
+    const available = new Map();
+    state.vrm.scene.traverse(node => {
+      const dictionary = node.morphTargetDictionary, influences = node.morphTargetInfluences;
+      if (!dictionary || !influences) return;
+      for (const name of names) {
+        const index = dictionary[name];
+        if (!Number.isInteger(index) || index < 0 || index >= influences.length) continue;
+        let targets = available.get(name);
+        if (!targets) available.set(name, targets = []);
+        if (!targets.some(target => target.influences === influences && target.index === index)) {
+          targets.push({ influences, index });
+        }
+      }
+    });
+    state.stageMorphs = resolveMorphWeights(requested, available);
+  }
+
+  _applyStageMorphs(state) {
+    for (const { weight, targets } of state.stageMorphs || []) {
+      for (const { influences, index } of targets) influences[index] = weight;
+    }
+  }
+
+  // The speaking close-up is driven by the lip clock, not by layout state.
+  setSpeaking(speaking) {
+    this.stageCamera.setSpeaking(!!speaking);
+  }
+
+  // Cool hair sheen and a softer skin toon boundary. Only the Daily asset is
+  // tuned; an external VRM keeps its own material intent.
+  _captureStageMaterials(state) {
+    if (state.vrm?.meta?.name !== DAILY_GESTURE_MODEL_NAME) return;
+    const look = state.stage?.look || {};
+    const hairRim = look.hair_rim || {};
+    const rimColor = new THREE.Color(hairRim.color || '#a9c9e8')
+      .multiplyScalar(Number.isFinite(hairRim.strength) ? hairRim.strength : 1);
+    const seen = new Set();
+    state.vrm.scene.traverse(node => {
+      for (const material of Array.isArray(node.material) ? node.material : [node.material]) {
+        if (!material?.isMToonMaterial || seen.has(material)) continue;
+        seen.add(material);
+        const name = material.name || '';
+        if (/hair/i.test(name)) {
+          material.parametricRimColorFactor?.copy(rimColor);
+          if (material.parametricRimFresnelPowerFactor !== undefined) {
+            material.parametricRimFresnelPowerFactor = Number.isFinite(hairRim.fresnel) ? hairRim.fresnel : 3.4;
+          }
+          if (material.parametricRimLiftFactor !== undefined) {
+            material.parametricRimLiftFactor = Number.isFinite(hairRim.lift) ? hairRim.lift : 0.05;
+          }
+          if (material.rimLightingMixFactor !== undefined) {
+            material.rimLightingMixFactor = Number.isFinite(hairRim.mix) ? hairRim.mix : 0.7;
+          }
+          if (Number.isFinite(look.hair_outline)) material.outlineWidthFactor = look.hair_outline;
+        } else if (name === 'body_bake' || name === 'body_bake (Outline)') {
+          if (Number.isFinite(look.face_toony)) material.shadingToonyFactor = look.face_toony;
+          if (Number.isFinite(look.face_outline)) material.outlineWidthFactor = look.face_outline;
+        }
+      }
+    });
+  }
+
   // Front/side hair spring bones are the only hair chains in the hair candidate.
   // Keep their loaded settings as originals and always recompute from them.
-  _captureHairPhysics(state) {
-    state.hairPhysics = [];
+  _captureHairPhysics(state) {    state.hairPhysics = [];
     for (const joint of state.vrm?.springBoneManager?.springBones || []) {
       if (!joint?.bone?.name?.includes('hair') || !joint.settings) continue;
       state.hairPhysics.push({ joint, settings: {
@@ -636,6 +740,7 @@ export class VrmRig {
     state.target.position.copy(head).add(new THREE.Vector3(...mapped.gaze)
       .applyQuaternion(headRotation).multiplyScalar(state.modelHeight * 1.5));
     state.target.updateMatrixWorld(true);
+    this._applyStageMorphs(state);
     state.vrm.update(safeDelta(dt));
     if (this.secondaryScale < 1) {
       for (const { node, rest } of state.springBones) {
@@ -646,6 +751,10 @@ export class VrmRig {
      * 像持机拍摄时人的呼吸。不是真的散景——那需要后处理管线，而持续视差
      * 已经能读成"镜头是活的"。周期刻意避开呼吸(4.1s)和头发慢漂(7.3s)的
      * 整数倍，防止出现循环点；reduced-motion 下压到四分之一。 */
+    this.stageCamera.update(safeDelta(dt));
+    state.stageBlend = this.stageCamera.eased;
+    state.stageMode = this.stageCamera.mode;
+    if (state.stage && !state.eyeFocus) this._frameCamera(state);
     const dof = state.stage?.dof;
     if (dof && dof.enabled !== false && state.dolly) {
       const amount = Number.isFinite(dof.amount) ? dof.amount : 0.012;
@@ -653,8 +762,10 @@ export class VrmRig {
       const scale = this.reduceGestures ? 0.25 : 1;
       this._dofPhase = (((this._dofPhase || 0) + safeDelta(dt) / period) % 1 + 1) % 1;
       const k = 1 + Math.sin(this._dofPhase * Math.PI * 2) * amount * scale;
-      state.camera.position.set(state.dolly.focus.x, state.dolly.focus.y,
-        state.dolly.focus.z + state.dolly.distance * k);
+      state.camera.position.set(
+        state.dolly.focus.x + state.dolly.offset.x * k,
+        state.dolly.focus.y,
+        state.dolly.focus.z + state.dolly.offset.z * k);
       state.camera.lookAt(state.dolly.focus);
     }
     state.renderer.render(state.scene, state.camera);

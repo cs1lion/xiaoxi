@@ -5,12 +5,72 @@ import hashlib
 import inspect
 import math
 import re
+import struct
+import wave
 from dataclasses import dataclass
+from io import BytesIO
 from typing import Any, AsyncIterator
 
 from ..config import pacing_cfg, persona_cfg, settings
 
 _SENT_SPLIT = re.compile(r"(?<=[。！？!?…])|(?<=\n)")
+
+
+def trim_wav_silence(audio: bytes, *, threshold: float | None = None,
+                     pad_ms: int | None = None) -> bytes:
+    """Strip leading and trailing near-silence from a 16-bit PCM WAV.
+
+    The provider pads every chunk with roughly 0.36s before and 0.38s after the
+    speech. Stacked on the designed breath pauses in pacing.yaml, a comma gap
+    that should be 140ms becomes about 880ms, so a three-chunk reply carries
+    seconds of dead air and reads as halting.
+
+    Returns the input unchanged when it is not a WAV this can parse, so an
+    unexpected container never becomes a synthesis failure.
+    """
+    if not audio or audio[:4] != b"RIFF" or audio[8:12] != b"WAVE":
+        return audio
+    limit = settings.tts_trim_threshold if threshold is None else threshold
+    keep = settings.tts_trim_pad_ms if pad_ms is None else pad_ms
+    try:
+        with wave.open(BytesIO(audio), "rb") as wav:
+            channels = wav.getnchannels()
+            width = wav.getsampwidth()
+            rate = wav.getframerate()
+            frames = wav.readframes(wav.getnframes())
+    except (wave.Error, EOFError, struct.error):
+        return audio
+    if width != 2 or channels < 1 or rate <= 0 or not frames:
+        return audio
+    samples = struct.unpack(f"<{len(frames) // 2}h", frames[:len(frames) // 2 * 2])
+    stride = channels
+    count = len(samples) // stride
+    if count == 0:
+        return audio
+
+    def loud(index: int) -> bool:
+        base = index * stride
+        return any(abs(samples[base + ch]) / 32768.0 > limit for ch in range(stride))
+
+    first = next((i for i in range(count) if loud(i)), None)
+    if first is None:
+        return audio
+    last = count - 1
+    while last > first and not loud(last):
+        last -= 1
+    keep_samples = min(count, int(rate * max(0, keep) / 1000.0))
+    start = max(0, first - keep_samples)
+    end = min(count, last + 1 + keep_samples)
+    if start == 0 and end == count:
+        return audio
+    body = struct.pack(f"<{(end - start) * stride}h", *samples[start * stride:end * stride])
+    out = BytesIO()
+    with wave.open(out, "wb") as wav:
+        wav.setnchannels(channels)
+        wav.setsampwidth(width)
+        wav.setframerate(rate)
+        wav.writeframes(body)
+    return out.getvalue()
 
 
 @dataclass
@@ -329,11 +389,14 @@ class TTSEngine:
         from ..llm import llm
 
         client = await llm.client()
+        # 修剪只能在 PCM 上做，所以开关打开时按 WAV 取流；浏览器 decodeAudioData
+        # 按容器嗅探，交付格式不必与 settings.tts_format 一致。
+        wire_format = "wav" if settings.tts_trim_silence else settings.tts_format
         payload: dict[str, Any] = {
             "model": settings.tts_model,
             "input": text[:1000],  # service hard limit
             "voice": profile.get("voice") or settings.tts_voice,
-            "response_format": settings.tts_format,
+            "response_format": wire_format,
             "sample_rate": settings.tts_sample_rate,
             "text_normalization": "standard",  # latency-sensitive path
         }
@@ -344,7 +407,10 @@ class TTSEngine:
         resp = await client.post(f"{llm.base_url}/audio/speech", json=payload)
         if resp.status_code >= 400:
             raise RuntimeError(f"tts {resp.status_code}: {resp.text[:200]}")
-        return resp.content
+        audio = resp.content
+        if settings.tts_trim_silence:
+            audio = trim_wav_silence(audio)
+        return audio
 
     async def _edge(self, text: str, profile: dict[str, Any], *,
                     word_timings: list[dict[str, Any]] | None = None) -> bytes:

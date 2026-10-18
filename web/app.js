@@ -30,6 +30,7 @@ import { mountContextBudget } from './context-budget.js';
 import { AmbientDriver } from "./avatar/drivers/ambient.js";
 import { createGlimmer } from "./glimmer_bubble.js";
 import { createHoloDeck, parseCmd, summarizeAqiBlocks } from "./blocks.js";
+import { createAqiFlow, aqiPendingMessage } from "./aqi-flow.js";
 import { normalizeUiNav, drawerViewFor, shouldCloseDrawer, shouldOpenSidePanel,
   shouldOpenStarmap, gazeAfter } from "./ui_nav.js";
 bootAssistant().catch(error => console.warn('助手面板启动失败', error));
@@ -561,7 +562,7 @@ function gazeAtCard(direction) {
   } catch (_) { /* 形象层降级不影响积木本身 */ }
 }
 
-function handleAqiBlocks(msg) {
+function renderAqiBlocksNow(msg) {
   const summary = summarizeAqiBlocks(msg);
   if (!summary || !summary.count) return;
   const deck = summary.layout === "drawer_ops" ? opsDeck : holoDeck;
@@ -573,6 +574,67 @@ function handleAqiBlocks(msg) {
     if (view) { drawer?.open(); drawer?.selectView(view); }
   }
 }
+
+/* 协议 §23.6 心流防打扰：打字/写作时卡片不弹，只点亮战况胶囊报数；
+ * 停手过一个静默窗后按原序补弹，内容不改。守卫只延迟，不丢弃。
+ * 注意：只认真实 input（IME 的主力路径），不认快捷键；程序化赋值也不算。 */
+const aqiFlow = createAqiFlow({
+  isWriting: () => document.body.classList.contains("is-writing"),
+});
+let aqiDrainTimer = null;
+
+function showAqiHeld(count) {
+  const box = el("opsPending");
+  if (!box) return;
+  box.replaceChildren();
+  box.hidden = false;
+  box.dataset.quiet = "true";
+  const dot = document.createElement("span");
+  dot.className = "ops-breathe";
+  const text = document.createElement("span");
+  text.className = "ops-pending-text";
+  text.textContent = aqiPendingMessage(count, true);
+  box.append(dot, text);
+}
+
+function hideAqiHeld() {
+  const box = el("opsPending");
+  if (!box || box.hidden) return;
+  // 不抢 executive.js 的“待验收”报数：只熄灭自己写的那句。
+  if (!(box.textContent || "").includes("她递了")) return;
+  box.hidden = true;
+  box.replaceChildren();
+}
+
+function scheduleAqiDrain() {
+  if (aqiDrainTimer !== null) return;
+  const tick = () => {
+    if (!aqiFlow.count) { aqiDrainTimer = null; return; }
+    if (aqiFlow.isQuiet()) { aqiDrainTimer = setTimeout(tick, 120); return; }
+    aqiDrainTimer = null;
+    for (const held of aqiFlow.drain()) renderAqiBlocksNow(held);
+    hideAqiHeld();
+  };
+  aqiDrainTimer = setTimeout(tick, 120);
+}
+
+function handleAqiBlocks(msg) {
+  if (aqiFlow.isQuiet()) {
+    aqiFlow.hold(msg);
+    showAqiHeld(aqiFlow.count);
+    scheduleAqiDrain();
+    return;
+  }
+  renderAqiBlocksNow(msg);
+}
+
+el("textInput")?.addEventListener("input", (event) => {
+  if (event.isTrusted) aqiFlow.markTyping();
+});
+window.addEventListener("message", (event) => {
+  if (event.origin !== location.origin) return;
+  if (event.data?.type === "aqi-notes-typing") aqiFlow.markTyping();
+});
 
 function handleAqiAction(cmd, block) {
   if (typeof cmd !== "string" || !cmd) return;

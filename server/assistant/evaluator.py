@@ -122,6 +122,15 @@ def _check_artifacts_exist(artifact, packet, usage, thresholds):
         if not isinstance(ref, str) or not ref.strip():
             findings.append(_finding("no_unwired_dry_run", "blocker",
                                      f"第 {index + 1} 项成果没有可达 ref（文件路径/接口/便笺版本）。"))
+            continue
+        if item.get("kind") == "file":
+            try:
+                exists = Path(ref).is_file()
+            except OSError:
+                exists = False
+            if not exists:
+                findings.append(_finding("no_unwired_dry_run", "blocker",
+                                         f"第 {index + 1} 项成果的文件不存在：{ref[:200]}"))
     return findings
 
 
@@ -151,12 +160,230 @@ def _check_token_budget(artifact, packet, usage, thresholds):
     return []
 
 
+# ---------- 派单验收条件（acceptance） ----------
+# 指挥官下的验收口径必须能落到真实文件上，不能只核对交付卡的形状。每条规则
+# 都以 kind 为判别键；无法评估的规则（未知 kind、缺字段、带路径的文件名）一律
+# 产出 blocker，绝不当成"没写这条规则"而静默放行。
+_ACCEPTANCE_READ_LIMIT = 1_000_000
+
+
+def _acceptance_finding(kind: str, detail: str) -> dict[str, Any]:
+    return _finding(f"acceptance:{kind}", "blocker", detail)
+
+
+def _artifact_files(artifact: dict[str, Any]) -> list[Path]:
+    """交付卡里所有真实存在的文件成果。形状不算数，Path.is_file() 才算。"""
+    files: list[Path] = []
+    for item in artifact.get("artifacts") or []:
+        if not isinstance(item, dict):
+            continue
+        ref = item.get("ref")
+        if not isinstance(ref, str) or not ref.strip():
+            continue
+        try:
+            path = Path(ref)
+            if path.is_file():
+                files.append(path)
+        except (OSError, ValueError):
+            continue
+    return files
+
+
+def _acceptance_name(rule: dict[str, Any]) -> tuple[str, str]:
+    """`name` 只能是 basename；带路径分隔符或 .. 的规则判失败，不拿去拼路径。"""
+    name = rule.get("name")
+    if name is None:
+        return "", ""
+    if not isinstance(name, str) or not name.strip():
+        return "", "name 必须是非空文件名"
+    clean = name.strip()
+    if ".." in clean or "/" in clean or "\\" in clean or Path(clean).name != clean:
+        return "", f"name 不能包含路径：{clean[:80]}"
+    return clean, ""
+
+
+def _acceptance_files(rule: dict[str, Any],
+                      artifact: dict[str, Any]) -> tuple[list[Path], str]:
+    name, problem = _acceptance_name(rule)
+    if problem:
+        return [], problem
+    files = _artifact_files(artifact)
+    if name:
+        files = [path for path in files if path.name == name]
+        if not files:
+            return [], f"没有名为 {name[:80]} 的真实成果文件"
+    elif not files:
+        return [], "没有任何真实成果文件（ref 指向的文件都不存在）"
+    return files, ""
+
+
+def _acceptance_text(path: Path) -> tuple[str, str]:
+    try:
+        if path.stat().st_size > _ACCEPTANCE_READ_LIMIT:
+            return "", f"{path.name} 超过 {_ACCEPTANCE_READ_LIMIT} 字节，无法核对内容"
+        return path.read_text(encoding="utf-8", errors="replace"), ""
+    except OSError as exc:
+        return "", f"读不了 {path.name}（{type(exc).__name__}）"
+
+
+def _json_subset(expected: Any, actual: Any) -> bool:
+    """expect 只要求"包含"：对象按键递归，数组按位置前缀，其余精确相等。"""
+    if isinstance(expected, dict):
+        return isinstance(actual, dict) and all(
+            key in actual and _json_subset(value, actual[key])
+            for key, value in expected.items())
+    if isinstance(expected, list):
+        return isinstance(actual, list) and len(actual) >= len(expected) and all(
+            _json_subset(left, right) for left, right in zip(expected, actual))
+    return expected == actual
+
+
+def _rule_artifact_exists(rule, artifact):
+    _files, problem = _acceptance_files(rule, artifact)
+    return _acceptance_finding("artifact_exists", problem) if problem else None
+
+
+def _rule_artifact_name(rule, artifact):
+    name, problem = _acceptance_name(rule)
+    if problem:
+        return _acceptance_finding("artifact_name", problem)
+    if not name:
+        return _acceptance_finding("artifact_name", "缺少 name：不知道要核对哪个文件")
+    files = [path for path in _artifact_files(artifact) if path.name == name]
+    if not files:
+        return _acceptance_finding("artifact_name", f"没有名为 {name[:80]} 的成果文件")
+    return None
+
+
+def _rule_artifact_contains(rule, artifact):
+    text = rule.get("text")
+    if not isinstance(text, str) or not text:
+        return _acceptance_finding("artifact_contains", "缺少 text：不知道要核对什么内容")
+    files, problem = _acceptance_files(rule, artifact)
+    if problem:
+        return _acceptance_finding("artifact_contains", problem)
+    misses: list[str] = []
+    for path in files:
+        content, error = _acceptance_text(path)
+        if error:
+            misses.append(error)
+            continue
+        if text in content:
+            return None
+    return _acceptance_finding(
+        "artifact_contains", misses[0] if misses else f"成果文件里找不到 {text[:60]!r}")
+
+
+def _rule_artifact_json(rule, artifact):
+    expect = rule.get("expect")
+    if expect is not None and not isinstance(expect, (dict, list)):
+        return _acceptance_finding("artifact_json", "expect 必须是对象或数组")
+    files, problem = _acceptance_files(rule, artifact)
+    if problem:
+        return _acceptance_finding("artifact_json", problem)
+    reasons: list[str] = []
+    for path in files:
+        content, error = _acceptance_text(path)
+        if error:
+            reasons.append(error)
+            continue
+        try:
+            data = json.loads(content)
+        except ValueError:
+            reasons.append(f"{path.name} 不是合法 JSON")
+            continue
+        if expect is not None and not _json_subset(expect, data):
+            reasons.append(f"{path.name} 缺少 expect 里的字段或取值")
+            continue
+        return None
+    return _acceptance_finding("artifact_json", "；".join(reasons[:2]) or "没有可解析的 JSON 成果")
+
+
+def _rule_artifact_regex(rule, artifact):
+    pattern = rule.get("pattern")
+    if not isinstance(pattern, str) or not pattern:
+        return _acceptance_finding("artifact_regex", "缺少 pattern：不知道要匹配什么")
+    try:
+        compiled = re.compile(pattern)
+    except re.error:
+        return _acceptance_finding("artifact_regex", "pattern 不是合法正则")
+    files, problem = _acceptance_files(rule, artifact)
+    if problem:
+        return _acceptance_finding("artifact_regex", problem)
+    misses: list[str] = []
+    for path in files:
+        content, error = _acceptance_text(path)
+        if error:
+            misses.append(error)
+            continue
+        if compiled.search(content):
+            return None
+    return _acceptance_finding(
+        "artifact_regex", misses[0] if misses else f"成果文件不匹配 {pattern[:60]!r}")
+
+
+def _rule_artifact_max_bytes(rule, artifact):
+    limit = rule.get("bytes")
+    if type(limit) is not int or limit < 0:
+        return _acceptance_finding("artifact_max_bytes", "bytes 必须是非负整数")
+    files, problem = _acceptance_files(rule, artifact)
+    if problem:
+        return _acceptance_finding("artifact_max_bytes", problem)
+    over: list[str] = []
+    for path in files:
+        try:
+            size = path.stat().st_size
+        except OSError as exc:
+            over.append(f"读不了 {path.name}（{type(exc).__name__}）")
+            continue
+        if size > limit:
+            over.append(f"{path.name} {size} 字节超过上限 {limit}")
+    if over:
+        return _acceptance_finding("artifact_max_bytes", "；".join(over[:2]))
+    return None
+
+
+_ACCEPTANCE_RULES: dict[str, Callable[..., dict[str, Any] | None]] = {
+    "artifact_exists": _rule_artifact_exists,
+    "artifact_name": _rule_artifact_name,
+    "artifact_contains": _rule_artifact_contains,
+    "artifact_json": _rule_artifact_json,
+    "artifact_regex": _rule_artifact_regex,
+    "artifact_max_bytes": _rule_artifact_max_bytes,
+}
+
+
+def _check_acceptance_rule(rule: Any, artifact: dict[str, Any]) -> dict[str, Any] | None:
+    if not isinstance(rule, dict) or not rule:
+        return _acceptance_finding("invalid", "验收规则不是对象，无法评估")
+    kind = rule.get("kind")
+    if not isinstance(kind, str) or not kind:
+        return _acceptance_finding("invalid", "验收规则缺少 kind，无法评估")
+    checker = _ACCEPTANCE_RULES.get(kind)
+    if checker is None:
+        return _acceptance_finding(kind[:64], f"未知的验收规则类型：{kind[:64]}")
+    return checker(rule, artifact)
+
+
+def _check_acceptance(artifact, packet, usage, thresholds):
+    rules = (packet or {}).get("acceptance") or []
+    if not isinstance(rules, (list, tuple)) or not rules:
+        return []
+    findings = []
+    for rule in rules:
+        finding = _check_acceptance_rule(rule, artifact or {})
+        if finding is not None:
+            findings.append(finding)
+    return findings
+
+
 L1_CHECKS: dict[str, Callable[..., list[dict[str, Any]]]] = {
     "required_fields": _check_required_fields,
     "artifacts_exist": _check_artifacts_exist,
     "wired_not_dry": _check_wired,
     "no_topbar_button": _check_no_topbar_button,
     "token_budget": _check_token_budget,
+    "acceptance_met": _check_acceptance,
 }
 
 

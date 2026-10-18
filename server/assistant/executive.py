@@ -6,16 +6,21 @@
 """
 from __future__ import annotations
 
+import asyncio
 import time
 from pathlib import Path
 from typing import Any, Callable
 
 from ..interaction.threads import CommissionStore
-from .dispatcher import Dispatcher, roster_agents
+from .dispatcher import IN_FLIGHT_STATUSES, Dispatcher, roster_agents
 from .evaluator import Evaluator, load_roster
 from .telemetry import SpinningGuard, TelemetryGateway, TelemetryStore
 
 DEFAULT_TELEMETRY_WINDOW = 24 * 60 * 60
+
+RESTART_QUESTION = "服务重启过，这单停在半路，还没跑完。要我重跑吗？"
+NO_WORKER_QUESTION = "这单没人能接：花名册上的 Worker 都满载了。换将，还是等一轮？"
+FALLBACK_FEEDBACK = "上一版没过初审，按密件里的验收条件逐条改，改完再交。"
 
 
 class ExecutiveService:
@@ -40,6 +45,12 @@ class ExecutiveService:
                                      roster=self.evaluator.roster,
                                      memory_provider=self._memory_provider(notes, threads, preference_store),
                                      clock=clock, telemetry=self.telemetry)
+        # 收口只允许发生一次：重派出去的单会变成"在跑"，再收一次会把活着的单
+        # 当成半路的单掐掉。
+        self._recovery_done = False
+        # Shadow 模式：sidecar 照跑，结果只落日志。None 表示没开。
+        self.shadow = None
+        self._shadow_tasks: set[asyncio.Task] = set()
 
     @property
     def roster(self) -> dict[str, Any]:
@@ -63,6 +74,29 @@ class ExecutiveService:
         return True
 
     # ---------- 记忆注入 ----------
+    def bind_durable(self, config: dict[str, Any], *, apply_to: list[str] | None = None) -> int:
+        """把执行内核的端点与令牌写进花名册里 `adapter: durable` 的条目。
+
+        幂等，返回被绑定的 Worker 数。没绑定时派单不会静默改派：适配器会抛
+        AdapterError，那一单转 BLOCKED 并明说执行内核不可用。
+        """
+        bound = 0
+        for key in ("agents", "workers"):
+            entries = self.evaluator.roster.get(key)
+            if not isinstance(entries, list):
+                continue
+            for worker in entries:
+                if not isinstance(worker, dict):
+                    continue
+                # switch_agents 让配置直接把指定 Worker 切到 durable；不写 YAML，
+                # 回退就是改回配置，改坏了也不会留下半套花名册。
+                if str(worker.get("adapter")) == "durable" or (
+                        apply_to and str(worker.get("id")) in apply_to):
+                    worker.update(config)
+                    worker["adapter"] = "durable"
+                    bound += 1
+        return bound
+
     @staticmethod
     def _memory_provider(notes, threads, preference_store):
         from ..memory.commission_context import gather
@@ -96,31 +130,66 @@ class ExecutiveService:
     def start(self, commission_id: str) -> dict[str, Any]:
         return self.dispatcher.start(commission_id)
 
-    async def delegate(self, text: str, *, thread_id: str = "") -> dict[str, Any]:
+    async def delegate(self, text: str, *, thread_id: str = "",
+                       acceptance: Any = None) -> dict[str, Any]:
         """后台接单：open -> dispatch -> start -> 驱动执行体跑完。
 
         执行所有权在这里：正常委派由服务端自己驱动到终态，调用方不需要
         （也不能）只派不跑。任何一步失败都只在台账里留痕，不向外抛——
         语音轮次早就说完"接单了"，不该被慢环拖住，更不该被它带崩。
+
+        初审打回后自动重做，但重做次数与 Evaluator.MAX_RETRY 同一个上限：
+        每次重做前把上一轮的 scolding 写回密件（Worker 下一轮 prepare_context
+        就能看到），状态转出 running（ready_to_report / blocked / done）或
+        重做次数用尽就停。循环还额外有 retries 计数兜底，即使台账没有正常
+        累计重试次数也不会无限转。
         """
         title = (text or "").strip()[:80] or "未命名督办"
         commission = self.dispatcher.open(title, text or "", thread_id)
         try:
-            self.dispatcher.dispatch(commission["id"], intent=text or "")
+            self.dispatcher.dispatch(commission["id"], intent=text or "", acceptance=acceptance)
             commission = self.dispatcher.start(commission["id"])
             await self._drive(commission["id"])
             commission = self.ledger.get(commission["id"])
+            retries = 0
+            while (commission["status"] == "running"
+                   and int(commission["retry_count"]) <= self.evaluator.MAX_RETRY
+                   and retries < self.evaluator.MAX_RETRY):
+                retries += 1
+                audit = commission.get("audit") or {}
+                feedback = str(audit.get("scolding") or FALLBACK_FEEDBACK)
+                self.dispatcher.retry_with_feedback(commission["id"], feedback)
+                await self._drive(commission["id"])
+                commission = self.ledger.get(commission["id"])
         except LookupError:
             # 选不出将：先承认进了组密件阶段，再带一句请示转 BLOCKED。
             # 只用协议 §19 里写明的迁移，不为了顺手新开一条边。
             self.ledger.transition(commission["id"], "briefing")
-            commission = self.dispatcher.block(commission["id"], "这单没人能接：花名册上的 Worker 都满载了。换将，还是等一轮？")
+            commission = self.dispatcher.block(commission["id"], NO_WORKER_QUESTION)
         except Exception as exc:  # A broken dispatch must never break the voice turn.
-            self.ledger.transition(commission["id"], "blocked",
-                                        blocked_question=f"派单没组成：{type(exc).__name__}。要我再试一次吗？")
+            current = self.ledger.get(commission["id"])
+            if current["status"] == "drafting":
+                current = self.ledger.transition(commission["id"], "briefing")
+            if current["status"] in ("briefing", "running", "auditing"):
+                self.ledger.transition(commission["id"], "blocked",
+                                       blocked_question=f"派单没组成：{type(exc).__name__}。要我再试一次吗？")
             commission = self.ledger.get(commission["id"])
+        self._start_shadow(commission)
         return {"commission_id": commission["id"], "status": commission["status"],
                 "agent_id": commission["agent_id"], "agent_name": self._agent_name(commission["agent_id"])}
+
+    def _start_shadow(self, commission: dict[str, Any]) -> None:
+        if self.shadow is None:
+            return
+        task = asyncio.create_task(self._run_shadow(commission))
+        self._shadow_tasks.add(task)
+        task.add_done_callback(self._shadow_tasks.discard)
+
+    async def _run_shadow(self, commission: dict[str, Any]) -> None:
+        try:
+            await self.shadow(commission)
+        except Exception:
+            return
 
     async def _drive(self, commission_id: str) -> None:
         """驱动执行体跑完这一单。
@@ -176,6 +245,52 @@ class ExecutiveService:
 
     def open_commissions(self) -> list[dict[str, Any]]:
         return self.ledger.open_commissions()
+
+    def recover_interrupted(self, question: str = RESTART_QUESTION) -> dict[str, list[str]]:
+        """重启收口：把半路的单变成有出路的，把没派出去的重新派一遍。
+
+        briefing / running / auditing 只有活着的进程能推进，重启后没人持有它们，
+        而且它们算在 Worker 的并发槽里（dispatcher 的 in_flight_load）。blocked
+        是这三个状态唯一共同的合法去处（协议 §19），所以只做这一条迁移，不顺手
+        新开边。
+
+        drafting 是"接了单还没派出去"：一点活没干，重派一次就是接着做。
+
+        返回 {"blocked": [...], "resumed": [...]}。resumed 的单已经回到 running，
+        调用方负责接着驱动；不驱动它也不会再卡在半路状态。一个实例只收一次，
+        重复调用返回空。
+        """
+        if self._recovery_done:
+            return {"blocked": [], "resumed": []}
+        blocked: list[str] = []
+        resumed: list[str] = []
+        for item in self.ledger.open_commissions():
+            status = item.get("status")
+            if status in IN_FLIGHT_STATUSES:
+                self.dispatcher.block(item["id"], question)
+                blocked.append(item["id"])
+            elif status == "drafting":
+                try:
+                    self.dispatcher.dispatch(item["id"],
+                                             intent=item.get("brief") or item.get("title") or "")
+                except LookupError:
+                    self.ledger.transition(item["id"], "briefing")
+                    self.dispatcher.block(item["id"], NO_WORKER_QUESTION)
+                    blocked.append(item["id"])
+                except Exception as exc:  # 启动期的派单失败不该带崩服务
+                    if self.ledger.get(item["id"])["status"] == "drafting":
+                        self.ledger.transition(item["id"], "briefing")
+                    self.dispatcher.block(item["id"], f"派单没组成：{type(exc).__name__}。要我再试一次吗？")
+                    blocked.append(item["id"])
+                else:
+                    self.dispatcher.start(item["id"])
+                    resumed.append(item["id"])
+        self._recovery_done = True
+        return {"blocked": blocked, "resumed": resumed}
+
+    async def resume(self, commission_id: str) -> None:
+        """接着驱动一单已经回到 RUNNING 的督办（重启收口之后用）。"""
+        await self._drive(commission_id)
 
     def pending_reports(self) -> list[dict[str, Any]]:
         """READY_TO_REPORT 里还没被老板看过的那几单——心流防打扰只靠这份清单。"""

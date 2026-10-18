@@ -114,7 +114,8 @@ class ReflectCycleTest(unittest.IsolatedAsyncioTestCase):
     async def test_near_duplicate_child_is_refused_and_not_digested(self):
         # the only proposed child restates an existing seed -> no distinct child
         dup = _valid_payload()
-        dup["child_seeds"] = [{"title": "重复", "question": "观察人类为什么总喜欢在深夜做推翻白天的决定？", "reason": "r"}]
+        dup["child_seeds"] = [{"title": "重复", "question": "观察人类为什么总喜欢在深夜做推翻白天的决定？",
+                               "reason": "原问题已经覆盖了这一点，换个说法再问一遍"}]
         provider = ReflectProvider(dup)
         result = await self._cycle(provider).reflect(idle_seconds=99999, notes_provider=_notes)
         self.assertEqual(result["status"], "failed")

@@ -1,0 +1,1096 @@
+[
+  {
+    "id": "a-nocturne",
+    "view": "1440x1000",
+    "overflow": false,
+    "innerWidth": 1440,
+    "innerHeight": 1000,
+    "scrollWidth": 1440,
+    "scrollHeight": 1000,
+    "bodyScrollWidth": 1440,
+    "errors": [],
+    "metrics": {
+      "title": "方向 A · 夜航星图 / Nocturne Atlas",
+      "bodyFont": "\"Noto Sans SC\", \"PingFang SC\", \"Microsoft YaHei\", sans-serif",
+      "items": {
+        ".side": {
+          "fontFamily": "\"Noto Sans SC\", \"PingFang SC\", \"Microsoft YaHei\", sans-serif",
+          "fontSize": "13px",
+          "fontWeight": "400",
+          "lineHeight": "22.1px",
+          "letterSpacing": "normal",
+          "color": "rgb(220, 232, 230)",
+          "background": "rgba(0, 0, 0, 0)",
+          "borderRadius": "0px",
+          "box": {
+            "x": 0,
+            "y": 0,
+            "w": 288,
+            "h": 1000
+          }
+        },
+        ".topbar": {
+          "fontFamily": "\"Noto Sans SC\", \"PingFang SC\", \"Microsoft YaHei\", sans-serif",
+          "fontSize": "12px",
+          "fontWeight": "400",
+          "lineHeight": "20.4px",
+          "letterSpacing": "normal",
+          "color": "rgb(131, 151, 156)",
+          "background": "rgba(0, 0, 0, 0)",
+          "borderRadius": "0px",
+          "box": {
+            "x": 322,
+            "y": 0,
+            "w": 1084,
+            "h": 58
+          }
+        },
+        ".room-label": {
+          "fontFamily": "Consolas, SFMono-Regular, Menlo, monospace",
+          "fontSize": "10px",
+          "fontWeight": "400",
+          "lineHeight": "normal",
+          "letterSpacing": "1.8px",
+          "color": "rgb(111, 133, 139)",
+          "background": "rgba(0, 0, 0, 0)",
+          "borderRadius": "0px",
+          "box": {
+            "x": 322,
+            "y": 58,
+            "w": 1084,
+            "h": 32
+          }
+        },
+        ".companion-strip": {
+          "fontFamily": "\"Noto Sans SC\", \"PingFang SC\", \"Microsoft YaHei\", sans-serif",
+          "fontSize": "14px",
+          "fontWeight": "400",
+          "lineHeight": "23.8px",
+          "letterSpacing": "normal",
+          "color": "rgb(220, 232, 230)",
+          "background": "rgba(0, 0, 0, 0)",
+          "borderRadius": "0px",
+          "box": {
+            "x": 322,
+            "y": 102,
+            "w": 620,
+            "h": 63
+          }
+        },
+        ".hero h2": {
+          "fontFamily": "\"Noto Serif SC\", \"Source Han Serif SC\", STSong, SimSun, serif",
+          "fontSize": "78px",
+          "fontWeight": "300",
+          "lineHeight": "87.36px",
+          "letterSpacing": "1.17px",
+          "color": "rgb(220, 232, 230)",
+          "background": "rgba(0, 0, 0, 0)",
+          "borderRadius": "0px",
+          "box": {
+            "x": 322,
+            "y": 307,
+            "w": 620,
+            "h": 175
+          }
+        },
+        ".lede": {
+          "fontFamily": "\"Noto Sans SC\", \"PingFang SC\", \"Microsoft YaHei\", sans-serif",
+          "fontSize": "14.5px",
+          "fontWeight": "400",
+          "lineHeight": "28.275px",
+          "letterSpacing": "normal",
+          "color": "rgb(131, 151, 156)",
+          "background": "rgba(0, 0, 0, 0)",
+          "borderRadius": "0px",
+          "box": {
+            "x": 322,
+            "y": 504,
+            "w": 430,
+            "h": 57
+          }
+        },
+        ".sug": {
+          "fontFamily": "\"Noto Sans SC\", \"PingFang SC\", \"Microsoft YaHei\", sans-serif",
+          "fontSize": "14px",
+          "fontWeight": "400",
+          "lineHeight": "23.8px",
+          "letterSpacing": "normal",
+          "color": "rgb(220, 232, 230)",
+          "background": "rgba(0, 0, 0, 0)",
+          "borderRadius": "0px",
+          "box": {
+            "x": 322,
+            "y": 693,
+            "w": 490,
+            "h": 54
+          }
+        },
+        ".window": {
+          "fontFamily": "\"Noto Sans SC\", \"PingFang SC\", \"Microsoft YaHei\", sans-serif",
+          "fontSize": "14px",
+          "fontWeight": "400",
+          "lineHeight": "23.8px",
+          "letterSpacing": "normal",
+          "color": "rgb(220, 232, 230)",
+          "background": "rgba(0, 0, 0, 0)",
+          "borderRadius": "6px",
+          "box": {
+            "x": 976,
+            "y": 102,
+            "w": 430,
+            "h": 778
+          }
+        },
+        ".mode-line": {
+          "fontFamily": "\"Noto Sans SC\", \"PingFang SC\", \"Microsoft YaHei\", sans-serif",
+          "fontSize": "11.5px",
+          "fontWeight": "400",
+          "lineHeight": "19.55px",
+          "letterSpacing": "normal",
+          "color": "rgb(131, 151, 156)",
+          "background": "rgba(0, 0, 0, 0)",
+          "borderRadius": "0px",
+          "box": {
+            "x": 322,
+            "y": 892,
+            "w": 1084,
+            "h": 30
+          }
+        },
+        ".input-bar": {
+          "fontFamily": "\"Noto Sans SC\", \"PingFang SC\", \"Microsoft YaHei\", sans-serif",
+          "fontSize": "14px",
+          "fontWeight": "400",
+          "lineHeight": "23.8px",
+          "letterSpacing": "normal",
+          "color": "rgb(220, 232, 230)",
+          "background": "rgba(10, 20, 27, 0.84)",
+          "borderRadius": "8px",
+          "box": {
+            "x": 322,
+            "y": 922,
+            "w": 1084,
+            "h": 62
+          }
+        }
+      }
+    }
+  },
+  {
+    "id": "a-nocturne",
+    "view": "390x844",
+    "overflow": false,
+    "innerWidth": 390,
+    "innerHeight": 844,
+    "scrollWidth": 390,
+    "scrollHeight": 844,
+    "bodyScrollWidth": 390,
+    "errors": [],
+    "metrics": {
+      "title": "方向 A · 夜航星图 / Nocturne Atlas",
+      "bodyFont": "\"Noto Sans SC\", \"PingFang SC\", \"Microsoft YaHei\", sans-serif",
+      "items": {
+        ".side": {
+          "fontFamily": "\"Noto Sans SC\", \"PingFang SC\", \"Microsoft YaHei\", sans-serif",
+          "fontSize": "13px",
+          "fontWeight": "400",
+          "lineHeight": "22.1px",
+          "letterSpacing": "normal",
+          "color": "rgb(220, 232, 230)",
+          "background": "rgba(0, 0, 0, 0)",
+          "borderRadius": "0px",
+          "box": {
+            "x": 0,
+            "y": 0,
+            "w": 0,
+            "h": 0
+          }
+        },
+        ".topbar": {
+          "fontFamily": "\"Noto Sans SC\", \"PingFang SC\", \"Microsoft YaHei\", sans-serif",
+          "fontSize": "12px",
+          "fontWeight": "400",
+          "lineHeight": "20.4px",
+          "letterSpacing": "normal",
+          "color": "rgb(131, 151, 156)",
+          "background": "rgba(0, 0, 0, 0)",
+          "borderRadius": "0px",
+          "box": {
+            "x": 16,
+            "y": 0,
+            "w": 358,
+            "h": 52
+          }
+        },
+        ".room-label": {
+          "fontFamily": "Consolas, SFMono-Regular, Menlo, monospace",
+          "fontSize": "8.5px",
+          "fontWeight": "400",
+          "lineHeight": "normal",
+          "letterSpacing": "1.19px",
+          "color": "rgb(111, 133, 139)",
+          "background": "rgba(0, 0, 0, 0)",
+          "borderRadius": "0px",
+          "box": {
+            "x": 16,
+            "y": 52,
+            "w": 358,
+            "h": 27
+          }
+        },
+        ".companion-strip": {
+          "fontFamily": "\"Noto Sans SC\", \"PingFang SC\", \"Microsoft YaHei\", sans-serif",
+          "fontSize": "14px",
+          "fontWeight": "400",
+          "lineHeight": "23.8px",
+          "letterSpacing": "normal",
+          "color": "rgb(220, 232, 230)",
+          "background": "rgba(0, 0, 0, 0)",
+          "borderRadius": "0px",
+          "box": {
+            "x": 16,
+            "y": 87,
+            "w": 358,
+            "h": 54
+          }
+        },
+        ".hero h2": {
+          "fontFamily": "\"Noto Serif SC\", \"Source Han Serif SC\", STSong, SimSun, serif",
+          "fontSize": "40px",
+          "fontWeight": "300",
+          "lineHeight": "46.4px",
+          "letterSpacing": "0.4px",
+          "color": "rgb(220, 232, 230)",
+          "background": "rgba(0, 0, 0, 0)",
+          "borderRadius": "0px",
+          "box": {
+            "x": 16,
+            "y": 175,
+            "w": 358,
+            "h": 93
+          }
+        },
+        ".lede": {
+          "fontFamily": "\"Noto Sans SC\", \"PingFang SC\", \"Microsoft YaHei\", sans-serif",
+          "fontSize": "12px",
+          "fontWeight": "400",
+          "lineHeight": "22.2px",
+          "letterSpacing": "normal",
+          "color": "rgb(131, 151, 156)",
+          "background": "rgba(0, 0, 0, 0)",
+          "borderRadius": "0px",
+          "box": {
+            "x": 16,
+            "y": 281,
+            "w": 300,
+            "h": 44
+          }
+        },
+        ".sug": {
+          "fontFamily": "\"Noto Sans SC\", \"PingFang SC\", \"Microsoft YaHei\", sans-serif",
+          "fontSize": "12px",
+          "fontWeight": "400",
+          "lineHeight": "20.4px",
+          "letterSpacing": "normal",
+          "color": "rgb(220, 232, 230)",
+          "background": "rgba(0, 0, 0, 0)",
+          "borderRadius": "0px",
+          "box": {
+            "x": 16,
+            "y": 521,
+            "w": 358,
+            "h": 44
+          }
+        },
+        ".window": {
+          "fontFamily": "\"Noto Sans SC\", \"PingFang SC\", \"Microsoft YaHei\", sans-serif",
+          "fontSize": "14px",
+          "fontWeight": "400",
+          "lineHeight": "23.8px",
+          "letterSpacing": "normal",
+          "color": "rgb(220, 232, 230)",
+          "background": "rgba(0, 0, 0, 0)",
+          "borderRadius": "6px",
+          "box": {
+            "x": 16,
+            "y": 339,
+            "w": 358,
+            "h": 168
+          }
+        },
+        ".mode-line": {
+          "fontFamily": "\"Noto Sans SC\", \"PingFang SC\", \"Microsoft YaHei\", sans-serif",
+          "fontSize": "11.5px",
+          "fontWeight": "400",
+          "lineHeight": "19.55px",
+          "letterSpacing": "normal",
+          "color": "rgb(131, 151, 156)",
+          "background": "rgba(0, 0, 0, 0)",
+          "borderRadius": "0px",
+          "box": {
+            "x": 16,
+            "y": 750,
+            "w": 358,
+            "h": 28
+          }
+        },
+        ".input-bar": {
+          "fontFamily": "\"Noto Sans SC\", \"PingFang SC\", \"Microsoft YaHei\", sans-serif",
+          "fontSize": "14px",
+          "fontWeight": "400",
+          "lineHeight": "23.8px",
+          "letterSpacing": "normal",
+          "color": "rgb(220, 232, 230)",
+          "background": "rgba(10, 20, 27, 0.84)",
+          "borderRadius": "7px",
+          "box": {
+            "x": 16,
+            "y": 778,
+            "w": 358,
+            "h": 56
+          }
+        }
+      }
+    }
+  },
+  {
+    "id": "b-almanac",
+    "view": "1440x1000",
+    "overflow": false,
+    "innerWidth": 1440,
+    "innerHeight": 1000,
+    "scrollWidth": 1440,
+    "scrollHeight": 1000,
+    "bodyScrollWidth": 1440,
+    "errors": [],
+    "metrics": {
+      "title": "方向 B · 星图手帐 / Star-Map Almanac",
+      "bodyFont": "\"Noto Sans SC\", \"PingFang SC\", \"Microsoft YaHei\", sans-serif",
+      "items": {
+        ".side": {
+          "fontFamily": "\"Noto Sans SC\", \"PingFang SC\", \"Microsoft YaHei\", sans-serif",
+          "fontSize": "13px",
+          "fontWeight": "400",
+          "lineHeight": "22.1px",
+          "letterSpacing": "normal",
+          "color": "rgb(33, 28, 22)",
+          "background": "rgba(0, 0, 0, 0)",
+          "borderRadius": "0px",
+          "box": {
+            "x": 0,
+            "y": 0,
+            "w": 300,
+            "h": 1000
+          }
+        },
+        ".topbar": {
+          "fontFamily": "\"Noto Sans SC\", \"PingFang SC\", \"Microsoft YaHei\", sans-serif",
+          "fontSize": "12px",
+          "fontWeight": "400",
+          "lineHeight": "20.4px",
+          "letterSpacing": "normal",
+          "color": "rgb(109, 95, 74)",
+          "background": "rgba(0, 0, 0, 0)",
+          "borderRadius": "0px",
+          "box": {
+            "x": 348,
+            "y": 0,
+            "w": 1044,
+            "h": 58
+          }
+        },
+        ".room-label": {
+          "fontFamily": "Consolas, SFMono-Regular, Menlo, monospace",
+          "fontSize": "9.5px",
+          "fontWeight": "400",
+          "lineHeight": "normal",
+          "letterSpacing": "1.71px",
+          "color": "rgb(116, 102, 80)",
+          "background": "rgba(0, 0, 0, 0)",
+          "borderRadius": "0px",
+          "box": {
+            "x": 348,
+            "y": 58,
+            "w": 1044,
+            "h": 31
+          }
+        },
+        ".editorial h2": {
+          "fontFamily": "\"Noto Serif SC\", \"Source Han Serif SC\", STSong, SimSun, serif",
+          "fontSize": "70px",
+          "fontWeight": "600",
+          "lineHeight": "81.2px",
+          "letterSpacing": "1.05px",
+          "color": "rgb(33, 28, 22)",
+          "background": "rgba(0, 0, 0, 0)",
+          "borderRadius": "0px",
+          "box": {
+            "x": 414,
+            "y": 131,
+            "w": 546,
+            "h": 162
+          }
+        },
+        ".lede": {
+          "fontFamily": "\"Noto Serif SC\", \"Source Han Serif SC\", STSong, SimSun, serif",
+          "fontSize": "15px",
+          "fontWeight": "400",
+          "lineHeight": "29.25px",
+          "letterSpacing": "normal",
+          "color": "rgb(74, 66, 56)",
+          "background": "rgba(0, 0, 0, 0)",
+          "borderRadius": "0px",
+          "box": {
+            "x": 414,
+            "y": 311,
+            "w": 440,
+            "h": 59
+          }
+        },
+        ".slip": {
+          "fontFamily": "\"Noto Sans SC\", \"PingFang SC\", \"Microsoft YaHei\", sans-serif",
+          "fontSize": "14px",
+          "fontWeight": "400",
+          "lineHeight": "23.8px",
+          "letterSpacing": "normal",
+          "color": "rgb(33, 28, 22)",
+          "background": "rgb(251, 247, 238)",
+          "borderRadius": "0px",
+          "box": {
+            "x": 413,
+            "y": 389,
+            "w": 374,
+            "h": 127
+          }
+        },
+        ".sug": {
+          "fontFamily": "\"Noto Sans SC\", \"PingFang SC\", \"Microsoft YaHei\", sans-serif",
+          "fontSize": "14px",
+          "fontWeight": "400",
+          "lineHeight": "23.8px",
+          "letterSpacing": "normal",
+          "color": "rgb(33, 28, 22)",
+          "background": "rgba(0, 0, 0, 0)",
+          "borderRadius": "0px",
+          "box": {
+            "x": 414,
+            "y": 538,
+            "w": 500,
+            "h": 54
+          }
+        },
+        ".plate": {
+          "fontFamily": "\"Noto Sans SC\", \"PingFang SC\", \"Microsoft YaHei\", sans-serif",
+          "fontSize": "14px",
+          "fontWeight": "400",
+          "lineHeight": "23.8px",
+          "letterSpacing": "normal",
+          "color": "rgb(33, 28, 22)",
+          "background": "rgba(0, 0, 0, 0)",
+          "borderRadius": "0px",
+          "box": {
+            "x": 990,
+            "y": 107,
+            "w": 405,
+            "h": 583
+          }
+        },
+        ".mode-line": {
+          "fontFamily": "\"Noto Sans SC\", \"PingFang SC\", \"Microsoft YaHei\", sans-serif",
+          "fontSize": "11.5px",
+          "fontWeight": "400",
+          "lineHeight": "19.55px",
+          "letterSpacing": "normal",
+          "color": "rgb(109, 95, 74)",
+          "background": "rgba(0, 0, 0, 0)",
+          "borderRadius": "0px",
+          "box": {
+            "x": 348,
+            "y": 896,
+            "w": 1044,
+            "h": 30
+          }
+        },
+        ".input-slip": {
+          "fontFamily": "\"Noto Sans SC\", \"PingFang SC\", \"Microsoft YaHei\", sans-serif",
+          "fontSize": "14px",
+          "fontWeight": "400",
+          "lineHeight": "23.8px",
+          "letterSpacing": "normal",
+          "color": "rgb(33, 28, 22)",
+          "background": "rgb(251, 247, 238)",
+          "borderRadius": "0px",
+          "box": {
+            "x": 348,
+            "y": 926,
+            "w": 1044,
+            "h": 60
+          }
+        }
+      }
+    }
+  },
+  {
+    "id": "b-almanac",
+    "view": "390x844",
+    "overflow": false,
+    "innerWidth": 390,
+    "innerHeight": 844,
+    "scrollWidth": 390,
+    "scrollHeight": 844,
+    "bodyScrollWidth": 390,
+    "errors": [],
+    "metrics": {
+      "title": "方向 B · 星图手帐 / Star-Map Almanac",
+      "bodyFont": "\"Noto Sans SC\", \"PingFang SC\", \"Microsoft YaHei\", sans-serif",
+      "items": {
+        ".side": {
+          "fontFamily": "\"Noto Sans SC\", \"PingFang SC\", \"Microsoft YaHei\", sans-serif",
+          "fontSize": "13px",
+          "fontWeight": "400",
+          "lineHeight": "22.1px",
+          "letterSpacing": "normal",
+          "color": "rgb(33, 28, 22)",
+          "background": "rgba(0, 0, 0, 0)",
+          "borderRadius": "0px",
+          "box": {
+            "x": 0,
+            "y": 0,
+            "w": 0,
+            "h": 0
+          }
+        },
+        ".topbar": {
+          "fontFamily": "\"Noto Sans SC\", \"PingFang SC\", \"Microsoft YaHei\", sans-serif",
+          "fontSize": "12px",
+          "fontWeight": "400",
+          "lineHeight": "20.4px",
+          "letterSpacing": "normal",
+          "color": "rgb(109, 95, 74)",
+          "background": "rgba(0, 0, 0, 0)",
+          "borderRadius": "0px",
+          "box": {
+            "x": 20,
+            "y": 0,
+            "w": 350,
+            "h": 50
+          }
+        },
+        ".room-label": {
+          "fontFamily": "Consolas, SFMono-Regular, Menlo, monospace",
+          "fontSize": "8px",
+          "fontWeight": "400",
+          "lineHeight": "normal",
+          "letterSpacing": "1.04px",
+          "color": "rgb(116, 102, 80)",
+          "background": "rgba(0, 0, 0, 0)",
+          "borderRadius": "0px",
+          "box": {
+            "x": 20,
+            "y": 50,
+            "w": 350,
+            "h": 26
+          }
+        },
+        ".editorial h2": {
+          "fontFamily": "\"Noto Serif SC\", \"Source Han Serif SC\", STSong, SimSun, serif",
+          "fontSize": "44px",
+          "fontWeight": "600",
+          "lineHeight": "52.8px",
+          "letterSpacing": "0.66px",
+          "color": "rgb(33, 28, 22)",
+          "background": "rgba(0, 0, 0, 0)",
+          "borderRadius": "0px",
+          "box": {
+            "x": 20,
+            "y": 104,
+            "w": 350,
+            "h": 106
+          }
+        },
+        ".lede": {
+          "fontFamily": "\"Noto Serif SC\", \"Source Han Serif SC\", STSong, SimSun, serif",
+          "fontSize": "12px",
+          "fontWeight": "400",
+          "lineHeight": "22.2px",
+          "letterSpacing": "normal",
+          "color": "rgb(74, 66, 56)",
+          "background": "rgba(0, 0, 0, 0)",
+          "borderRadius": "0px",
+          "box": {
+            "x": 20,
+            "y": 222,
+            "w": 320,
+            "h": 44
+          }
+        },
+        ".slip": {
+          "fontFamily": "\"Noto Sans SC\", \"PingFang SC\", \"Microsoft YaHei\", sans-serif",
+          "fontSize": "14px",
+          "fontWeight": "400",
+          "lineHeight": "23.8px",
+          "letterSpacing": "normal",
+          "color": "rgb(33, 28, 22)",
+          "background": "rgb(251, 247, 238)",
+          "borderRadius": "0px",
+          "box": {
+            "x": 20,
+            "y": 468,
+            "w": 350,
+            "h": 111
+          }
+        },
+        ".sug": {
+          "fontFamily": "\"Noto Sans SC\", \"PingFang SC\", \"Microsoft YaHei\", sans-serif",
+          "fontSize": "14px",
+          "fontWeight": "400",
+          "lineHeight": "23.8px",
+          "letterSpacing": "normal",
+          "color": "rgb(33, 28, 22)",
+          "background": "rgba(0, 0, 0, 0)",
+          "borderRadius": "0px",
+          "box": {
+            "x": 20,
+            "y": 592,
+            "w": 350,
+            "h": 42
+          }
+        },
+        ".plate": {
+          "fontFamily": "\"Noto Sans SC\", \"PingFang SC\", \"Microsoft YaHei\", sans-serif",
+          "fontSize": "14px",
+          "fontWeight": "400",
+          "lineHeight": "23.8px",
+          "letterSpacing": "normal",
+          "color": "rgb(33, 28, 22)",
+          "background": "rgba(0, 0, 0, 0)",
+          "borderRadius": "0px",
+          "box": {
+            "x": 20,
+            "y": 282,
+            "w": 350,
+            "h": 164
+          }
+        },
+        ".mode-line": {
+          "fontFamily": "\"Noto Sans SC\", \"PingFang SC\", \"Microsoft YaHei\", sans-serif",
+          "fontSize": "11.5px",
+          "fontWeight": "400",
+          "lineHeight": "19.55px",
+          "letterSpacing": "normal",
+          "color": "rgb(109, 95, 74)",
+          "background": "rgba(0, 0, 0, 0)",
+          "borderRadius": "0px",
+          "box": {
+            "x": 20,
+            "y": 753,
+            "w": 350,
+            "h": 26
+          }
+        },
+        ".input-slip": {
+          "fontFamily": "\"Noto Sans SC\", \"PingFang SC\", \"Microsoft YaHei\", sans-serif",
+          "fontSize": "14px",
+          "fontWeight": "400",
+          "lineHeight": "23.8px",
+          "letterSpacing": "normal",
+          "color": "rgb(33, 28, 22)",
+          "background": "rgb(251, 247, 238)",
+          "borderRadius": "0px",
+          "box": {
+            "x": 20,
+            "y": 779,
+            "w": 350,
+            "h": 55
+          }
+        }
+      }
+    }
+  },
+  {
+    "id": "c-courtyard",
+    "view": "1440x1000",
+    "overflow": false,
+    "innerWidth": 1440,
+    "innerHeight": 1000,
+    "scrollWidth": 1440,
+    "scrollHeight": 1000,
+    "bodyScrollWidth": 1440,
+    "errors": [],
+    "metrics": {
+      "title": "方向 C · 苔庭 / Moss Courtyard",
+      "bodyFont": "\"Noto Sans SC\", \"PingFang SC\", \"Microsoft YaHei\", sans-serif",
+      "items": {
+        ".side": {
+          "fontFamily": "\"Noto Sans SC\", \"PingFang SC\", \"Microsoft YaHei\", sans-serif",
+          "fontSize": "13px",
+          "fontWeight": "400",
+          "lineHeight": "22.1px",
+          "letterSpacing": "normal",
+          "color": "rgb(241, 237, 224)",
+          "background": "rgba(0, 0, 0, 0)",
+          "borderRadius": "0px",
+          "box": {
+            "x": 0,
+            "y": 0,
+            "w": 300,
+            "h": 1000
+          }
+        },
+        ".topbar": {
+          "fontFamily": "\"Noto Sans SC\", \"PingFang SC\", \"Microsoft YaHei\", sans-serif",
+          "fontSize": "12px",
+          "fontWeight": "400",
+          "lineHeight": "20.4px",
+          "letterSpacing": "normal",
+          "color": "rgba(28, 42, 33, 0.62)",
+          "background": "rgba(0, 0, 0, 0)",
+          "borderRadius": "0px",
+          "box": {
+            "x": 344,
+            "y": 0,
+            "w": 1052,
+            "h": 56
+          }
+        },
+        ".room-label": {
+          "fontFamily": "Consolas, SFMono-Regular, Menlo, monospace",
+          "fontSize": "9.5px",
+          "fontWeight": "400",
+          "lineHeight": "normal",
+          "letterSpacing": "1.71px",
+          "color": "rgba(28, 42, 33, 0.7)",
+          "background": "rgba(0, 0, 0, 0)",
+          "borderRadius": "0px",
+          "box": {
+            "x": 344,
+            "y": 56,
+            "w": 1052,
+            "h": 30
+          }
+        },
+        ".plaque": {
+          "fontFamily": "\"Noto Sans SC\", \"PingFang SC\", \"Microsoft YaHei\", sans-serif",
+          "fontSize": "14px",
+          "fontWeight": "400",
+          "lineHeight": "23.8px",
+          "letterSpacing": "normal",
+          "color": "rgb(241, 237, 224)",
+          "background": "rgba(0, 0, 0, 0)",
+          "borderRadius": "28px 28px 8px",
+          "box": {
+            "x": 344,
+            "y": 96,
+            "w": 604,
+            "h": 82
+          }
+        },
+        ".hero h2 .small": {
+          "fontFamily": "\"Noto Serif SC\", \"Source Han Serif SC\", STSong, SimSun, serif",
+          "fontSize": "38px",
+          "fontWeight": "400",
+          "lineHeight": "51.3px",
+          "letterSpacing": "2.28px",
+          "color": "rgba(28, 42, 33, 0.72)",
+          "background": "rgba(0, 0, 0, 0)",
+          "borderRadius": "0px",
+          "box": {
+            "x": 344,
+            "y": 222,
+            "w": 604,
+            "h": 51
+          }
+        },
+        ".hero h2 .big": {
+          "fontFamily": "\"Noto Sans SC\", \"PingFang SC\", \"Microsoft YaHei\", sans-serif",
+          "fontSize": "94px",
+          "fontWeight": "800",
+          "lineHeight": "92.12px",
+          "letterSpacing": "-3.29px",
+          "color": "rgb(28, 42, 33)",
+          "background": "rgba(0, 0, 0, 0)",
+          "borderRadius": "0px",
+          "box": {
+            "x": 344,
+            "y": 273,
+            "w": 604,
+            "h": 92
+          }
+        },
+        ".lede": {
+          "fontFamily": "\"Noto Sans SC\", \"PingFang SC\", \"Microsoft YaHei\", sans-serif",
+          "fontSize": "14.5px",
+          "fontWeight": "400",
+          "lineHeight": "26.825px",
+          "letterSpacing": "normal",
+          "color": "rgba(28, 42, 33, 0.68)",
+          "background": "rgba(0, 0, 0, 0)",
+          "borderRadius": "0px",
+          "box": {
+            "x": 344,
+            "y": 478,
+            "w": 440,
+            "h": 54
+          }
+        },
+        ".stone": {
+          "fontFamily": "\"Noto Sans SC\", \"PingFang SC\", \"Microsoft YaHei\", sans-serif",
+          "fontSize": "14px",
+          "fontWeight": "400",
+          "lineHeight": "23.8px",
+          "letterSpacing": "normal",
+          "color": "rgb(28, 42, 33)",
+          "background": "rgba(0, 0, 0, 0)",
+          "borderRadius": "26px 16px 24px 14px",
+          "box": {
+            "x": 344,
+            "y": 552,
+            "w": 370,
+            "h": 55
+          }
+        },
+        ".arch": {
+          "fontFamily": "\"Noto Sans SC\", \"PingFang SC\", \"Microsoft YaHei\", sans-serif",
+          "fontSize": "14px",
+          "fontWeight": "400",
+          "lineHeight": "23.8px",
+          "letterSpacing": "normal",
+          "color": "rgb(28, 42, 33)",
+          "background": "rgba(0, 0, 0, 0)",
+          "borderRadius": "210px 210px 16px 16px",
+          "box": {
+            "x": 986,
+            "y": 96,
+            "w": 400,
+            "h": 778
+          }
+        },
+        ".mode-line": {
+          "fontFamily": "\"Noto Sans SC\", \"PingFang SC\", \"Microsoft YaHei\", sans-serif",
+          "fontSize": "11.5px",
+          "fontWeight": "400",
+          "lineHeight": "19.55px",
+          "letterSpacing": "normal",
+          "color": "rgb(36, 22, 15)",
+          "background": "rgba(0, 0, 0, 0)",
+          "borderRadius": "0px",
+          "box": {
+            "x": 353,
+            "y": 893,
+            "w": 1034,
+            "h": 28
+          }
+        },
+        ".dock": {
+          "fontFamily": "\"Noto Sans SC\", \"PingFang SC\", \"Microsoft YaHei\", sans-serif",
+          "fontSize": "14px",
+          "fontWeight": "400",
+          "lineHeight": "23.8px",
+          "letterSpacing": "normal",
+          "color": "rgb(28, 42, 33)",
+          "background": "rgba(0, 0, 0, 0)",
+          "borderRadius": "26px 26px 10px",
+          "box": {
+            "x": 344,
+            "y": 886,
+            "w": 1052,
+            "h": 100
+          }
+        }
+      }
+    }
+  },
+  {
+    "id": "c-courtyard",
+    "view": "390x844",
+    "overflow": false,
+    "innerWidth": 390,
+    "innerHeight": 844,
+    "scrollWidth": 390,
+    "scrollHeight": 844,
+    "bodyScrollWidth": 390,
+    "errors": [],
+    "metrics": {
+      "title": "方向 C · 苔庭 / Moss Courtyard",
+      "bodyFont": "\"Noto Sans SC\", \"PingFang SC\", \"Microsoft YaHei\", sans-serif",
+      "items": {
+        ".side": {
+          "fontFamily": "\"Noto Sans SC\", \"PingFang SC\", \"Microsoft YaHei\", sans-serif",
+          "fontSize": "13px",
+          "fontWeight": "400",
+          "lineHeight": "22.1px",
+          "letterSpacing": "normal",
+          "color": "rgb(241, 237, 224)",
+          "background": "rgba(0, 0, 0, 0)",
+          "borderRadius": "0px",
+          "box": {
+            "x": 0,
+            "y": 0,
+            "w": 0,
+            "h": 0
+          }
+        },
+        ".topbar": {
+          "fontFamily": "\"Noto Sans SC\", \"PingFang SC\", \"Microsoft YaHei\", sans-serif",
+          "fontSize": "12px",
+          "fontWeight": "400",
+          "lineHeight": "20.4px",
+          "letterSpacing": "normal",
+          "color": "rgba(28, 42, 33, 0.62)",
+          "background": "rgba(0, 0, 0, 0)",
+          "borderRadius": "0px",
+          "box": {
+            "x": 16,
+            "y": 0,
+            "w": 358,
+            "h": 50
+          }
+        },
+        ".room-label": {
+          "fontFamily": "Consolas, SFMono-Regular, Menlo, monospace",
+          "fontSize": "8px",
+          "fontWeight": "400",
+          "lineHeight": "normal",
+          "letterSpacing": "1.04px",
+          "color": "rgba(28, 42, 33, 0.7)",
+          "background": "rgba(0, 0, 0, 0)",
+          "borderRadius": "0px",
+          "box": {
+            "x": 16,
+            "y": 50,
+            "w": 358,
+            "h": 25
+          }
+        },
+        ".plaque": {
+          "fontFamily": "\"Noto Sans SC\", \"PingFang SC\", \"Microsoft YaHei\", sans-serif",
+          "fontSize": "14px",
+          "fontWeight": "400",
+          "lineHeight": "23.8px",
+          "letterSpacing": "normal",
+          "color": "rgb(241, 237, 224)",
+          "background": "rgba(0, 0, 0, 0)",
+          "borderRadius": "20px 20px 6px",
+          "box": {
+            "x": 16,
+            "y": 83,
+            "w": 358,
+            "h": 68
+          }
+        },
+        ".hero h2 .small": {
+          "fontFamily": "\"Noto Serif SC\", \"Source Han Serif SC\", STSong, SimSun, serif",
+          "fontSize": "24px",
+          "fontWeight": "400",
+          "lineHeight": "32.4px",
+          "letterSpacing": "0.96px",
+          "color": "rgba(28, 42, 33, 0.72)",
+          "background": "rgba(0, 0, 0, 0)",
+          "borderRadius": "0px",
+          "box": {
+            "x": 16,
+            "y": 182,
+            "w": 358,
+            "h": 32
+          }
+        },
+        ".hero h2 .big": {
+          "fontFamily": "\"Noto Sans SC\", \"PingFang SC\", \"Microsoft YaHei\", sans-serif",
+          "fontSize": "48px",
+          "fontWeight": "800",
+          "lineHeight": "48.96px",
+          "letterSpacing": "-0.96px",
+          "color": "rgb(28, 42, 33)",
+          "background": "rgba(0, 0, 0, 0)",
+          "borderRadius": "0px",
+          "box": {
+            "x": 16,
+            "y": 214,
+            "w": 358,
+            "h": 49
+          }
+        },
+        ".lede": {
+          "fontFamily": "\"Noto Sans SC\", \"PingFang SC\", \"Microsoft YaHei\", sans-serif",
+          "fontSize": "12px",
+          "fontWeight": "400",
+          "lineHeight": "21.6px",
+          "letterSpacing": "normal",
+          "color": "rgba(28, 42, 33, 0.68)",
+          "background": "rgba(0, 0, 0, 0)",
+          "borderRadius": "0px",
+          "box": {
+            "x": 16,
+            "y": 329,
+            "w": 340,
+            "h": 43
+          }
+        },
+        ".stone": {
+          "fontFamily": "\"Noto Sans SC\", \"PingFang SC\", \"Microsoft YaHei\", sans-serif",
+          "fontSize": "14px",
+          "fontWeight": "400",
+          "lineHeight": "23.8px",
+          "letterSpacing": "normal",
+          "color": "rgb(28, 42, 33)",
+          "background": "rgba(0, 0, 0, 0)",
+          "borderRadius": "18px 12px",
+          "box": {
+            "x": 16,
+            "y": 538,
+            "w": 358,
+            "h": 44
+          }
+        },
+        ".arch": {
+          "fontFamily": "\"Noto Sans SC\", \"PingFang SC\", \"Microsoft YaHei\", sans-serif",
+          "fontSize": "14px",
+          "fontWeight": "400",
+          "lineHeight": "23.8px",
+          "letterSpacing": "normal",
+          "color": "rgb(28, 42, 33)",
+          "background": "rgba(0, 0, 0, 0)",
+          "borderRadius": "100px 100px 12px 12px",
+          "box": {
+            "x": 16,
+            "y": 384,
+            "w": 358,
+            "h": 142
+          }
+        },
+        ".mode-line": {
+          "fontFamily": "\"Noto Sans SC\", \"PingFang SC\", \"Microsoft YaHei\", sans-serif",
+          "fontSize": "11.5px",
+          "fontWeight": "400",
+          "lineHeight": "19.55px",
+          "letterSpacing": "normal",
+          "color": "rgb(36, 22, 15)",
+          "background": "rgba(0, 0, 0, 0)",
+          "borderRadius": "0px",
+          "box": {
+            "x": 23,
+            "y": 750,
+            "w": 344,
+            "h": 25
+          }
+        },
+        ".dock": {
+          "fontFamily": "\"Noto Sans SC\", \"PingFang SC\", \"Microsoft YaHei\", sans-serif",
+          "fontSize": "14px",
+          "fontWeight": "400",
+          "lineHeight": "23.8px",
+          "letterSpacing": "normal",
+          "color": "rgb(28, 42, 33)",
+          "background": "rgba(0, 0, 0, 0)",
+          "borderRadius": "20px 20px 8px",
+          "box": {
+            "x": 16,
+            "y": 745,
+            "w": 358,
+            "h": 89
+          }
+        }
+      }
+    }
+  }
+]

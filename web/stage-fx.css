@@ -1,16 +1,57 @@
 /* Midnight Living Stage · 状态光场（配合 stage-fx.js 的粒子画布）
  * 状态全部来自 #avatarStage[data-interaction]（app.js 真实写入），
- * 用 .stage:has(...) 调光场强度；reduced-motion 时画布不启动，这里的光场即最终效果。 */
+ * 用 .stage:has(...) 调光场强度；reduced-motion 时画布不启动，这里的光场即最终效果。
+ *
+ * 2026-10-17 视觉轮：舞台同时服务两种页面构图——旧版暖纸上的独立头像，
+ * 和新版 almanac 的暗色"图版窗"。光晕因此只加光、不铺底：
+ * 左上暖、右侧冷、脚下暖池，四周收到透明，不会在纸上画出矩形卡片。 */
 
 #stageFx { position:absolute; inset:0; z-index:0; pointer-events:none; }
 
-/* 立绘身后的环境光场：强度按状态分档，默认安静 */
+.avatar-stage { isolation: isolate; }
+
+/* 窗光：左上暖主光、右侧冷反弹光、脚下暖池。全部收在透明里。 */
 .avatar-stage::after {
+  content: "";
+  position: absolute;
+  inset: -8% -12% -4%;
+  z-index: -2;
+  pointer-events: none;
+  background:
+    radial-gradient(ellipse 42% 40% at 20% 16%, #ffe0b42e, transparent 72%),
+    radial-gradient(ellipse 38% 56% at 86% 44%, #a9c9e83d, transparent 74%),
+    radial-gradient(ellipse 56% 24% at 50% 100%, #e0bd8a26, transparent 72%);
+  filter: blur(10px);
   opacity: var(--halo-o, 1);
-  transition: opacity .6s var(--ease);
+  transition: opacity .6s var(--ease, ease);
 }
+
+/* 脚下接触阴影：落在腿后，暖纸与暗窗上都读得出来。 */
+.avatar-stage::before {
+  content: "";
+  position: absolute;
+  left: 50%;
+  bottom: 3%;
+  transform: translateX(-50%);
+  width: 62%;
+  height: 26px;
+  z-index: -1;
+  border-radius: 50%;
+  background: radial-gradient(ellipse at 50% 50%, #0d0b0866, #0d0b0820 48%, transparent 74%);
+  filter: blur(5px);
+  opacity: .95;
+  transition: opacity .6s var(--ease, ease);
+}
+
+/* Canvas 的 alpha 轮廓落一层软投影：旧版暖纸上人物会"站"进纸面；
+ * 暗图版里几乎不可见，不干扰窗光。对比度只提 4%，把烤进贴图的嘴线略微压出来。 */
+.avatar-stage canvas {
+  filter: contrast(1.04) saturate(1.03) drop-shadow(0 14px 18px #3c43302b);
+}
+
+/* 立绘身后的环境光场：强度按状态分档，默认安静 */
 .stage:has(#avatarStage[data-interaction="listening"]) { --halo-o: 1.35; }
-.stage:has(#avatarStage[data-interaction="speaking"])  { --halo-o: 1.2; }
+.stage:has(#avatarStage[data-interaction="speaking"])  { --halo-o: 1.18; }
 .stage:has(#avatarStage[data-interaction="thinking"]),
 .stage:has(#avatarStage[data-interaction="preparing"]) { --halo-o: 1.1; }
 .stage:has(#avatarStage[data-interaction="yielding"]),
@@ -29,6 +70,12 @@
 .stage:has(#avatarStage[data-interaction="unavailable"]) #stageFx { display:none; }
 
 /* 脚下光池随状态轻微回应：倾听时暖一点，其余时间保持安静 */
-.avatar-stage::before { transition: opacity .6s var(--ease); }
 .stage:has(#avatarStage[data-interaction="listening"]) .avatar-stage::before { opacity: 1.25; }
 .stage:has(#avatarStage[data-interaction="unavailable"]) .avatar-stage::before { opacity: .6; }
+
+/* 390 头像只有 96×160，光晕与投影按比例收窄，避免糊成一团 */
+@media (max-width: 760px) {
+  .avatar-stage::after { inset: -6% -10% -4%; filter: blur(7px); }
+  .avatar-stage::before { width: 70%; height: 18px; filter: blur(3px); }
+  .avatar-stage canvas { filter: contrast(1.03) saturate(1.02) drop-shadow(0 8px 10px #3c433026); }
+}

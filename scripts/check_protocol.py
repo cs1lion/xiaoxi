@@ -6,7 +6,8 @@
 
 所以与其靠约定，不如把它变成机器可检的。这一脚本查八类漂移：
 
-  1. 情绪标签：persona.yaml 的 tts_emotions ↔ avatar.yaml 的 emotions 双向齐全
+  1. 情绪标签：orchestrator.EMOTIONS ↔ persona.yaml 的 tts_emotions ↔ avatar.yaml 的 emotions
+     三方齐全（2026-10-18 前只比两份 yaml，代码侧加情绪不报错、静默回落到 base）
   2. 参数表：web/avatar/params.js 的 PARAM_GROUPS ↔ avatar.yaml 的 neutral 互为全集
   3. 内部引用：表情 shift、手势关键帧、触发器、注视点的键必须真实存在
   4. 线上协议：app.js 每个 case 分支里读的 msg.<字段>，后端必须真的发这个字段
@@ -50,10 +51,39 @@ def all_params() -> set[str]:
     return set(re.findall(r'"(Param[A-Za-z]+)"', block.group(1)))
 
 
+def code_emotions() -> set[str]:
+    """orchestrator 的 EMOTIONS：模型被要求输出、_EMOTION_TAG 才认的那一份。
+
+    只比两份 yaml 会漏掉真正的事故面：EMOTIONS 是提示词与标签正则的唯一来源。
+    往这里加一个情绪而没配 persona/avatar 时，voice_profile() 会静默回落到 base
+    （`voices.get(emotion) or ... or voices["base"]`），表情层也退化成默认——
+    两头都不报错，只是"这个情绪从来没生效过"。
+    """
+    source = (SERVER_DIR / "dialogue" / "orchestrator.py").read_text(encoding="utf-8")
+    tree = ast.parse(source)
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Assign) or len(node.targets) != 1:
+            continue
+        target = node.targets[0]
+        if not (isinstance(target, ast.Name) and target.id == "EMOTIONS"):
+            continue
+        if isinstance(node.value, ast.Tuple):
+            return {item.value for item in node.value.elts
+                    if isinstance(item, ast.Constant) and isinstance(item.value, str)}
+    raise SystemExit("读不到 orchestrator.EMOTIONS，情绪标签的代码来源变了？")
+
+
 def emitted_types() -> dict[str, set[str]]:
-    """扫全部 server/*.py，收集 {"type": "X", ...} 形式的字典字面量。"""
+    """扫全部 server/*.py，收集 {"type": "X", ...} 形式的字典字面量。
+
+    `server/gateway/` 是 loopback 模型网关，说的是 Anthropic Messages 协议，
+    不是浏览器 WS 契约。把它算进来只会让"前端未处理"的提示越来越吵，
+    真正的 WS 漂移反而被淹没。
+    """
     found: dict[str, set[str]] = {}
     for path in sorted(SERVER_DIR.rglob("*.py")):
+        if SERVER_DIR / "gateway" in path.parents:
+            continue
         tree = ast.parse(path.read_text(encoding="utf-8"))
         for node in ast.walk(tree):
             if not isinstance(node, ast.Dict):
@@ -196,6 +226,33 @@ def check_ui_nav(problems: list[str]) -> None:
                 problems.append(f"web/ui_nav.js 的 {key} 白名单没覆盖协议取值 {sorted(missing)}")
 
 
+DURABLE_ROUTES_TS = ROOT / "agent-runtime" / "src" / "routes.ts"
+DURABLE_ROUTES_PY = ROOT / "server" / "assistant" / "adapters" / "durable.py"
+
+
+def check_durable_routes(problems: list[str]) -> None:
+    """慢环 sidecar 的路由表：Python 适配器与 Node 侧必须逐项一致。
+
+    sidecar 是独立进程，本脚本的路由扫描看不见它；两边各写一份常量，这里做
+    机械比对。agent-runtime 不存在时跳过，部分检出不该让门禁误报。
+    """
+    if not DURABLE_ROUTES_TS.exists() or not DURABLE_ROUTES_PY.exists():
+        return
+    ts_match = re.search(r"SIDECAR_ROUTES\s*=\s*\[([^\]]*)\]",
+                         DURABLE_ROUTES_TS.read_text(encoding="utf-8"))
+    py_match = re.search(r"SIDECAR_ROUTES\s*=\s*\(([^)]*)\)",
+                         DURABLE_ROUTES_PY.read_text(encoding="utf-8"))
+    if not ts_match or not py_match:
+        problems.append("sidecar 路由表缺失：routes.ts 或 durable.py 里找不到 SIDECAR_ROUTES")
+        return
+    ts_routes = set(re.findall(r'["\']([^"\']+)["\']', ts_match.group(1)))
+    py_routes = set(re.findall(r'["\']([^"\']+)["\']', py_match.group(1)))
+    for name in sorted(py_routes - ts_routes):
+        problems.append(f"durable 适配器用了 sidecar 没有的路由 {name}")
+    for name in sorted(ts_routes - py_routes):
+        problems.append(f"sidecar 路由 {name} 没登记进 durable 适配器（改名只改了一边）")
+
+
 def frontend_api_calls() -> set[str]:
     """Literal /api/... strings in web js; dynamic template paths cannot be checked statically."""
     calls: set[str] = set()
@@ -225,13 +282,20 @@ def main() -> int:
     params = all_params()
     problems: list[str] = []
 
-    # ---- 1. 情绪标签双向齐全 ----
+    # ---- 1. 情绪标签三方齐全 ----
     voices = {k for k in persona["tts_emotions"] if k != "base"}
     faces = {k for k in avatar["emotions"] if k != "base"}
-    for missing in sorted(faces - voices):
-        problems.append(f"avatar.yaml 有表情 {missing!r}，但 persona.yaml 没有对应情绪")
-    for missing in sorted(voices - faces):
-        problems.append(f"persona.yaml 有情绪 {missing!r}，但 avatar.yaml 没有对应表情")
+    spoken = code_emotions() - {"base"}
+    for label, left, right in (("avatar.yaml", faces, voices),
+                               ("persona.yaml", voices, faces),
+                               ("orchestrator.EMOTIONS", spoken, voices | faces)):
+        for missing in sorted(left - right):
+            problems.append(f"{label} 有情绪 {missing!r}，但另一侧没配（会静默回落到 base）")
+        for missing in sorted(right - left):
+            if label == "orchestrator.EMOTIONS":
+                # persona/avatar 多配一个不发给模型的情绪只是死配置，不是漂移事故。
+                continue
+            problems.append(f"{label} 少了情绪 {missing!r}，模型永远不会输出它")
 
     # ---- 2. 参数表与中位姿态互为全集 ----
     neutral = avatar.get("neutral", {})
@@ -353,6 +417,8 @@ def main() -> int:
                 problems.append(f"aqi_blocks.py 不认 {group_name}={value!r}（信封校验会静默纠正它）")
     # ---- 8. 协议 §24 ui_nav 领航：前后端取值域同步 ----
     check_ui_nav(problems)
+    # ---- 9. 慢环 sidecar 路由：Python 适配器与 Node 侧同步 ----
+    check_durable_routes(problems)
 
     if problems:
         print("FAIL")
