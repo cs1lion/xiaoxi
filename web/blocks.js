@@ -342,12 +342,15 @@ export function createHoloDeck(mount, handlers = {}) {
   function render(payload) {
     const summary = summarizeAqiBlocks(payload);
     if (!summary) return 0;
-    // 阶梯入场：同一批积木按序号错峰浮现（--aqi-i × 45ms，见 companion.css）
-    let stagger = 0;
+    /* 曾经打算做"阶梯入场"：给每张卡写 --aqi-i，由 CSS 的
+     * animation-delay: calc(var(--aqi-i)*45ms) 消费（设计记录见
+     * web/design-preview/NOTES.md，当时实测第 3 张 delay 90ms）。
+     * 但那条 CSS 从未落进 companion.css / almanac.css——变量写了没人读，
+     * 错峰一次都没发生过。2026-10-18 删掉这段死接线，免得下一个人按注释
+     * 去找一条不存在的规则。真要恢复错峰，补 CSS 时把这两行一起加回来。 */
     for (const block of list(payload.blocks)) {
       const card = renderAqiBlock(block, handlers);
       if (!card) continue;
-      card.style.setProperty("--aqi-i", String(stagger++));
       mount.append(card);
       count += 1;
     }

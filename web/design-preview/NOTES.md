@@ -16,6 +16,9 @@
 - **三态胶囊**（companion.css）：`rgba(22,24,32,.48)` + `blur(24px) saturate(180%)` + Specular Rim 复合内阴影；悬停上浮 1px、按压 scale(.96)；灵动=金 / 静默=银 / 无痕=薄荷，状态色只在呼吸圆点与色晕上表达。
 - **积木卡**（六种 + memo）：深邃基底 `rgba(17,19,26,.78)` + 顶部径向环境光 + 2px 左光条；tone=gold/red/mint/neutral → `--aqi-accent/--aqi-aura` 切换；标题 #f3f4f6 / 副文本 #9ca3af / 时间戳 #64748b；metric 数字与泳道状态强制 tabular-nums + 等宽栈；`R18/R10` 同心圆角。
 - **阶梯入场**（blocks.js `createHoloDeck.render`）：按批写入 `--aqi-i`，CSS `animation-delay: calc(var(--aqi-i)*45ms)`，第 3 张卡实测 delay 90ms。
+  > **2026-10-18 更正**：那条 CSS 从未落进 `companion.css` / `almanac.css`——原型目录里量到的
+  > 90ms 是对的，但生产样式表里没有这条规则，错峰在线上一次都没发生过。`blocks.js` 里
+  > 写 `--aqi-i` 的两行已作为死接线删除。要恢复：补 CSS 时把 setProperty 那两行一起加回。
 - **测试同步**（不改业务语义）：`test_blocks.mjs` 从过期的 `stage_float` 信封对齐到服务端实际的 `stage_holo + source`（修掉了进入本任务前已存在的红灯）；胶囊材质断言从 blur(10px) 升到新材质。
 - **验收**：`check_protocol.py` PASS；`npm test` 全绿（含 test:blocks 4/4）；`test-presence-capsule-browser` 9/9（含「顶栏 0 新增按钮」断言）；`test-aqi-blocks-browser` 9/9（含 XSS/回收/抽屉联动）；桌面与 390 窄屏均无横向溢出、输入框命中正常。证据：`shots/aqi-upgrade-{desktop,narrow}.png`。
 
