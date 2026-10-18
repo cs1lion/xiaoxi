@@ -134,10 +134,6 @@ def spinning_intercept_line() -> str:
     return stage_sample_line("spinning_intercept_mumble")
 
 
-def spinning_intercept_line() -> str:
-    return stage_sample_line("spinning_intercept_mumble")
-
-
 def audit_reject_line() -> str:
     return stage_sample_line("audit_reject_brag")
 

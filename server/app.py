@@ -8,7 +8,6 @@ import uuid
 from typing import Any
 
 import numpy as np
-import yaml
 from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
 from fastapi.responses import FileResponse, JSONResponse
 from .static import AppStaticFiles
@@ -98,16 +97,17 @@ async def get_persona() -> dict[str, Any]:
 
 
 @app.get("/api/avatar")
-async def get_avatar() -> Any:
-    path = ROOT / "config" / "avatar.yaml"
-    if not path.exists():
-        return JSONResponse({"error": "avatar.yaml missing"}, status_code=404)
-    return json.loads(json.dumps(yaml.safe_load(path.read_text(encoding="utf-8"))))
-
-
-@app.get("/api/avatar")
 async def get_avatar() -> dict[str, Any]:
-    """姿态契约。前端据此构建参数表、表情目标和手势轨道。"""
+    """姿态契约。前端据此构建参数表、表情目标和手势轨道。
+
+    必须走 `avatar_cfg()`，不能直接读 yaml 文件：`check_protocol.py` 与所有服务端
+    代码读的都是 `avatar_cfg()`，它在 config_hot 装了快照时返回覆盖后的结果
+    （协议 §17：改配置不用重启）。直接读盘的那一版在热覆盖生效时会给出**过期**
+    契约——前端按旧参数建姿态、校验却按新参数判，两头都不报错。
+
+    这里原先有两个同名处理函数挂在同一路径上：先注册的读盘版本胜出，后注册的
+    `avatar_cfg()` 版本被悄悄遮蔽，从来没有服务过请求。
+    """
     return avatar_cfg()
 
 

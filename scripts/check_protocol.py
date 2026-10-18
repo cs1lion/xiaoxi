@@ -147,6 +147,30 @@ def server_routes() -> set[str]:
     return {route for route in routes if route.startswith('/')}
 
 
+def duplicate_routes() -> dict[tuple[str, str], list[str]]:
+    """同一 (方法, 路径) 被注册多次的位置。
+
+    为什么要查：FastAPI 按注册顺序匹配，**先注册的胜出**，后注册的同路径处理函数
+    被悄悄遮蔽、从不服务请求。2026-10-18 抓到一次真实事故：`/api/avatar` 上挂了
+    两个同名 GET 处理函数，读盘的那版胜出，而 `check_protocol.py` 与服务端代码读的
+    都是走 config_hot 快照的 `avatar_cfg()`——热覆盖生效时前端拿到过期契约，
+    两头都不报错。`server_routes()` 返回集合，重复项天然被折叠，所以这里单独数。
+
+    必须连方法一起数：同一路径上的 GET 与 DELETE 是正常设计（REST），
+    只数路径会误报。
+    """
+    seen: dict[tuple[str, str], list[str]] = {}
+    for path in sorted(SERVER_DIR.rglob('*.py')):
+        if '__pycache__' in path.parts:
+            continue
+        text = path.read_text(encoding='utf-8')
+        for match in re.finditer(
+                r'@app\.(get|post|patch|delete|put)\(\s*["\']([^"\']+)["\']', text):
+            seen.setdefault((match.group(1).upper(), match.group(2)),
+                            []).append(str(path.relative_to(ROOT)))
+    return {key: where for key, where in seen.items() if len(where) > 1}
+
+
 INTERNAL_ROUTES = ('/internal/telemetry_proxy',)
 """服务端自用路由：前端不引用，所以第五类检查看不到它们。
 
@@ -419,6 +443,11 @@ def main() -> int:
     check_ui_nav(problems)
     # ---- 9. 慢环 sidecar 路由：Python 适配器与 Node 侧同步 ----
     check_durable_routes(problems)
+    # ---- 10. 同一 (方法, 路径) 只能注册一次：重复注册会让后一个处理函数永不服务 ----
+    for (method, route), where in sorted(duplicate_routes().items()):
+        problems.append(
+            f"路由 {method} {route!r} 被注册了 {len(where)} 次（{', '.join(where)}）："
+            "FastAPI 先注册者胜出，后注册的那个从不服务请求")
 
     if problems:
         print("FAIL")
