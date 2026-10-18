@@ -65,13 +65,24 @@ def seed_memories(case: dict) -> None:
                      key=mem["key"], value=mem["value"],
                      source=mem.get("source", "stated"),
                      importance=float(mem.get("importance", 0.8)))
+    for lesson in (case.get("setup") or {}).get("lessons") or []:
+        store.add_lesson(trigger=lesson["trigger"], action=lesson["action"],
+                         cues=lesson.get("cues"), scope=lesson.get("scope", "dialogue"),
+                         source=lesson.get("source", "reflection"),
+                         evidence_refs=lesson.get("evidence_refs"))
 
 
 def build_offline_prompt(case: dict) -> tuple[str, str]:
     """用最后一轮 user 文本走真实检索 + 真实装配，拼出最终 Prompt 文本。"""
+    from server.memory.lessons import render_lessons
     query = (case.get("turns") or [""])[-1]
     block, found = manager.context_with_status(query)
+    procedural = manager.lessons_for(query)
+    lesson_block = render_lessons(procedural) if procedural else ""
     messages = build_messages(memory_block=block, memory_found=found, user_text=query)
+    # Inject lessons as an additional system message, matching the Orchestrator path.
+    if lesson_block:
+        messages.append({"role": "system", "content": lesson_block})
     return "\n".join(m["content"] for m in messages), block
 
 
@@ -102,22 +113,60 @@ async def run_check(check: dict, state: dict) -> tuple[bool, str]:
     return False, f"未知 check 类型 {kind!r}"
 
 
-async def run_live_turns(case: dict, llm) -> list[str]:
-    """真实装配 + 真实模型，逐轮对话，返回每轮原始回复（情绪标签未剥离）。"""
-    from server.dialogue.orchestrator import EMOTION_INSTRUCTION
+async def run_live_turns(case: dict, llm) -> tuple[list[str], list[dict]]:
+    """真实装配 + 真实模型，逐轮对话。
+
+    返回 (每轮原始回复, 每轮元信息)。元信息必须留下 finish_reason：推理模型
+    把 token 预算吃光时正文为空，如果只看文本，会把"被截断"误报成"缺情绪标签"
+    （2026-10-17 实测：18 轮里 1 轮 finish_reason=length，正文 0 字）。
+
+    截断时按生产路径同款救援再要一次短回复；救援是否成功记在 rescued 里，
+    仍然为空就如实判失败，不靠重试把失败掩盖掉。
+    """
+    from server.dialogue.orchestrator import EMOTION_INSTRUCTION, parse_emotion
 
     history: list[dict[str, str]] = []
     replies: list[str] = []
+    meta: list[dict] = []
     for user_text in case.get("turns") or []:
         block, found = manager.context_with_status(user_text)
         messages = build_messages(memory_block=block, memory_found=found,
                                   emotion_instruction=EMOTION_INSTRUCTION,
                                   history=history, user_text=user_text)
-        reply = await llm.complete(messages, max_tokens=int(settings.llm_reply_tokens))
-        replies.append(reply)
+        raw = await llm.complete_raw(messages, max_tokens=int(settings.llm_reply_tokens))
+        text = raw.get("text") or ""
+        finish = raw.get("finish_reason") or ""
+        rescued = False
+        retry_meta: dict = {}
+        if finish == "length" and len(parse_emotion(text)[1]) < 6:
+            rescue = list(messages) + [{
+                "role": "user",
+                "content": "（上一条被截断了，现在只回一句话，保留开头的 [情绪] 标签，20 字以内。）",
+            }]
+            try:
+                retry = await llm.complete_raw(rescue, max_tokens=600,
+                                               reasoning_effort="minimal")
+            except Exception:  # provider rejects reasoning_effort
+                retry = await llm.complete_raw(rescue, max_tokens=600)
+            text = retry.get("text") or ""
+            finish = retry.get("finish_reason") or finish
+            rescued = True
+            retry_meta = {
+                "retry_finish_reason": finish,
+                "retry_completion_tokens": int(
+                    (retry.get("usage") or {}).get("completion_tokens") or 0),
+            }
+        replies.append(text)
+        meta.append({
+            "finish_reason": finish,
+            "rescued": rescued,
+            "text_chars": len(text),
+            "completion_tokens": int((raw.get("usage") or {}).get("completion_tokens") or 0),
+            **retry_meta,
+        })
         history.append({"role": "user", "content": user_text})
-        history.append({"role": "assistant", "content": reply})
-    return replies
+        history.append({"role": "assistant", "content": text})
+    return replies, meta
 
 
 async def run_case(case: dict, *, live: bool, llm) -> dict:
@@ -129,11 +178,13 @@ async def run_case(case: dict, *, live: bool, llm) -> dict:
         seed_memories(case)
         prompt, memory_block = ("", "")
         replies: list[str] = []
+        turn_meta: list[dict] = []
         if is_live:
-            replies = await run_live_turns(case, llm)
+            replies, turn_meta = await run_live_turns(case, llm)
         else:
             prompt, memory_block = build_offline_prompt(case)
-        state = {"case": case, "replies": replies, "prompt": prompt, "memory_block": memory_block}
+        state = {"case": case, "replies": replies, "prompt": prompt,
+                 "memory_block": memory_block, "turn_meta": turn_meta}
         check_results = []
         for check in case.get("checks") or []:
             try:
@@ -150,6 +201,7 @@ async def run_case(case: dict, *, live: bool, llm) -> dict:
             # live 落盘只存回复与判定；prompt 与凭据不落盘。
             "turns": [{"user": u, "reply": r} for u, r in
                       zip(case.get("turns") or [], replies)] if is_live else [],
+            "turn_meta": turn_meta if is_live else [],
             "checks": check_results,
         })
     passed_runs = sum(1 for r in run_records if r["passed"])

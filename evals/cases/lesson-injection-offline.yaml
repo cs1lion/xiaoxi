@@ -1,0 +1,25 @@
+id: lesson-injection-offline
+origin: "memory-self-evolution-20261017"
+description: "程序性经历检索链路：记忆开启、lessons 配置打开时，匹配的 lesson 被检索器返回"
+target: prompt
+setup:
+  memories:
+    - kind: fact
+      key: work:company
+      value: 用户在甲公司工作
+      source: stated
+      importance: 0.8
+  lessons:
+    - trigger: "当用户在深夜说累时"
+      action: "先接住情绪，不急着给方案"
+      cues: ["好累", "深夜"]
+      source: "reflection"
+      evidence_refs: ["diary:2026-10-13"]
+turns:
+  - "今天好累啊，什么事都不想动"
+checks:
+  - type: custom
+    value: "evals.checks:lesson_retrieval_check"
+    target: prompt
+    desc: "检索到的 lesson 内容包含触发词和动作"
+pass_rule: all
