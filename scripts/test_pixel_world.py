@@ -24,7 +24,12 @@ WORLD = ROOT / "pixel-world"
 
 def npm() -> str:
     found = shutil.which("npm")
-    return found or ("npm.cmd" if sys.platform == "win32" else "npm")
+    if found:
+        return found
+    fallback = "npm.cmd" if sys.platform == "win32" else "npm"
+    if shutil.which(fallback):
+        return fallback
+    return ""
 
 
 def steps() -> list[tuple[str, list[str]]]:

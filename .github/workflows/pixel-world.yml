@@ -1,7 +1,8 @@
 # 像素世界门禁（D7-A）：仅在 pixel-world/ 变更时触发。
 #
-# 只跑零外部依赖层：tsc --noEmit + node --test（59→90+ 项纯逻辑测试）。
-# 浏览器冒烟（Playwright + dev server）不在这里跑，理由与主 CI 一致：
+# 只跑零外部依赖层：tsc --noEmit + node --test（90+ 项纯逻辑测试）。
+# 具体命令统一由 scripts/test_pixel_world.py 决定，CI 与本地共用一套实现，
+# 避免两处命令各自漂移。浏览器冒烟（Playwright + dev server）不在这里跑：
 # 需要 GPU/浏览器/本地服务，放本地或单独手跑 `node pixel-world/scripts/smoke.mjs`。
 name: Pixel World Guard
 
@@ -21,9 +22,6 @@ jobs:
   guard:
     name: 像素世界门禁（types + logic tests）
     runs-on: ubuntu-latest
-    defaults:
-      run:
-        working-directory: pixel-world
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -36,10 +34,13 @@ jobs:
           cache-dependency-path: pixel-world/package-lock.json
 
       - name: Install dependencies
+        working-directory: pixel-world
         run: npm ci
 
-      - name: Type check
-        run: npm run check
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
 
-      - name: Logic tests
-        run: npm test
+      - name: Run pixel-world gate
+        run: python scripts/test_pixel_world.py
