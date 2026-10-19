@@ -1,6 +1,6 @@
-# ADR：Agent ⇄ 像素世界最小桥接（范围已批准 · 实施待 S5 · v2.4）
+# ADR：Agent ⇄ 像素世界最小桥接（范围已批准 · 实施待 S5 · v2.6）
 
-- **状态**：**范围已批准，实施待 S5**（v2.4 · 用户 2026-10-19 批准：§4.4 选 A；G2 为范围预批准；7 条实施条件见 §7.1）。首席架构审查官终审通过（2026-10-19）；§4.4 语料"当前分流"已运行验证 27/27。**未实现、未承诺；S3/S4 收口前不动 `server/assistant/**`。**
+- **状态**：**范围已批准，实施待 S5**（v2.6 · 用户 2026-10-19 批准：§4.4 选 A；G2 为范围预批准；7 条实施条件见 §7.1。v2.5→v2.6（2026-10-20 架构复审修订）：§4.4.1 A6 三重断言与"代表性抽样"、B2 改 stub handler + 反事实；§4.7 A 触发条件更正为"外部演示/自由输入再命中（附日期+ID）"、删淡化表述、C 并入 server-free 静态声明变体（`index.html:213`/`SandboxScene.ts:497`）、A 回归风险升档并注明干净让位做不到；语料 73/73 PASS）。首席架构审查官终审通过（2026-10-19）+ 2026-10-20 复审修订。**未实现、未承诺；S3/S4 收口前不动 `server/assistant/**`。**
 - **日期**：2026-10-19 · **作者**：Agent 集成工程师 · **分派**：Chief（选 A）；**评审**：首席架构审查官三轮（两轮有条件通过 → 终审通过），P1 全闭、P2 并入、勘误 5 条已 patch
 - **核验基线**：分支 `feat/pixel-world-oracle-world`，HEAD `5214eb5`。本文只读核验 + 文档提案，**未改任何源码/配置/测试，未 commit**。工作区 task-28 调色板改动进行中，本文不触碰 `pixel-world/src` 与 `docs/ART_PALETTE_AUDIT.md`。
 - **上游文档**：`docs/AGENT_INTEGRATION_STATUS.md`（三分类核验）、`docs/PIXEL_WORLD_ROUND3_20261019.md`（台账接入）、`docs/NEXT_PHASE_PLAN.md`（S5 排期）、`docs/DECISION_TRAIL_20261019.md`（D2）。
@@ -140,14 +140,27 @@ async def _drive_world_commission(self, commission_id):
 | **A（推荐）** | 不扩通用派单词，只扩"显式点名像素世界"的短语（像素世界/世界里/小镇/pixel world 等），且这些短语不被 `_DELEGATION` 命中；未被快环命中的世界措辞才进 AgentLoop 工具路径（需确认、有 receipt） | 需一组正反测试语料作为 G2 验收，证明既有分流零变化 |
 | B | 接受两套入口：快环立即派（免确认）与慢环工具派（需确认）并存，写进产品说明 | 同一意图两种语义，用户体感不一致；无测试语料门槛 |
 
-**A 的验收语料（当前分流部分已运行验证 · 2026-10-19 · `tmp/verify_routing_corpus.py` · 27/27 PASS）**：
+**A 的验收语料（已运行验证 · 2026-10-20 · `scripts/verify_world_routing_corpus.py` · 73/73 PASS · A/B 两类断言）**：
 - 正例·查询类（已验证：当前无快环命中、无 `should_route` 命中 → 今天落普通对话）：去像素世界里看看她在干什么 / 像素世界现在什么情况 / 世界里的铺子都开着吗 / 去看看像素世界 / 像素世界里有新的活吗 / 把 pixel world 的状态报给我 / 刷新一下像素世界的画面 / 像素世界需不需要我帮忙 / 帮我去像素世界那边瞅瞅 / 像素世界 offline 了吗
 - 正例·派单类（已验证：不被 `_DELEGATION` 命中 + 含世界短语 → 扩词后可到 `world.dispatch`）：让像素世界接一单把脚本写完 / 派一单给像素世界里的她：整理便笺 / 像素世界接一单，把便笺整理成三版标题
 - 反例（已验证：均不含世界短语 → 扩词按构造不可能改变其分流；括号内为实测当前分流）：安排人把便笺做成三版（快环 delegation）/ 让她去把这份稿子改了（快环 delegation）/ 盯着这个单做完再叫我（快环 delegation）/ 进度怎么样了（快环 progress）/ 战况烧了多少 token（快环 telemetry）/ 收工（快环 accept）/ 不行打回重做（快环 reject）/ 建个任务明天下午三点评审（显式 should_route 命中，task 原路）/ 取消提醒（显式 should_route 命中，reminder 原路）/ 便笺整理一下（显式正则未命中；便笺会话路径未纳入本次核验）
 - 反例·日常句（用户点名必须含；已验证：当前落普通对话、不含世界短语 → 短语级扩词后仍须不变）：世界杯开始了吗 / 你的世界观是什么 / 昨晚世界杯看了没 / 她最近世界观变了不少。**这也是"扩词必须短语级（像素世界/世界里/小镇/pixel world）、不能用裸"世界"二字"的证据——裸"世界"会误伤这四条。**
-- **已验证范围**：仅"当前分流"断言（快环五意图 + 显式 should_route + resume，正则逐字转写自 `orchestrator.py:60-76`、`service.py:95,99-101`）；"扩词后进 AgentLoop"按构造成义。**未验证**：note/thread 会话自有路由正则未纳入；"工具能被选中"需实现期 mock LLM 决策测试——mock LLM 对派单正例返回 `{"action":"tool_call","tool":"world.dispatch","arguments":{…}}`，断言 ① handler 被调用；② receipt 含 `id`/`commission_id`；③ 因 `mutation=True` 先出现 `waiting_confirmation` 回合、确认后才执行（E3）。
+- **已验证范围（2026-10-20 · `scripts/verify_world_routing_corpus.py` · 73/73 PASS）**：
+  - **A 类·当前分流**（正则级，已证，41 条）：快环五意图 + 显式 should_route + resume，正则逐字转写自 `orchestrator.py:60-76`、`service.py:95,99-101`；
+  - **B 类·扩词后进 AgentLoop**：**B1 构造级**（已证）——should_route 增加世界短语后，13 条正例改判 True、14 条反例 `after==before` 逐条一致（差分铁律）；**B2 契约级 mock**（已证，非真实 AgentLoop）——mock 模型对派单正例返回 `world.dispatch`，经 `loop.py:29-47` 同款校验后**调用 ADR §4.2 形状的 stub handler**（`world_dispatch_stub(title, brief="")`），断言 receipt DTO（`id==commission_id`、`world_visible="unknown"`）、`mutation` 先过 `waiting_confirmation` 再执行、仅传 title 时经 stub handler 不 TypeError，并以**无默认值反事实签名**确认缺省必炸（证明 `brief=""` 是必要屏障，非同义反复）。
+  - **未验证**：note/thread 会话自有路由正则未纳入；**真实 AgentLoop 内的工具选中仍属 S5 实现期验收**（B2 只是契约级 mock）。
 - **差分测试（批准条件 C3，S5 验收门）**：除本语料外，须对**现有语料与历史消息样本**（从消息表抽样）跑改动前后 `should_route` 输出**逐条一致**；反例集必须包含"世界杯/世界观"类日常句（上文四条即基线）。
 - **修正记录**：初版两条反例声称与实测不符，已改——"安排人把便笺整理成三版标题"不命中 `_DELEGATION`（"整理"不在第 2 分支动词表），换成"安排人把便笺做成三版"；"便笺整理一下"显式正则不命中，声称降级为"未纳入本次核验"。
+
+#### 4.4.1 派单正则边界与验收语料（同义改写静默不建单 · 用户 2026-10-20 指派 A）
+
+**既存事实**：派单只由 `_DELEGATION`（`server/dialogue/orchestrator.py:60-65`）判定，第一支要求「`去(把|帮我|替我)…`」句式；不命中 → `executive_route` 返回 None（`server/app.py:697-739` 的 `if route is not None` 不成立）→ 继续走 `should_route`/普通对话 → **不建单、无任何提示**；离线模式最终以通用闲聊句收尾（`server/llm.py:247-255` 回复池，Chief 锚点 `:250` 在池内——"静默"的最终形态）。证据：S4 双重复现（Chief `c_d34c824bc869`、QA `c_e6ecc8ce2da4`；反例「帮我把…」0 帧）——**转报未验证**：工作区内全部 commissions.db 均查无这两个 ID（主库 `data/commissions.db` 239 行、最新写入 10-19 10:43，疑为隔离演示库已清理）；本轮自证见下述语料。
+
+**验收语料（已运行验证 · `scripts/verify_world_routing_corpus.py` A5/A6 组 · 属 73/73 组成部分；进 S5 验收门，不进 1.0）**：
+- 建单组（`_DELEGATION` 命中 → `executive_route` 派单）：你去把便笺整理成三版标题 / 去把脚本写完 / 安排人把便笺做成三版 / 让她去把稿子改了
+- 静默组（不命中 → route=None → 不建单、无提示；**代表性抽样**，覆盖「帮我把…」「整理一下便笺」「你去把…」以外的常见同义说法，不穷尽）：帮我把便笺整理成三版标题 / 整理一下便笺 / 把这堆便笺弄成三版 / 辛苦你把便笺整理一下 / 麻烦整理下便笺 / 便笺整理成三版标题。**A6 三重断言**：不命中 `_DELEGATION` + 显式 `should_route` 不命中 + 无世界短语——三者俱全才配"静默落普通对话"标签（只验快环不命中会漏掉本应进 `should_route` 的句子）。
+
+**差分测试新增要求（C3 扩展）**：对每个静默组反例，必须断言「**不建单 + 有可见反馈**」，或明确记录为已知限制（当前=已知限制：无反馈，见 §4.7 方案 C）。
 
 ### 4.5 `begin_commission` / `drive_commission` 重构规格（`executive.py`，S5 实施；范围已批准）
 
@@ -172,8 +185,25 @@ async def _drive_world_commission(self, commission_id):
 | drive + 打回重试循环 | facade 只有 `run_commission`（`executive.py:265-267` → `dispatcher.py:309-337`）：**单次**驱动、要求 running、租约冲突即 400 | 重试循环只 inline 在 `delegate()`：`executive.py:185-196`（`ledger.get` `:186/:196`、`evaluator.MAX_RETRY` `:189-190`、`dispatcher.retry_with_feedback` `:194`、`_drive` `:185/:195`）。**没有"给已有 commission id 驱动到终态（含重试）"的公共入口**——纯公共 API 包装 = 初审打回后（`dispatcher.py:543-548` 回 running）无人再驱动，单子卡 running，正是 P1-2 修掉的坑 |
 | shadow 启动 | `_start_shadow` 私有（`executive.py:214-219`，delegate 在 `:210` 调），依赖 `self.shadow`（`:52`）与 `self._shadow_tasks` | 包装层调私有方法或索性不调；不调则工具派的单静默丢掉 durable shadow 运行，与 `delegate()` 行为不一致 |
 | "失败不外抛"策略 | `_drive` 私有（`executive.py:227-236`）：异常吞掉、降级进台账 | 包装层复刻该策略 = 复刻核心逻辑，违反 `AGENT_PLAYBOOK` 工程纪律 1/2（Reuse First、先诊断后微创） |
+| `dispatch()`/`start()` 返回形状不含 `agent_name` | `dispatch` 返回 `{"commission","packet"}`（`executive.py:159-161`）、`start` 返回台账行（`:163-164`）——都没有 `agent_name`；名字只能由私有 `_agent_name` 解析（`executive.py:238-242`，delegate 在 `:211-212` 用） | 包装层要自己解析花名册才能填 receipt 的 `agent_name`——又一"纯 public 包装做不到/做不全"的点（架构审查官补证 · 2026-10-20） |
 
 **若坚持"新模块"**：唯一不退化的做法是新模块只放工具 handler + 任务集合，同时在 `executive.py` 增加一个 public `drive_commission`（包住既有循环）——但这仍然碰 `executive.py`，且不减少改动量，只是把抽取出的代码换个文件放；按 Reuse First，工具 handler 放 `service.py:64-89`（与既有 12 个工具同源）比新开模块更符合现有架构。**ADR 现案（模块内抽取 + `delegate()` 改为组合 begin/drive，行为保持）即为最小正确解。**
+
+### 4.7 静默降级的可见提示（评估 · 用户 2026-10-20 指派 B · 只评估、不出代码）
+
+背景：§4.4.1 静默组——用户说"帮我把便笺整理成三版标题"，快环不建单也无提示，最终以普通对话收尾。三个方案的评估：
+
+| 方案 | 改动面（文件:行） | 回归风险 | 验收方式 | 需用户批准 |
+|---|---|---|---|---|
+| **A 快环侧提示**：`executive_route` 返回 None 但命中"弱委派特征"时回一句明示（"这句像派单，但没派下去；要我派就说『去把…』"） | `server/dialogue/orchestrator.py`（弱委派识别 + 新 route kind，如 `delegation_hint`）+ `server/app.py:727-732`（kind 分支：只发文本、不 spawn delegate；复用 `_present_reply` 既有路径，**无新协议事件**）；**或 hint 逻辑下移 service 层**（+1 文件 `server/assistant/service.py`：在 `should_route`（`app.py:740`）之后、`assistant.start` 之前才看得见便笺/事项路由状态） | **高**：① **干净让位做不到（除非下移 service 层）**——便笺/事项路由发生在 `assistant.start` 内部（`service.py:383,391` 的 note/thread conversation 判定），orchestrator 拿不到该状态；插在快环的 hint 会劫走「帮我把便笺改一下」这类本应进便笺会话的句子；② 与 12 个既有工具的交互——提示轮次不得触发工具；③ 需独立正反语料 + 差分 | 每条弱委派句→出提示且不建单；既有 73 条语料 + 历史样本路由输出逐条不变；演示脚本可演 | **是**（`server/**`，主产品语音路径行为变更） |
+| **B 像素世界侧提示**：调试面板/状态行显示"派单未建单" | **不可行（如所述）**：世界只能收 `commission_update` 帧与 REST 快照（`ledger.ts`），"没建单"是**非事件**，任何通道都不会通知世界；`?ledger=off` 时更无从得知。server-free 唯一变体是在世界侧复制派单正则（`oracle.ts:31-51` 有自建关键词路由先例）——意图判定双真相源，违反协议单一事实来源纪律，且神谕面板输入是界内操作、覆盖不了麦克风原话 | 变体=高（双真相源漂移） | n/a（不采纳） | 世界内不需要；若要世界可知，必须服务端广播新事件 → 回到 A 的改动面 + 协议评审 |
+| **C 不加提示 + 文档声明 + server-free 静态声明（现状 + 新变体，已并入 C）** | `docs/`（演示脚本/FAQ；Role 0/Chief 领地）+ **世界页状态行固定一行**「这里只显示已建单；刚派的单没出现，请回主界面确认」：`pixel-world/index.html:213`（`#status` 静态落点）/ `pixel-world/src/scenes/SandboxScene.ts:497 statusLine()` 固定补充行——零检测、零 server、零回归，使"只改 `pixel-world/**`"的选项有可核清单 | 零 | QA 复核：文档声明与实测一致（静默组→普通对话、无帧、无提示）；静态行在 `?ledger=on/off` 两模式均在且不随状态变化 | 否（`pixel-world/**` 内 + docs） |
+
+**推荐：C（1.0/S5 最小闭环，含静态声明变体）**。理由：零回归、零协议变更，且 G2 范围预批准只覆盖 5 处世界桥接编辑、**不含** orchestrator/service 语音路径的行为变更——推 A 等于推荐一个未获批准的主产品改动；§4.4.1 差分要求（"不建单 + 有可见反馈"**或**记录为已知限制）以"已知限制 + 静态声明"形式闭合。
+
+**关于 A 的触发条件（按复审更正）**：S4 双重复现（Chief `c_d34c…`、QA `c_e6ecc…`）证明的是**现象存在且可复现**（技术事实），不是"真实用户因此误解/卡住"（产品证据）——原触发条件"若 S4 演示中真实用户被卡住"与之矛盾，已废除。新触发条件：**外部演示 / 真实用户自由输入再次命中静默组且造成误解（须附日期 + 单号或录屏）**。触发后按 A 实施，门槛 = 用户批准 + hint 下移 service 层（或接受高回归风险并明示）+ 独立语料 + 差分全绿。用户若在知悉本评估后直接选择 A，亦是合法决策（A 本就必须用户批准）。
+
+**B 不采纳**（世界对非事件不可感知；server-free 变体 = 双真相源）。
 
 ## 5. 上行回执选型比较（S5 备料，本 ADR 不落地；U1 已按复审改判）
 
@@ -230,4 +260,4 @@ async def _drive_world_commission(self, commission_id):
 
 ## 9. 结论
 
-最小闭环（Agent 派单 → 世界执行 → 台账观察）**用现有通道即可成立：零新协议项、零新路由/WS 事件、零 `pixel-world/src` 改动**；服务端共 5 处编辑（全在 `server/assistant/**`，S5 实施）：两个工具 + `should_route` 短语级扩词（A 方案，语料 27/27 已验证 + 差分门）+ `__init__`/`close()` 后台任务纪律（强引用/日志/取消/并发上限 2）+ `begin_commission`/`drive_commission` 行为保持型重构（修掉打回后停摆，`delegate()` 返回形状不变；"新模块包装零碰 executive.py"经 §4.6 逐行论证不可行）。上行回执不做通用化：世界保持只读，U1 仅收窄为"世界 UI 代老板点验收/打回"，世界原生事件回执留 U2 + 协议评审。天气/时间/造物等 richer 操作今天无入站通道，明确留在 S5。
+最小闭环（Agent 派单 → 世界执行 → 台账观察）**用现有通道即可成立：零新协议项、零新 REST/WS 端点、零 `pixel-world/src` 改动**；服务端共 5 处编辑（全在 `server/assistant/**`，S5 实施）：两个工具 + `should_route` 短语级扩词（A 方案，语料 73/73 已验证 + 差分门）+ `__init__`/`close()` 后台任务纪律（强引用/日志/取消/并发上限 2）+ `begin_commission`/`drive_commission` 行为保持型重构（修掉打回后停摆，`delegate()` 返回形状不变；"新模块包装零碰 executive.py"经 §4.6 逐行论证不可行）。上行回执不做通用化：世界保持只读，U1 仅收窄为"世界 UI 代老板点验收/打回"，世界原生事件回执留 U2 + 协议评审。天气/时间/造物等 richer 操作今天无入站通道，明确留在 S5。
