@@ -59,6 +59,7 @@ export class SaveStore {
   private readonly onWarning: (message: string) => void;
   private autoSave = true;
   private readonly warned = new Set<string>();
+  private lastSaved: { schemaVersion: number; savedAtWallClock: number } | null = null;
 
   constructor(options: SaveStoreOptions = {}) {
     this.storage = options.storage ?? (globalThis.localStorage as StorageLike);
@@ -76,6 +77,11 @@ export class SaveStore {
 
   disableAutoSave(): void {
     this.autoSave = false;
+  }
+
+  /** 调试面板：最近一次成功读/写的存档元信息（无则 null）。 */
+  lastSavedMeta(): { schemaVersion: number; savedAtWallClock: number } | null {
+    return this.lastSaved === null ? null : { ...this.lastSaved };
   }
 
   /** 读档；任何异常都降级为可读结果，不抛。 */
@@ -113,6 +119,10 @@ export class SaveStore {
     try {
       const migrated = migrateSave(raw);
       assertSaveV1(migrated);
+      this.lastSaved = {
+        schemaVersion: migrated.schemaVersion,
+        savedAtWallClock: migrated.meta.savedAtWallClock,
+      };
       return { ok: true, save: migrated };
     } catch {
       this.backupCorrupt(text);
@@ -142,6 +152,10 @@ export class SaveStore {
         return { ok: false, paused: true, message: QUOTA_MESSAGE };
       }
     }
+    this.lastSaved = {
+      schemaVersion: save.schemaVersion,
+      savedAtWallClock: save.meta.savedAtWallClock,
+    };
     return { ok: true, paused: false, message: '存档已写入。' };
   }
 

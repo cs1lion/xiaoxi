@@ -449,6 +449,155 @@ async function runSandboxSuite() {
   });
   check(bridged.after === bridged.before + 1, '外部 Agent 的消息进了同一条命令队列');
 
+  // 上帝调试面板（S2-3）：只读浮层，不改变仿真。
+  const panelInitial = await page.evaluate(() => ({
+    hidden: document.querySelector('#debug-panel')?.hidden ?? null,
+  }));
+  check(panelInitial.hidden === true, '调试面板默认收起');
+  await page.click('#debug-toggle');
+  const panelCounts = await page.evaluate(() => {
+    const snapshot = window.Oracle.view();
+    const rows = (kind) =>
+      document.querySelectorAll(`#debug-panel [data-debug-row="${kind}"]`).length;
+    return {
+      hidden: document.querySelector('#debug-panel')?.hidden,
+      villagers: rows('villager'),
+      snapshotVillagers: snapshot.villagers.length,
+      buildings: rows('building'),
+      snapshotBuildings: snapshot.workstations.length,
+      tasks: rows('task'),
+      snapshotTasks: snapshot.tasks.length,
+      events: rows('event'),
+      snapshotEvents: window.Oracle.events(50).length,
+      injectOpen: document.querySelector('#debug-inject')?.open ?? null,
+    };
+  });
+  check(panelCounts.hidden === false, '快捷键/按钮能打开调试面板');
+  check(
+    panelCounts.villagers === panelCounts.snapshotVillagers &&
+      panelCounts.buildings === panelCounts.snapshotBuildings &&
+      panelCounts.tasks === panelCounts.snapshotTasks,
+    '调试面板实体数量与快照一致',
+  );
+  check(
+    panelCounts.events === Math.min(50, panelCounts.snapshotEvents),
+    '事件流行数与只读事件数一致',
+  );
+  check(panelCounts.injectOpen === false, '调试注入默认折叠');
+  await page.screenshot({ path: `${OUT}/07-debug-panel.png` });
+
+  // P2 回归：注入区必须在面板刷新后仍然存在、按钮可用（独立于 #debug-content）。
+  await page.waitForTimeout(400);
+  const injectAt400 = await page.evaluate(() => {
+    const details = document.querySelector('#debug-inject');
+    const buttons = [...document.querySelectorAll('#debug-inject [data-debug-action]')];
+    return {
+      exists: details !== null,
+      buttons: buttons.length,
+      enabled: buttons.every((button) => !(button instanceof HTMLButtonElement) || !button.disabled),
+      text: details?.textContent ?? '',
+      open: details instanceof HTMLDetailsElement ? details.open : null,
+      insideContent: document.querySelector('#debug-content #debug-inject') !== null,
+    };
+  });
+  check(
+    injectAt400.exists && injectAt400.buttons === 2 && injectAt400.enabled,
+    '400ms 后注入区仍在且两个按钮可点',
+  );
+  check(
+    injectAt400.text.includes('仅调试') && injectAt400.text.includes('不写台账'),
+    '注入区文案标明仅调试、不写台账',
+  );
+  check(injectAt400.open === false && injectAt400.insideContent === false, '注入区默认折叠且在刷新区之外');
+  await page.screenshot({ path: `${OUT}/07-debug-panel-400ms.png` });
+
+  // 展开后点一次 feed：只进世界命令队列，不写台账。
+  const tasksBeforeFeed = await page.evaluate(() => window.Oracle.view().tasks.length);
+  await page.evaluate(() => {
+    const details = document.querySelector('#debug-inject');
+    if (details instanceof HTMLDetailsElement) details.open = true;
+  });
+  await page.click('#debug-inject [data-debug-action="feed"]');
+  await page.waitForTimeout(600);
+  const injectAt1s = await page.evaluate(() => ({
+    buttons: document.querySelectorAll('#debug-inject [data-debug-action]').length,
+    tasks: window.Oracle.view().tasks.length,
+    open: document.querySelector('#debug-inject')?.open ?? null,
+  }));
+  check(injectAt1s.buttons === 2, '1s 后注入区仍在');
+  check(injectAt1s.tasks > tasksBeforeFeed, '注入按钮可用（feed 进了世界队列）');
+  check(injectAt1s.open === true, '展开状态在刷新后保留');
+  await page.screenshot({ path: `${OUT}/07-debug-panel-1s.png` });
+
+  // 暂停后不再重绘：先冻结，再派一单，面板内容不动。
+  await page.click('#debug-pause');
+  const frozen = await page.evaluate(() => ({
+    tasks: document.querySelectorAll('#debug-panel [data-debug-row="task"]').length,
+    stats: document.querySelector('#debug-stats')?.textContent ?? '',
+  }));
+  await page.click('button[data-kind="quick"]');
+  await page.waitForTimeout(700);
+  const stillFrozen = await page.evaluate(() => ({
+    tasks: document.querySelectorAll('#debug-panel [data-debug-row="task"]').length,
+    stats: document.querySelector('#debug-stats')?.textContent ?? '',
+    injectButtons: document.querySelectorAll('#debug-inject [data-debug-action]').length,
+  }));
+  check(
+    stillFrozen.tasks === frozen.tasks && stillFrozen.stats === frozen.stats,
+    '暂停后调试面板不更新',
+  );
+  check(frozen.stats.includes('已暂停'), '暂停状态在面板可见');
+  check(stillFrozen.injectButtons === 2, '暂停后注入区仍在');
+
+  // 恢复后继续刷新，并验证 tone 过滤只留对应事件。
+  await page.click('#debug-pause');
+  await page.waitForTimeout(500);
+  const resumed = await page.evaluate(
+    () => document.querySelectorAll('#debug-panel [data-debug-row="task"]').length,
+  );
+  check(resumed > frozen.tasks, '恢复后面板继续刷新');
+  await page.selectOption('#debug-tone', 'info');
+  await page.waitForTimeout(500);
+  const filtered = await page.evaluate(() => {
+    const rows = [...document.querySelectorAll('#debug-panel [data-debug-row="event"]')];
+    return { total: rows.length, tones: [...new Set(rows.map((row) => row.dataset.tone))] };
+  });
+  check(
+    filtered.total > 0 && filtered.tones.every((tone) => tone === 'info'),
+    '事件过滤只显示所选 tone',
+  );
+  const injectAfterFilter = await page.evaluate(() => ({
+    buttons: document.querySelectorAll('#debug-inject [data-debug-action]').length,
+    open: document.querySelector('#debug-inject')?.open ?? null,
+  }));
+  check(
+    injectAfterFilter.buttons === 2 && injectAfterFilter.open === true,
+    '切过滤后注入区仍在且保持展开',
+  );
+  await page.screenshot({ path: `${OUT}/07-debug-panel-filtered.png` });
+
+  // 390px 视口不横向溢出，面板也不遮挡主舞台布局。
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.waitForTimeout(300);
+  const narrow = await page.evaluate(() => {
+    const rect = document.querySelector('#debug-panel')?.getBoundingClientRect();
+    return {
+      panelWidth: rect?.width ?? 0,
+      panelRight: rect?.right ?? 0,
+      viewport: window.innerWidth,
+    };
+  });
+  check(
+    narrow.panelWidth <= 390 && narrow.panelRight <= narrow.viewport + 0.5,
+    '390px 视口下调试面板自身不溢出',
+  );
+  await page.setViewportSize({ width: 1010, height: 940 });
+  await page.click('#debug-close');
+  const panelClosed = await page.evaluate(
+    () => document.querySelector('#debug-panel')?.hidden ?? null,
+  );
+  check(panelClosed === true, '调试面板能关闭');
+
   // 存档：写单槽 → 刷新 → 世界恢复（BRIEF 验收目标 4）。
   const beforeSave = await state();
   const saveResult = await page.evaluate(() => window.Oracle.saveNow());

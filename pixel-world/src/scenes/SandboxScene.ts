@@ -24,6 +24,7 @@ import { toWorldCommand, type AgentToWorld } from '../world/bridge.ts';
 import { LedgerClient } from '../world/ledger.ts';
 import { SaveStore } from '../ui/save-store.ts';
 import type { WorldSaveV1 } from '../world/save.ts';
+import { CURRENT_SCHEMA_VERSION } from '../world/save.ts';
 
 export interface ScenePayload {
   readonly world: BuiltWorld;
@@ -321,6 +322,25 @@ export class SandboxScene extends Phaser.Scene {
     return this.snapshot;
   }
 
+  /** 调试面板用：最近 N 条事件（快照只带 12 条）。避开 Phaser.Scene.events 命名。 */
+  recentEvents(limit = 50): ReturnType<Simulation['recentEvents']> {
+    return this.sim.recentEvents(limit);
+  }
+
+  /** 调试面板用：存档状态（只读，不触发写档）。 */
+  saveStatus(): {
+    readonly schemaVersion: number;
+    readonly savedAtWallClock: number | null;
+    readonly autoSavePaused: boolean;
+  } {
+    const meta = this.saveStore.lastSavedMeta();
+    return {
+      schemaVersion: meta?.schemaVersion ?? CURRENT_SCHEMA_VERSION,
+      savedAtWallClock: meta?.savedAtWallClock ?? null,
+      autoSavePaused: !this.saveStore.isAutoSaveEnabled(),
+    };
+  }
+
   private registerOracleApi(): void {
     const api = {
       say: (text: string): CommandResult => this.say(text),
@@ -341,6 +361,8 @@ export class SandboxScene extends Phaser.Scene {
       },
       report: (): DailyReport => composeReport(this.snapshot),
       view: (): WorldSnapshot => this.view(),
+      events: (limit = 50) => this.recentEvents(limit),
+      saveStatus: () => this.saveStatus(),
       saveNow: (): CommandResult => this.saveNow(),
       clearSave: (): CommandResult => this.clearSave(),
       loadSave: (): CommandResult => {

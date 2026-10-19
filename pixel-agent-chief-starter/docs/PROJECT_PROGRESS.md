@@ -10,9 +10,9 @@
 - 真实项目根目录：`D:\project\neurosama`；分支 `feat/pixel-world-oracle-world`；HEAD 以 `git log -1` 为准。
 - 像素世界技术栈：**Phaser 3.90 + TypeScript 5.9.3 + Vite 8.3.4，已落地并实测可运行**。
 - **文档旧声称严重滞后**：旧进度写「Phase 0 / MVP 0.1 已完成，Phase 1 IN_PROGRESS，TASK-1.1 IN_PROGRESS，TASK-1.2 下一项」。真实情况：19 张任务卡全部落地，主体已到 Phase 6 + S2。
-- **MVP 1.0 九项**：6 DONE / 3 PARTIAL（三工坊语义、Mock/LLM 神谕层、调试面板 UI 尚未补齐）。
-- 门禁实测（2026-10-19 15:36）：`npm run check` 通过；`npm test` **129/129**；`npm run build` 通过；浏览器冒烟沙盒 **85/85**、台账 **21/21**、显式离线 7/7；`check_protocol.py` PASS、`test_core.py` 64/0。
-- S2 已完成：任务排队（task-10）、多角色 2–3（task-17）、多角色 P3 收口（task-21）、JSON 存档单槽 + 恢复（task-18/23/24，v1 schema 已冻结）；下一项 S2-3 调试面板。
+- **MVP 1.0 九项**：7 DONE / 2 PARTIAL（三工坊语义、Mock/LLM 神谕层 尚未补齐）。
+- 门禁实测（2026-10-19 15:50）：`npm run check` 通过；`npm test` **133/133**；`npm run build` 通过；浏览器冒烟沙盒 **104/104**、台账 **21/21**、显式离线 7/7；`check_protocol.py` PASS、`test_core.py` 64/0。
+- S2 全部完成：任务排队（task-10）、多角色 2–3（task-17）、多角色 P3（task-21）、JSON 存档（task-18/23/24，v1 冻结）、调试面板（task-19/25）。下一项 S3 视觉垂直切片，等 D5/D6 拍板。
 
 ## 一、阶段与任务卡（核验后）
 
@@ -63,7 +63,7 @@
 - [x] **S2-1 多角色 2–3**（task-17）；P3 收口（task-21：日报归属、手动完成对象）。
 - [x] **S2-2 存档 ADR**（task-20，`docs/ADR_SAVE.md`，final，§1 frozen）。
 - [x] **S2-2 JSON 存档单槽 + 恢复**（task-18/23/24：刷新恢复、对账三分支、settled 去重、坏档/配额/高版本、v1 指纹冻结；P3：配额暂停无运行时恢复接线、DEBUG 面板未做）。
-- [ ] **S2-3 调试面板 UI**（实体列表 + 事件流，进行中/待开工）。
+- [x] **S2-3 调试面板 UI**（task-19/25，QA 通过：实体/事件/暂停/过滤/注入区；P3：390px 页面级溢出另开卡）。
 - [ ] **S2-2b 存档手动导出/导入**（task-22，排在 S2-3 后）。
 - [ ] 视觉垂直切片：中文迁出 canvas、调色板收敛 + 校验器、idle/walk 帧动画 + 12fps 采样、证据链重建。
 - [ ] 定稿并批准 `DEMO_SCRIPT.md` v0.1 与 `ART_SPEC.md` v0.1（用 `docs/DEMO_ART_SPEC_TODO.md` 的清单）。

@@ -341,6 +341,12 @@ export class Simulation {
     return this.weather.intensity;
   }
 
+  /** 调试面板用：取最近 N 条事件（快照只带 12 条，面板要 50 条）。只读。 */
+  recentEvents(limit = 50): readonly WorldEvent[] {
+    const size = Math.max(0, Math.floor(limit));
+    return this.events.slice(-size);
+  }
+
   // ---------------------------------------------------------------- commands
 
   private apply(command: WorldCommand): CommandResult {

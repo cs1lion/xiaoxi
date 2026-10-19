@@ -6,7 +6,10 @@ import { parseBlueprintTable } from './world/blueprints.ts';
 import { buildWorld, buildWorldFromSave, GRID_WIDTH, GRID_HEIGHT, TILE_PX } from './world/setup.ts';
 import { SandboxScene } from './scenes/SandboxScene.ts';
 import { bindOraclePanel, type OracleApi } from './ui/oracle-panel.ts';
+import { bindDebugPanel, type SaveStatusView } from './ui/debug-panel.ts';
 import { SaveStore } from './ui/save-store.ts';
+import type { AgentToWorld } from './world/bridge.ts';
+import type { WorldEvent, WorldSnapshot } from './world/types.ts';
 import { UI } from './render/palette.ts';
 
 const blueprints = parseBlueprintTable(prefabs);
@@ -51,3 +54,21 @@ game.scene.add('SandboxScene', SandboxScene, true, {
 
 // 按钮等场景 create() 挂上 window.Oracle；期间点击直接忽略。
 bindOraclePanel(() => (window as unknown as { Oracle?: OracleApi }).Oracle);
+
+// 上帝调试面板：只读浮层，数据来自 Oracle 只读接口（不改变仿真）。
+interface DebugOracle {
+  view(): WorldSnapshot;
+  events(limit: number): readonly WorldEvent[];
+  saveStatus(): SaveStatusView;
+  feed(message: AgentToWorld): { ok: boolean; message: string };
+  pushLedger(commission: unknown): void;
+}
+const debugOracle = (): DebugOracle | undefined =>
+  (window as unknown as { Oracle?: DebugOracle }).Oracle;
+bindDebugPanel({
+  getSnapshot: () => debugOracle()?.view(),
+  getEvents: (limit) => debugOracle()?.events(limit) ?? [],
+  getSaveStatus: () => debugOracle()?.saveStatus() ?? null,
+  feed: (message) => debugOracle()?.feed(message) ?? { ok: false, message: '世界还没醒来。' },
+  pushLedger: (commission) => debugOracle()?.pushLedger(commission),
+});

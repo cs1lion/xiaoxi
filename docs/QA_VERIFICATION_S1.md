@@ -1,9 +1,9 @@
 # S1 各卡独立验收记录（QA Verification · S1）
 
 - 验收方：qa-runtime（Agent Teams · QA Engineer），独立于各卡作者
-- 验收时间：2026-10-19 13:06–13:10（task-7）；**13:13–13:18（task-9 + task-8）**；**13:23–13:29（task-12 D4-A + task-11 D3-A）**；**13:41–13:49（task-13 S1-5）**；**13:47–13:53（task-14 S1-6）**；**13:56–14:01（task-15 + task-16）**；**14:18–14:29（task-10 + 提交与重构复验）**；**14:37–14:41（task-17 S2-1 多角色）**；**14:54–14:58（task-21 多角色 P3）**；**15:13–15:18（task-18 存档单槽+恢复）**；**15:24–15:28（task-23 台账时间戳透传）**；**15:32–15:36（task-24 v1 字段漂移修复）**（Asia/Shanghai）
-- 验收对象：task-7 / task-9 / task-8 / task-12（D4-A）/ task-11（D3-A）/ task-13（S1-5）/ task-14（S1-6）/ task-15 / task-16 / task-10（排队）/ task-17（S2-1 多角色）/ task-21（多角色 P3）/ task-18（存档 v1 + 恢复）/ task-23（台账时间戳透传）/ task-24（v1 字段漂移修复）/ 提交链 340d0ab、b656488、150b2a7、8a95c94、d8a57f9、2bde7cb、7e00d27、7db15ab
-- 仓库：`D:\project\neurosama`，分支 `feat/pixel-world-oracle-world`，HEAD `7db15ab`（本次验收期间作者改动均在未提交的工作区）
+- 验收时间：2026-10-19 13:06–13:10（task-7）；**13:13–13:18（task-9 + task-8）**；**13:23–13:29（task-12 D4-A + task-11 D3-A）**；**13:41–13:49（task-13 S1-5）**；**13:47–13:53（task-14 S1-6）**；**13:56–14:01（task-15 + task-16）**；**14:18–14:29（task-10 + 提交与重构复验）**；**14:37–14:41（task-17 S2-1 多角色）**；**14:54–14:58（task-21 多角色 P3）**；**15:13–15:18（task-18 存档单槽+恢复）**；**15:24–15:28（task-23 台账时间戳透传）**；**15:32–15:36（task-24 v1 字段漂移修复）**；**15:44–15:49（task-19 调试面板 UI）**；**15:52–15:54（task-25 调试注入区 P2 修复）**（Asia/Shanghai）
+- 验收对象：task-7 / task-9 / task-8 / task-12（D4-A）/ task-11（D3-A）/ task-13（S1-5）/ task-14（S1-6）/ task-15 / task-16 / task-10（排队）/ task-17（S2-1 多角色）/ task-21（多角色 P3）/ task-18（存档 v1 + 恢复）/ task-23（台账时间戳透传）/ task-24（v1 字段漂移修复）/ task-19（S2-3 调试面板）/ task-25（调试注入区 P2 修复）/ 提交链 340d0ab、b656488、150b2a7、8a95c94、d8a57f9、2bde7cb、7e00d27、7db15ab、d3f757e
+- 仓库：`D:\project\neurosama`，分支 `feat/pixel-world-oracle-world`，HEAD `d3f757e`（本次验收期间作者改动均在未提交的工作区）
 - 方法：不采信作者自述；自己看 diff、跑测试与冒烟、做对抗性探针；临时脚本/日志只放工作区
   `C:\Users\18712\.dsh\bot\workspace\recon\`，只在本文件留结论
 - 执行节奏：task-7 于 13:06–13:10 复验；task-9、task-8 于 13:13–13:18 收到 Lead 通知后按本文方案执行并回填结论。
@@ -29,6 +29,8 @@
 | **S1-18 / task-18（存档）** | 单槽存档 v1 + 读档对账/失败降级 | **通过（P2 已由 task-23 关闭）** | `WorldSaveV1` 与样例一致、指纹 `f53a0736d782d657`（206 路径去重 99）、运行时快照无 settled；变异样例测试必红、指纹不符按坏档；settled/去重/对账三分支/坏档备份 3/5/高版本只读/配额降级/30s+pagehide/刷新续跑均实测；**118/118**、check 0、smoke **85/85 + 21/21**、check_protocol/test_core 64/0。原 P2（ledger completedAt 恒 null）已由 task-23 接线并实测关闭 |
 | **S1-23 / task-23（台账时间戳）** | `closed_at ?? updated_at` 透传 → settled | **通过（P2 已由 task-24 关闭）** | 解析三分支/秒×1000/毫秒原样/无本地兜底全部实测；真实 8000 行交付后 `settled.completedAt=1792377786778`（×1000）、clock=ledger；finishedAt 缺失退回已见 updated_at；都缺→null；样例指纹仍合法、`assertSaveV1(sim.toSave())` 通过、旧档可读；**126/126**、check 0、smoke **85/85 + 21/21**、check_protocol/test_core 64/0。原 P2（`toSave` 多出 `tasks[].ledgerCompletedAt`）已由 task-24 剥离+嵌套防线关闭 |
 | **S1-24 / task-24（v1 字段漂移修复）** | 剥离运行时字段 + 嵌套键集合防线 | **通过** | `toSave()` 落盘 tasks 键集合与样例 10 键完全一致、无 `ledgerCompletedAt`；样例 SHA `F24FBAEF…298402`、schemaVersion 1 不变；`SAVE_TASK_KEYS`/`SAVE_SETTLED_KEYS` 与样例逐键一致，`assertSaveV1` 校验 tasks/settled 键集合 + `done⊆settled`；变异（tasks 加字段/伪 done 无 settled/settled 加字段/少字段）全部抛；去掉剥离的临时副本测试 **9/1 FAIL**；**129/129**、check 0、smoke **85/85 + 21/21**、check_protocol/test_core 64/0；task-18 刷新/对账/坏档/配额/高版本与 task-23 真实台账时间戳回归全过 |
+| **S1-19 / task-19（S2-3 调试面板）** | 只读实体/事件流/连接存档面板 | **通过（P2 已由 task-25 关闭）** | 开关（按钮/快捷键 D/输入框内不触发）、实体行数与快照一致、任务 source/worker/blocked、按角色队列、最近 50 事件 + tone 过滤、暂停冻结而世界继续、台账四字段（离线/在线）、存档 v1/savedAt/paused、只读（无 fetch/WS、canvas 布局不变）、刷新 3.96Hz、无 JS 报错；**133/133**、check 0、smoke **96/96 + 21/21**、check_protocol/test_core 64/0。原 P2（注入区 250ms 后消失）已由 task-25 独立槽修复并实测关闭；P3（390px 页面级溢出/单测覆盖）不阻塞、记入后续卡 |
+| **S1-25 / task-25（调试注入区 P2 修复）** | 注入区移出刷新区 | **通过** | `#debug-inject` 移至 `#debug-inject-slot`（独立于 `#debug-content`），随面板创建一次；400ms/1s/2s 后仍在、2 按钮可用、文案含「仅调试、不写台账」；暂停/切 tone 后仍在且展开状态保留；点 feed 一次只触发一次、两次各 +1（无重复绑定）；刷新 3.98Hz、无 JS 报错；**133/133**、check 0、smoke **104/104 + 21/21**；check_protocol/test_core 沿用 task-19（本轮未改主产品/server） |
 
 ---
 
@@ -1402,6 +1404,107 @@ task-23 的 **P2 关闭**；存档批次（task-18 → task-23 → task-24）最
 
 ---
 
+# 卡 16：task-19（S2-3 调试面板 UI）
+
+## 结论：**通过**（P2 已由 task-25 关闭）
+
+- 初验标记的 P2（`#debug-inject` 首帧后 250ms 被 `#debug-content` 刷新清空且不再重建）**已由 task-25 修复**：
+  注入区移动到 `#debug-inject-slot`（在 `#debug-content` 之外），随面板创建一次，repaint 不再触碰；
+  QA 复验 400ms/1s/2s 均存在、按钮可用、暂停/过滤后仍在，无重复绑定（见卡 17）。
+
+### 1) 功能实测（硬点 1）
+
+- **开关**：默认 `hidden=true`/`aria-expanded=false`；按钮开/关；快捷键 `D` 开/关；焦点在 `#utterance`
+  输入框内按 `D` 不切换（键盘处理过滤 INPUT/TEXTAREA/SELECT）✓
+- **实体列表**：角色行数与 `snapshot.villagers` 一致、含 `id name mode task=`；铺子行数与 `workstations`
+  一致；任务行数与 `snapshot.tasks` 一致、含 `source·worker=·kind·summary`（blocked 时含请示）；
+  等待队列按角色分组（每角色一行 + 明细），空队列也展示 ✓
+- **事件流**：行数 = `min(50, Oracle.events(50).length)`；`tone` 过滤（info）后只剩 info 行 ✓
+- **暂停**：暂停后派单并等 900ms，任务行/状态行不变、状态行含「已暂停」；世界继续跑（`now` 2700→3600，
+  新单生效）✓
+- **台账状态**：`connected/complete/reconciled/mock` 四字段展示，与快照逐项一致；在线 `?ledger=on`
+  实测 `connected=true · complete=false · reconciled=true · mock=false`（截图 21）✓
+- **存档状态**：`存档：v1 · 保存于 HH:MM:SS UTC · 自动存档开启`；`saveStatus()` 与面板一致 ✓
+
+### 2) 只读性（硬点 2）
+
+- 面板打开/刷新期间 **fetch 次数 0、WebSocket.send 次数 0**（页面注入计数器，离线与在线各测）→ 无隐藏写路径
+- 打开面板前后 `#app canvas` 的 boundingRect 完全一致（不改变主舞台布局）；`buildDebugModel` 单测证明快照
+  JSON 不变
+- `feed`/`pushLedger` 调试路径（Oracle 同路径）：无服务器写请求；`feed` 只让世界多一条事件/交付，不写台账
+- **P2**：`#debug-inject` 首帧存在（`exists=true, open=false`，文案含「仅调试、不写台账」，
+  两个按钮 `feed`/`pushLedger` 标注「注入…」）；**400ms 后再查 `exists=false`**——
+  `injectBuilt` 标记导致后续 `replaceChildren()` 后不再重建。面板开着就永远看不到注入按钮，
+  smoke 的首帧断言掩盖了这一点。
+
+### 3) 性能 / 布局（硬点 3）
+
+- 刷新节流：MutationObserver 实测 6 次/1508ms ≈ **3.96 Hz**（250ms 定时器，4Hz）✓
+- 世界逻辑未被拖慢：1500ms 内 `snapshot.now` 前进 1500ms ✓
+- 390px：面板自身 `width=360, right=380 ≤ 390` ✓；**页面级** `document.scrollWidth=677 > 390`
+  （面板开/合都 677）→ 既有页面布局（固定 960px canvas，缩放 NONE）造成，非 task-19 引入；
+  若本轮验收要求页面级不横向溢出则未达成（需单独做 canvas 响应式）
+- 打开时覆盖世界右侧（fixed 浮层），默认收起；"不遮挡"在"默认/不改变布局"意义上成立
+- 全程无 JS 报错 ✓
+
+### 4) 测试与回归（硬点 4/5）
+
+- `test/debug-panel.test.ts`：4 项（模型数量/任务归属来源请示、事件最近50+tone过滤、连接与存档摘要、
+  只读不改快照）全过；**P3**：未包含开关/暂停/DOM 行为测试（由 smoke/浏览器覆盖）
+- `npm run check` 0；`npm test` **133/133**（129 + 4 debug 测试）
+- 沙盒 smoke **96/96**（85 + 11 面板断言；其中「调试注入默认折叠」为**首帧**断言，未覆盖消失）
+- 台账 smoke **21/21**；`check_protocol` PASS；`test_core`（venv）**64/0**
+- 交叉：存档 32/32、台账时间戳 20/20、排队 24/24、order 16/16、多角色 26/26、归属 26/26 → 无回退
+
+### 5) 问题分级
+
+| 级别 | 问题 | 说明 / 建议 |
+|---|---|---|
+| **P2** | 调试注入区首帧后消失（`injectBuilt` 只建一次，`replaceChildren()` 清掉后不再补） | 每帧重建 details 并保留 open 状态（或把注入区移出 `#debug-content` 随面板创建），smoke 增加「400ms 后仍存在」断言 |
+| P3 | 390px 页面级横向溢出（canvas 固定 960，非本卡引入） | 面板自身合规；如需页面级无溢出，另开响应式任务（canvas CSS 缩放/横向滚动容器） |
+| P3 | 单测未覆盖开关/暂停 | `test/debug-panel.test.ts` 补 DOM 绑定测试或明确由 smoke 覆盖 |
+| 信息 | 打开时覆盖世界右侧约 346×602px | 默认收起、开关明确；若"不遮挡"要求像素不覆盖需改为抽屉/内嵌 |
+
+**总评：有条件通过。** 面板核心功能、只读性、节流、回归全绿；P2 的调试注入区消失是一个明确可复现的
+功能缺陷（但只影响调试辅助入口，不影响主世界/台账/存档），修复并补 smoke 断言后可复验通过。
+
+---
+
+# 卡 17：task-25（调试注入区 P2 修复）
+
+## 结论：**通过**（2026-10-19 15:52–15:54）；**task-19 的 P2 关闭 → task-19 通过，S2 全部完成**
+
+### 1) 修复内容
+
+- `debug-panel.ts`：注入区 `<details id="debug-inject">` 改为在 `bindDebugPanel()` 时创建**一次**，
+  放进 `index.html` 新增的 `#debug-inject-slot`（位于 `#debug-content` 之外）；
+  4Hz `paint()` 只 `replaceChildren()` 刷新区，不再清掉注入区；按钮事件只绑一次（无重复绑定）
+- 注入区默认折叠，summary 仍为「调试注入（仅调试、不写台账；默认收起）」
+
+### 2) 快速复验（QA 独立浏览器 14/14）
+
+- 首帧 / **400ms** / **1s** / **2s**：`#debug-inject` 均存在、2 个按钮（feed/pushLedger）、
+  文案含「仅调试、不写台账」、`open=false`、在 `#debug-inject-slot` 内且不在 `#debug-content` 内
+- **暂停**后仍在；**切 tone 过滤**后仍在且保持展开状态（`open=true` 不丢）
+- **无重复绑定**：点 feed 一次活动量 +1，点两次共 +2；pushLedger 点击无 JS 报错
+- 刷新 **3.98Hz**、1500ms 内 sim 前进 1500ms；无 JS 报错；截图 `22-task25-inject-fixed.png`
+
+### 3) 回归（抽查）
+
+- `npm run check` 0；`npm test` **133/133**
+- 沙盒 smoke **104/104**（96 + 8 项新注入断言：400ms 后仍在、1s 后仍在、暂停后仍在、
+  切过滤后仍在且保持展开、文案标注、默认折叠且在刷新区之外等）；台账 smoke **21/21**
+- 本轮未改主产品/server，`check_protocol`/`test_core` 沿用 task-19 的 PASS/64·0（无新增相关改动）
+
+### 4) 遗留 P3（不阻塞，记入后续卡）
+
+- 390px **页面级**横向溢出（既有固定 canvas 布局，非 task-25/19 引入；面板自身 360px 合规）
+- `test/debug-panel.test.ts` 未覆盖开关/暂停/DOM（行为已由 smoke/浏览器覆盖）
+
+**总评：通过。** 注入区 P2 已修复且可稳定复现；task-19 由此改判通过，S2 全部完成。
+
+---
+
 # 附录 A：证据文件清单（工作区 `C:\Users\18712\.dsh\bot\workspace\recon\`）
 
 ## task-7
@@ -1598,6 +1701,29 @@ task-23 的 **P2 关闭**；存档批次（task-18 → task-23 → task-24）最
 | `task24-cross-qa-task*.log` | 交叉 task-18/23/10/15/17/21：32/20/24/16/26/26 全过 |
 | `task24-cleanup.log` | 端口释放、8000 PID/启动时间、样例 SHA、server mtime、临时副本已清理 |
 
+## task-19（调试面板 UI）
+
+| 文件 | 内容 |
+|---|---|
+| `task19-npm-test.log` / `task19-check.log` | **133/133**、check 0 |
+| `task19-debug-panel-probe.log` | QA 浏览器 **30 项**：开关/实体/事件/过滤/暂停/只读/节流/390px；含注入区消失 FAIL（P2）与页面溢出 FAIL（P3） |
+| `qa-task19-inject-repro.mjs` | 注入区消失的最初复现脚本（首帧 2 按钮 → 400ms 后 0） |
+| `eval\screens\20-task19-debug.png`、`20-task19-debug-missing-inject.png`、`21-task19-debug-online.png`、`07-debug-panel.png` | 面板截图（离线/注入缺失/在线台账） |
+| `task19-smoke-sandbox.log` / `task19-smoke-ledger.log` | 沙盒 **96/96**、台账 **21/21** |
+| `task19-check-protocol.log` / `task19-test-core.log` | 主产品 PASS / 64 passed 0 failed |
+| `task19-cross-qa-task*.log` | 交叉存档/时间戳/排队/order/多角色/归属：32/20/24/16/26/26 全过 |
+| `task19-cleanup.log` | 端口释放、8000 PID/启动时间、样例 SHA、server mtime |
+
+## task-25（调试注入区 P2 修复）
+
+| 文件 | 内容 |
+|---|---|
+| `task25-inject-probe.log` | QA 浏览器复验 **14/14**：400ms/1s/2s 持续存在、2 按钮、暂停/过滤后仍在、无重复绑定、3.98Hz |
+| `task25-smoke-sandbox.log` / `task25-smoke-ledger.log` | 沙盒 **104/104**（含 400ms/1s/暂停/过滤注入断言）、台账 **21/21** |
+| `task25-npm-test.log` | `npm test` 133/133、`npm run check` 0 |
+| `eval\screens\22-task25-inject-fixed.png` | 修复后注入区（稳定存在、默认折叠） |
+| `task25-cleanup.log` | 端口释放、8000 PID/启动时间、样例 SHA |
+
 # 附录 B：复验顺序（各卡）
 
 ```powershell
@@ -1717,3 +1843,21 @@ Get-NetTCPConnection -LocalPort 5188,5190,8001,8000 -State Listen -ErrorAction S
 - **task-24 收口（15:35:53）**：5188/8001/5189 无监听；8000 PID 22996、start 2026-10-18 16:40:34、health 200
   未重启；`data/commissions.db` 未被写（mtime 10:43:06）；`data/memory.db` 15:35:46 变化来自 8000 自身会话写入；
   样例 SHA `F24FBAEF…298402` 未变；server 最新 mtime 14:14:16；临时变异副本已删除、无 `.tmp` 残留
+- **task-19（S2-3 调试面板）：有条件通过（1 条 P2 + 2 条 P3）**（15:44–15:49）——开关（按钮/D/输入框保护）、
+  实体行数与快照一致、任务 source/worker/blocked、按角色队列、事件最近 50 + tone 过滤、暂停冻结且世界继续、
+  台账四字段（离线/在线）、存档 v1/savedAt/paused、只读（fetch/WS 0、canvas 布局不变）、刷新 3.96Hz、无 JS 报错；
+  **133/133**、check 0、smoke **96/96 + 21/21**、check_protocol/test_core 64/0；交叉存档/时间戳/排队/order/
+  多角色/归属全过。**P2**：调试注入区首帧后 250ms 被刷新清空且不再重建（按钮实际不可用；smoke 只测首帧）；
+  P3：390px 页面级横向溢出（677>390，既有 canvas 布局、非本卡；面板自身 360px 合规）、单测未覆盖开关/暂停。
+  修复注入区重建并补「400ms 后仍存在」smoke 断言后可复验
+- **task-19 收口（15:49:11）**：5188/8001/5189 无监听；8000 PID 22996、start 2026-10-18 16:40:34、health 200
+  未重启；`data/commissions.db` 未被写（mtime 10:43:06）；`data/memory.db` 15:48:52 变化来自 8000 自身会话写入；
+  样例 SHA 未变；server 最新 mtime 14:14:16；无临时目录/.tmp 残留
+- **task-25（调试注入区 P2 修复）：通过**（15:52–15:54）——注入区移至 `#debug-inject-slot`（`#debug-content` 外）
+  随面板创建一次，400ms/1s/2s 后仍在、2 按钮可用、文案含「仅调试、不写台账」；暂停/切过滤后仍在且展开状态保留；
+  点 feed 一次只触发一次、两次各 +1（无重复绑定）；刷新 3.98Hz、无 JS 报错；**133/133**、check 0、
+  smoke **104/104 + 21/21**。**task-19 P2 关闭 → task-19 通过，S2 全部完成**；P3（390px 页面级溢出/单测覆盖）
+  不阻塞、记入后续卡
+- **task-25 收口（15:54:18）**：5188/8001/5189 无监听；8000 PID 22996、start 2026-10-18 16:40:34、health 200
+  未重启；`data/commissions.db` 未被写（mtime 10:43:06）；`data/memory.db` 15:54:07 变化来自 8000 自身会话写入；
+  样例 SHA 未变；无临时目录/.tmp 残留
