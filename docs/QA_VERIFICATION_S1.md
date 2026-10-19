@@ -2559,3 +2559,133 @@ Get-NetTCPConnection -LocalPort 5188,5190,8001,8000 -State Listen -ErrorAction S
 - 无 P0–P3 遗留。门禁现在在本沙箱可复跑、可判红、可判绿，「要提交的人自己跑」这个前提成立了。
 - `--report-only` 的语义已在模式标签里写清（只免配色预算，check/test 仍参与退出码），与 docstring 一致。
 - 本轮我对仓库的唯一改动是 `docs/QA_VERIFICATION_S1.md`（纯追加）；`debug-panel.ts` 字节级还原。
+
+---
+
+## task-30（E-16 切片证据）技术复验（2026-10-19 19:11–19:22，lead · QA Engineer）
+
+- **基线声明**：HEAD `e506542 docs(pixel-world): task-31 门禁验收与进度（D7-A）`。工作区只有
+  `pixel-world/scripts/capture-palette.mjs`（+188/−1）一个改动，与 Chief 说的「只改一个文件」一致；
+  **`pixel-world/src/world/simulation.ts` 与 `setup.ts` 相对 HEAD 零 diff**；`server/` 的 8 个 M 是主产品
+  既有改动，本卡未碰。
+- **最终结论：有条件通过**（1 条 P2）。manifest、脚本断言、门禁、口径全部实测正确；
+  P2 是「5 档截图不是同一帧的 5 种缩放」——严格最近邻关系不成立，E-16 的「400% 最近邻检查」这一条过不了。
+
+### 通过项
+
+| # | 验收项 | 实测结果 |
+|---|---|---|
+| 1a | 尺寸 | 15 张全部正确：`100` = **1010×1400**、`200pct`/`canvas` = **960×640**、`native-480x320` = **480×320**、`400pct` = **1920×1280** |
+| 2a | manifest ↔ 产物 sha | 15/15 逐一复算 sha256 前 16 位，**全部与 manifest 记录一致** |
+| 2b | manifest 状态字段 | 三行 `buildingCount=4`、`instanceIds` 均含 **`workshop_plot#4`**；`targetNow=actualNow=6000`；weather `sunny/night=clear`、`rain=rain`；night 行 `night` 列为 **`filter(brightness 0.55)`**，表头注明「1.0 无昼夜，只读试验，不是产品态」 |
+| 2c | 复跑字节一致 | **未验证**（无浏览器，见下） |
+| 3a | 触发时机 | `animInitScript` 新增 `pendingClicks`，在**页面自己的 rAF 回调里**读 `globalThis.Oracle.view().now`，`now >= atNow` 才 `click()`；扩建 `[data-build="workshop_plot"]` @500ms、下雨 `#rain` @800ms。注释说明为何不在 Node 侧轮询（会差一个模拟步、雨天相位对不上） |
+| 3b | 失败不静默 | 截图前硬断言：建筑数==4、含 workshop_plot、weather 与模式一致、canvas 为 960×640、scroll 为 0,0、元素截图前再断言 boundingBox 为整数像素 960×640——任一不过就 `console.error(JSON.stringify(info))` + `throw new Error(...)`，**进程非 0 退出，无静默降级** |
+| 3c | 不碰世界 | `simulation.ts` / `setup.ts` **零 diff**（已核）；`server/` 未碰 |
+| 4 | 200pct 口径 | **认同「200pct = native×2」的读法**。`slice-*-200pct.png` 与 `slice-*-canvas.png` **逐字节相同**（sha 全等），因为游戏本身 `Scale.NONE + zoom 2`，canvas 就是 960×640 = native 的 2×。`ART_SLICE_REVIEW_CHECKLIST.md` §2 写的是「原生 480×320，各出 100%/200%/400% 最近邻」，百分比以原生帧为基准，所以 200%=960×640 正确；它与 canvas 同尺寸同 sha 是巧合而非错误。建议在 manifest 里显式写一句「200pct 与 canvas 等价（游戏固定 zoom 2）」，免得后人以为写错了 |
+| 5 | 门禁 | `python scripts/test_pixel_world.py` → check exit 0、`test:inprocess` **161/161**、audit **16/8/1/23**、`--strict` exit 0、整门禁 **exit 0**（我独立重跑） |
+
+### 未验证（沙箱限制）
+
+- **`--scenario slice` 连跑两次逐字节一致**：Chromium 在本沙箱起不来（累计 7 次尝试：完整 Chrome 与
+  chrome-headless-shell、多种参数组合，全部退出码 1 立即死、无输出、无 CDP 端点）。按施工自报记录，**不计入通过**。
+- **smoke**：同样原因，未验证。
+
+### 缺陷列表
+
+- **P2 5 档截图不是同一帧的 5 种缩放，严格最近邻不成立**。逐像素比对（与 task-28 同一方法）：
+  - `native` ← `canvas`（2× 降采样取左上）：块外不匹配 **343 / 323 / 343** 个（晴/雨/夜），占 153,600 的 **0.22%**；
+  - `native` → `200pct`（2× 升采样）：同样 **343 / 323 / 343**（因为 200pct 与 canvas 逐字节相同）；
+  - `native` → `400pct`（4× 升采样）：不匹配 **2,957 / 2,815 / 2,957** 个，占 2,457,600 的 **0.12%**。
+  - **task-28 轮同一检查是 0 处不匹配**，所以这是切片流程引入的回退。
+  - **根因已定位**：Playwright 的 `locator('canvas').screenshot()` 截的是**元素包围盒下的页面区域**，
+    不是 canvas 自己的像素，所以压在画布上的 DOM 会进来；而 DOM 的位置/大小是相对 canvas 盒子排的，
+    canvas 的 CSS 尺寸一改，DOM 的覆盖范围就变。实测（`#171b18` = `--panel` 面板色）：
+    - `canvas`/`200pct`（CSS 960×640）：面板 **1,049 px**，包围盒 x 928–959 / y 10–44；
+    - `native`（CSS 480×320）：面板 **0 px**——面板在页面 x 940–980，已落在 480 宽盒子之外；
+    - `400pct`（CSS 1920×1280）：面板 **2,243 px**，包围盒 x 930–998 / y 10–44（盒子更大，面板占的块也变大）。
+    另有 55 处不匹配来自一处文字 overlay（`#e8e2d2` = `--ink`，约 native x 358–367 / y 77–78，疑似角色名/气泡），
+    同样只出现在 canvas/200pct 档。
+  - **影响**：E-16 要求「原生 480×320 + 400% 最近邻检查」，现在 400% 不是 native 的最近邻放大，
+    「同一构图只差缩放」这个前提不成立；拿 400% 去做像素级评审会看到 DOM 伪影。
+  - **修法**：在拍 canvas/native/400pct 三档之前，用 `addStyleTag` 把压在画布上的 DOM 关掉
+    （`#oracle-panel,#debug-panel,#world-overlay,#status{display:none!important}`），
+    只给 `100` 全页档保留 DOM（那档本来就是「给人看窗口里长这样」）。
+- **P3 建议**：manifest 补一句「200pct 与 canvas 等价（游戏固定 zoom 2）」；`--scenario slice` 的两次复跑
+  字节一致由施工方在正常环境留档（本沙箱无法复跑）。
+
+### 客观测量（供切片评审，非通过/不通过项）
+
+以下都取自 `native-480x320`（唯一没被 DOM 污染的一档），**是数据不是人眼判定**；「3 秒指认」由用户最终评审。
+
+- **四栋建筑剪影/色差**：4 栋共用同一 body 色 `timber #8a5a44`（6,794 px，分 2 簇 x48–207 与 x272–335），
+  **body 色不参与区分**；差别在屋顶/饰边——左组（x45–210）：timberDark 1,220 px、cloak 808 px、trim 432 px；
+  右组（x269–367）：timberDark 612 px、cloak 60 px、trim 920 px。即「剪影 + 屋顶/饰边区分、body 同色」，
+  与 `ART_PALETTE_AUDIT` §4.1/§7 的预判一致。
+- **雨幕 vs 主角**：晴态小人皮肤 78 px @ (241,153)。以质心 19×19 邻域（排除角色本体）测：
+  晴态背景均值 L=25.9%、角色区最亮 60.4% → **主角/背景 2.12:1**；雨态背景均值 24.6%、角色区最亮 49.5%
+  → **1.84:1**（下降约 13%）。全帧亮度 >55% 的像素：晴 **2,889** 个 → 雨 **979** 个（**−66%**）。
+  即：主角仍是邻域最亮，但雨幕把整体亮部压掉三分之二，可读性余量明显变窄。
+- **夜景路径/广场明度差**（晴态实测）：plaza L=**30.2%**、grass L=**21.6%**、stone L=**24.2%**、farm L=**20.5%**、
+  soil L=**12.3%** → **路径/草地 1.32:1**、**石面/草地 1.10:1**。night 档是 `brightness(0.55)` 整体压暗
+  （task-28 轮实测 night/sunny 平均亮度比 0.5554），压暗会进一步压缩这些已经 ≤1.4:1 的差 →
+  **路径与石面在夜里与草地并团**，与施工方结论方向一致，可作为 18 色申请素材。
+
+### 收口
+
+- 本轮未改动任何项目文件（只读验收 + TEMP 脚本）；`git status` 与进场快照一致。
+
+---
+
+## task-30 P2 修复后最终签收复验（2026-10-19 19:23–19:30，lead · QA Engineer）
+
+- **基线声明**：HEAD `e506542`；工作区只有 `pixel-world/scripts/capture-palette.mjs` 一个改动（+188/−1，
+  本卡累计），`simulation.ts` / `setup.ts` 仍零 diff。产物 15 张 + `slice-manifest.txt` 均为 19:27 重新生成。
+- **最终结论：通过，task-30 技术验收关闭**。上一轮 P2 的关闭条件（三态块外不匹配 0/0/0）**实测达成**。
+
+### P2 关闭条件：逐像素复算（与上轮同一 Pillow/System.Drawing 方法）
+
+| 关系 | sunny | rain | night | 判定 |
+|---|---:|---:|---:|---|
+| `native` ← `canvas`（2×2 块，左上对齐） | 153,600/153,600，**块外 0** | 153,600/153,600，**块外 0** | 153,600/153,600，**块外 0** | ✅ |
+| `native` → `400pct`（4×4 块） | **0** 处不匹配 | **0** 处不匹配 | **0** 处不匹配 | ✅ |
+| `native` → `200pct`（2×2 块） | **块外 0** | **块外 0** | **块外 0** | ✅ |
+
+- 旁证：三态 `native-480x320.png` 的 sha 与上轮**完全相同**（`c5fee920ad0c8b7c` / `69c1329fec43890c` /
+  `885df2380019ef69`），而 canvas/200pct/400pct 的 sha 都变了——说明这次只剥掉了 DOM 污染，
+  画布帧本身没动，现在四档严格同源。
+
+### 修复方式核对
+
+- `addStyleTag` 增加 `#world-overlay,#debug-panel,#debug-toggle{visibility:hidden!important}`，
+  与去页头/内边距/左对齐写在**同一条**样式里；用 `visibility:hidden` 而非 `display:none`（不重排，
+  canvas 位置尺寸不变），并在隐藏后**重新取 boundingBox 且断言整数 960×640**（`Number.isInteger(box.x/y)`），
+  不满足就 `throw`。`100` 档在隐藏之前拍，所以保留 DOM。
+
+### 其余复验结果
+
+| # | 项 | 结果 |
+|---|---|---|
+| 2a | manifest ↔ 产物 | **15/15** sha 逐一复算一致；`canvas` 与 `200pct` 三态**逐字节相同**（`d6c75edc…` / `26aaf554…` / `17748a00…`） |
+| 2b | manifest 表头 | L5「DOM：100 档保留页头/overlay；其余四档 hide #world-overlay/#debug-panel/#debug-toggle（visibility:hidden，不重排）」、L6「200pct 与 canvas 等价：canvas=960×640=native×2（Scale.NONE + zoom 2）」——上轮建议的两句都已写入 |
+| 2c | 复跑字节一致 | **未验证**（Chromium 本沙箱起不来，累计 7 次尝试全失败），按施工自报记录 |
+| 3a | 尺寸 | 15 张全部正确：100=1010×1400、canvas/200pct=960×640、native=480×320、400pct=1920×1280 |
+| 3b | 状态字段 | 三态 `buildingCount=4`、instanceIds 含 `workshop_plot#4`、`actualNow=targetNow=6000`、weather sunny/night=clear 且 rain=rain、canvasBox 960x640、scroll 0,0 |
+| 4a | `-100` 保留 DOM | 实测 `#171b18`(panel) **151,884 px**、`#e8e2d2`(DOM 文字) **122,063 px**、`#0c0f0d`(页面底) **357,373 px** → DOM 完整在图里；文字像素在画布区内分成**多个独立簇**（y≈240-279 与 y≈460-499 等），与「两个角色名 + 气泡」的预期相符（文字内容我读不了，只核到簇数与 DOM 在场） |
+| 4b | 其余四档无 DOM | `-canvas` / `-200pct` / `-native` / `-400pct` 三态**全部 0 px** 的 `#171b18`、`#e8e2d2`、`#0c0f0d` → 画布档是纯 canvas 像素 |
+| 5 | 门禁 | `python scripts/test_pixel_world.py` → check **exit 0**、`test:inprocess` **161/161**、audit **16/8/1/23**、`--strict` **exit 0**、整门禁 **exit 0**（我独立重跑） |
+| — | 不碰世界 | `simulation.ts` / `setup.ts` 相对 HEAD **零 diff** |
+
+### 遗留
+
+- 无 P0–P3 遗留。
+- **未验证**：`--scenario slice` 连跑两次逐字节一致（沙箱禁 Chromium，无法复跑）；建议施工方在正常环境再跑一次并留档，作为「复跑可重现」的最终凭据。
+- **评审判定（待用户评审，保持不变）**：上轮已给出的客观测量仍然有效，且现在四档严格同源、可以放心做像素级评审——
+  - 四栋建筑共用 body 色 `timber #8a5a44`（6,794 px / 2 簇），区分靠剪影 + 屋顶/饰边（左组 timberDark 1,220 / cloak 808 / trim 432；右组 612 / 60 / 920）；
+  - 雨幕：主角/背景对比晴 **2.12:1** → 雨 **1.84:1**；全帧亮度 >55% 像素晴 **2,889** → 雨 **979**（−66%）；
+  - 夜景：路径/草地 **1.32:1**、石面/草地 **1.10:1**，night 为 `brightness(0.55)` 只读试验，路径与石面夜里与草地并团 → 可作 18 色申请素材；
+  - 「3 秒指认」由用户最终判定，QA 不下结论。
+
+### 收口
+
+- 本轮未改动任何项目文件（只读验收 + TEMP 脚本）；`git status` 与进场快照一致，无残留进程/监听。

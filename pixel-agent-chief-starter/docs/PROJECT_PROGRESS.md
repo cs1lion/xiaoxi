@@ -69,7 +69,7 @@
 - [x] **S3-2b 调色板收敛到 16+8**（task-28，QA 最终通过：世界 16/UI 8/共享 1/并集 23、越界 0/0、`--strict` 0；`test:inprocess` 150/150；读档按 prefabId 重解 palette（gap A）；截图脚本 `scripts/capture-palette.mjs` 同种子可复现；P3：3 秒指认待用户评审、smoke CDP 运行属作者侧证据）。
 - [x] **S3-3 帧动画 + 12fps**（task-29，QA 最终通过：帧号 = `floor(snapshot.now/(1000/12)) % 帧数`，idle 2 帧 / walk 4 帧；整数像素与全整数姿态偏移；确定性回放含小人真走路 300 步快照相等；`test:inprocess` 161/161；证据 `eval/screens/anim-manifest.txt`；P3：smoke/动画截图 sha 复跑在 QA 沙箱记未验证、人眼辨识待用户评审）。
 - [x] **D7-A 门禁接线**（task-31，QA 通过：本地 `--strict` 门禁 3/3 PASS、CI 模式 `--report-only` 不挡配色预算但 check/test 仍参与退出码；门禁 test 步改 `test:inprocess` 适配受限沙箱；对抗探针门禁级 FAIL/PASS 翻转演示）。
-- [ ] S3-4 垂直切片评审与 ART_SPEC/DEMO_SCRIPT 草案。
+- [ ] S3-4 垂直切片评审：**证据已产出并通过 QA 技术验收**（`capture-palette --scenario slice`，15 张 + manifest；四栋同框/雨/夜同构图；canvas/native/400pct 三态严格同源 0 不匹配；`100` 档保留 DOM）；**待用户 3 秒指认与夜景是否加色裁决**，随后出 ART_SPEC/DEMO_SCRIPT 草案。
 - [ ] **S2-2b 存档手动导出/导入**（task-22，排在 S3 后）。
 - [ ] 定稿并批准 `DEMO_SCRIPT.md` v0.1 与 `ART_SPEC.md` v0.1（用 `docs/DEMO_ART_SPEC_TODO.md` 的清单）。
 - [ ] 3 分钟演示跑通 + QA 独立复验 + 用户验收后，才进入 Agent 正式双向集成。
