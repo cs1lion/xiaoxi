@@ -2297,3 +2297,157 @@ Get-NetTCPConnection -LocalPort 5188,5190,8001,8000 -State Listen -ErrorAction S
 - 我对仓库的唯一改动仍是 `docs/QA_VERIFICATION_S1.md`（纯追加）；变异过的 `palette-data.ts` 已字节级还原
   （SHA256 与改前一致）；我起的 vite 5188 已停、无残留监听、无 dist 残留。
 - **待用户评审**：3 秒指认 / 晴雨夜可读性的人类判定（本会话模型无图像输入，只做了对比度与构图的数据测量）。
+
+---
+
+## task-29（帧动画 + 12fps 采样）独立复验（2026-10-19 17:38–17:48，lead · QA Engineer）
+
+- **基线声明**：HEAD `f2dbd90 docs(pixel-world): S3-2b 收敛审计重生成、切片清单与桥接 ADR`（上一提交
+  `433033f feat(pixel-world): 调色板收敛 16+8、读档重解与可复现截图（S3-2b）`）。`pixel-world/` 实测
+  **3 M + 0 D + 2 ??**，与预期完全一致：M = `scripts/capture-palette.mjs`、`src/render/villager.ts`、
+  `src/scenes/SandboxScene.ts`；?? = `src/render/villager-frames.ts`、`test/anim-frames.test.ts`。
+  主产品已跟踪改动 **35 个逐条未动**；`docs/_palette_*.py` 三个临时脚本已清空。
+  **施工期间工作区确认为冻结**：本轮开始与结束时 `git status` 快照一致，未观察到中途写入。
+- **最终结论：有条件通过**（1 条 P2 + 3 条 P3；1 项未验证）。代码与门禁全部实测达标，
+  P2 是「动画截图的帧号证据不存在可留存形式」，属证据缺陷而非功能缺陷。
+
+### 通过项（全部本会话自跑；参数刻意与施工方不同，独立覆盖）
+
+| # | 验收项 | 实测结果 |
+|---|---|---|
+| 1 | 12fps 采样公式 | `ANIM_FPS=12`、`FRAME_MS=1000/12`；`animFrame = ((floor(now/FRAME_MS) % n) + n) % n`。用**我自己实现的公式**对照 **200,001 个时间点**（含负值与小数）× 帧数 {2,4} → **0 处偏差**；`villager-frames.ts` 只 `import type VillagerMode`，**无 Phaser、无 Date/performance、不读 rAF/墙钟** ✓ |
+| 1b | 帧数分配 | 7 个 mode 全查：走路态 `toWork/toAltar/sheltering` = **4 帧**；`idle/saluting/working/delivering` = **2 帧** ✓ |
+| 1c | 节拍与边界 | −100..3000ms 共 **38 次进位**，间隔只有 83/84ms（≈83.33ms 的整数抖动，无跳帧/掉帧）；`NaN/±Infinity` → step 0，`frameCount≤0` → frame 0，不炸 |
+| 2 | 位置取整 | `pixelAt = Math.round`；**100,009 个分数坐标**（含 ±0.5 边界、±1e6）全部落整数像素，最大偏差 ≤0.5px ✓ |
+| 2b | 姿态偏移整数 | **50,000 个时间点 × 7 个 mode = 350,000 次采样**（施工是 5,000×5），`offsetY/footLeft/footRight` 全整数且在量纲内（offsetY ∈ [−2,2]、foot ∈ [−1,1]）✓ |
+| 3 | 确定性 | 施工方测试确实是 `assert.deepEqual(sampled.snapshot(), plain.snapshot())`，不是空断言。我独立复跑：两个同构 Simulation 各 300 步、一边每步采样（600 次）→ **深度相等**；**反向对照**：多跑 1 步 / 少跑 1 步的快照**不**相等 → 证明 deepEqual 真的在比东西；快照非平凡（`now=15000ms`、2 个角色） |
+| 3b | **补上走路路径** | 施工方的确定性测试只跑「待机」仿真（角色不动），走路 4 帧路径没被回放覆盖。我加跑一版：第 10 步派一个 code 活 → 小人**真的走了**（出现 mode：idle/saluting/toWork/working/delivering/toAltar，首次走路在步 24，600 个位置样本去重后 256 个，采样到帧号 0/1/2/3）→ 采样与不采样两条 300 步回放**仍深度相等** ✓ |
+| 4 | 不碰世界状态 | `git diff -- pixel-world/src/world/simulation.ts` **空**；`world-overlay.ts`、`labels.ts` **零改动**；`labels.ts:66-67` 仍用**原始 `villager.pos`**（不过 `pixelAt`）——DOM overlay 锚点保持分数坐标，`pixelAt/villagerPose` **只在 `villager.ts`（canvas 路）使用**，分工正确 ✓ |
+| 5 | 不新增颜色 | 审计 **16/8/1/23**、越界 **0/0**、`--strict` exit **0**、默认 exit **0**；`villager.ts` **0 个裸色值**（全走 WORLD token）；`villager-frames.ts` 无任何颜色字面量 ✓ |
+| 6 | 门禁 | `npm run check` → **exit 0**；`npm run test:inprocess` → **160/160**（150 + 10 条新增 anim 测试）✓ |
+| 8b | 施工自报②（smoke 一次性失败） | **机制成立、非回归**：`smoke.mjs` **开局不清 localStorage**（只在 L744 存档/读档校验之后才清），所以上一次异常中断留下的存档会改变下一次运行的初始世界状态 → 一次性失败可解释。清 origin 后 114/114 与代码无关 |
+
+### 未验证
+
+- **smoke 114/114**：Chromium 在本沙箱起不来（完整 Chrome 与 chrome-headless-shell 共 5 种参数组合全部退出码 1 立即死、无输出），按**未验证**处理，不计入通过。
+- **动画截图「同帧复跑同 sha」**：同上，无浏览器可跑，**未验证**。
+
+### 缺陷列表
+
+- **P2-1 动画截图的帧号证据不可核**。`capture-palette.mjs --anim` 每次都会打印
+  `mode/pos/now→step→frame/frames/sha`，但**只打到 stdout，仓库里没有任何 log/txt 落盘**
+  （`pixel-world` 全树除 node_modules/dist 外 0 个 .log/.txt，`eval/` 下只有 PNG）。
+  后果：看图的人无法知道哪张 PNG 对应哪个 12fps 帧号，「核 idle a/b 与 walk a/b 的帧号证据」这一条
+  **无法完成**。建议把每次 capture 的那行摘要同时写进 `eval/screens/anim-manifest.txt`（`eval/` 已 gitignore，不进仓库）。
+- **P2-2（同属证据缺陷）a/b 两组没有把「姿态差」分离出来**。我对 4 张 PNG 做了像素级分析：
+  - `anim-idle-a` vs `anim-idle-b`：264 处不同，全部集中在小人包围盒 x 241–254 / y 160–185；
+    皮肤质心 (247.5,165) → (247.5,169)，即**整个小人被平移了 4px**（列 dump 显示 ink/发/皮肤/围巾/斗篷
+    每一层都整体下移 4 行），**不是**待机 2 帧的 1px 呼吸差。
+  - `anim-walk-a` vs `anim-walk-b`：小人区域 **900/900 完全相同**；1,074 处不同全在小人之外
+    （768 处集中在 y 240–259 的底部区域）。皮肤质心 (218.6,146) → (213.6,145)，即**横向移动 5px**。
+  - 也就是说：a/b 的差异主要来自**仿真推进导致的位置变化**，1px 呼吸/靴子前伸被位置变化掩盖，
+    看不出「同一构图、只差一个动画帧」。建议把 a/b 设计成**同一 simulation 时间、只差一个 anim 帧**
+    （例如固定 `now` 只改帧号，或两次都在同一 `stopAt` 但用 `window.__ANIM_FRAME__` 直接指定帧），
+    否则这组图证明的是「世界在动」，不是「12fps 采样在动」。
+- **P3-1 `pixelAt(-0.5)` 返回 `-0`**。`Math.round(-0.5) === -0`，数值上等于 0、`Number.isInteger(-0)` 为 true，
+  渲染无差别；但 `assert.strictEqual(pixelAt(-0.5), 0)` 会红（`Object.is` 语义）。我在自己的探针里就撞到了。
+  不影响功能，建议在测试里用 `Object.is` 或 `+0` 归一，避免后人误判为 bug。
+- **P3-2 `smoke.mjs` 不开机清档，运行之间不隔离**（见 8b）。建议进 page 后先
+  `localStorage.clear()` 或 `browser.newContext()`，让每次 smoke 都从新世界开始。
+- **P3-3 施工自报①的「simulation now 约 8ms/rAF 帧推进」数值未获证实**。静态读代码：
+  `capture-palette.mjs` 把 `performance.now` 覆盖成 `state.frame * frameMs`（`frameMs = 1000/60 = 16.667ms`），
+  rAF 回调里 `cb(now())`，Phaser 拿到的 delta 应是 **16.667ms/帧**，与「约 8ms」不符。
+  我的像素证据只能支持「< 13.9ms/帧」：idle 两组相隔 6 个 rAF 帧却**没有发生动画帧翻转**
+  （否则会出现 1px 呼吸差），要求 6 帧累计 < 83.33ms。**结论的「只影响截图脚本不影响游戏」这半句已核实成立**
+  （rAF/performance.now 覆盖只存在于 `addInitScript`，`simulation.ts`/`weather.ts` 不读墙钟、只吃 `deltaMs`）；
+  但「约 8ms」这个数字请施工方给出测量方法或改正，否则后续按 8ms 设计冻结帧会算错。
+
+### 收口
+
+- 本轮未改动任何项目文件（只读验收 + 临时探针在 TEMP）；`git status` 与进场快照一致。
+- **待用户评审**：动画可读性（待机呼吸 / 走路脚部 / 行礼下蹲在人眼下的辨识度）——本会话模型无图像输入，
+  只做了帧号、整数像素、位移与确定性的数据核验。
+
+---
+
+## task-29 修复后最终签收复验（2026-10-19 17:59–18:10，lead · QA Engineer）
+
+- **基线声明**：HEAD `f2dbd90`；工作区脏树。`pixel-world/` 实测 **4 M + 0 D + 2 ??**，与预期完全一致
+  （M = `scripts/capture-palette.mjs`、`scripts/smoke.mjs`、`src/render/villager.ts`、
+  `src/scenes/SandboxScene.ts`；?? = `src/render/villager-frames.ts`、`test/anim-frames.test.ts`）。
+  主产品已跟踪改动 **35 个未动**；`simulation.ts` / `world-overlay.ts` / `labels.ts` **零 diff**；
+  工作区冻结确认（进场/出场 `git status` 一致）。`eval/` 已被 `.gitignore:3` 忽略，
+  `anim-manifest.txt` 与 12 个 PNG 均不进 git。
+- **最终结论：通过**（上一轮 1 条 P2 + 3 条 P3 全部关闭；2 项因沙箱禁 Chromium 记**未验证**，不计入通过）。
+
+### P2-1 / P2-2 复验：证据已可核，且姿态差被干净分离
+
+- **manifest 确由脚本生成、不是手写**：`capture-palette.mjs` 在 `--anim` 分支末尾
+  `await writeFile(`${OUT}/anim-manifest.txt`, …)`，表头含种子、页面、冻结条件、帧号公式、裁剪口径；
+  每行的 `fullSha`/`poseSha` 直接取自 `save()` 的返回值。
+- **manifest ↔ 产物 sha 全对得上**：8 个产物（4 张 480×320 全帧 + 4 张 52×40 裁剪）逐一复算 sha256 前 16 位，
+  **8/8 与 manifest 记录完全一致**；裁剪图实测均为 **52×40**、全帧 **480×320**。
+- **帧号算术自洽**（我用 `villager-frames.ts` 的公式独立复算 manifest 每一行）：
+  `anim-idle-a` now=5200 → step 62 → frame **0/2**；`anim-idle-b` now=5300 → step 63 → frame **1/2**；
+  `anim-walk-a` now=2000 → step 24 → frame **0/4**；`anim-walk-b` now=2100 → step 25 → frame **1/4**；
+  四行的 `px,py = round((pos.x+0.5)*16, (pos.y+1)*16)` 全部复算一致；idle 两行 **pos 与 px,py 完全相同
+  (7.00,13.00) / 120,224**，walk 两行 **px 差 −4**（12.90→12.60），`now` 差 100ms ≈ 1.2 个 83.33ms 步 → 恰好差一帧。
+- **姿态差被干净分离（像素级实证）**。裁减图以各自 v0 取整像素为中心，皮肤质心在四张裁剪里都是 x=25.56：
+  - `anim-idle-a-pose` 皮肤首行 y=17、`anim-idle-b-pose` y=18 → **整体下移 1px（待机呼吸）**；
+    裁剪内 dx=0,dy=0 匹配 **1994/2080（95.9%）**，任何 1px 平移都掉到 ~1520 → 对齐干净，差异只有 86px。
+  - 靴子像素图（timberDark `#4a3f39`，crop 坐标）逐行核对：
+    - `anim-walk-a`（frame 0）：靴子在 **y=32-33**，左靴 x **23-25**、右靴 x **27-29**；
+    - `anim-walk-b`（frame 1）：靴子在 **y=33-34**，左靴 x **22-24**、右靴 x **28-30**；
+    - 即 **offsetY 0→1（整体下移 1px）、左脚 −1px、右脚 +1px**，与 `WALK_POSES[0]→[1]` 完全一致。
+    - `anim-idle-a/b`：双脚都在 x 22-24 / 27-29，只有 y 32-33 → 33-34 的 1px 下移。
+  - 这把上一轮「a/b 差异主要是位置变化、看不出姿态差」的问题彻底解决了：idle 同位置只差 1px 呼吸，
+    walk 用裁剪扣掉 4px 位移后，剩下的正是设计好的脚步交替。
+- ** walk 裁剪仍有地形噪声（不影响结论，记录在案）**：`anim-walk-a-pose` vs `-b-pose` 有 578/2080 px 不同
+  且包围盒铺满整张裁剪——因为两刀取在 canvas x 188..239 与 184..235，**背景地形相对裁剪位移了 4px**；
+  平移对齐测试也显示没有单一档位能显著改善（dx=0,dy=0 已是最高 1502/2080）。
+  但小人本体已对齐（皮肤质心 x 一致、y 差 1px），靴子像素已逐行核对如上，**姿态证据本身是干净的**。
+  建议后续若要「连背景也逐字节可比」，可按 v0 的**未取整**像素裁切（当前用取整像素，残留 ≤0.5px）。
+
+### P3-1 / P3-2 / P3-3 复验
+
+- **P3-1 `-0` 归一**：`villager-frames.ts:57-60` 改为 `rounded === 0 ? 0 : rounded` 并注明原因。
+  实测 `pixelAt(-0.5)` 与 `pixelAt(-0)` 都返回 **+0**（`strictEqual` 与 `Object.is` 双双通过）；
+  另扫 −20000..20000 × 0.25 共 160,001 个输入，**无一返回 -0**；其它取整行为不变（0.5→1、-1.5→-1、214.4→214、209.6→210）。
+- **P3-2 smoke 清档**：改为 `page.addInitScript` 在**页面脚本之前**清，并用 `sessionStorage` 标记
+  **只清第一次导航**。逻辑核对：smoke 全流程是 goto(①清) → `saveNow` → reload(②不清，存档存活) →
+  断言恢复 → `clearSave` → reload(③不清，回新世界)，**存档/读档/刷新用例不受影响**。
+  施工方注释里「先 goto 再 clear 会被 pagehide 写回来」也核实成立：`SandboxScene.ts:141-144` 确有
+  `pagehide → saveStore.write(sim.toSave())`，L279 注释亦印证。`smoke.mjs` 仍用 `chromium.launch()`
+  （未改 connectOverCDP），所以 **smoke 本身在本沙箱仍跑不了**。
+- **P3-3 时钟测量**：新方法 `mean(now / rafFrames)`，且**只打 stdout、不进 manifest**，
+  理由写在代码里：「rAF 帧数受调度抖动影响，进 manifest 会让复跑字节一致失效」——这个取舍正确。
+  自洽性：理论每 rAF 帧推进 16.667ms（`performance.now` 被覆盖为 `frame × 1000/60`），Chief 实测
+  **16.21ms/帧**与之相差 <0.5ms，量级吻合；manifest 只含 `now`/`step`，逐行复算全部自洽。
+  上一轮「约 8ms/rAF 帧」的数字被本次测量取代，且冻结条件已**改用 simulation `now`**
+  （`freezeAt` 用 `Oracle.view().now >= target` + `__ANIM_STATE__.frozen = true`），不再依赖 rAF 计数，
+  所以那个数即使不准也不影响证据——**更正解释成立**。
+
+### 现场数字（本会话重跑）
+
+| 项 | 结果 |
+|---|---|
+| `npm run check` | `npx tsc --noEmit` → **exit 0** |
+| `npm run test:inprocess` | **161/161，exit 0**（160 + 1 条 `-0` 归一用例） |
+| `node scripts/audit-palette.mjs` | 世界 **16**（90 引用）/ UI **8**（45）/ 共享 **1**（`#e3a13c`）/ 并集 **23** / 越界 **0 / 0** |
+| 退出码 | `--strict` **exit 0**、默认 **exit 0** |
+| 独立探针复跑 | 公式 200,001 点 0 偏差、姿态 350,000 次全整数、pixelAt 160,001 输入无 -0、确定性含**反向对照**、**走路路径** 300 步深度相等（帧号 0-3 全覆盖）——13 组全过 |
+| 无新增色 | `villager.ts` **0 个裸色值**、`villager-frames.ts` **0 个色值 + 0 个 phaser import** |
+| 不碰世界 | `simulation.ts` / `world-overlay.ts` / `labels.ts` **零 diff**；`labels.ts:66-67` 仍用原始 `villager.pos` |
+
+### 未验证（沙箱限制，不计入通过）
+
+- **smoke 114/114**：`smoke.mjs:28` 仍是 `chromium.launch()`，本沙箱 `spawn EPERM`；
+  本轮又试一次 `chrome-headless-shell --headless --remote-debugging-port=9333 …`（按 E2E_PALETTE.md 原命令），
+  仍以退出码 1 立即退出、无输出、无 CDP 端点（累计 6 次尝试全失败）。
+- **`--anim` 连跑两次逐字节一致**：同上，无浏览器可跑。已核的替代证据：manifest 8/8 sha 与产物对得上、
+  帧号算术逐行自洽、姿态差像素级分离；「复跑字节一致」这条**未经我复跑**，建议在正常环境由用户或施工方再跑一次并留档。
+
+### 收口
+
+- 本轮未改动任何项目文件（只读验收 + TEMP 探针）；`git status` 与进场快照一致，无残留进程/监听。
+- **待用户评审**：动画在人眼下的辨识度（待机呼吸是否看得出、走路脚部交替是否可读、行礼下蹲是否像行礼）。
