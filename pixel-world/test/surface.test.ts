@@ -53,6 +53,51 @@ test('交付一单之后，日报写的是这单本身', () => {
   assert.equal(report.headline, '今日有交付', '没攒满里程碑就不能写"神恩"');
 });
 
+test('日报把台账交付与 Mock 交付分开写，不合并计数', () => {
+  const sim = makeSim();
+  // 台账单：完成权在台账，由 sync 收尾。
+  sim.enqueue({
+    kind: 'sync',
+    tasks: [{ commissionId: 'c_1', kind: 'code', title: '写爬虫', agentName: '甲' }],
+    finished: [],
+    connected: true,
+  });
+  let guard = 0;
+  while (sim.snapshot().villager.mode !== 'working') {
+    sim.update(100);
+    if ((guard += 1) > 200) throw new Error('没走到铺子');
+  }
+  sim.enqueue({ kind: 'sync', tasks: [], finished: ['c_1'], connected: true });
+  sim.update(16);
+  assert.equal(sim.snapshot().deliveries.ledger, 1);
+  guard = 0;
+  while (sim.snapshot().villager.mode !== 'idle') {
+    sim.update(100);
+    if ((guard += 1) > 200) throw new Error('台账单没走完交付');
+  }
+
+  // 沙盒单：短活自己结束，计入 Mock。
+  sim.enqueue({ kind: 'dispatch', taskKind: 'quick', summary: '顺手看一眼' });
+  guard = 0;
+  while (sim.snapshot().deliveries.mock !== 1) {
+    sim.update(100);
+    if ((guard += 1) > 400) throw new Error('短活没结束');
+  }
+
+  // 断线后 Mock 必须显式标成「离线 Mock」，日报据此分开写。
+  sim.enqueue({ kind: 'sync', tasks: [], finished: [], connected: false });
+  sim.update(16);
+  const snapshot = sim.snapshot();
+  assert.equal(snapshot.deliveries.ledger, 1);
+  assert.equal(snapshot.deliveries.mock, 1);
+
+  const report = composeReport(snapshot);
+  const line = report.lines.find((item) => item.includes('交付')) ?? '';
+  assert.ok(line.includes('台账交付 1 单'), line);
+  assert.ok(line.includes('离线 Mock 交付 1 单'), line);
+  assert.equal(report.headline, '今日有交付');
+});
+
 test('攒满里程碑后，标题写的是已经落地的那次神恩', () => {
   const sim = makeSim();
   for (let i = 0; i < 3; i += 1) {

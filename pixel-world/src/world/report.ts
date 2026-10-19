@@ -17,11 +17,24 @@ const LINE_LIMIT = 3;
 export function composeReport(snapshot: WorldSnapshot): DailyReport {
   const done = snapshot.tasks.filter((task) => task.status === 'done');
   const failed = snapshot.tasks.filter((task) => task.status === 'failed');
+  const { ledger: ledgerDelivered, mock: mockDelivered } = snapshot.deliveries;
+  const delivered = ledgerDelivered + mockDelivered;
   const lines: string[] = [];
 
-  if (done.length > 0) {
+  if (delivered > 0) {
+    // 台账交付与 Mock 交付分开写，不合并成一个总数。
+    const parts: string[] = [];
+    if (ledgerDelivered > 0) parts.push(`台账交付 ${ledgerDelivered} 单`);
+    if (mockDelivered > 0) {
+      const label = snapshot.ledger.mock ? '离线 Mock' : 'Mock';
+      parts.push(`${label} 交付 ${mockDelivered} 单`);
+    }
     const latest = done[done.length - 1];
-    lines.push(`交付 ${done.length} 单，最近一单：${latest.summary}`);
+    lines.push(
+      latest === undefined
+        ? parts.join('，')
+        : `${parts.join('，')}，最近一单：${latest.summary}`,
+    );
   } else {
     lines.push('还没有交付。祭坛在等第一条神谕。');
   }
@@ -46,7 +59,7 @@ export function composeReport(snapshot: WorldSnapshot): DailyReport {
   const headline =
     snapshot.faith.milestones > 0
       ? `第 ${snapshot.faith.milestones} 次神恩已落地`
-      : done.length > 0
+      : delivered > 0
         ? '今日有交付'
         : '世界刚醒来';
 

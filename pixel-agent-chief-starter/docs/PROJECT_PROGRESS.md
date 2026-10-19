@@ -11,7 +11,7 @@
 - 像素世界技术栈：**Phaser 3.90 + TypeScript 5.9.3 + Vite 8.3.4，已落地并实测可运行**。
 - **文档旧声称严重滞后**：旧进度写「Phase 0 / MVP 0.1 已完成，Phase 1 IN_PROGRESS，TASK-1.1 IN_PROGRESS，TASK-1.2 下一项」。真实情况：19 张任务卡 **17 DONE + 2 PARTIAL**，主体已到 Phase 6。
 - **MVP 1.0 仍未达标**：九项必须项 = **4 DONE / 4 PARTIAL / 2 MISSING**（详见下表；MISSING：多角色、JSON 存档；调试面板按「数据有、UI 无」计入 PARTIAL）。
-- 门禁实测：`npm run check` 通过；`npm test` **59/59**；`npm run build` 通过；浏览器冒烟沙盒 **49/49**、台账 **10/10**、显式离线 **7/7**。
+- 门禁实测：`npm run check` 通过；`npm test` **90/90**；`npm run build` 通过；浏览器冒烟沙盒 **53/53**、台账 **21/21**、显式离线 7/7（2026-10-19 S1 收口后数字；12:38 基线为 59/49/10）。
 
 ## 一、阶段与任务卡（核验后）
 
@@ -53,9 +53,12 @@
 ## 四、后续主线（按 2026-10-19 核验重排）
 
 - [x] **S0 文档对账（2026-10-19 完成）**：README 计数、`main.ts:25` 注释、两份架构笔记历史提案横幅、ROUND1 七态注记；4 文件 6 行，`npm run check` 通过。
-- [ ] 用户拍板待定决策：D1/D2 已定；D3 人工交付、D4 台账 Agent 映射、D5 中文出 canvas、D6 尺寸/调色板、D7 纳入门禁仍待定（见 `docs/DECISION_TRAIL_20261019.md`）。
+- [x] 决策：D1/D2/D3/D4 已定并落地（D3 人工交付、D4 台账能力映射，2026-10-19）；D5 中文出 canvas、D6 尺寸/调色板、D7 纳入门禁仍待定。
 - [x] **参考包采纳三卡（2026-10-19 完成，QA 复验通过）**：task-7 重连指数退避、task-9 契约 fixture、task-8 `/ws` Origin 校验；证据 `docs/QA_VERIFICATION_S1.md`。
-- [ ] P0 剩余：人工交付只对沙盒单生效（D3）、台账 `adapters` 字段契约（D4）、周期对账/心跳、一次真帧端到端。
+- [x] D3 人工交付只对沙盒单生效 + 离线 Mock 显式标记（2026-10-19，QA 通过）。
+- [x] D4 台账 Agent 能力映射：新增只读 `/api/executive/roster`，现有返回结构零改动（QA 通过）。
+- [x] **S1 收口（2026-10-19）**：参考包三卡 + D3/D4 + S1 剩余四项（周期对账/分页、真帧端到端、pickActive、blocked_question）全部完成并经 QA 复验；`npm test` 90/90、沙盒 53/53、台账 21/21、`check_protocol.py` PASS；仅 D7 上游派活未验证（manual 适配器 + 无 Key）。
+- [x] S1 剩余四项：`blocked_question` 透传（仅展示）、`pickActive` 接线、周期对账/分页、一次真帧端到端（全部 QA 通过）。
 - [ ] MVP 硬缺口：多角色 2–3、JSON 存档单槽 + 恢复、调试面板 UI。
 - [ ] 视觉垂直切片：中文迁出 canvas、调色板收敛 + 校验器、idle/walk 帧动画 + 12fps 采样、证据链重建。
 - [ ] 定稿并批准 `DEMO_SCRIPT.md` v0.1 与 `ART_SPEC.md` v0.1（用 `docs/DEMO_ART_SPEC_TODO.md` 的 A1–A12 / B1–B12 清单）。

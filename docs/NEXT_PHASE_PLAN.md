@@ -76,6 +76,25 @@ S3 视觉垂直切片（与 S2 并行，依赖 D5、D6）
 - task-8（S1-8 `/ws` Origin）：**通过**——服务器改动仅 `server/app.py` +24 行、仅 `/ws` 头部；离线 11/11、8001 live 5/5、QA 独立握手矩阵 12/12（无 Origin/同源/跨源 403/https 同 netloc/null 403/畸形 403/大小写/空串/代理）、Vite 代理 10/10、`check_protocol.py` PASS、`test_core.py` 64/0；8000 全程未重启。
 - 遗留 P3（不阻断）：无 Origin 白名单不等于认证、只比 netloc、依赖 `changeOrigin:false`、拒绝无速率限制、fixture 的 blocked/running 为派生值。后续卡见 §10。
 
+**S1 第二阶段收口（2026-10-19）**：D3（task-11）与 D4（task-12）完成并经 QA 独立复验通过。
+- D3 行为探针 18/18：台账单人工完成被拒、沙盒单可收尾、离线 Mock 在快照/状态行/回执/日报四处显式、日报分账不合并；未写台账、未动 server。
+- D4 对抗 8/8：`/roster` 200 / 7 条 / 仅 `id,name,strengths,adapter`；8001 与 8000 的 `/adapters` 均 1478 B、byte-identical；旧服务 404 回退链有效；无凭据字段。
+
+**用户指定的 S1 剩余执行顺序（2026-10-19）**：
+1. S1-5 周期对账 + 分页截断 + fetch 超时（task-13）
+2. S1-6 真帧端到端 + 三项未验证取证：冷启动（D4）、无 Key Mock（D1）、真实 WS `commission_update` 推送（D3）；必须连真实 WS，禁止 `pushLedger` 注入帧（task-14）
+3. S1-4 `pickActive` 接线（task-15）
+4. S1-3 `blocked_question` 透传，**仅展示、不在世界内回答**（task-16，World Builder）
+- task-10（排队）与 task-15/task-16 共用 `simulation.ts`，按用户规则**排后**，不并行。
+- D7 在 S1 收口时定；D5/D6 在 S3 开工前定。像素美术先做中文位图字体试验（含许可证确认）与色数统计，只出证据、不碰代码。
+
+**S1 全部收口（2026-10-19 14:05）**：S1 五张卡 + 参考包三卡全部完成并经 QA 独立复验。
+- S1-5 周期对账/分页：30s 对账（WS 在线也做）、limit=100 截断标「未取全」不误撤、5s 超时；QA 对抗 16/16，真实 8000 DB 239 行 → 页面提示可复现。
+- S1-6 真帧端到端：隔离 8001 冷启动 2.5s、无 Key `offline:true`、真实 WS 6 帧同 id、真浏览器 `pushLedgerCalls=0`；覆盖 D1/D3/D4。D7 上游派活未验证（manual + 无 Key）。
+- S1-4 pickActive：blocked→running→auditing，同级稳定，撤单重排；QA 矩阵 16/16。
+- S1-3 blocked_question：真帧→快照→状态行，60 码点截断，无回答入口（全程仅 GET）；QA 逻辑 27/27 + 浏览器 17/17，真帧 e2e 复跑 23/23。
+- 全量：`npm test` 90/90、沙盒 smoke 53/53、台账 smoke 21/21、`check_protocol.py` PASS、`test_core.py` 64/0；8000 全程未重启，`data/commissions.db` 未写。
+
 ---
 
 ## 4. S2 — MVP 1.0 硬缺口（依赖 D2、D6）

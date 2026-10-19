@@ -168,6 +168,11 @@ test('「顺手」走原地短活，不抢长活的活', () => {
   assert.equal(long.kind === 'dispatch' && long.taskKind, 'research');
 });
 
+test('神谕里出现答复也只当普通文本，不触发任何回答', () => {
+  assert.equal(parseOracle('先按短句还是完整句式？答复：短句').kind, 'unknown');
+  assert.equal(parseOracle('回答：选 A').kind, 'unknown');
+});
+
 // ------------------------------------------------------------------- everyday
 
 test('没人管的时候她也过日子：离开祭坛再回来', () => {
@@ -262,6 +267,61 @@ test('空手时交付被拒绝', () => {
   const rig = makeRig();
   rig.sim.enqueue({ kind: 'complete' });
   assert.equal(rig.sim.update(16)[0].ok, false);
+});
+
+// ------------------------------------------------------- 人工交付与离线 Mock（D3）
+
+test('台账单不能人工完成：完成权在台账，状态不变', () => {
+  const rig = makeRig();
+  rig.sim.enqueue({
+    kind: 'sync',
+    tasks: [{ commissionId: 'c_1', kind: 'code', title: '写爬虫', agentName: '甲' }],
+    finished: [],
+    connected: true,
+  });
+  rig.runUntil(() => rig.state().villager.mode === 'working');
+  assert.equal(rig.state().ledger.mock, false, '台账在线');
+
+  rig.sim.enqueue({ kind: 'complete' });
+  const result = rig.sim.update(16);
+  assert.equal(result[0].ok, false);
+  assert.ok(result[0].message.includes('完成权在台账'), result[0].message);
+
+  const state = rig.state();
+  assert.equal(state.villager.mode, 'working', '被拒后台账单继续跑');
+  assert.equal(state.tasks[0].status, 'in_progress');
+  assert.equal(state.deliveries.ledger, 0);
+  assert.equal(state.deliveries.mock, 0);
+});
+
+test('沙盒单可以人工收尾，回执标明离线 Mock 且不计入台账', () => {
+  const rig = makeRig();
+  rig.sim.enqueue({ kind: 'dispatch', taskKind: 'code', summary: '写个脚本' });
+  rig.runUntil(() => rig.state().villager.mode === 'working');
+
+  rig.sim.enqueue({ kind: 'complete' });
+  const result = rig.sim.update(16);
+  assert.equal(result[0].ok, true);
+  assert.ok(result[0].message.includes('离线 Mock'), result[0].message);
+  assert.ok(result[0].message.includes('不计入台账'), result[0].message);
+
+  const state = rig.state();
+  assert.equal(state.villager.mode, 'delivering');
+  assert.equal(state.deliveries.mock, 1, '沙盒交付计入 Mock');
+  assert.equal(state.deliveries.ledger, 0, '不冒充台账交付');
+});
+
+test('快照的离线 Mock 标记随台账连接变化', () => {
+  const rig = makeRig();
+  assert.equal(rig.state().ledger.mock, true, '没接台账就是离线 Mock');
+
+  rig.sim.enqueue({ kind: 'sync', tasks: [], finished: [], connected: true });
+  rig.sim.update(16);
+  assert.equal(rig.state().ledger.mock, false, '连上后不再是 Mock');
+
+  rig.sim.enqueue({ kind: 'sync', tasks: [], finished: [], connected: false });
+  rig.sim.update(16);
+  assert.equal(rig.state().ledger.mock, true, '断线后标回离线 Mock');
 });
 
 test('每条命令只在 update 开头结算一次', () => {

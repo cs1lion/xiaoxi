@@ -95,6 +95,25 @@ export interface TaskRecord {
   status: TaskStatus;
   readonly createdAt: number;
   completedAt: number | null;
+  /**
+   * 台账 blocked 单要请示的问题。只透传、只展示，世界绝不在内部回答；
+   * 非 blocked 单（转 running / 完成 / 撤单）必须清成 null，不残留。
+   * 这里保留完整原文，展示截断由 excerptBlockedQuestion 负责。
+   */
+  blockedQuestion: string | null;
+}
+
+/** 状态行/回执里展示要请示问题时最多显示多少个字符（按 Unicode 码点计）。 */
+export const BLOCKED_QUESTION_LIMIT = 60;
+
+/** 展示用截断：超过 60 字符加省略号；完整值仍留在 TaskRecord.blockedQuestion。 */
+export function excerptBlockedQuestion(question: string | null): string {
+  if (question === null) return '';
+  const text = question.trim();
+  if (text === '') return '';
+  const points = Array.from(text);
+  if (points.length <= BLOCKED_QUESTION_LIMIT) return text;
+  return `${points.slice(0, BLOCKED_QUESTION_LIMIT).join('')}…`;
 }
 
 /** 每类活的时长与场地。短的原地做，长的进城。 */
@@ -161,6 +180,12 @@ export interface ConstructionSnapshot {
   readonly totalMs: number;
 }
 
+/** 交付统计：台账交付与离线 Mock 交付分开计，不合并。 */
+export interface DeliveryStats {
+  readonly ledger: number;
+  readonly mock: number;
+}
+
 /** 累积式改变：交付多了，世界多一件东西。不可花掉、不贬值。 */
 export type PropKind = 'lamp' | 'tree' | 'banner';
 
@@ -199,8 +224,17 @@ export interface WorldSnapshot {
   readonly weather: Weather;
   /** 交付积累的信仰点数与已达成的世界记忆数。 */
   readonly faith: { readonly points: number; readonly milestones: number };
+  /** 交付统计：台账交付与离线 Mock 交付分开计，禁止合并成一个数。 */
+  readonly deliveries: DeliveryStats;
   /** 上游台账的在线情况。离线时世界照常过日子，但不再谎报"没有活"。 */
-  readonly ledger: { readonly connected: boolean; readonly lastSyncAt: number | null };
+  readonly ledger: {
+    readonly connected: boolean;
+    readonly lastSyncAt: number | null;
+    /** 当前按离线 Mock 运行（没接台账或已断线）。状态行据此显式标注。 */
+    readonly mock: boolean;
+    /** 最近一次 REST 快照是否完整；false 表示"台账可能未取全"。 */
+    readonly complete: boolean;
+  };
 }
 
 /** 神谕解析结果。世界只认这几种动词，别的都落到 unknown。 */

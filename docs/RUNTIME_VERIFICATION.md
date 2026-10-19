@@ -490,3 +490,11 @@ Get-NetTCPConnection -LocalPort 5188,4174,8000 -State Listen -ErrorAction Silent
 6. 共享事实中"`node --test` spawn EPERM 失败"**未复现**（危险全开沙箱下 59/59 通过）。
 7. 未验证：无 Key 自动 Mock 的运行时行为、真实服务端 WS 推送、主服务冷启动、`npm install` 从零。
 8. 端口：自启的 5188/4174 已关闭并复核无监听；8000 为会话前既有服务（PID 22996），未由 QA 启动，保持运行。
+
+## 十、补验（2026-10-19 14:00）
+
+- **D1 无 Key Mock：已补验**——task-14 隔离实例 `LLM_API_KEY=''`，`/api/health` 返回 `offline:true`、链路可跑，证据见 `docs/E2E_REAL_FRAME.md`。
+- **D3 真实 WS `commission_update` 推送：已补验**——独立 WS 采集到同 id 6 帧 `drafting→briefing→running→blocked`，真浏览器端 `pushLedgerCalls=0`。
+- **D4 冷启动：已补验**——lifespan ON 的隔离实例，`Application startup complete`，bootMs≈2.5s。
+- **D7 上游派活：仍未验证**——全部 Worker 为 manual 适配器、无 Key，answer 后仍 blocked，到不了 `ready_to_report`。
+- 详见 `docs/E2E_REAL_FRAME.md` 与 `docs/QA_VERIFICATION_S1.md` 卡 7–9。

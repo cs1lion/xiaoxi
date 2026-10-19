@@ -7,6 +7,7 @@ import Phaser from 'phaser';
 import { TILE_PX } from '../world/setup.ts';
 import { Simulation, type NewBuilding, type WorldCommand } from '../world/simulation.ts';
 import type { CommandResult, WorldSnapshot } from '../world/types.ts';
+import { excerptBlockedQuestion } from '../world/types.ts';
 import { parseOracle } from '../world/oracle.ts';
 import { placeBlueprint, type BuiltWorld } from '../world/setup.ts';
 import type { PrefabBlueprint } from '../world/types.ts';
@@ -125,6 +126,8 @@ export class SandboxScene extends Phaser.Scene {
           tasks: view.tasks,
           finished: view.finished,
           connected: view.connected,
+          complete: view.complete,
+          order: view.order,
         });
       },
     });
@@ -367,16 +370,22 @@ export class SandboxScene extends Phaser.Scene {
     };
     const weather = this.snapshot.weather === 'rain' ? '雨' : '晴';
     const faith = this.snapshot.faith;
-    const ledger = this.snapshot.ledger.connected ? '台账在线' : '台账离线';
-    return `${villager.name}：${modeLabel[villager.mode]}　　${weather}　　${ledger}　　已交付 ${this.completedCount()} 单　　神恩 ${faith.points}/${3}`;
+    const { ledger: ledgerDelivered, mock: mockDelivered } = this.snapshot.deliveries;
+    // 离线 Mock 必须显式标出：状态行不只说"台账离线"，还说现在跑的是 Mock。
+    const ledgerState = this.snapshot.ledger.connected ? '台账在线' : '台账离线 · 离线 Mock';
+    // 分页取满时快照不完整：说出来，别让"少了一条"看起来像"被撤了"。
+    const ledger = this.snapshot.ledger.complete ? ledgerState : `${ledgerState} · 台账可能未取全`;
+    // blocked_question 只展示，不在世界内回答：完整值留在快照，这里按 60 字符截断。
+    const waitingTask = this.snapshot.tasks.find((item) => item.blockedQuestion !== null);
+    const waiting =
+      waitingTask === undefined || waitingTask.blockedQuestion === null
+        ? ''
+        : `　　在等你的答复：${excerptBlockedQuestion(waitingTask.blockedQuestion)}`;
+    return `${villager.name}：${modeLabel[villager.mode]}　　${weather}　　${ledger}　　台账交付 ${ledgerDelivered} 单 · Mock 交付 ${mockDelivered} 单　　神恩 ${faith.points}/${3}${waiting}`;
   }
 
   private buildingName(id: string | null): string | null {
     if (id === null) return null;
     return this.snapshot.buildings.find((item) => item.instanceId === id)?.displayName ?? id;
-  }
-
-  private completedCount(): number {
-    return this.snapshot.tasks.filter((task) => task.status === 'done').length;
   }
 }

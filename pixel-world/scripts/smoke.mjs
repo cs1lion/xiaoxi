@@ -63,10 +63,19 @@ async function runLedgerSuite() {
   await waitFor((s) => s.ledger.connected === true, '台账连接建立', 15000);
   const linked = await state();
   check(linked.ledger.lastSyncAt !== null, '世界拿到过一次台账快照');
+  await page.waitForFunction(
+    () => (document.querySelector('#status')?.textContent ?? '').includes('台账在线'),
+    null,
+    { timeout: 5000 },
+  );
   const statusText = await page.textContent('#status');
   check(
     statusText.includes('台账在线') || statusText.includes('台账离线'),
     '状态行读得出台账状态',
+  );
+  check(
+    statusText.includes('台账在线') && !statusText.includes('离线 Mock'),
+    '台账在线时状态行不标离线 Mock',
   );
 
   // 注入一帧 commission_update，等价于服务端真发了一帧。不写主服务：
@@ -86,6 +95,17 @@ async function runLedgerSuite() {
   check(driven.tasks.some((t) => t.id === 'c_smoke_probe'), '上游单进了世界的活动清单');
   check(driven.villager.mode !== 'idle', '她停下日常，去干上游派的活');
 
+  // 完成权在台账：台账单不许人工收尾，按 #finish 必须被拒且她继续干活。
+  await waitFor((s) => s.villager.mode === 'working', '上游单进入干活态', 15000);
+  await page.click('#finish');
+  await page.waitForFunction(
+    () => (document.querySelector('#reply')?.textContent ?? '').includes('完成权在台账'),
+    null,
+    { timeout: 5000 },
+  );
+  check(true, '台账单人工完成被拒，回执写明完成权在台账');
+  check((await state()).villager.mode === 'working', '被拒后台账单继续跑');
+
   // 上游说收工，她走正常交付，不是凭空结束。
   const delivered = await page.evaluate(async () => {
     window.Oracle.pushLedger({
@@ -104,11 +124,87 @@ async function runLedgerSuite() {
     '台账说收工，她走交付',
   );
   check(!delivered.tasks.some((t) => t.id === 'c_smoke_probe'), '收工的单退出活动清单');
+  check(delivered.deliveries.ledger === 1, '台账交付单独计入台账统计');
+  check(delivered.deliveries.mock === 0, '台账交付不混进 Mock 统计');
+
+  // blocked_question 只展示、不回答：进快照，状态行与回执都能读到，转 running 后清除。
+  const blocked = await page.evaluate(async () => {
+    window.Oracle.pushLedger({
+      id: 'c_smoke_blocked',
+      title: '把便笺整理成三版标题',
+      agent_id: 'scribe',
+      status: 'blocked',
+      step_idx: 3,
+      blocked_question: '先按短句还是完整句式？',
+    });
+    await new Promise((resolve) => setTimeout(resolve, 400));
+    return window.Oracle.view();
+  });
+  check(
+    blocked.tasks.some((t) => t.blockedQuestion === '先按短句还是完整句式？'),
+    'blocked_question 进了世界快照',
+  );
+  await page.waitForFunction(
+    () => (document.querySelector('#status')?.textContent ?? '').includes('在等你的答复：'),
+    null,
+    { timeout: 5000 },
+  );
+  check(true, '状态行写出在等你的答复');
+  check(
+    (await page.textContent('#reply')).includes('在等你的答复：'),
+    '同步回执写出在等你的答复',
+  );
+
+  // 上游把单转成 running：问题立刻清掉，不残留。
+  const resumed = await page.evaluate(async () => {
+    window.Oracle.pushLedger({
+      id: 'c_smoke_blocked',
+      title: '把便笺整理成三版标题',
+      agent_id: 'scribe',
+      status: 'running',
+      step_idx: 4,
+      blocked_question: '',
+    });
+    await new Promise((resolve) => setTimeout(resolve, 400));
+    return window.Oracle.view();
+  });
+  check(
+    resumed.tasks.every((t) => t.blockedQuestion === null),
+    '转 running 后答复等待被清除',
+  );
+
+  // 收工后这条单离开活动清单，问题不残留。
+  await page.evaluate(async () => {
+    window.Oracle.pushLedger({
+      id: 'c_smoke_blocked',
+      title: '把便笺整理成三版标题',
+      agent_id: 'scribe',
+      status: 'ready_to_report',
+      step_idx: 5,
+      blocked_question: '',
+    });
+    await new Promise((resolve) => setTimeout(resolve, 300));
+  });
+  check(
+    !(await state()).tasks.some((t) => t.id === 'c_smoke_blocked'),
+    '收工后带问题的单退出活动清单',
+  );
 }
 
 /** 沙盒模式：神谕闭环 + 日常 + 天气 + 造物主 + 信仰 + 日报 + 外部桥接。 */
 async function runSandboxSuite() {
   const opening = await state();
+  check(opening.ledger.mock === true, '离线模式在快照里标成离线 Mock');
+  await page.waitForFunction(
+    () => (document.querySelector('#status')?.textContent ?? '').includes('离线 Mock'),
+    null,
+    { timeout: 5000 },
+  );
+  const openingStatus = await page.textContent('#status');
+  check(
+    openingStatus.includes('离线 Mock') && openingStatus.includes('台账离线'),
+    '状态行标出离线 Mock',
+  );
   // 她自己会动，不是屏保。
   const before = opening.villager.pos;
   await page.waitForTimeout(3200);
@@ -176,10 +272,19 @@ async function runSandboxSuite() {
   );
   check((await state()).tasks.length === 2, '被拒的神谕没有进台账');
 
-  // 「现实完成」是人工交付通道：活还没到时间，也能从外面结束。
+  // 「现实完成」只对沙盒单生效：回执必须标出离线 Mock，且不计入台账。
   await page.click('#finish');
   const manual = await waitFor((s) => s.villager.mode === 'delivering', '人工交付也能结束这单');
-  check(manual.tasks[1]?.status === 'done', '人工交付写进台账');
+  check(manual.tasks[1]?.status === 'done', '人工交付对沙盒单生效');
+  const manualReply = await page.textContent('#reply');
+  check(
+    manualReply.includes('离线 Mock') && manualReply.includes('不计入台账'),
+    '沙盒单人工交付回执标明离线 Mock、不计入台账',
+  );
+  check(
+    manual.deliveries.ledger === 0 && manual.deliveries.mock >= 2,
+    '交付统计把 Mock 单独计，不混进台账',
+  );
   await waitFor((s) => s.villager.mode === 'idle', '交付完回到日常');
 
   const routine = await waitFor(

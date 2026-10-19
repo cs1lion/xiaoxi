@@ -1,8 +1,8 @@
-# S1 三张卡独立验收记录（QA Verification · S1）
+# S1 各卡独立验收记录（QA Verification · S1）
 
-- 验收方：qa-runtime（Agent Teams · QA Engineer），独立于三张卡的作者
-- 验收时间：2026-10-19 13:06–13:10（task-7）；**2026-10-19 13:13–13:18（task-9 + task-8 正式复验）**（Asia/Shanghai）
-- 验收对象：task-7（S1-7 WS 指数退避）/ task-9（S1-9 台账帧契约 fixture）/ task-8（S1-8 `/ws` 同源 Origin 校验）
+- 验收方：qa-runtime（Agent Teams · QA Engineer），独立于各卡作者
+- 验收时间：2026-10-19 13:06–13:10（task-7）；**13:13–13:18（task-9 + task-8）**；**13:23–13:29（task-12 D4-A + task-11 D3-A）**；**13:41–13:49（task-13 S1-5）**；**13:47–13:53（task-14 S1-6）**；**13:56–14:01（task-15 + task-16）**（Asia/Shanghai）
+- 验收对象：task-7（WS 退避）/ task-9（fixture 契约）/ task-8（`/ws` Origin）/ task-12（D4-A 花名册只读端点）/ task-11（D3-A 人工交付+离线 Mock）/ task-13（S1-5 周期对账+分页截断+超时）/ task-14（S1-6 真帧端到端+三项未验证）/ task-15（pickActive 接线）/ task-16（blocked_question 透传仅展示）
 - 仓库：`D:\project\neurosama`，分支 `feat/pixel-world-oracle-world`，HEAD `9cd0c5a4`（本次验收期间作者改动均在未提交的工作区）
 - 方法：不采信作者自述；自己看 diff、跑测试与冒烟、做对抗性探针；临时脚本/日志只放工作区
   `C:\Users\18712\.dsh\bot\workspace\recon\`，只在本文件留结论
@@ -14,8 +14,14 @@
 | 卡号 | 任务 | 结论 | 一句话 |
 |---|---|---|---|
 | **S1-7 / task-7** | WS 重连指数退避 | **通过** | 退避序列/重置/上限/dispose/无定时器泄漏均实测；单测+冒烟+真实断网恢复回绿，未发现 P0–P2 问题 |
-| **S1-9 / task-9** | 台账帧契约 fixture 测试 | **通过** | 正常 6/6 绿；`agent_id` 改名 → 5/6 FAIL、exit 1；类型漂移 → FAIL；哈希还原后复绿；fixture 无敏感字段、与 8000 实响应字段集合一致；未新增依赖/未削弱既有断言 |
+| **S1-9 / task-9** | 台账帧契约 fixture 测试 | **通过** | 正常 6/6 绿；`agent_id` 改名 → 5/6 FAIL、exit 1；类型漂移 → FAIL；哈希还原后复绿；fixture 无敏感字段、与 8000 实响应字段集合一致；未新增依赖/未削弱既有断言。**二轮独立复验（13:20–13:27，lead/QA）确认通过，变异矩阵扩展至帧 fixture 与 `step_idx` 字段** |
 | **S1-8 / task-8** | `/ws` Origin 校验 | **通过** | `server/app.py` 仅 +24 行；py_compile 通过；离线 11/11、8001 live 5/5、QA 独立握手矩阵 12/12；浏览器同源可用/跨源 403；Vite 代理链路 10/10 不误拒；8000 未重启且 PID 不变 |
+| **S1-12 / task-12（D4-A）** | 只读 `/api/executive/roster` + 前端兼容回退 | **通过** | server 仅新增 1 条只读路由（+9/0）；`/adapters` 8000 vs 8001 byte-identical；8001 `/roster` 200/7 条/仅 4 字段、无敏感值；前端 22/22 + 对抗 8/8；77/77、smoke 53/53 + 16/16；8000 旧进程 404 属已知限制 |
+| **S1-11 / task-11（D3-A）** | 人工交付只对沙盒单 + 离线 Mock 显式标记 | **通过** | 台账单手动完成被拒（source 判断、状态不变）；离线标记/快照/回执/日报分账 18/18 全过；77/77、check 0、smoke 53/53 + 16/16；未碰 ledger/projection/server；README 计数漂移记次要 |
+| **S1-5 / task-13** | 周期对账 / 分页截断 / 请求超时 | **通过** | 30s 对账（WS 在线也跑）、单飞、5s 超时、limit=100 截断语义均实测；81/81、check 0、smoke 53/53 + 16/16；真实 8000 台账 239 条>100，状态行「台账可能未取全」可复现；task-7 退避/task-12 回退交叉通过 |
+| **S1-6 / task-14** | 真帧端到端 + 三项未验证（D4/D1/D3） | **通过** | 单次复跑 **23/23**（连跑 2 次绿，另 1 次仅隔离 mtime 断言被外部并发写触发假失败，已定位为环境）；冷启动 2.51s/lifespan complete；无 Key offline=true；真 WS 6 帧同 id `drafting→briefing→running→blocked`；浏览器同 id、`toWork`、pushLedger=0；D7 如实标未验证 |
+| **S1-15 / task-15** | pickActive 接线（台账 order 驱动派活） | **通过** | `ordered/orderActive`（blocked→running→auditing→其它，同级 id 稳定）+ LedgerView.order + `nextLedgerTask` 排序；QA 矩阵 16/16（含无 order 插入序、撤单重排、单任务上限）；90/90、check 0、smoke 53/53 + 21/21；task-13/task-11 保护与 task-12 回退交叉通过 |
+| **S1-16 / task-16** | blocked_question 真帧→快照/状态行（只展示） | **通过** | 全链路透传、60 **码点**截断（emoji surrogate 不劈开）、转 running/收工清除、空值不显示；QA 纯逻辑 27/27 + 浏览器 17/17；全程仅 GET、无 answer 入口；真帧 e2e 23/23 并手工抓到浏览器 `blockedQuestion` 与真实帧逐字一致 |
 
 ---
 
@@ -271,6 +277,51 @@ $live.items[0].PSObject.Properties.Name | Sort-Object
 
 **总评：通过。** 契约真会红、来源可对账、无敏感数据、未削弱既有断言。
 
+### 二轮独立复验（2026-10-19 13:20–13:27，lead · QA Engineer）
+
+背景：本文档 13:18:16 已有一份并行会话（验收方署名 qa-runtime）的记录。按 Chief 指示对 task-9
+做**独立复验**：不采信既有结论与既有日志，全部命令由本会话重新执行；临时日志以 `qa9-` 前缀
+落工作区 `recon\`，与上轮 `s1-` 前缀证据区分。task-8 按 Chief 指示已打回、暂停验收，本轮不含 task-8。
+
+| # | 检查 | 实测 | 判定 |
+|---|---|---|---|
+| 1 | 基线：fixture 测试单跑 | `node test\ledger-fixtures.test.ts` → **6/6 pass**，exit 0（10.0 ms，13:21） | ✅ |
+| 2 | 变异 A：`commissions.json` 字段改名 `step_idx`→`stepIndex`（3 处；上轮未覆盖的字段） | **3 fail / 3 pass**，exit 1；红的是：字段集合锁（test 1）、逐条解析（test 2）、帧/REST 同形（test 5） | ✅ 契约真会红 |
+| 3 | 变异 A 还原 | 字节级还原后 SHA256 与 `s1-fixture-orig-hash.json` **一致**；复跑 **6/6 pass**，exit 0 | ✅ |
+| 4 | 变异 B：`commission_update.json` **帧内** `step_idx`→`stepIndex`（上轮未覆盖的文件） | **test 5 fail**，exit 1（`deepStrictEqual` 帧与 REST 键集合） | ✅ 帧侧契约也会红 |
+| 5 | 变异 B 还原 | 两个 fixture 哈希均与原始记录一致；复跑 **6/6 pass**，exit 0 | ✅ |
+| 6 | fixture 敏感字段扫描 | `api_key/token/secret/password/authorization/bearer/sk-/phone/身份证/邮箱` 等 12 类模式 **0 命中**；`brief` 非空 0 条、`delivery/audit/packet` 均为 `{}`；`agent_id` 仅公开花名册 `scribe`/`claude`；唯一非空用户向文本是通用问句「先按短句还是完整句式？」 | ✅ 无敏感数据 |
+| 7 | 契约来源核对（只读） | `PROTOCOL.md` §19（L334–339）15 字段与测试 `CONTRACT_FIELDS` **逐一一致**；§19 L348–350「commission 就是 items 元素本身，不另立一套字段」由 test 5 锁定 | ✅ |
+| 8 | 实响应形状比对（只读，未写 8000） | 8000（PID **22996**，未重启）`GET /api/executive/commissions?limit=100` → 100 条、**16 键与 fixture 完全一致**（KEY SETS IDENTICAL）；线上 100 条全为 `done`，与 fixture `note` 自述的录制时状态相符 | ✅ fixture 与真实形状一致 |
+| 9 | 未削弱既有断言 | `git diff --numstat -- test/`：`ledger.test.ts +284/−0`、`surface.test.ts +45/−0`、`world.test.ts +55/−0`、`grid.test.ts` 0 变更——**全部纯新增**；`projection.ts` 仅 `parseAgentRow` 向后兼容扩展（`id` 或 `agent_id`），`parseCommissionRow`/`project` 零改动 | ✅ |
+| 10 | 依赖/离线性 | `package.json` 无 diff（0 新依赖）；fixture 测试 0 处网络调用（`readFileSync` + 纯函数 + 已注入的假时钟/假 location，`applyPush` 不建连） | ✅ |
+| 11 | 回归 | `npm run check` exit 0；`npm test` **77/77 pass**，exit 0（13:26，`qa9-npm-test-final.log`） | ✅ |
+
+**变异矩阵（本轮独立执行，字段/文件均与上轮不重复）**：
+
+| 编号 | 对象 | 变异 | 结果 |
+|---|---|---|---|
+| M-A | `commissions.json` | `step_idx`→`stepIndex` ×3 | 3 fail / 3 pass，exit 1 → 还原后 6/6 绿 |
+| M-B | `commission_update.json` | 帧内 `step_idx`→`stepIndex` ×1 | test 5 fail，exit 1 → 还原后 6/6 绿 |
+
+**测试强度评估（诚实结论）**：字段集合用 `deepEqual` 精确锁定，改名（M-A/M-B 实测）与删字段
+都会红；逐字段值相等（test 2）能兜住 REST items 的类型漂移与缺字段。发现的真实边界：
+帧侧缺字段时 `parseCommissionRow` 不抛（缺失 `step_idx` 默认 0），因此变异 B 中 test 6 仍绿——
+帧侧防线实际只有 test 5 的键集合锁（已证明会红），见下方 P3。
+
+**发现问题分级（二轮）**
+
+| 级别 | 问题 | 说明 / 建议 |
+|---|---|---|
+| **P0/P1/P2** | 无 | — |
+| P3 | `parseCommissionRow` 注释称「字段缺失一律拒绝，不用默认值把坏数据蒙混进来」，实际缺失字符串字段默认 `''`、缺失 `step_idx` 默认 `0`，仅 `id` 缺失抛错 | 既有代码（HEAD 即有），非 task-9 引入；要么补严解析（缺字段即抛），要么改注释与行为一致。当前 fixture 测试对 REST items 有逐字段值相等兜底，帧侧仅靠键集合锁 |
+| P3（信息） | 复验期间测试总数持续增长（69→73→77，并行 D4-A 等工作，均为纯新增） | 本结论基于 13:26 快照；fixture 测试自身（13:06:07 落盘后）未再变动 |
+
+**总评（二轮）：通过。** 独立复验确认：正常 fixture 全绿；两类变异（REST 字段改名、帧字段改名）
+均如预期变红且字节级还原后复绿；fixture 无敏感字段且与 8000 实响应字段集合一致；既有断言零削弱；
+无新增依赖、测试纯离线。对上轮两条 P3 建议（补录真实 running/blocked、补逐字段类型断言）无异议，
+可作为后续顺手项。
+
 ---
 
 # 卡 3：S1-8（task-8）`/ws` 同源 Origin 校验
@@ -410,6 +461,422 @@ node D:\project\neurosama\pixel-world\scripts\smoke.mjs               # 10/10
 
 ---
 
+# 卡 4：S1-12（task-12，D4-A）只读花名册端点 + 前端兼容回退
+
+## 结论：**通过**（2026-10-19 13:23–13:27 执行）
+
+### 1) 范围/结构复核
+
+| 复核项 | 实测 | 判定 |
+|---|---|---|
+| `server/assistant/executive_api.py` | `git diff -U0` 仅 1 个 hunk `@@ -123,0 +124,9 @@`，numstat **+9/−0**；只在 `create_executive_router` 里新增 `GET /roster`，原有路由零改动 | ✅ 0 删除、只有新增路由 |
+| `server/assistant/executive.py` | `roster_view()` 所在 hunk 为纯新增（无 `-` 行）；`adapter_bindings` 函数体与 `git show HEAD` **逐字相同**（641 chars，equal=True）。该文件工作区总 numstat +155/−5 含 2026-10-18 遗留改动（bind_durable/recover 等，非本卡），本卡新增仅 roster_view | ✅ 纯新增、不影响 adapter_bindings |
+| `/adapters` 返回结构（用户硬条件：不改主产品 server 返回结构） | 8000 旧进程与 8001 新代码各取一次 `GET /api/executive/adapters`：**len 均 1478 B、rawEqual=True、canonical equal=True**（7 条 agent、字段一致） | ✅ byte-identical |
+| 前端 `projection.ts` | `parseAgentRow` 兼容 `id`（新 `/roster`）与 `agent_id`（旧 `/adapters`）；`strengths` 缺失/非数组时留空，不抛 | ✅ |
+| 前端 `ledger.ts` | `refreshAgents()` 先 `/roster`，非 OK/异常再 `/adapters`；两源都失败只降级分类，不把 commissions 成功判离线 | ✅ |
+
+> 归因说明：`executive.py` 的其余 working-tree 改动（durable 对账/审批等）mtime 为 2026-10-18，
+> 早于本卡开工；本卡改动集中在 mtime 13:20–13:21 的 roster 相关行。`server/app.py` 的 +24 行属
+> task-8，非本卡。
+
+### 2) 端点实测（8001 临时实例，隔离，不碰 8000；用后关闭）
+
+启动：`.venv\Scripts\python.exe -m uvicorn server.app:app --host 127.0.0.1 --port 8001 --lifespan off`，
+`DB_PATH` 指向工作区临时文件，PID 18436；`GET /api/health` → 200（`memories:0`）。
+
+- `GET /api/executive/roster` → **200**，823 B，**7 条**；每条键集合恰为 `adapter,id,name,strengths`：
+  `scribe/笔录官(manual)`、`builder/营造匠(manual)`、`scout/探马(manual)`、`claude/真机 Claude(cli_subproc)`、
+  `workbuddy/真机 WorkBuddy(cli_subproc)`、`dsh/真机 DSH(cli_subproc)`、`codex/真机 Codex(cli_subproc)`
+- 敏感字段扫描（响应 JSON）：key 名 `endpoint/executable/env/token/api_key/secret/password/credential/workspace_root/
+  base_url/headers/authorization` **0 命中**；值扫描 `http:// https:// Bearer sk- /usr/ C:\ \\` **0 命中**；
+  cli_subproc 的 claude/workbuddy/dsh/codex 均只有 id/name/strengths/adapter
+- 只读性：`POST /api/executive/roster` → **405**；代码审阅 `roster_view()` 只读 `self.roster`，不实例化适配器、不写库
+- 旧进程已知限制：`GET http://127.0.0.1:8000/api/executive/roster` → **404**（8000 是 2026-10-18 启动的旧代码，
+  新路由要下次重启生效）。**按 Lead 要求记入结论，不算失败**
+- 8000 未重启：全程 PID **22996**、CreationTime 2026-10-18 16:40:37、`/api/health` 200 不变
+
+### 3) 前端测试/对抗
+
+- `node test/ledger.test.ts` → **22/22 pass**（14 旧 + task-7 4 + task-12 4），新增 4 项：
+  `parseAgentRow 兼容`、`/roster 优先且不再请求 /adapters`、`/roster 404 回退`、`两源失败只降级不判离线`
+- `npm test` 安静期快照 → **77/77 pass、0 fail**（77 = 73 + task-11 D3 新增 4；task-12 自身的 4 项见上）；
+  `npm run check` → exit 0
+- QA 独立对抗探针 `recon\qa-roster-probe.mjs` → **8/8 ALL PASS**，exit 0：
+  缺 strengths / strengths 为字符串 / `items: []` / 条目非法 / 信封形状坏 / 两源失败 / 旧 404 回退 / 两次刷新保留花名册
+  （缺字段、字符串 strengths、空 items 均不崩并退回标题关键词分类；坏信封回退 `/adapters`）
+- P3 观察：`/roster` 返回 200 且 `items` 为数组但条目全非法时，前端**不会**再回退 `/adapters`（200+数组被当作
+  权威清单）；对当前实现无实际影响（新端点已过滤无 id 条目），建议后续补一条显式测试/注释
+
+### 4) 端到端冒烟
+
+- 沙盒 smoke：**53/53 通过**，exit 0（32.9 s）
+- 台账 smoke（走 8000 旧服务 = 回退路径）：**16/16 通过**，exit 0（6.2 s）
+- 真实页面额外取证（`recon\qa-d3-probe.mjs`）：`fetch('/api/executive/roster')=404`、
+  `fetch('/api/executive/adapters')=200`（7 条 agent_id）→ 台账连接建立、注入台账单能驱动世界，
+  证明旧服务回退链路真实可用
+
+### 5) 问题分级
+
+| 级别 | 问题 | 说明 / 建议 |
+|---|---|---|
+| **P0/P1/P2** | 无 | — |
+| P3（信息） | 8000 旧进程无 `/roster`，新路径需下次重启生效 | 已知限制，非失败；重启前旧客户端继续走 `/adapters` 回退 |
+| P3（信息） | 200+数组但条目全非法时不回退 `/adapters` | 设计选择；建议补测试/注释固定语义 |
+| P3（信息） | `/roster` 每次 4s 轮询都会请求（无缓存） | 7 条只读内存数据、开销极低；暂不构成问题 |
+
+**总评：通过。** 用户硬条件（不改主产品 server 返回结构）以 byte-identical `/adapters` 实证；
+新端点只读、无敏感字段；前端兼容/回退/降级均有测试与独立探针覆盖。
+
+---
+
+# 卡 5：S1-11（task-11，D3-A）人工交付只对沙盒单 + 离线 Mock 显式标记
+
+## 结论：**通过**（2026-10-19 13:23–13:29 执行）
+
+### 1) 范围复核（用户三条硬约束）
+
+| 复核项 | 实测 | 判定 |
+|---|---|---|
+| 改动文件（numstat） | `simulation.ts +35/−5`、`types.ts +14/−1`、`SandboxScene.ts +4/−6`、`report.ts +16/−3`、`scripts/smoke.mjs +44/−2`、`test/world.test.ts +55/−0`、`test/surface.test.ts +45/−0` | ✅ 均在声明范围（report.ts/surface.test.ts 属离线统计区分所需） |
+| 声明范围中的 `oracle-panel.ts` | `git diff` **0 行**：回执文案由 simulation 返回值直接进 `#reply`，UI 无需改；非越界、非缺失 | ✅ 说明即可 |
+| 是否碰 task-12 文件 | `ledger.ts` / `projection.ts` 的 working-tree diff 全部是 task-12 的 roster/backoff 内容，无 D3 字段/文案改动；mtime 13:21:00（task-12）早于 task-11 文件 13:21:30+ | ✅ 未碰 |
+| 是否碰主产品 server（约束③） | `server/**/*.py` 在 13:21 之后**零修改**（app.py 13:12=task-8；executive*.py 13:20:51=task-12；其余为 10-18 旧账）；task-11 未新增 server 改动 | ✅ 未改主产品 server |
+| 是否为了标记 Mock 写台账/加网络（约束②） | task-11 新增代码行扫描 `fetch(/WebSocket/XMLHttpRequest/http(s)://axios/kind:'sync'` **0 命中**；只新增内存计数器 `ledgerDeliveries`/`mockDeliveries` | ✅ 无写台账、无网络 |
+| 完成权唯一来源（约束①） | `finish()` 先判 `task.source === 'ledger'` → 拒绝；台账单只能由 `sync` 收尾；沙盒单才走人工收尾 | ✅ 代码 + 实测 |
+
+### 2) 关键行为（真实浏览器，`recon\qa-d3-probe.mjs`，**18/18 PASS**，exit 0）
+
+- **离线 `?ledger=off`**：快照 `ledger.mock === true`；状态行
+  `…台账离线 · 离线 Mock　　台账交付 0 单 · Mock 交付 0 单…`；沙盒短活点「现实完成」→ 成功，
+  回执 `这单办了（离线 Mock，不计入台账）。`；`deliveries={ledger:0,mock:1}`；
+  日报行 `离线 Mock 交付 1 单，最近一单：…`（不含「台账交付」）
+- **在线（8000）**：快照 `ledger.mock === false`、状态行无「离线 Mock」；
+  注入台账单（running）→ 她进铺子；点 `#finish` → 被拒，回执 `这单的完成权在台账，人工不能收尾。`，
+  仍 `working`、单未完成、`deliveries` 不变（拒绝靠 `source`，不是靠文案）
+- **同一在线模式下**：推送台账单 `ready_to_report` → 正常交付，`deliveries.ledger=1`；
+  再点沙盒 `quick` 单 → 人工完成**成功**，回执 `这单办了（沙盒 Mock，不计入台账）。`，`deliveries.mock=1`
+  —— 同一入口两种来源结果不同，证明按 `source` 区分而非按模式一刀切
+- **日报/统计分账**：在线时 `台账交付 1 单，Mock 交付 1 单，最近一单：…`，报纸 DOM 同步渲染；
+  两数分开、不合并
+- 全程页面 JS 报错 **0**
+
+### 3) 单测/回归
+
+- `npm test` → **77/77 pass、0 fail**（node 320.6 ms / 墙钟 825 ms），`npm run check` → exit 0
+- task-11 新增 4 项全部通过：`日报把台账交付与 Mock 交付分开写`（ok 38）、
+  `台账单不能人工完成：完成权在台账，状态不变`（ok 68）、`沙盒单可以人工收尾，回执标明离线 Mock`（ok 69）、
+  `快照的离线 Mock 标记随台账连接变化`（ok 70）
+- **既有断言未被削弱**：`test/world.test.ts` 与 `test/surface.test.ts` diff 均为 **0 删除行**（+55/+0、+45/+0）；
+  既有日报断言（空交付 / 单笔交付 / 里程碑 / 新楼 / 日记）全部仍然通过
+- 沙盒 smoke：**53/53 通过**（49 + 新增 4）；台账 smoke：**16/16 通过**（10 + 新增 6），
+  8000 只读、未重启（PID 22996 不变）
+
+### 4) 问题分级
+
+| 级别 | 问题 | 说明 / 建议 |
+|---|---|---|
+| **P0/P1/P2** | 无 | — |
+| P3（文档） | README 计数过期：`README.md:25/67` 仍写「59 项」，实际已 **77** | 文档漂移，次要问题，不算 D3 验收失败；建议 S0 文档对账再跑一轮 |
+| P3（信息） | 在线时沙盒交付回执写「沙盒 Mock」而非「离线 Mock」 | 语义正确（不是离线）；若产品文案要求统一，可再讨论 |
+| P3（信息） | 台账交付计数只在 `finishActiveTask` 落地；台账单必须先被驱动到铺子 | 当前流程成立；后续多角色改造时需复核计数点 |
+
+**总评：通过。** 三条用户硬约束逐条有代码 + 运行时证据；离线 Mock 在状态行/快照/回执/日报四处显式
+且不合并计数；台账完成权未被人工入口绕过。
+
+> **并发期环境备注（不计失败）**：13:23 复验时曾观察到 `test/fixtures/commission_update.json` 被并行作业
+> 瞬时改成 `stepIndex`，导致全量测试出现 1 个 fixture 测试失败；13:24 该文件已恢复（SHA256 `39F57390…` 与
+> 原始一致），安静期（13:26）复跑 **77/77 全绿**。该现象来自其他卡的并发写，不是 task-11/12 引入。
+
+---
+
+# 卡 6：S1-5（task-13）周期对账 / 分页截断 / 请求超时
+
+## 结论：**通过**（2026-10-19 13:41–13:49 执行）
+
+### 1) 实现复核（代码事实）
+
+- `ledger.ts`：新增 `RECONCILE_MS = 30_000` 独立 interval（**WS 在线也调用 `refresh()`**）；
+  `refresh()` 用 `inFlight` 做**单飞**（在途时后续调用直接 `return this.inFlight`）；
+  `getJson()` 用 **AbortController + `REQUEST_TIMEOUT_MS = 5000`**，超时走失败分支；
+  `COMMISSIONS_LIMIT = 100`、`COMMISSIONS_URL = '/api/executive/commissions?limit=100'`；
+  `absorbCommissions()` 里 **`complete = items.length < 100`**，`publish()` 把 `complete` 透给世界
+- `simulation.ts`：`sync(..., complete)`（命令缺省 `complete ?? true` 保持旧调用兼容）；
+  `complete=false` 时**只按 `finished` 收尾，绝不把"不在快照里"当撤单**；`complete=true` 才撤单；
+  `ledger.complete` 透进 `WorldSnapshot`；由完整→不完整时写 warn 日志
+- `types.ts`：`WorldSnapshot.ledger.complete` 字段新增
+- `SandboxScene.ts`：把 `view.complete` 传给 `sync`；状态行在 `complete=false` 时追加
+  「台账可能未取全」（与「台账在线/离线 · 离线 Mock」并列，不覆盖离线标记）
+- 单测新增 4 项（ok 36–39）：30s 对账、取满 limit、截断不撤单、5s 超时
+
+### 2) 自跑结果
+
+| 检查 | 实测 | 判定 |
+|---|---|---|
+| `npm run check` | exit 0（tsc 静默） | ✅ |
+| `npm test` | **81/81 pass、0 fail**（node 327.7 ms / 墙钟 830 ms）；ok 36–39 为新增 4 项 | ✅ 与作者声称 81 一致 |
+| 沙盒 smoke | **53/53 通过**，exit 0，32.6 s | ✅ |
+| 台账 smoke（8000 只读） | **16/16 通过**，exit 0，6.2 s | ✅ |
+
+### 3) 对抗探针（不依赖作者单测；`recon\qa-task13-probe.mjs`，16/16 ALL PASS，exit 0）
+
+| 场景 | 实测 |
+|---|---|
+| fetch 返回恰好 100 条 | `complete=false`、`finished` 仍完整映射 100 条 |
+| fetch 返回 99 条 | `complete=true` |
+| 截断快照（complete=false）里旧单不在 items | 不撤单：旧单仍在，`snapshot.ledger.complete=false` |
+| 99 条完整快照里旧单确实消失 | 允许撤单：旧单被移除，`ledger.complete=true` |
+| fetch 挂起 6s（真实计时） | **5006 ms 后超时**、降级 `connected=false`、**无未捕获 Promise 异常** |
+| 并发 3 次 `refresh()` | 只发 **1 次** commissions 请求；在途结束后下一次正常发起（单飞有效） |
+| WS 在线 | 4s 兜底**不**刷新；30s 对账**刷新 1 次** |
+| 定时器收口 | 正常返回后 5s 超时定时器被清；stop 清两个 interval 与退避定时器（task-7 探针项） |
+
+### 4) 真实截断取证（8000，只读；复现作者证据）
+
+- 8000 API：`limit=100` → **恰好 100 条**；`limit=101/200/1000` 仍 100 条（服务端 `MAX_LIST=100` 硬顶）。
+  项目 `data/commissions.db` **只读副本**统计：`commissions` 表 **239 行、全部 `done`** → 台账真实总数 >100，
+  **不是恰好 100**：每次 REST 都被截断，前端 `complete=false` 判定正确
+- 真实页面 `?ledger=on`：`window.Oracle.view().ledger.complete === false`，状态行
+  `…台账在线 · 台账可能未取全…`（截图 `14-truncation-status.png`）；`?ledger=off` 不显示该标记；全程零 JS 报错
+  （`recon\qa-task13-real.mjs`，5/5 PASS）
+- 8000 未重启：PID **22996**、CreationTime 2026-10-18 16:40:37、health 200 全程不变
+
+### 5) 交叉回归（任务要求：不破坏 task-7 / task-12）
+
+- **task-7 退避**：用真实断网复跑（杀 5188 → 重启）：状态行 **121 ms** 转离线、**1118 ms** 回在线、
+  恢复后 `ledger.connected=true`、页面零报错（`recon\s1-task13-cross-task7-disconnect.log`，6/6 通过）。
+  备注：旧的 fake-clock 退避探针因 task-13 新增了「每请求一个 5s 超时定时器 + 30s 对账 interval」，
+  其计数口径失效（3 项 FAIL 是探针口径问题，不是产品回归），故改用真实断网复跑为准
+- **task-12 花名册**：`qa-roster-probe.mjs` 适配 `?limit=100` URL 后 **8/8 PASS**；
+  真实旧服务仍走 `/roster 404 → /adapters 200` 回退，台账 smoke 16/16 不回退
+- 说明：13:42 起 8001 被另一成员临时实例占用（PID 28664，anaconda uvicorn），**未触碰**；
+  本卡自己的临时进程均未占用 8000，5188 已释放
+
+### 6) 问题分级
+
+| 级别 | 问题 | 说明 / 建议 |
+|---|---|---|
+| **P0/P1/P2** | 无 | — |
+| P3（信息） | 断网时状态行会保留上次 `complete=false` → `台账离线 · 离线 Mock · 台账可能未取全` | 旧快照残留；建议离线时把 `complete` 视为未知/不显示截断提示（不阻断） |
+| P3（信息） | `absorbCommissions()` 对非数组 `items` 直接 return，`complete` 保留旧值 | 坏响应时截断标记可能滞后一拍；低风险 |
+| P3（信息） | 服务端 `MAX_LIST=100` 硬顶，前端无法真正翻页取全 | 本卡目标只是"不把截断当撤单"；真正取全需服务端分页/游标，超出本卡范围 |
+| P3（信息） | 30s 对账 + 4s 兜底两个 interval 并存 | 已由单飞去重，无请求叠加；本次实测无并发叠加 |
+
+**总评：通过。** 30s 对账/单飞/5s 超时/100 截断语义逐项有代码 + 独立探针证据；真实 8000 的截断标记
+可复现且判定正确（239>100）；task-7 退避与 task-12 回退交叉回归均未破坏。
+
+---
+
+# 卡 7：S1-6（task-14）真帧端到端 + 三项未验证
+
+## 结论：**通过**（2026-10-19 13:47–13:53 执行；功能项 23/23，隔离断言有一次被外部并发写触发假失败，见 §4）
+
+### 1) 交付与复跑方式
+
+- 新增：`pixel-world/scripts/e2e-real-frame.mjs`（437 行）、`docs/E2E_REAL_FRAME.md`（138 行）；
+  `server/` 无本卡改动（git status 中 server 改动均属 task-8/12，且 mtime 早于本卡）
+- 复跑命令（3 次，证据均落工作区）：
+  `cd pixel-world; node scripts/e2e-real-frame.mjs`
+  （`E2E_EVIDENCE` 指到 `recon\e2e-real-frame-evidence*.json`；第二次另加 `--keep` 查日志后手工清理）
+- 结果：**run1 23/23（exit 0，15.2s）**；run2（--keep）**22/23**（唯一失败为「仓库 data/memory.db 未被触碰」，
+  功能 22 项全过）；**run3 23/23（exit 0，15.1s）**。证据：`s1-task14-e2e.log`、
+  `e2e-real-frame-evidence.json`、`s1-task14-e2e-keep.log`、`e2e-real-frame-evidence-keep.json`、
+  `s1-task14-e2e-run3.log`、`e2e-real-frame-evidence-run3.json`
+
+### 2) 逐项核对（run3 数字；run1 同量级）
+
+| 声称项 | 实测 | 判定 |
+|---|---|---|
+| 冷启动 lifespan ON、startup complete、bootMs≈2.5s | run3 `bootMs=2507ms / wall=2536ms`（run1 2517/2548，--keep 2979）；`--keep` 的 `server.log` 确有 `Application startup complete.` 与 `Uvicorn running on http://127.0.0.1:8001`；无 `--lifespan off` | ✅ |
+| 无 Key Mock、health offline=true、链路真跑通 | 子进程 `LLM_API_KEY=''`；health `ok=true, llm.offline=true, provider=openai, model=deepseek-chat, memories=0, proactivity=false`；WS 文本派单后真实帧到 blocked | ✅ |
+| 真实 WS 帧 drafting→briefing→running→blocked（含 blocked_question） | 独立采集连接（Node undici WebSocket 直连 8001 `/ws`，与浏览器分开）收到 **6 帧**，**同一新 id `c_d89a20255410`**：`atMs=3414 drafting` → `3415 briefing` → `3415 running` → `3415 blocked`（blocked_question=`笔录官 没有配置执行体…`）→ `4421 running` → `4421 blocked`（D7 的 answer 后续跑） | ✅ |
+| 真帧端到端：浏览器世界出现真实 id、toWork、pushLedgerCalls=0 | 临时 Vite 5189→8001、`?ledger=on`；世界快照 `tasks[0].id=c_d89a20255410`（与帧 id 相同）、`kind=writing`、`villagerMode=toWork`、`villagerTaskId` 相同、`ledger.connected=true/complete=true`、**`pushLedgerCalls=0`**、`pageerror=0`；状态行「赶往 抄书斋…台账在线」 | ✅ |
+| D7 未验证（manual+无 Key 到不了 ready_to_report） | `POST …/answer` → 200；随后 running→blocked，最终 `finalStatus=blocked`；证据 JSON `d7.verified=false` + reason；脚本只 `check(true, 'D7 标注未验证…')` 记录，没有伪造通过 | ✅ 如实未验证 |
+
+### 3) 断言可信度（是否"脚本自己说绿"）
+
+- **真 WS vs 注入**：采集连接是脚本内独立 `new WebSocket('ws://127.0.0.1:8001/ws')`，与浏览器无关；
+  `--keep` 的 `server.log` 显示 **2 条 `WebSocket /ws [accepted]`**（采集 + 浏览器）、
+  `GET /api/executive/commissions?limit=100`、`GET /api/executive/roster`、`POST …/answer` 200，链路对得上
+- **pushLedger 计数可信**：页面侧 `window.Oracle.pushLedger` 真实存在（`SandboxScene.ts:225/241`），
+  脚本在发文本前把它包一层计数；全脚本对 pushLedger 的引用只有这层包装（grep 5 处均为注释/包装/断言）。
+  世界的真实帧走 `LedgerClient.applyPush`（`ledger.ts:198/245`），不经 pushLedger → **0 可信**
+- **不是旧缓存/初始态**：临时根 `data/` 是全新库（`tempRoot/data/` 下自建 `memory.db/commissions.db` 等），
+  帧 id 由本轮文本产生；浏览器任务 id 与帧 id 完全一致；帧时间全部在发送文本（约 3.4s）之后
+- **23/23 的构成**：22 项功能性断言 + 1 项「D7 标注未验证」的记录项（无条件 `check(true)`）。
+  记录项不算功能验证，但 D7 的 `verified=false` 是如实记录，不是伪造通过
+
+### 4) 隔离性（含一次并发假失败）
+
+- **run1/run3**：仓库 `data/commissions.db`、`data/memory.db` mtime 前后**完全相同**
+  （run3：`1792377786785.2737 / 1792388950918.0684` 前后一致）；8000 PID **22996**、启动时间
+  2026-10-18 16:40:34、health `200→200` 全程不变（脚本只对 8000 做 GET /health）
+- **run2 唯一失败**（`仓库 data/memory.db 未被触碰`）已定位为**外部并发写**，不是临时实例：
+  - `--keep` 证据显示临时实例全部 DB 写在 `tempRoot/data/`（memory.db 143,360 B、commissions.db 28,672 B
+    等，mtime 13:48:57–13:49:07）；
+  - 同时段仓库 `pixel-world/eval/screens` 被另一进程改写成 1 B 文件（13:48:45–13:49:03），提示有并发作业；
+  - run2 后静默监视 30s，仓库 memory.db 无写入；随后 run3 前后完全一致并 23/23
+  - 归因：8000 的会话/记忆写入或其他 Agent 的并发 smoke，非 e2e 临时实例
+- **收口**：run1/run3 自动清理临时目录；`--keep` 目录在查完日志后手工删除（`tempRoot exists=False`）；
+  `Get-ChildItem %TEMP%\aqi-e2e-real-frame-*` = 0；8001/5189 无监听（run3 evidence
+  `portsReleased={8001:true,5189:true}` + 实际 netstat 复核）；仓库无临时 Vite 配置/无 `.tmp*` 残留；
+  新增仓库文件只有 `pixel-world/scripts/e2e-real-frame.mjs` 与 `docs/E2E_REAL_FRAME.md`
+
+### 5) 与文档声称的差异（小）
+
+- `docs/E2E_REAL_FRAME.md` 写「启动 2512ms」「帧 3316/3317/4247ms」，那是作者那一轮的数值；
+  本次复跑得 2507/2517/2979ms 与 3414/4421ms —— **量级与顺序可复现，毫秒数因机器负载浮动**，不是矛盾
+- 文档称「复跑 23 passed」：本次 2/3 次是 23/23，另 1 次仅隔离断言受外部并发影响；功能项均通过
+
+### 6) 问题分级
+
+| 级别 | 问题 | 说明 / 建议 |
+|---|---|---|
+| **P0/P1/P2** | 无 | — |
+| P3（测试稳健性） | 隔离断言只看仓库 `data/*.db` 的 mtime，**会被 8000/其他 Agent 的并发写触发假失败**（本次 run2 遇到） | 建议：失败时区分"临时实例写"与"外部写"（例如同时记录进程/文件大小、或在安静窗口复跑）；或在证据里标注可重试 |
+| P3（断言强度） | 帧没断言「全部同一 id / title 与派单文本一致 / atMs 递增」，理论上一条旧广播也可能满足现有断言 | 本次 QA 手工核对证据（单 id、标题逐字一致、时间递增）；建议脚本补这三条断言 |
+| P3（计数口径） | 23/23 中 1 项是「D7 标注未验证」的记录项，不是功能断言 | 报告时说明 22 功能 + 1 记录，避免误读为 23 项功能全验 |
+| P3（运维） | `--keep` 不会自动删临时目录 | 文档已写明；QA 查完日志后手工清理 |
+
+**总评：通过。** 三项未验证（D4/D1/D3）都有独立可复现证据；真 WS 帧与浏览器世界同 id、pushLedger=0、
+无注入；D7 如实标注未验证；隔离与端口收口完整（个别外部并发写会干扰 mtime 断言，已定位为环境问题）。
+
+### 7) 复跑命令（QA 使用）
+
+```powershell
+cd D:\project\neurosama\pixel-world
+$env:E2E_EVIDENCE = 'C:\Users\18712\.dsh\bot\workspace\recon\e2e-real-frame-evidence.json'
+node scripts/e2e-real-frame.mjs            # 期望 23 passed, 0 failed
+Remove-Item Env:E2E_EVIDENCE
+# 查日志时：node scripts/e2e-real-frame.mjs --keep，然后读证据 JSON 的 coldStart.tempRoot，查完手动删目录
+```
+
+---
+
+# 卡 8：S1-15（task-15）pickActive 接线
+
+## 结论：**通过**（2026-10-19 13:56–14:00 执行）
+
+### 1) diff 复核
+
+- `projection.ts`：新增 `ordered: readonly WorldTask[]` 与 `orderActive(tasks)`；排序键
+  `blocked(0) → running(1) → auditing(2) → 其它(3)`，同级 `commissionId.localeCompare` 稳定；
+  `active` 改为 `ordered[0]`，`pickActive()` 委托给 `orderActive()[0]`，旧调用方不变
+- `ledger.ts`：`LedgerView.order = projected.ordered.map(commissionId)`；`publish()` 同时透出
+  `status` / `blockedQuestion`（task-16 用）与 `order`
+- `simulation.ts`：`sync` 命令新增可选 `order?: readonly string[]`；`ledgerOrder = order`；
+  `nextLedgerTask()` 只取 `source==='ledger' && status==='assigned'`，按 `ledgerOrder.indexOf(id)` 排序、
+  不在 order 里的 `MAX_SAFE_INTEGER`、稳定排序保持插入序；`assignFromLedger()` 仅 `isFree()` 时派一条
+  → **单任务上限语义不变**
+- `SandboxScene.ts`：把 `view.order` 透传进 `sync` 命令
+- 无 order（旧服务/旧快照/旧测试调用）时 `order ?? []` → 所有候选同 rank → 稳定排序=插入序，行为与改造前一致
+
+### 2) 单测与回归
+
+- `npm run check` → **exit 0**
+- `npm test` → **90/90 pass、0 fail**（node 351.6 ms / 墙钟 842 ms）；task-15 新增 5 项 `ok 40–44`
+- 沙盒 smoke **53/53**（32.8 s）；台账 smoke **21/21**（7.3 s，8000 只读、未重启）
+
+### 3) QA 独立对抗矩阵（`recon\qa-task15-order-probe.mjs`，16/16 ALL PASS）
+
+| 场景 | 实测 |
+|---|---|
+| 多状态混排（2 blocked + 2 running + auditing + briefing + done） | `blocked_a, blocked_z, run_a, run_b, audit, brief`；done 不进 ordered |
+| 同级 id 稳定 | 两种输入顺序都得 `c_a, c_z` |
+| `active`/`pickActive`/`orderActive` 一致性 | 三者一致，active=ordered[0] |
+| 带 order 派活 | blocked 优先被派；另一单仍 `assigned`（单任务上限不变） |
+| 无 order 兼容 | 插入序 `c_b` 先；旧调用行为不变 |
+| order 里有未知 id | 未知排最后，同级保持插入序（`c_y` 先） |
+| 撤单后重排 | 撤 `c_a` 后下一拍自动接 `c_b`；被撤单出清单 |
+| **task-13 保护** | 截断快照（complete=false）不撤单 |
+| **task-11 完成权** | 台账单人工完成被拒「完成权在台账」，任务仍在 |
+| **task-12 回退** | 台账 smoke 21/21 走 8000 旧服务：`/roster 404 → /adapters` 回退链路未回退 |
+
+### 4) 问题分级
+
+| 级别 | 问题 | 说明 / 建议 |
+|---|---|---|
+| **P0/P1/P2** | 无 | — |
+| P3（信息） | order 里若混入已收工/不存在 id，只影响该 id 的 rank，不会让收工单重新进清单 | 语义安全；可在 `nextLedgerTask` 里过滤 order 到候选集合，纯优化 |
+| P3（信息） | 无 order 时 rank 全为 MAX，依赖 `Array.sort` 稳定（V8 已保证） | 显式用插入序兜底更稳，但当前行为符合验收 |
+
+**总评：通过。** 台账顺序真正驱动世界派活，同级稳定、无 order 兼容、撤单重排、单任务上限与既有保护均实测。
+
+---
+
+# 卡 9：S1-16（task-16）blocked_question 透传只展示
+
+## 结论：**通过**（2026-10-19 13:56–14:01 执行）
+
+### 1) diff 复核（含 projection 未改说明）
+
+- `types.ts`：`TaskRecord.blockedQuestion: string | null`；`BLOCKED_QUESTION_LIMIT = 60`；
+  `excerptBlockedQuestion()` 用 `Array.from(text)` 按 **Unicode 码点**取 60 再拼 `…`（surrogate pair 不会被劈开），
+  先 `trim()`，null/空白返回空串；快照保留完整原文
+- `ledger.ts`：`LedgerView.tasks` 增加 `status` 与 `blockedQuestion`，`publish()` 从 `project()` 映射透传
+- `simulation.ts`：`sync` 命令增加可选 `status`/`blockedQuestion`；只有 `status==='blocked'` 且问题非空才进
+  `blockedQuestions` map；所有既有 ledger 任务按 map 对齐（**转 running/空问题/收工/撤单一律清 null**）；
+  新任务落 `blockedQuestion`；`abandonActiveTask()` 显式清 null；sync 回执追加
+  `在等你的答复：<60码点>（仅展示，世界不代为回答）`
+- `SandboxScene.ts`：状态行找 `tasks.find(blockedQuestion !== null)`，追加
+  `在等你的答复：excerptBlockedQuestion(...)`；未新增任何输入/按钮
+- **`projection.ts` 未为本卡改动（说明原因）**：`WorldTask.blockedQuestion` 与
+  `parseCommissionRow` 的 `blocked_question` 解析在改造前就存在；本卡只是把它从 LedgerView 继续透传到
+  TaskRecord/快照。当前 `projection.ts` 的 diff 全部属 task-15 的 ordering 与 task-12 的 agent 兼容，**无本卡改动**
+- 无回答入口：`WorldCommand` 仍只有 dispatch/complete/setWeather/build/sync；index.html 只有 `#utterance`
+  一个输入与既有按钮；源码无 `/answer` 调用（`e2e-real-frame.mjs` 的 POST answer 属 task-14 D7 探测，不是世界 UI）
+
+### 2) 单测与回归
+
+- `npm run check` exit 0；`npm test` **90/90**（task-16 新增 `ok 45–47` 与 `ok 73`）
+- 沙盒 smoke **53/53**；台账 smoke **21/21**（新增 5 项：`blocked_question 进了世界快照`、`状态行写出在等你的答复`、
+  `同步回执写出在等你的答复`、`转 running 后答复等待被清除`、`收工后带问题的单退出活动清单`）
+
+### 3) QA 独立探针
+
+**纯逻辑 27/27**（`recon\qa-task16-blocked-probe.mjs`）：
+- 截断：61 个 `😀` → 60 emoji + `…`（`Array.from` 计数 61 码点）；**无孤立 surrogate**；恰好 60 码点不加省略号；
+  混合 `a...😀` 在 emoji 边界不劈开；null/空白→空串；首尾空白 trim
+- 快照三路径：store（完整原文保留）→ clear（转 running / 空白问题 → null）→ remove（收工后任务移除、无残留）；
+  截断快照仍不撤单（task-13 保护）
+- LedgerClient fetch stub：**全程只有 GET（2 次）**，URL 仅 commissions/roster，**无 answer/reply/respond**；
+  `applyPush` 透传完整 blockedQuestion 且不产生新请求
+- `parseOracle('答复：…')`/`回答：…`/`reply: …` → **unknown**（不触发回答）
+
+**浏览器 17/17**（`recon\qa-task16-ui-probe.mjs`，dev 5188 + 8000）：
+- blocked 帧 → 快照 `blockedQuestion` 完整；状态行出现「在等你的答复：先按短句还是完整句式？」
+- 61 emoji 问题 → 快照保留 61 码点原文，状态行显示 60 emoji + `…`，**无孤立 surrogate**（截图 15）
+- 转 running → 快照 null、状态行等待提示消失（截图 16）；空白问题不显示
+- 「答复：短句」仅得 unknown 回执，世界未进入交付；页面只有 `#utterance` 一个输入、无回答按钮/
+  `[data-answer]`、表单无 answer action；所有 `/api/executive/*` 请求均 GET、无 answer/reply/respond；无 JS 报错
+
+### 4) 加分：真帧复核（task-14 e2e，无注入）
+
+- `node pixel-world/scripts/e2e-real-frame.mjs` 复跑：**23/23 pass**（证据 `s1-task16-e2e-real.log` /
+  `e2e-task16-evidence.json`）
+- 独立 WS 采集到的真实 blocked 帧：id `c_fe5ca701b80e`，
+  question=`笔录官 没有配置执行体，本单不会自动执行。。要我再催一次，还是这单算了？`
+- 同一次运行的浏览器快照：`taskId=c_fe5ca701b80e`、`pushLedgerCalls=0`，状态行已出现
+  「在等你的答复：笔录官 没有配置执行体…」
+- 为拿到完整快照字段，用 e2e 的临时副本（仅加一行输出、其余逻辑不变）再跑一次：浏览器
+  `fullTasks=[{id:'c_5893b24d22a8', status:'assigned', blockedQuestion:'笔录官 没有配置执行体…'}]`，
+  与同 run 的 WS 帧 id/question 逐字一致，`pushLedgerCalls=0`（证据 `e2e-task16-snapshot-evidence.json`）
+- 结论：blocked_question 确实来自**真实帧**，经 LedgerView → simulation → 快照 → 状态行，无注入
+
+### 5) 问题分级
+
+| 级别 | 问题 | 说明 / 建议 |
+|---|---|---|
+| **P0/P1/P2** | 无 | — |
+| P3（防御性） | 状态行用 `tasks.find(blockedQuestion !== null)`，没有同时判 `status==='blocked'` | 当前由 simulation 的清除逻辑保证不变量；建议加 `status==='blocked'` 双保险 |
+| P3（信息） | 状态行在 `toWork`/`saluting` 等非 blocked 的 villager mode 下也会显示等待提示 | 这是"有单在等答复"的全局提示，语义可接受；若产品要求只在 blocked 时显示，需再定义 |
+| P3（信息） | 按**码点**截断，组合 emoji（ZWJ 序列/带变音符号）仍可能被切开 | 需求就是 60 码点；如需按 grapheme 截断要另引库，超出范围 |
+| P3（信息） | 快照保留完整原文，只有展示层截断 | 符合"完整值留快照、展示截断"设计；日志/回执也只展示截断 |
+
+**总评：通过。** 全链路透传、只展示不回答、60 码点截断（含 surrogate）与三条清除路径均有独立证据；
+真帧复核确认 blocked_question 来自真实 WS 帧而非注入。
+
+---
+
 # 附录 A：证据文件清单（工作区 `C:\Users\18712\.dsh\bot\workspace\recon\`）
 
 ## task-7
@@ -436,6 +903,12 @@ node D:\project\neurosama\pixel-world\scripts\smoke.mjs               # 10/10
 | `s1-fixtures-mutated-type.log` | 类型漂移 1 fail / 5 pass、exit 1 |
 | `s1-fixture-orig-hash.json` / `fixture-bak-*.json` | 原始 SHA256 与字节级备份 |
 | `s1-check-final.log` / `s1-npm-test-final.log` | 最终 check（0）与 69/69 |
+| `qa9-fixtures-normal.log` | 二轮复验：基线 6/6（13:21） |
+| `qa9-fixtures-mutated-stepidx.log` | 二轮复验：变异 A（`step_idx` 改名）3 fail / 3 pass、exit 1 |
+| `qa9-fixtures-mutated-frame.log` | 二轮复验：变异 B（帧内 `step_idx` 改名）test 5 fail、exit 1 |
+| `qa9-fixtures-restored.log` / `qa9-fixtures-final-green.log` | 二轮复验：两次字节级还原后 6/6 绿 |
+| `qa9-check.log` / `qa9-check-final.log` | 二轮复验：`npm run check` exit 0 |
+| `qa9-npm-test.log` / `qa9-npm-test-final.log` | 二轮复验：全量 73/73（13:21）与 77/77（13:26） |
 
 ## task-8
 
@@ -452,7 +925,69 @@ node D:\project\neurosama\pixel-world\scripts\smoke.mjs               # 10/10
 | `s1-smoke-sandbox-final.log` / `s1-smoke-ledger-final.log` | 最终 49/49、10/10 |
 | `s1-ws-cleanup.log` | 8001/5190 关闭、8000 PID 锚点 |
 
-# 附录 B：三张卡的一键复验顺序
+## task-12（D4-A）
+
+| 文件 | 内容 |
+|---|---|
+| `s1-task12-roster.json` | 8001 `/roster` 原始响应（7 条、823 B） |
+| `s1-task12-adapters-8000.json` / `s1-task12-adapters-8001.json` | `/adapters` 新旧进程对照（len 1478、rawEqual=True） |
+| `s1-task12-8001.log` | 8001 临时实例日志（route 就绪 / 请求记录） |
+| `s1-task12-ledger-single.log` | `node test/ledger.test.ts` 22/22 |
+| `s1-task12-roster-probe.log` | QA 花名册对抗 8/8 ALL PASS |
+| `s1-task12-npm-test.log` / `s1-task11-task12-npm-test.log` | 全量 77/77（含 task-11 并发新增） |
+| `s1-task12-check.log` | `npm run check` exit 0 |
+| `s1-task11-smoke-sandbox.log` / `s1-task11-smoke-ledger.log` | 沙盒 53/53、台账 16/16（兼作 task-12 回归） |
+| `s1-task11-d3-probe.log` | 真实浏览器：`/roster` 404 → `/adapters` 200 回退取证 |
+
+## task-11（D3-A）
+
+| 文件 | 内容 |
+|---|---|
+| `s1-task11-d3-probe.log` | 18/18：离线 Mock/在线不误标/台账单拒绝/沙盒单放行/日报分账 |
+| `s1-task11-smoke-sandbox.log` | 沙盒 smoke 53/53（新增离线 Mock 断言） |
+| `s1-task11-smoke-ledger.log` | 台账 smoke 16/16（新增完成权/分账断言） |
+| `s1-task11-task12-npm-test.log` | 安静期全量 77/77 |
+| `eval\screens\12-d3-offline-mock.png` / `13-d3-online-separated.png` | 离线 Mock 状态行、在线分账截图 |
+| `s1-task11-task12-cleanup.log` | 5188/8001 关闭、8000 PID/健康锚点、无 server 新写入 |
+
+## task-13（S1-5）
+
+| 文件 | 内容 |
+|---|---|
+| `s1-task13-npm-test.log` | 全量 81/81（含 ok 36–39 新增 4 项） |
+| `s1-task13-probe.log` | QA 对抗探针 16/16（截断/撤单/超时/单飞/30s 对账） |
+| `s1-task13-real.log` | 真实 8000 截断：complete=false、状态行标记、离线不误标 |
+| `s1-task13-smoke-sandbox.log` / `s1-task13-smoke-ledger.log` | 沙盒 53/53、台账 16/16 |
+| `s1-task13-cross-task7-disconnect.log` | 真实断网复跑：离线 121 ms / 恢复 1118 ms |
+| `s1-task13-cross-task12.log` | roster 探针适配后 8/8 |
+| `commissions-ro-copy.db` / `qa-db-count.py` / `qa-db-status.py` | 8000 台账 DB 只读副本：239 行、全 done（真实截断证据） |
+| `eval\screens\14-truncation-status.png` | 真实页面「台账可能未取全」状态行截图 |
+
+## task-14（S1-6）
+
+| 文件 | 内容 |
+|---|---|
+| `s1-task14-e2e.log` | run1 控制台：23/23 |
+| `e2e-real-frame-evidence.json` | run1 证据（health、帧时间线、浏览器快照、D7、隔离/端口） |
+| `s1-task14-e2e-run3.log` / `e2e-real-frame-evidence-run3.json` | run3 安静复跑 23/23（bootMs 2507、6 帧同 id、push=0） |
+| `s1-task14-e2e-keep.log` / `e2e-real-frame-evidence-keep.json` | run2（--keep）22/23：唯一失败为隔离 mtime；用于查 `server.log` 的 startup complete/WS/answer |
+| `s1-task14-pre.json` / `s1-task14-post.json` / `s1-task14-run3-before.json` / `s1-task14-run3-after.json` | 仓库 data mtime 与 8000 PID 前后证据（run3 前后一致） |
+| `s1-task14-keep-tempdir.txt` | run2 临时目录路径（查完日志后已手动删除） |
+
+## task-15 / task-16
+
+| 文件 | 内容 |
+|---|---|
+| `s1-task15-order-probe.log` | task-15 矩阵 16/16（排序/稳定/无 order/撤单重排/单任务上限/task-13/11 保护） |
+| `s1-task16-blocked-probe.log` | task-16 纯逻辑 27/27（emoji 截断/三路径/仅 GET/unknown） |
+| `s1-task16-ui-probe.log` | task-16 浏览器 17/17（状态行/截断/无回答入口/GET-only） |
+| `s1-task15-16-npm-test.log` / `s1-task15-16-check.log` | 90/90、check exit 0 |
+| `s1-task15-16-smoke-sandbox.log` / `s1-task15-16-smoke-ledger.log` | 53/53、21/21 |
+| `s1-task16-e2e-real.log` / `e2e-task16-evidence.json` | 真帧 e2e 23/23：真实 blocked 帧 + 浏览器状态行含真实问题、push=0 |
+| `e2e-task16-snapshot-evidence.json` + `recon\e2e-task16-copy.mjs` | e2e 临时副本手工抓完整浏览器快照 `blockedQuestion`（与真实帧 id/文本一致） |
+| `eval\screens\15-blocked-question-status.png` / `16-blocked-question-cleared.png` | 状态行展示 / 转 running 后清除 |
+
+# 附录 B：复验顺序（各卡）
 
 ```powershell
 # 1) task-9（先做，纯逻辑，不占端口）
@@ -471,10 +1006,42 @@ Get-NetTCPConnection -LocalPort 5188,5190,8001,8000 -State Listen -ErrorAction S
 # 附录 C：本次验收后状态（2026-10-19 13:18）
 
 - task-7：**通过**（P3 建议非阻断）
-- task-9：**通过**（契约变异实测会红、哈希还原、无敏感字段、未削弱断言）
-- task-8：**通过**（8001 隔离验收；8000 PID 22996 全程未变）
+- task-9：**通过**（契约变异实测会红、哈希还原、无敏感字段、未削弱断言）；**二轮独立复验（13:20–13:27，lead/QA）再次确认通过**，变异矩阵扩展至帧 fixture 与 `step_idx` 字段，详见「卡 2 · 二轮独立复验」
+- task-8：**通过**（8001 隔离验收；8000 PID 22996 全程未变）——注意：Chief 于 13:12 通知 task-8 经首席架构审查**已打回修订**（3 处必修：scheme 误拒 TLS 反代、`urlsplit` 畸形 Origin 未捕获 `ValueError`、1008/403 注释不准确），打回后 `server/app.py` 工作区已含对应修订（只比 netloc、捕获 `ValueError`、注释修正），卡 3 记录即为修订后代码的隔离验收；**最终放评以 Chief 与首席架构的确认为准**，二轮复验按指示未重跑 task-8
 - 端口：5188 / 5190 / 8001 均已释放（复核无监听）；8000 为既有服务，未重启/未终止
 - 仓库：本次除本文件外未修改任何源码/配置/测试/既有文档；临时脚本、日志、临时 DB/临时 Vite 配置
   全部留在工作区 `recon\`，未进仓库
 - 已知红项（非本卡引入、不计基线）：`scripts/test_voice_turns.py` / `scripts/test_experience_websocket.py`
   在 HEAD 即红（缺 `_connections`，按 Lead 说明记录）
+- 二轮复验时快照（13:26–13:27）：pixel-world 全量 **77/77** 绿（并行 D4-A 等工作使总数自 69 持续增长，
+  各 diff 均为纯新增）；两个 fixture 字节级还原（SHA256 与原始记录一致）；8000 仍为 PID 22996
+- **task-12（D4-A）：通过**（13:23–13:27）——`/roster` 只读端点 200/7 条/仅 4 字段、无敏感值；
+  `/adapters` 8000 vs 8001 byte-identical；前端兼容/404 回退/两源失败不判离线；77/77、check 0、
+  smoke 53/53 + 16/16；8000 旧进程无 `/roster` 属已知限制（下次重启生效），未重启
+- **task-11（D3-A）：通过**（13:23–13:29）——台账单人工完成被拒（source 判断、状态不变、回执含「完成权在台账」）、
+  沙盒单人工完成正常；`?ledger=off` 状态行/快照/回执/日报含「离线 Mock」且与台账分账；
+  77/77、check 0、smoke 53/53 + 16/16；未碰 ledger/projection/server。README 计数 59→实际 77 记为 P3 文档漂移
+- **收口（13:28:27）**：5188/8001 已关闭（探测 connection refused）；8000 PID 22996、health 200、未重启；
+  `server/**/*.py` 在 13:21 后零修改；pixel-world 无 `.tmp*` 残留；临时 DB 只在工作区 `recon\`
+- **并发期环境备注**：13:23 全量测试一度因 `commission_update.json` 被并行作业瞬时改坏而 1 项失败；
+  13:24 已恢复原 SHA256（`39F57390…`），安静期 13:26 复跑 77/77 全绿——非 task-11/12 引入
+- **task-13（S1-5）：通过**（13:41–13:49）——30s 对账在 WS 在线也运行、refresh 单飞、5s AbortController 超时、
+  limit=100 截断语义均实测；81/81、check 0、smoke 53/53 + 16/16；真实 8000 台账 DB **239 行（>100）**，
+  页面「台账可能未取全」可复现且判定正确；task-7 退避（真实断网 121ms/1118ms）与 task-12 回退（8/8）交叉通过。
+  收口：5188 已释放；8000 PID 22996 未重启；8001 由另一成员临时占用（PID 28664），未触碰
+- **task-14（S1-6）：通过**（13:47–13:53）——真帧 e2e 复跑 run1/run3 **23/23**；冷启动 bootMs 2517/2507、
+  lifespan `Application startup complete`；无 Key `offline=true`；独立 WS 采集到同 id 6 帧
+  `drafting→briefing→running→blocked→(answer)→running→blocked`；浏览器同 id、`toWork`、**pushLedgerCalls=0**；
+  D7 如实 `verified=false`。run2（--keep）22/23 仅隔离 mtime 断言被外部并发写触发假失败（临时实例 DB 均在
+  `tempRoot/data`，同段他人 smoke 改 eval 截图；静默 30s 无写入、run3 前后一致）→ 环境问题已定位。
+  收口：8001/5189 释放、临时目录清理、8000 PID 22996/start 2026-10-18 16:40:34 未变
+- **task-15（S1-15）：通过**（13:56–14:00）——`ordered/orderActive`（blocked→running→auditing→其它，同级 id 稳定）、
+  LedgerView.order、`nextLedgerTask` 排序接线；QA 矩阵 16/16（无 order 插入序、撤单重排、单任务上限、
+  task-13/task-11 保护）；90/90、check 0、smoke 53/53 + 21/21；task-12 旧服务回退未破坏
+- **task-16（S1-16）：通过**（13:56–14:01）——blocked_question 真帧→LedgerView→TaskRecord→快照+状态行；
+  60 **码点**截断（emoji surrogate 不劈开）、转 running/收工清除、空值不显示；QA 纯逻辑 27/27 + 浏览器 17/17；
+  全程仅 GET、无 answer 入口；真帧 e2e 23/23 并手工抓到浏览器 `blockedQuestion` 与真实帧逐字一致（push=0）。
+  `projection.ts` 本卡未改（原因见卡 9）
+- **task-15/16 收口（14:00）**：5188/8001/5189 无监听；8000 PID 22996、start 2026-10-18 16:40:34 未重启；
+  `data/commissions.db` 未被写（mtime 仍 10:43:06）；`data/memory.db` 因 8000 自身会话写入在 13:58:57 有 mtime 变化
+  （非 QA 写台账；8000 进程未动）；临时 e2e 目录 0；仓库无 `.tmp*`；新增仅为 QA 文档与 task-14 的脚本/文档

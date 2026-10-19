@@ -121,6 +121,28 @@ def create_executive_router(executive):
         return ready({'types': call(executive.adapter_types),
                       'agents': call(executive.adapter_bindings)})
 
+    @router.get('/roster')
+    async def roster():
+        """花名册只读投影：id / name / strengths / adapter（D4，供像素世界做能力映射）。
+
+        新增端点：/adapters 的既有返回结构一行不动，旧客户端继续读它；新客户端
+        优先读这里，读不到时回退 /adapters。只读配置，不实例化适配器、不写库。
+        """
+        from .dispatcher import roster_agents
+
+        items = []
+        for entry in roster_agents(executive.roster):
+            if not isinstance(entry, dict) or not entry.get('id'):
+                continue
+            raw_strengths = entry.get('strengths')
+            strengths = ([str(word) for word in raw_strengths if isinstance(word, str)]
+                         if isinstance(raw_strengths, list) else [])
+            items.append({'id': str(entry['id']),
+                          'name': str(entry.get('name') or ''),
+                          'strengths': strengths,
+                          'adapter': str(entry.get('adapter') or '')})
+        return ready({'items': items})
+
     @router.get('/telemetry')
     async def telemetry(window_seconds: int = 86400):
         if type(window_seconds) is not int or not 60 <= window_seconds <= 30 * 86400:

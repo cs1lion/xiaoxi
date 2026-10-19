@@ -458,6 +458,7 @@ agents:
 - `POST /api/executive/commissions/{id}/submit`：外部 Worker 交差入口，`artifact` 直接进初审室，与内部链路同一套判据。
 - `POST /api/executive/commissions/{id}/run`：进程内驱动执行体跑完这一单。与自动驱动共用同一把执行权租约，已在跑时返回 `400 commission_already_running`。
 - `GET /api/executive/adapters`：已登记类型 + 每个 Agent 当前绑定（只回类型名，不回配置值）。
+- `GET /api/executive/roster`：花名册只读投影 `{"items":[{"id","name","strengths","adapter"}]}`（D4，供像素世界做能力映射）。新增端点，`/adapters` 的返回结构不变；客户端优先读它，旧服务没有时回退 `/adapters`。
 - `POST /internal/telemetry_proxy`：本地透明代理，见 §20。该路由无前端引用，由 `check_protocol.py` 第六类检查显式纳管。
 
 回归：`python scripts/test_agent_adapter_ext.py`（Mock 适配器验证注册表派发全程）。

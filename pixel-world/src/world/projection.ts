@@ -44,7 +44,9 @@ export interface WorldTask {
 
 export interface Projection {
   readonly tasks: readonly WorldTask[];
-  /** 需要她立刻去做的那一条（按优先级挑出的唯一一条）。 */
+  /** 活动清单按优先级排好的顺序（blocked→running→auditing→其它，同级 id 稳定）。 */
+  readonly ordered: readonly WorldTask[];
+  /** 需要她立刻去做的那一条（= ordered[0]），保留给老调用方。 */
   readonly active: WorldTask | null;
   /** 台账里已经收工、世界还没交付的那几条。 */
   readonly finished: readonly WorldTask[];
@@ -87,19 +89,29 @@ export function project(input: ProjectionInput): Projection {
     if (done) finished.push(task);
     else tasks.push(task);
   }
-  return { tasks, active: pickActive(tasks), finished };
+  const ordered = orderActive(tasks);
+  return { tasks, ordered, active: ordered[0] ?? null, finished };
 }
 
-/** 优先 blocked（要请示），其次 running，最后 briefing/auditing。同级按 id 稳定排序。 */
-export function pickActive(tasks: readonly WorldTask[]): WorldTask | null {
+/**
+ * 活动清单的优先级顺序：blocked（要请示）→ running → auditing → 其它，
+ * 同级按 commissionId 稳定排序。世界按这个顺序派活，不再靠台账返回次序碰运气。
+ */
+export function orderActive(tasks: readonly WorldTask[]): readonly WorldTask[] {
   const rank = (task: WorldTask): number => {
     if (task.status === 'blocked') return 0;
     if (task.status === 'running') return 1;
     if (task.status === 'auditing') return 2;
     return 3;
   };
-  const sorted = [...tasks].sort((a, b) => rank(a) - rank(b) || a.commissionId.localeCompare(b.commissionId));
-  return sorted[0] ?? null;
+  return [...tasks].sort(
+    (a, b) => rank(a) - rank(b) || a.commissionId.localeCompare(b.commissionId),
+  );
+}
+
+/** 优先级最高的那一条；等价于 orderActive(tasks)[0]。 */
+export function pickActive(tasks: readonly WorldTask[]): WorldTask | null {
+  return orderActive(tasks)[0] ?? null;
 }
 
 /** 用花名册的能力关键词归类。认不出的 Agent 落到写作，因为它是唯一不碰代码的默认档。 */
@@ -138,11 +150,16 @@ export function parseCommissionRow(raw: unknown): CommissionRow {
   };
 }
 
+/** 解析花名册条目：新 /roster 用 id，旧 /adapters 用 agent_id；strengths 缺了就留空。 */
 export function parseAgentRow(raw: unknown): AgentRow {
   if (typeof raw !== 'object' || raw === null) throw new Error('花名册条目不是对象');
   const row = raw as Record<string, unknown>;
-  const id = row.id;
-  if (typeof id !== 'string' || id === '') throw new Error('花名册条目缺 id');
+  const id = typeof row.id === 'string' && row.id !== ''
+    ? row.id
+    : typeof row.agent_id === 'string' && row.agent_id !== ''
+      ? row.agent_id
+      : '';
+  if (id === '') throw new Error('花名册条目缺 id');
   const strengths = Array.isArray(row.strengths)
     ? row.strengths.filter((item): item is string => typeof item === 'string')
     : [];

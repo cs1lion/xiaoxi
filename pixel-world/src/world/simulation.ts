@@ -36,6 +36,7 @@ import type {
   WorldProp,
   WorldSnapshot,
 } from './types.ts';
+import { excerptBlockedQuestion } from './types.ts';
 
 export type WorldCommand =
   | { readonly kind: 'dispatch'; readonly taskKind: TaskKind; readonly summary: string }
@@ -50,10 +51,24 @@ export type WorldCommand =
         readonly kind: TaskKind;
         readonly title: string;
         readonly agentName: string;
+        /** 台账状态；blocked 表示这单在等用户答复。旧调用方省略时按无 blocked 处理。 */
+        readonly status?: string;
+        /** blocked 单要请示的问题；只透传，世界不回答。省略/空串即没有。 */
+        readonly blockedQuestion?: string;
       }[];
       /** 台账里已经收工的督办；世界据此把她的活收尾。 */
       readonly finished: readonly string[];
       readonly connected: boolean;
+      /**
+       * 快照是否完整（REST 没取满 limit）。false 时"不在快照里"不能当撤单，
+       * 否则台账一次分页截断就会把她手上的活误判成被撤回。省略按完整处理。
+       */
+      readonly complete?: boolean;
+      /**
+       * 活动督办的优先级顺序（LedgerView.order）。省略时退回插入序，
+       * 保持旧调用方（测试、旧快照）行为不变。
+       */
+      readonly order?: readonly string[];
     };
 
 export interface NewBuilding {
@@ -119,9 +134,19 @@ export class Simulation {
   private weather: WeatherState = clearWeather();
   private faithPoints = 0;
   private milestones = 0;
+  /** 交付统计按来源分开：台账的活只有台账能收，沙盒/离线 Mock 另计。 */
+  private ledgerDeliveries = 0;
+  private mockDeliveries = 0;
   /** 上游台账是否在线。离线时世界照常过日子，但状态行必须说出来。 */
   private ledgerConnected = false;
   private ledgerSyncedAt: number | null = null;
+  /**
+   * 最近一次快照是否完整（REST 没取满 limit）。false 时"不在快照里"不能当撤单，
+   * 否则一次分页截断就会把她手上的活误判成被上游撤回。
+   */
+  private ledgerComplete = true;
+  /** 台账给的派活优先级（commissionId 从高到低）；空表示没给顺序，退回插入序。 */
+  private ledgerOrder: readonly string[] = [];
 
   /** 神谕下达时算好的路线，等行礼结束再交给她走。 */
   private pendingRoute: GridPoint[] = [];
@@ -230,7 +255,15 @@ export class Simulation {
       events: this.events.slice(-12),
       weather: this.weather.kind,
       faith: { points: this.faithPoints, milestones: this.milestones },
-      ledger: { connected: this.ledgerConnected, lastSyncAt: this.ledgerSyncedAt },
+      /** 台账交付与 Mock 交付分开计，不合并成一个数。 */
+      deliveries: { ledger: this.ledgerDeliveries, mock: this.mockDeliveries },
+      ledger: {
+        connected: this.ledgerConnected,
+        lastSyncAt: this.ledgerSyncedAt,
+        mock: !this.ledgerConnected,
+        /** 最近一次快照是否完整；false 时状态行标"台账可能未取全"。 */
+        complete: this.ledgerComplete,
+      },
     };
   }
 
@@ -252,7 +285,8 @@ export class Simulation {
       case 'build':
         return this.build(command.prefabId, command.instanceId);
       case 'sync':
-        return this.sync(command.tasks, command.finished, command.connected);
+        return this.sync(command.tasks, command.finished, command.connected,
+          command.complete ?? true, command.order ?? []);
     }
   }
 
@@ -269,9 +303,15 @@ export class Simulation {
       readonly kind: TaskKind;
       readonly title: string;
       readonly agentName: string;
+      /** 台账状态；blocked 表示这单在等用户答复。旧调用方省略时按无 blocked 处理。 */
+      readonly status?: string;
+      /** blocked 单要请示的问题；只透传，世界不回答。省略/空串即没有。 */
+      readonly blockedQuestion?: string;
     }[],
     finished: readonly string[],
     connected: boolean,
+    complete: boolean,
+    order: readonly string[],
   ): CommandResult {
     this.ledgerConnected = connected;
     if (!connected) {
@@ -280,24 +320,44 @@ export class Simulation {
       return { ok: false, message };
     }
     this.ledgerSyncedAt = this.now;
+    this.ledgerOrder = order;
+    const wasComplete = this.ledgerComplete;
+    this.ledgerComplete = complete;
+    if (!complete && wasComplete) {
+      this.log('warn', '台账快照可能未取全：暂不把不在快照里的督办当撤单。');
+    }
 
     const finishedIds = new Set(finished);
     const next = new Set([...incoming.map((item) => item.commissionId), ...finished]);
 
+    // blocked_question 只透传、只展示：只有仍处于 blocked 且问题非空的单才带问题。
+    const blockedQuestions = new Map<string, string>();
+    for (const item of incoming) {
+      if (item.status !== 'blocked') continue;
+      if ((item.blockedQuestion ?? '').trim() === '') continue;
+      blockedQuestions.set(item.commissionId, item.blockedQuestion ?? '');
+    }
+    // 已有的台账单立刻对齐：转 running / 空问题 / 完成 / 撤单都清成 null，不残留。
+    for (const task of this.tasks) {
+      if (task.source !== 'ledger') continue;
+      task.blockedQuestion = blockedQuestions.get(task.id) ?? null;
+    }
+
     // 台账说收工了：她手上的这单走正常交付，不是被撤。
+    // 快照不完整时，"不在快照里"不等于被撤回：只认明确的收工，其余保持现状。
     const active = this.activeTask();
     if (active !== null && active.source === 'ledger') {
       if (finishedIds.has(active.id)) {
         this.finishActiveTask();
-      } else if (!next.has(active.id)) {
+      } else if (complete && !next.has(active.id)) {
         this.abandonActiveTask();
       }
     }
 
-    // 已收工的条不再进活动清单；已消失的直接删掉。
+    // 已收工的条不再进活动清单；完整快照里已消失的直接删掉。
     for (const task of [...this.tasks]) {
       if (task.source !== 'ledger') continue;
-      if (finishedIds.has(task.id) || !next.has(task.id)) {
+      if (finishedIds.has(task.id) || (complete && !next.has(task.id))) {
         const index = this.tasks.indexOf(task);
         if (index >= 0) this.tasks.splice(index, 1);
         this.idleWorkstationFor(task.id);
@@ -316,13 +376,19 @@ export class Simulation {
         status: 'assigned',
         createdAt: this.now,
         completedAt: null,
+        blockedQuestion: blockedQuestions.get(item.commissionId) ?? null,
       });
       added += 1;
     }
 
     if (added > 0) this.log('info', `台账来了 ${added} 条新督办。`);
     this.assignFromLedger();
-    return { ok: true, message: `台账已同步，${this.tasks.length} 条在册。` };
+    let message = `台账已同步，${this.tasks.length} 条在册。`;
+    const waiting = this.tasks.find((task) => task.blockedQuestion !== null);
+    if (waiting !== undefined && waiting.blockedQuestion !== null) {
+      message += `在等你的答复：${excerptBlockedQuestion(waiting.blockedQuestion)}（仅展示，世界不代为回答）`;
+    }
+    return { ok: true, message };
   }
 
   /** 把还挂着这条活的铺子熄火。 */
@@ -341,12 +407,12 @@ export class Simulation {
    *
    * 这就是「操作台和世界连通」的那一步：你在屏幕外派单，她在屏幕里动起来。
    * 只在她闲着时派；已经在干活就不打断，因为打断是神谕的语义，不是同步器的。
+   * 优先级来自台账：LedgerView.order（blocked→running→auditing→其它，同级稳定）；
+   * 没带顺序（旧服务/旧快照）时保持插入序，与改造前一致。
    */
   private assignFromLedger(): void {
     if (!this.isFree()) return;
-    const task = this.tasks.find(
-      (item) => item.source === 'ledger' && item.status === 'assigned',
-    );
+    const task = this.nextLedgerTask();
     if (task === undefined) return;
     const building = this.buildings.find((item) => item.boundTask === task.kind);
     if (building === undefined) {
@@ -362,10 +428,27 @@ export class Simulation {
     this.log('oracle', `台账派活：${task.summary} → ${building.displayName}`);
   }
 
+  /**
+   * 按台账给的优先级挑下一单：不在顺序表里的排后面，同级保持插入序
+   * （Array.prototype.sort 在 V8 里是稳定排序）。台账撤单后下一拍就用新顺序重排。
+   */
+  private nextLedgerTask(): TaskRecord | undefined {
+    const candidates = this.tasks.filter(
+      (item) => item.source === 'ledger' && item.status === 'assigned',
+    );
+    if (candidates.length === 0) return undefined;
+    const rank = (task: TaskRecord): number => {
+      const index = this.ledgerOrder.indexOf(task.id);
+      return index < 0 ? Number.MAX_SAFE_INTEGER : index;
+    };
+    return [...candidates].sort((a, b) => rank(a) - rank(b))[0];
+  }
+
   /** 她手上的活被上游撤回：状态机收回 idle，铺子熄火。 */
   private abandonActiveTask(): void {
     const task = this.activeTask();
     if (task === null) return;
+    task.blockedQuestion = null;
     const building = this.buildingOf(task);
     if (building !== undefined) {
       this.activities.set(building.instanceId, { kind: 'idle' });
@@ -491,6 +574,7 @@ export class Simulation {
       status: 'assigned',
       createdAt: this.now,
       completedAt: null,
+      blockedQuestion: null,
     };
     this.nextTaskNumber += 1;
     this.tasks.push(task);
@@ -504,12 +588,24 @@ export class Simulation {
       return { ok: false, message };
     }
     const task = this.activeTask();
-    if (task !== null && task.buildingId === null) {
+    if (task === null) {
+      const message = '她现在没有在干活，无需交付。';
+      this.log('warn', message);
+      return { ok: false, message };
+    }
+    // 完成权唯一来源是台账：台账单必须由台账收尾，人工入口一律拒绝，也不写台账。
+    if (task.source === 'ledger') {
+      const message = '这单的完成权在台账，人工不能收尾。';
+      this.log('warn', message);
+      return { ok: false, message };
+    }
+    const label = this.ledgerConnected ? '沙盒 Mock' : '离线 Mock';
+    if (task.buildingId === null) {
       this.finishInPlace(task);
-      return { ok: true, message: '这单办完了。' };
+      return { ok: true, message: `这单办了（${label}，不计入台账）。` };
     }
     this.finishActiveTask();
-    return { ok: true, message: '成果已交付。' };
+    return { ok: true, message: `成果已交付（${label}，不计入台账）。` };
   }
 
   private build(prefabId: string, instanceId: string): CommandResult {
@@ -595,8 +691,11 @@ export class Simulation {
   }
 
   private finishInPlace(task: TaskRecord): void {
+    if (task.status === 'done') return;
     task.status = 'done';
     task.completedAt = this.now;
+    task.blockedQuestion = null;
+    this.recordDelivery(task.source);
     this.villager.mode = 'idle';
     this.villager.taskId = null;
     this.villager.bubble = '办好了。';
@@ -728,9 +827,11 @@ export class Simulation {
 
   private finishActiveTask(): void {
     const task = this.activeTask();
-    if (task === null) return;
+    if (task === null || task.status === 'done') return;
     task.status = 'done';
     task.completedAt = this.now;
+    task.blockedQuestion = null;
+    this.recordDelivery(task.source);
     const building = this.buildingOf(task);
     if (building !== undefined) {
       this.activities.set(building.instanceId, {
@@ -749,6 +850,12 @@ export class Simulation {
     this.villager.path = [];
     this.accrueFaith();
     this.log('done', `${task.summary} 已交付。`);
+  }
+
+  /** 交付按来源分开记账：台账的活与沙盒/离线 Mock 的活不合并。 */
+  private recordDelivery(source: TaskRecord['source']): void {
+    if (source === 'ledger') this.ledgerDeliveries += 1;
+    else this.mockDeliveries += 1;
   }
 
   /** 攒够一个里程碑，世界多一件东西；不够就只是点数。 */

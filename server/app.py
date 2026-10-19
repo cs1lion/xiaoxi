@@ -1007,6 +1007,30 @@ def _spawn_broadcast(commission: dict[str, Any]) -> None:
 
 @app.websocket("/ws")
 async def websocket_endpoint(ws: WebSocket) -> None:
+    # 同源校验：只挡浏览器页面，规则与 Connection.bind_editor_insight 的 netloc 比对一致。
+    # 只比 netloc（host:port），不比较 scheme：TLS 终止在反代上时 scope 里是 ws/http、
+    # 浏览器 Origin 却是 https，比 scheme 会把合法同源页面误拒。
+    # 没有 Origin 头（本地脚本、直连测试、健康检查）或 Origin 为空串时按白名单放行。
+    headers = getattr(ws, "headers", None) or {}
+    host = str(headers.get("host") or "").lower()
+    origin = headers.get("origin")
+    if origin:
+        from urllib.parse import urlsplit
+
+        try:
+            origin_netloc = urlsplit(origin).netloc.lower()
+        except ValueError:
+            # 畸形 Origin（如 "http://["）不是合法来源：按跨源拒绝，不能抛成 500。
+            origin_netloc = ""
+        if origin_netloc == "" or origin_netloc != host:
+            # 拒绝发生在 accept 之前：uvicorn 把它落成 HTTP 403 握手失败，浏览器看不到
+            # 1008/reason（它们只留在 ASGI 关闭帧与服务端日志里），这是预期行为。
+            import logging
+
+            logging.getLogger("server.app").warning(
+                "websocket origin rejected: origin=%r host=%r", origin, headers.get("host"))
+            await ws.close(code=1008, reason="cross_origin_denied")
+            return
     await ws.accept()
     conn = Connection(ws)
     _connections.add(conn)
