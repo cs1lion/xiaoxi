@@ -2451,3 +2451,111 @@ Get-NetTCPConnection -LocalPort 5188,5190,8001,8000 -State Listen -ErrorAction S
 
 - 本轮未改动任何项目文件（只读验收 + TEMP 探针）；`git status` 与进场快照一致，无残留进程/监听。
 - **待用户评审**：动画在人眼下的辨识度（待机呼吸是否看得出、走路脚部交替是否可读、行礼下蹲是否像行礼）。
+
+---
+
+## task-31（`--strict` 接本地门禁、CI 只报告）独立复验（2026-10-19 18:10–18:25，lead · QA Engineer）
+
+- **基线声明**：HEAD `bd6be8d docs(pixel-world): S3-3 帧动画验收与进度（task-29）`（上一提交
+  `b224095 feat(pixel-world): idle/walk 帧动画与 12fps 采样（S3-3）`）。全仓 **37 M + 0 D + 149 ??**：
+  37 M = 主产品既有 **35** + `.github/workflows/pixel-world.yml` + `scripts/test_pixel_world.py`，
+  与 Chief 说的「只动两个文件」一致；**`pixel-world/` 0 改动**（task-29 已干净提交）。
+  `scripts/` 下 16 个 M 中 15 个是既有主产品改动，仅 `test_pixel_world.py` 属本卡。
+- **最终结论：有条件通过**（1 条 P1 + 1 条 P3）。task-31 的接线本身（strict/report-only 分流、CI、文档）
+  全部实测正确；但**本地门禁在本沙箱跑不出 PASS**，达不到「要提交的人自己跑」这个设计前提。
+
+### 通过项
+
+| # | 验收项 | 实测结果 |
+|---|---|---|
+| 1 | `--list` 模式与命令 | 默认：`mode: local-strict（超预算即失败）`，audit 行带 **`--strict`**；`--report-only --list`：`mode: ci-report-only（配色只报告）`，audit 行**不带** `--strict`。两种都 exit 0，模式与命令都能从 `--list` 看出 ✓ |
+| 4a | CI yml | L50 `run: python scripts/test_pixel_world.py --report-only` ✓；job 名已改为 `像素世界门禁（types + logic tests + palette report）`；L8–L11 注释把 D7-A 分工（本地 strict / CI 只报告）写清 ✓ |
+| 4b | `package.json` 未动 | 相对 HEAD **零 diff**；`test` 仍是 `node --test test/*.test.ts`、`test:inprocess` 仍在 ✓ |
+| 4c | `run_gates.py` 本卡未动 | 相对 HEAD 有 53/2 改动，但 **mtime 2026-10-18 20:20:28**（早于本卡两个文件的 18:08），属主产品既有改动；diff 内容是 `node_cmd()` 解析与配置键审计，与 pixel-world 无关；`run_gates.py` 也未引用 pixel-world 门禁 ✓ |
+| 5 | 基线一致性 | 主产品已跟踪改动 **35 个**与基线一致；`scripts/` 无本卡之外的新改动；`pixel-world/` 0 改动 ✓ |
+| 3a | 对抗：audit 步行为 | 在 `src/ui/debug-panel.ts` 注入 `0x123456`（UI 9 色 / 越界 1 / 并集 24）：本地模式 audit `--strict` → **exit 1**；`--report-only` 模式 audit（无 strict）→ **exit 0**。字节级还原后 SHA256 `CCB39FA0…7D7D` 与改前一致 ✓ |
+| 3b | 还原干净 | `debug-panel.ts` SHA256 还原一致；`git status` 除我追加的 QA 文档外无变化；我上一轮 Chrome 尝试留下的未跟踪 `debug.log`（95 字节，内容为 chrome-headless-shell 报错）已由我删除 |
+
+### 不通过项
+
+- **验收点 2「本地连跑 3 次全 PASS」→ 3/3 全 FAIL**（exit 1）。三步里 `check` exit 0、`audit --strict` exit 0，
+  但 **`test` 步 `npm test` 全红**。原始错误（每次运行、每个测试文件都是同一条）：
+
+  ```
+  > node --test test/*.test.ts
+  # Subtest: test\anim-frames.test.ts
+  not ok 1 - test\anim-frames.test.ts
+    failureType: 'testCodeFailure'
+    error: 'spawn EPERM'
+    code: 'EPERM'
+    stack: ChildProcess.spawn (node:internal/child_process:420:11)
+  # tests 13   # pass 0   # fail 13
+  ```
+
+  原因：`node --test` 默认给每个测试文件起一个子进程，子进程用管道 stdio，被本沙箱禁；
+  `test_pixel_world.py` 里「不捕获子进程输出、直接继承 stdio」只解决了 Python→npm 那一层的 pipe，
+  **没有解决 node 自己 per-file spawn 这一层**。`node --test --experimental-test-isolation=none`
+  （即项目里已经有的 `test:inprocess`）单进程跑则 **161/161 全绿**（我本轮单独复跑确认）。
+- **验收点 3 的门禁级演示被同上问题掩盖**：变异后 `--report-only` 整门禁 exit 仍是 1（因为 `test` 步红），
+  所以「本地 FAIL / report-only PASS」这组对照**只能在 audit 步级别演示**（已通过，见 3a），
+  在整门禁级别演示不出来。
+
+### 缺陷列表
+
+- **P1 本地门禁在本沙箱永远 FAIL，strict 形同虚设**。`scripts/test_pixel_world.py` 的 `steps()` 第 2 步是
+  `npm test`（= `node --test test/*.test.ts`），在本环境稳定 spawn EPERM。后果正是 task-31 想避免的那个：
+  门禁是给「要提交的人」自己跑的，现在谁跑都是红，**跑两次之后就没人看了**，`audit --strict` 也就失去了
+  「预算破了就该挡住」的作用。修复是一行：把 `("test", [npm(), "test"])` 换成
+  `("test", [npm(), "run", "test:inprocess"])`（或先试 `npm test`、失败回退 `test:inprocess`）——
+  `test:inprocess` 就是 task-28 的 P3-3 为这个沙箱加的口子，本项目一直在用（我每轮都跑它）。
+  注：这是既有问题，不是 task-31 引入；但 task-31 把本地门禁提成正轨入口，就得把它接对。
+- **P3 `--report-only` 只作用于 audit 一步**。`check` 和 `test` 在该模式下仍参与退出码，
+  所以「CI 只报告」实际含义是「配色预算不挡别人」，不是「这个门禁不会红」。
+  文档字符串里写清了，但名字容易误解；建议在 `--list`/`mode:` 行里补一句「report-only 仅指 audit 步」。
+
+### 收口
+
+- 本轮我对仓库的唯一改动是 `docs/QA_VERIFICATION_S1.md`（纯追加）；`debug-panel.ts` 字节级还原；
+  删除的 `debug.log` 是我自己上一轮 Chrome 尝试的产物（未跟踪、95 字节、内容为 headless_shell 报错）。
+- **待用户评审**：无（本卡无视觉项）。但**建议在正常环境（非本沙箱）由施工方复跑一次
+  `python scripts/test_pixel_world.py` 并贴完整输出**——如果那边 `npm test` 能跑通，P1 就降级为
+  「仅本沙箱受影响」，需要在文档里注明；如果同样 EPERM，则必修。
+
+---
+
+## task-31 修复后最终签收复验（2026-10-19 18:15–18:20，lead · QA Engineer）
+
+- **基线声明**：HEAD `bd6be8d`；工作区脏树，全仓 **38 M + 0 D + 148 ??** = 主产品既有 **35** +
+  本卡两个文件（`scripts/test_pixel_world.py`、`.github/workflows/pixel-world.yml`）+ 我的 QA 文档；
+  **`pixel-world/` 0 改动**（task-29 已提交）。施工只动了上述两个文件，`run_gates.py` mtime 仍是
+  **2026-10-18 20:20:28**（早于本卡），本卡未碰。
+- **最终结论：通过**。上一轮 1 条 P1 + 1 条 P3 全部关闭并实测生效。
+
+### 修复内容核对
+
+- **P1 修复**：`steps()` 的 test 步由 `npm test` 改为 **`npm run test:inprocess`**，注释写明原因——
+  「`node --test` 默认按文件起子进程、用管道收 stdout，DSH 沙箱会直接拒绝（spawn EPERM）；
+  `test:inprocess` 用 `--experimental-test-isolation=none` 在同一进程跑同一批 `test/*.test.ts`，
+  本地与 CI 结果一致，也不需要任何提权」。docstring 的「零外部依赖层」一行也同步改成 `test:inprocess`。
+- **P3 修复**：`mode_label()` 两种模式都补了退出码口径——
+  本地：`local-strict（配色超预算即失败；check/test 同样参与退出码）`；
+  CI：`ci-report-only（配色预算只报告、不改退出码；check/test 仍参与退出码，不是「门禁不会红」）`。
+  误解点（「report-only = 门禁不会红」）已被明确堵住。
+
+### 复验结果（全部本会话自跑）
+
+| # | 验收项 | 结果 |
+|---|---|---|
+| 1 | **本地连跑 3 次** | **3/3 PASS（exit 0）**。每次：`check` exit 0 → `test:inprocess` **161/161** exit 0 → `audit --strict` exit 0（世界 16/90、UI 8/45、共享 1、并集 23、越界 0/0）。P1 关闭 |
+| 2 | `--list` 两种模式 | 默认 `mode: local-strict（配色超预算即失败；check/test 同样参与退出码）`，test 行为 `npm run test:inprocess`、audit 带 `--strict`；`--report-only` 模式标签带「check/test 仍参与退出码，不是『门禁不会红』」、audit 不带 `--strict`。两种都 exit 0 |
+| 3 | **对抗（门禁级）** | 往 `src/ui/debug-panel.ts` 注入 `0x123456`（UI 9 色/越界 1/并集 24）后：**本地门禁 exit 1**（check 0、test 161/161、`audit --strict` **exit 1**）；**`--report-only` 整门禁 exit 0**（check 0、test 161/161、audit **exit 0**）。两步的唯一差别就是配色预算，verdict 随之翻转——正是 task-31 想要的效果。字节级还原后 SHA256 `CCB39FA0…7D7D` 与改前一致，还原后审计回到 16/8/1/23、strict exit 0 |
+| 4a | CI yml | L50 `run: python scripts/test_pixel_world.py --report-only`；L27 job 名 `像素世界门禁（types + logic tests + palette report）`；L8–L11 注释同步 |
+| 4b | `package.json` | 相对 HEAD **零 diff**；`test` 仍 `node --test test/*.test.ts`、`test:inprocess` 仍在 |
+| 4c | `run_gates.py` | 本卡未动（mtime 10-18 20:20）；相对 HEAD 的 53/2 是主产品既有改动，内容为 `node_cmd()` 解析与配置键审计，与 pixel-world 无关 |
+| 5 | 基线一致性 | 主产品 **35 个**既有改动与基线一致；`pixel-world/` 0 改动；`scripts/` 除 `test_pixel_world.py` 外无本卡新改动 |
+
+### 遗留与备注
+
+- 无 P0–P3 遗留。门禁现在在本沙箱可复跑、可判红、可判绿，「要提交的人自己跑」这个前提成立了。
+- `--report-only` 的语义已在模式标签里写清（只免配色预算，check/test 仍参与退出码），与 docstring 一致。
+- 本轮我对仓库的唯一改动是 `docs/QA_VERIFICATION_S1.md`（纯追加）；`debug-panel.ts` 字节级还原。
