@@ -1,4 +1,4 @@
-/** 神谕解析：把一句话收敛到世界认识的四个动词。
+/** 神谕解析：把一句话收敛到世界认识的几个动词。
  *
  * 这是世界自己的意图路由器，不是 LLM。真实助理把结构化指令交给它；
  * 沙盒里用关键词兜底，任何认不出的输入都落到 unknown，世界不动。
@@ -15,6 +15,8 @@ interface Rule {
 const COMPLETE_WORDS = ['完成', '交付', '收工', 'done', 'finish', 'complete'];
 const RAIN_WORDS = ['下雨', '降雨', '落雨', 'rain'];
 const CLEAR_WORDS = ['放晴', '雨停', '天晴', '出太阳', 'clear'];
+/** 撤销排队中的神谕；只撤等待队列，不动正在干的活。 */
+const CANCEL_WORDS = ['撤销', '取消', 'cancel', 'undo'];
 /** 短活必须整句就是"顺手"，不能抢「查一下资料」里的"查"。 */
 const QUICK_PREFIXES = ['顺手', '随便', '简单', '小事'];
 
@@ -39,6 +41,7 @@ export function parseOracle(raw: string): OracleAction {
   if (RAIN_WORDS.some((word) => lower.includes(word))) {
     return { kind: 'weather', weather: 'rain' };
   }
+  if (CANCEL_WORDS.some((word) => lower.includes(word))) return { kind: 'cancelPending' };
   if (QUICK_PREFIXES.some((word) => lower.includes(word))) {
     return { kind: 'dispatch', taskKind: 'quick', summary: text };
   }

@@ -101,6 +101,8 @@ export interface TaskRecord {
    * 这里保留完整原文，展示截断由 excerptBlockedQuestion 负责。
    */
   blockedQuestion: string | null;
+  /** 接下这单的角色 id；没人接时 null。交付归属按它算。 */
+  workerId: string | null;
 }
 
 /** 状态行/回执里展示要请示问题时最多显示多少个字符（按 Unicode 码点计）。 */
@@ -114,6 +116,23 @@ export function excerptBlockedQuestion(question: string | null): string {
   const points = Array.from(text);
   if (points.length <= BLOCKED_QUESTION_LIMIT) return text;
   return `${points.slice(0, BLOCKED_QUESTION_LIMIT).join('')}…`;
+}
+
+/**
+ * 排队等待派发的一条神谕。她手上有活时新神谕不丢，先排在这里；
+ * 队列只存在 Simulation 内，随快照暴露，保证固定步长下可复现。
+ */
+export interface PendingDispatch {
+  /** 世界内自增 id（p1、p2…），不用时间戳/随机数。 */
+  readonly id: string;
+  readonly kind: TaskKind;
+  readonly summary: string;
+  /** 入队时刻（this.now）。 */
+  readonly requestedAt: number;
+  /** 只排神谕单；台账单走 tasks.assigned，天然排队且不可被神谕撤销。 */
+  readonly source: 'oracle';
+  /** 预留按角色分队列：当前单角色世界固定用 v0。 */
+  readonly villagerId: string;
 }
 
 /** 每类活的时长与场地。短的原地做，长的进城。 */
@@ -197,6 +216,8 @@ export interface WorldProp {
 }
 
 export interface VillagerSnapshot {
+  /** 世界内稳定 id（v0 = 主角色）。渲染按它对齐多个实例。 */
+  readonly id: string;
   readonly name: string;
   readonly mode: VillagerMode;
   readonly pos: Vec2;
@@ -212,11 +233,16 @@ export interface VillagerSnapshot {
 
 export interface WorldSnapshot {
   readonly now: number;
+  /** 兼容旧调用方：等于 villagers[0]（主角色）。 */
   readonly villager: VillagerSnapshot;
+  /** 全部角色（2–3 个），渲染与状态行都读这里。 */
+  readonly villagers: readonly VillagerSnapshot[];
   readonly buildings: readonly PlacedBuilding[];
   readonly workstations: readonly WorkstationSnapshot[];
   readonly constructions: readonly ConstructionSnapshot[];
   readonly tasks: readonly TaskRecord[];
+  /** 排队等待派发的神谕（FIFO）。只展示/可撤销，不影响台账完成权。 */
+  readonly pending: readonly PendingDispatch[];
   readonly props: readonly WorldProp[];
   readonly roads: readonly GridPoint[];
   readonly altar: GridPoint;
@@ -241,6 +267,7 @@ export interface WorldSnapshot {
 export type OracleIntent =
   | { readonly kind: 'dispatch'; readonly taskKind: TaskKind; readonly summary: string }
   | { readonly kind: 'complete' }
+  | { readonly kind: 'cancelPending' }
   | { readonly kind: 'unknown'; readonly raw: string };
 
 export interface CommandResult {

@@ -194,6 +194,12 @@ async function runLedgerSuite() {
 /** 沙盒模式：神谕闭环 + 日常 + 天气 + 造物主 + 信仰 + 日报 + 外部桥接。 */
 async function runSandboxSuite() {
   const opening = await state();
+  check(opening.villagers.length === 2, '世界里有两个小人');
+  check(
+    opening.villagers[0]?.name !== opening.villagers[1]?.name &&
+      opening.villagers[0]?.id !== opening.villagers[1]?.id,
+    '两个角色各有独立 id 与名字',
+  );
   check(opening.ledger.mock === true, '离线模式在快照里标成离线 Mock');
   await page.waitForFunction(
     () => (document.querySelector('#status')?.textContent ?? '').includes('离线 Mock'),
@@ -205,6 +211,10 @@ async function runSandboxSuite() {
     openingStatus.includes('离线 Mock') && openingStatus.includes('台账离线'),
     '状态行标出离线 Mock',
   );
+  check(
+    openingStatus.includes('莞尔：') && openingStatus.includes('阿雾：'),
+    '状态行显示多角色摘要',
+  );
   // 她自己会动，不是屏保。
   const before = opening.villager.pos;
   await page.waitForTimeout(3200);
@@ -214,13 +224,17 @@ async function runSandboxSuite() {
     wandering.villager.pos.y - before.y,
   );
   check(moved > 0.2 || wandering.villager.mode !== 'idle', '没人管的时候她会自己走动');
+  check(
+    wandering.villagers.every((item) => typeof item.routine === 'string'),
+    '两个角色各自有独立作息',
+  );
 
   // 认不出的句子不让世界动。
   const unknown = await page.evaluate(() => window.Oracle.say('今天天气不错'));
   check(unknown.ok === false, '认不出的输入被拒');
   check((await state()).villager.mode !== 'saluting', '认不出的输入没有触发神谕');
 
-  // 一句代码活：行礼 → 赶路 → 开工。
+  // 一句代码活：行礼 → 赶路 → 开工。派活只叫一个人。
   await page.fill('#utterance', '帮我写个爬虫脚本');
   await page.click('button[type="submit"]');
   await page.waitForFunction(
@@ -235,6 +249,10 @@ async function runSandboxSuite() {
 
   const working = await waitFor((s) => s.villager.mode === 'working', '她走进铺子开始干活');
   check(working.villager.visible === false, '进屋后人不在门外');
+  check(
+    working.villagers[1]?.mode !== 'working' && working.villagers[1]?.taskId === null,
+    '派活只叫一个人，另一个还在祭坛',
+  );
   const operating = working.workstations.filter((w) => w.activity.kind === 'operating');
   check(operating.length === 1, '恰好一台铺子在运转');
   const activeBuilding = working.buildings.find(
@@ -256,21 +274,34 @@ async function runSandboxSuite() {
   const back = await waitFor((s) => s.villager.mode === 'idle', '她回到祭坛恢复闲逛');
   check(back.villager.taskId === null, '回到祭坛后手上没有单');
 
-  // 手上有活时再派一单：句子认得，但世界不接。拒单理由必须回到界面。
+  // 两个角色各接一单：第一单给主角色，第二单给空闲的助手。
   await page.click('button[data-kind="research"]');
   await waitFor((s) => s.villager.mode === 'working', '第二单能派出去');
-  await page.fill('#utterance', '再查点东西');
+  await page.click('button[data-kind="writing"]');
+  const second = await waitFor(
+    (s) => s.villagers[1]?.taskId !== null,
+    '第二个角色接下了另一单',
+  );
+  check(second.villagers[0]?.taskId !== second.villagers[1]?.taskId, '派活不串任务');
+
+  // 两个人都被占着时再派一单：进等待队列；回执与状态行必须说出来。
+  await page.fill('#utterance', '再整理一份便笺');
   await page.click('button[type="submit"]');
   await page.waitForFunction(
-    () => document.querySelector('#reply')?.classList.contains('bad') === true,
+    () => (document.querySelector('#reply')?.textContent ?? '').includes('已排队'),
     null,
     { timeout: 5000 },
   );
-  check(
-    (await page.textContent('#reply')).includes('手上有活'),
-    '手上有活时新神谕被拒，理由回到界面',
+  check(true, '两人都忙时新神谕进排队，回执写明第几位');
+  const queuedView = await state();
+  check(queuedView.tasks.length === 3, '排队的单没有立刻进台账');
+  check(queuedView.pending.length === 1, '排队单在快照 pending 里可见');
+  await page.waitForFunction(
+    () => (document.querySelector('#status')?.textContent ?? '').includes('排队 1 条'),
+    null,
+    { timeout: 5000 },
   );
-  check((await state()).tasks.length === 2, '被拒的神谕没有进台账');
+  check(true, '状态行显示排队数');
 
   // 「现实完成」只对沙盒单生效：回执必须标出离线 Mock，且不计入台账。
   await page.click('#finish');
@@ -285,7 +316,34 @@ async function runSandboxSuite() {
     manual.deliveries.ledger === 0 && manual.deliveries.mock >= 2,
     '交付统计把 Mock 单独计，不混进台账',
   );
-  await waitFor((s) => s.villager.mode === 'idle', '交付完回到日常');
+
+  // 主角色空下来后，排队单自动开工，不需要再点任何按钮。
+  const queuedStarted = await waitFor(
+    (s) => s.tasks.length === 4 && s.tasks[3]?.status === 'in_progress',
+    '排队的神谕在上一单交付后自动开工',
+    20000,
+  );
+  check(queuedStarted.tasks[3]?.summary === '再整理一份便笺', '自动开工的是排队的那条神谕');
+  check(queuedStarted.pending.length === 0, '出队后 pending 清空');
+
+  // 把剩下的活逐单收尾，最后两个人都回到日常。
+  for (let i = 0; i < 20; i += 1) {
+    const snapshot = await state();
+    if (
+      snapshot.tasks.every((task) => task.status === 'done') &&
+      snapshot.villagers.every((villager) => villager.mode === 'idle')
+    ) {
+      break;
+    }
+    await page.click('#finish');
+    await page.waitForTimeout(500);
+  }
+  const settled = await state();
+  check(settled.tasks.every((task) => task.status === 'done'), '所有单都收尾');
+  await waitFor(
+    (s) => s.villagers.every((item) => item.mode === 'idle'),
+    '两个人都回到日常',
+  );
 
   const routine = await waitFor(
     (s) => typeof s.villager.routine === 'string' && s.villager.routine.length > 0,
@@ -331,7 +389,8 @@ async function runSandboxSuite() {
     await waitFor((s) => s.villager.mode === 'idle', `第 ${i + 1} 单短活结束`);
   }
   const withProp = await waitFor((s) => s.props.length > 0, '神恩攒够，世界多了一件东西');
-  check(withProp.faith.milestones === 1, '里程碑记了一次');
+  // 队列让交付多了一单，里程碑可能提前落到第 2 次：只要求确实记上了。
+  check(withProp.faith.milestones >= 1, '里程碑记上了');
   await page.waitForTimeout(400);
   await page.screenshot({ path: `${OUT}/06-faith.png` });
 

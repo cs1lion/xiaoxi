@@ -44,7 +44,7 @@ export class SandboxScene extends Phaser.Scene {
   private blueprints!: ReadonlyMap<string, PrefabBlueprint>;
   private sim!: Simulation;
   private snapshot!: WorldSnapshot;
-  private villagerView!: VillagerView;
+  private readonly villagerViews = new Map<string, VillagerView>();
   private weatherView!: WeatherView;
   private decor!: DecorView;
   private entries: BuildingEntry[] = [];
@@ -54,7 +54,7 @@ export class SandboxScene extends Phaser.Scene {
   private lastStatus = '';
   private lastRoadCount = -1;
   private lastConstructionKey = '';
-  private lastBubble: string | null = null;
+  private readonly lastBubbles = new Map<string, string | null>();
   private readonly animalese: Animalese = createLazyAnimalese();
   private ledger: LedgerClient | null = null;
   private readonly resultListeners = new Set<(result: CommandResult) => void>();
@@ -91,7 +91,6 @@ export class SandboxScene extends Phaser.Scene {
       view: createBuilding(this, building, originX, originY),
       emitter: createAccentEmitter(this, building.accent),
     }));
-    this.villagerView = createVillager(this, this.villagerName, originX, originY);
     this.weatherView = createWeatherView(this);
 
     this.drawAltar(originX, originY);
@@ -189,12 +188,20 @@ export class SandboxScene extends Phaser.Scene {
     if (intent.kind === 'unknown') {
       return { ok: false, message: '没听懂这句，世界没有动。' };
     }
-    const command: WorldCommand =
-      intent.kind === 'dispatch'
-        ? { kind: 'dispatch', taskKind: intent.taskKind, summary: intent.summary }
-        : intent.kind === 'weather'
-          ? { kind: 'setWeather', weather: intent.weather }
-          : { kind: 'complete' };
+    let command: WorldCommand;
+    switch (intent.kind) {
+      case 'dispatch':
+        command = { kind: 'dispatch', taskKind: intent.taskKind, summary: intent.summary };
+        break;
+      case 'weather':
+        command = { kind: 'setWeather', weather: intent.weather };
+        break;
+      case 'cancelPending':
+        command = { kind: 'cancelPending' };
+        break;
+      default:
+        command = { kind: 'complete' };
+    }
     // 命令不直接改世界，排进队列，由下一个逻辑步统一结算。
     this.sim.enqueue(command);
     return { ok: true, message: '神谕已投递，随下一拍生效。' };
@@ -288,17 +295,28 @@ export class SandboxScene extends Phaser.Scene {
       this.drawScaffolds(snapshot);
     }
 
-    updateVillager(this.villagerView, snapshot.villager, 0, 0, ALTITUDE);
+    // 多角色：每个 id 一个渲染实例；updateVillager 内部按 y 设 depth，天然 Y-Sort。
+    for (const villager of snapshot.villagers) {
+      let view = this.villagerViews.get(villager.id);
+      if (view === undefined) {
+        view = createVillager(this, villager.name, 0, 0);
+        this.villagerViews.set(villager.id, view);
+      }
+      updateVillager(view, villager, 0, 0, ALTITUDE);
+    }
     this.weatherView.update(this.sim.weatherIntensity(), delta);
 
-    // 气泡一出现就出声；同一句话不重复念。
-    const bubble = snapshot.villager.bubble;
-    if (bubble !== null && bubble !== this.lastBubble) {
-      this.lastBubble = bubble;
-      this.animalese.speak(bubble);
-      for (const listener of this.bubbleListeners) listener(bubble);
-    } else if (bubble === null) {
-      this.lastBubble = null;
+    // 气泡一出现就出声；同一个角色的同一句话不重复念。
+    for (const villager of snapshot.villagers) {
+      const bubble = villager.bubble;
+      const last = this.lastBubbles.get(villager.id) ?? null;
+      if (bubble !== null && bubble !== last) {
+        this.lastBubbles.set(villager.id, bubble);
+        this.animalese.speak(bubble);
+        for (const listener of this.bubbleListeners) listener(bubble);
+      } else if (bubble === null) {
+        this.lastBubbles.set(villager.id, null);
+      }
     }
 
     const line = this.statusLine();
@@ -356,18 +374,23 @@ export class SandboxScene extends Phaser.Scene {
   }
 
   private statusLine(): string {
-    const villager = this.snapshot.villager;
-    const task = this.snapshot.tasks.find((item) => item.id === villager.taskId);
-    const where = task === null || task === undefined ? null : this.buildingName(task.buildingId);
-    const modeLabel: Record<typeof villager.mode, string> = {
-      idle: villager.routine ?? '在祭坛边闲逛',
-      saluting: '正向神谕行礼',
-      toWork: where === null ? '赶路' : `赶往 ${where}`,
-      working: where === null ? '在祭坛边当场办' : `在 ${where} 干活`,
-      delivering: '正在交付',
-      toAltar: '回到祭坛',
-      sheltering: '跑到屋檐下躲雨',
-    };
+    // 多角色摘要：主角色：…　/　助手：…
+    const summary = this.snapshot.villagers
+      .map((villager) => {
+        const task = this.snapshot.tasks.find((item) => item.id === villager.taskId);
+        const where = task === null || task === undefined ? null : this.buildingName(task.buildingId);
+        const modeLabel: Record<typeof villager.mode, string> = {
+          idle: villager.routine ?? '在祭坛边闲逛',
+          saluting: '正向神谕行礼',
+          toWork: where === null ? '赶路' : `赶往 ${where}`,
+          working: where === null ? '在祭坛边当场办' : `在 ${where} 干活`,
+          delivering: '正在交付',
+          toAltar: '回到祭坛',
+          sheltering: '跑到屋檐下躲雨',
+        };
+        return `${villager.name}：${modeLabel[villager.mode]}`;
+      })
+      .join('　/　');
     const weather = this.snapshot.weather === 'rain' ? '雨' : '晴';
     const faith = this.snapshot.faith;
     const { ledger: ledgerDelivered, mock: mockDelivered } = this.snapshot.deliveries;
@@ -381,7 +404,11 @@ export class SandboxScene extends Phaser.Scene {
       waitingTask === undefined || waitingTask.blockedQuestion === null
         ? ''
         : `　　在等你的答复：${excerptBlockedQuestion(waitingTask.blockedQuestion)}`;
-    return `${villager.name}：${modeLabel[villager.mode]}　　${weather}　　${ledger}　　台账交付 ${ledgerDelivered} 单 · Mock 交付 ${mockDelivered} 单　　神恩 ${faith.points}/${3}${waiting}`;
+    // 排队中的神谕必须在状态行可见，否则跟"被拒"分不出来。
+    const queued = this.snapshot.pending;
+    const queue =
+      queued.length === 0 ? '' : `　　排队 ${queued.length} 条：${queued[0]?.summary ?? ''}`;
+    return `${summary}　　${weather}　　${ledger}　　台账交付 ${ledgerDelivered} 单 · Mock 交付 ${mockDelivered} 单　　神恩 ${faith.points}/${3}${waiting}${queue}`;
   }
 
   private buildingName(id: string | null): string | null {

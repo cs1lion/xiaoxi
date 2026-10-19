@@ -1,9 +1,9 @@
 # S1 各卡独立验收记录（QA Verification · S1）
 
 - 验收方：qa-runtime（Agent Teams · QA Engineer），独立于各卡作者
-- 验收时间：2026-10-19 13:06–13:10（task-7）；**13:13–13:18（task-9 + task-8）**；**13:23–13:29（task-12 D4-A + task-11 D3-A）**；**13:41–13:49（task-13 S1-5）**；**13:47–13:53（task-14 S1-6）**；**13:56–14:01（task-15 + task-16）**（Asia/Shanghai）
-- 验收对象：task-7（WS 退避）/ task-9（fixture 契约）/ task-8（`/ws` Origin）/ task-12（D4-A 花名册只读端点）/ task-11（D3-A 人工交付+离线 Mock）/ task-13（S1-5 周期对账+分页截断+超时）/ task-14（S1-6 真帧端到端+三项未验证）/ task-15（pickActive 接线）/ task-16（blocked_question 透传仅展示）
-- 仓库：`D:\project\neurosama`，分支 `feat/pixel-world-oracle-world`，HEAD `9cd0c5a4`（本次验收期间作者改动均在未提交的工作区）
+- 验收时间：2026-10-19 13:06–13:10（task-7）；**13:13–13:18（task-9 + task-8）**；**13:23–13:29（task-12 D4-A + task-11 D3-A）**；**13:41–13:49（task-13 S1-5）**；**13:47–13:53（task-14 S1-6）**；**13:56–14:01（task-15 + task-16）**；**14:18–14:29（task-10 + 提交与重构复验）**；**14:37–14:41（task-17 S2-1 多角色）**（Asia/Shanghai）
+- 验收对象：task-7（WS 退避）/ task-9（fixture 契约）/ task-8（`/ws` Origin）/ task-12（D4-A 花名册只读端点）/ task-11（D3-A 人工交付+离线 Mock）/ task-13（S1-5 周期对账+分页截断+超时）/ task-14（S1-6 真帧端到端+三项未验证）/ task-15（pickActive 接线）/ task-16（blocked_question 透传仅展示）/ task-10（排队+取消未出发行礼）/ task-17（S2-1 多角色）/ 提交链 340d0ab、b656488、150b2a7、8a95c94
+- 仓库：`D:\project\neurosama`，分支 `feat/pixel-world-oracle-world`，HEAD `8a95c94`（本次验收期间作者改动均在未提交的工作区）
 - 方法：不采信作者自述；自己看 diff、跑测试与冒烟、做对抗性探针；临时脚本/日志只放工作区
   `C:\Users\18712\.dsh\bot\workspace\recon\`，只在本文件留结论
 - 执行节奏：task-7 于 13:06–13:10 复验；task-9、task-8 于 13:13–13:18 收到 Lead 通知后按本文方案执行并回填结论。
@@ -22,6 +22,9 @@
 | **S1-6 / task-14** | 真帧端到端 + 三项未验证（D4/D1/D3） | **通过** | 单次复跑 **23/23**（连跑 2 次绿，另 1 次仅隔离 mtime 断言被外部并发写触发假失败，已定位为环境）；冷启动 2.51s/lifespan complete；无 Key offline=true；真 WS 6 帧同 id `drafting→briefing→running→blocked`；浏览器同 id、`toWork`、pushLedger=0；D7 如实标未验证 |
 | **S1-15 / task-15** | pickActive 接线（台账 order 驱动派活） | **通过** | `ordered/orderActive`（blocked→running→auditing→其它，同级 id 稳定）+ LedgerView.order + `nextLedgerTask` 排序；QA 矩阵 16/16（含无 order 插入序、撤单重排、单任务上限）；90/90、check 0、smoke 53/53 + 21/21；task-13/task-11 保护与 task-12 回退交叉通过 |
 | **S1-16 / task-16** | blocked_question 真帧→快照/状态行（只展示） | **通过** | 全链路透传、60 **码点**截断（emoji surrogate 不劈开）、转 running/收工清除、空值不显示；QA 纯逻辑 27/27 + 浏览器 17/17；全程仅 GET、无 answer 入口；真帧 e2e 23/23 并手工抓到浏览器 `blockedQuestion` 与真实帧逐字一致 |
+| **S1-10 / task-10** | 排队 + 取消未出发行礼 | **通过** | 忙时入队（不拒单）、MAX_PENDING=3、台账优先+FIFO、撤最后/按 id、clearDeparture 四条路径、两 sim 同命令同步长 deepEqual；96/96、check 0、smoke 59/59 + 21/21、check_protocol/test_core 不变；task-15/12 交叉通过 |
+| **提交与门禁** | 340d0ab / b656488 / 150b2a7 | **通过（1 条 P3）** | 25 文件范围正确、无主产品夹带；roster_view 已移除、`/roster` 自包含、823 字符与基线一致、`/adapters` 不变；门禁 3/3 PASS（96/96）；workflow 统一走脚本、paths 合理；P3：npm 缺失时仍 traceback（退出码 1，安全失败）→ 已由 8a95c94 修复并复验 |
+| **S1-17 / task-17（S2-1）** | 多角色（独立作息/派活/排队/归属） | **通过** | `villagers[]`+`villager` 兼容、每角色独立 state、队列 Map<villagerId>、派活只叫一个/第二单换人/双忙各自排队、workerId 归属、3 角色可扩、双 sim deepEqual；**100/100**、check 0、smoke **66/66 + 21/21**、check_protocol/test_core 64/0；渲染层按 id 多实例（截图双人可见） |
 
 ---
 
@@ -877,6 +880,201 @@ Remove-Item Env:E2E_EVIDENCE
 
 ---
 
+# 卡 10：S1-10（task-10）排队 + 取消未出发行礼
+
+## 结论：**通过**（2026-10-19 14:24–14:28 执行；工作区写入已停止后正式复验）
+
+### 1) diff 复核
+
+- `types.ts`：新增 `PendingDispatch`（`id` 自增 p1…、`kind`、`summary`、`requestedAt=this.now`、
+  `source:'oracle'`、预留 `villagerId`）；`WorldSnapshot.pending`；`OracleIntent` 增 `cancelPending`
+- `simulation.ts`：
+  - 私有 `pending: PendingDispatch[]` + `nextPendingNumber`；`MAX_PENDING_DISPATCHES = 3`
+  - `dispatch()`：忙时不拒单 → `enqueuePendingDispatch()`；未满回执「神谕已排队（第 N 位）」，
+    满 3 回执「队列也满了（3 条）；这条先不接」且 ok=false
+  - `pumpPending()` 在 `update()` 固定步长末尾调用：先 `assignFromLedger()`（台账真实活优先），
+    空闲后才取 `pending[0]` FIFO 开工；派不下去就留在队首下一拍再试
+  - `cancelPending(id?)`：省略 id 撤最后一条、按 id 撤、空队列/未知 id 拒绝；只动等待队列，不碰在干的活
+  - `clearDeparture()`：`saluteUntil=0 / pendingRoute=[] / pendingBuilding=null`，在
+    `finishInPlace / finishActiveTask / abandonActiveTask / arriveAtAltar` 四条路径调用
+    （修掉旧 `:366/:729` 不清 pendingRoute 的隐患）
+- `oracle.ts`：增 `CANCEL_WORDS`（撤销/取消/cancel/undo），排在 weather 之后、quick/dispatch 之前
+- `SandboxScene.ts`：`cancelPending` 命令接线；状态行追加「排队 N 条：<首条 summary>」
+- `smoke.mjs`：把旧的「忙时拒单」断言改为「进队列 + 状态行可见 + 交付后自动开工」；
+  里程碑断言从 `===1` 放宽为 `>=1`（队列让 Mock 交付多一单，属合理调整，记为 P3 观察）
+
+**未回退 task-13/task-15/task-16**：diff 只有新增/局部替换；`complete` 完成权、ledger `order`、
+`blockedQuestion` 透传代码路径均保留（交叉探针与 smoke 21 项验证）。
+
+### 2) 自跑与对抗
+
+| 检查 | 实测 |
+|---|---|
+| `npm run check` | **exit 0** |
+| `npm test` | **96/96 pass、0 fail**（node 365.4 ms / 墙钟 903 ms）；新增 7 项 ok 79–85 |
+| 沙盒 smoke（本工作区 dev，5188） | **59/59 通过**，exit 0，37.0 s |
+| 台账 smoke（8000 只读） | **21/21 通过**，exit 0，7.4 s |
+| `check_protocol.py` | exit 0，PASS |
+| `test_core.py` | **64 passed / 0 failed**，exit 0 |
+| dev 归属核对 | 5188 监听进程命令行 = `D:\project\neurosama\pixel-world\node_modules\.bin\..\vite\bin\vite.js`（**本工作区**，非旧快照） |
+
+**QA 独立对抗探针 24/24 ALL PASS**（`recon\qa-task10-queue-probe.mjs`）：
+- 忙时新神谕进队列（不拒单）；`pending` 2 条、`tasks` 仍 1 条（不提前进台账）；
+  pending 字段 `p1/p2`、`source=oracle`、`villagerId=v0`、`requestedAt` 齐全；回执第 1/2 位
+- 上限内 3 条都成功、第 4 条被拒「队列也满了」；撤最后一条、按 id 撤、撤不存在 id、空队列撤被拒；
+  撤销不影响正在干的活
+- 交付后排队第一单自动开工（FIFO），队列剩第二单
+- **确定性**：两个 sim 同命令同步长，逐拍 `JSON.stringify(snapshot)` 完全相等；
+  快照出现过 `pending/requestedAt`、id 为自增 `p\d+`（无墙钟/随机）
+- **台账优先**：sandbox 忙碌时 oracle 排队 + sync 台账单 → 空闲后先派 `c_ledger`，oracle 继续等；
+  台账收工后 oracle 才自动开工
+- **行礼中 sync**：收工 → `delivering`（不残留 saluting/旧路线）；撤单 → 回 `idle`、任务移除，
+  再推进 20 拍仍无旧目标（旧行礼计时器已取消）
+
+**交叉回归**：task-15 保护探针 **16/16**（含截断不撤单、完成权在台账）、
+task-12 roster 探针 **8/8**（旧服务 `/roster 404 → /adapters` 回退未破坏）。
+
+### 3) 问题分级
+
+| 级别 | 问题 | 说明 / 建议 |
+|---|---|---|
+| **P0/P1/P2** | 无 | — |
+| P3（断言口径） | smoke 里程碑断言由 `===1` 放宽为 `>=1` | 队列让 Mock 交付多一单、里程碑提前到第 2 次；可接受，但建议改成"里程碑与交付数对应"的更精确断言 |
+| P3（信息） | 状态行只显示排队第一条 summary | 有 N 条时只给首条；如产品要求可加"等 N 条" |
+| P3（信息） | `cancelPending` 只作用于等待队列（仅 oracle） | 符合设计（台账单不可被神谕撤）；台账撤单仍走 sync |
+
+**总评：通过。** 忙时排队/上限/撤销/FIFO/台账优先/确定性/行礼取消全部有独立证据；
+96 项单测、59+21 冒烟与主产品门禁均回绿。
+
+---
+
+# 提交与重构复验（340d0ab / b656488 / 150b2a7）
+
+## 结论：**通过**（1 条 P3：npm 缺失仍 traceback）
+
+### 1) 提交范围（静态）
+
+| 提交 | 文件数 | 结论 |
+|---|---|---|
+| `340d0ab`（S1 代码+文档） | **25**，+2927/−82 | 不含 `pixel-world/src/main.ts`、不含 `server/assistant/executive.py`；server 仅 `server/app.py` + `server/assistant/executive_api.py`；scripts 仅 `scripts/test_ws_origin.py`；其余为 pixel-world/文档 |
+| `b656488`（D7 门禁） | **2** | `.github/workflows/pixel-world.yml` + `scripts/test_pixel_world.py` |
+| `150b2a7`（门禁统一） | **2** | workflow + 门禁脚本（见 §3） |
+
+- 提交链：`21c1b12 → 340d0ab → b656488 → 150b2a7`
+- 当前主产品 36 个 dirty 文件（.env/config/web/assistant/root scripts 等）与 `340d0ab` **交集 0**，
+  没有夹带；340d0ab 中出现的 pixel-world/S1 文件后来被 task-10 再次修改属正常未提交 WIP，不是夹带
+
+### 2) 重构正确性（静态 + 8001 运行时）
+
+- `git grep roster_view` 在 HEAD 与工作区均 **0 命中**；`git diff -- server/assistant/executive.py`
+  = **136+/5−**，只剩既有 durable 改动（`bind_durable`/`recover_interrupted`/`_adopt_durable` 等）
+- `executive_api.py` 的 `/roster` **自包含**：`from .dispatcher import roster_agents` + 读
+  `executive.roster`，不依赖 `executive.roster_view`；`executive_api.py`、`server/app.py` 工作区 diff 为空
+- **8001 临时实例（当前代码，`--lifespan off` + 临时 DB_PATH）实测**：
+  - `GET /api/executive/roster` → 200、**823 字符 / 7 条**，与重构前基线
+    `recon\refactor\roster.before.json` **`-ceq` 逐字一致**（基线 before/after SHA256 相同
+    `486DDAE7…`；文件 1141 B vs 内容 823 字符，Lead 所述“823 字节”按字符口径成立）
+  - `GET /api/executive/adapters` → 1478 字符，与 **8000 旧进程**及**重构前基线**
+    `s1-task12-adapters-8001.json` 均 `-ceq` 一致（结构未变）
+  - `/roster` 敏感词扫描（endpoint/executable/env/token/secret/http/Bearer）0 命中
+  - 8000 全程 PID **22996**、start 2026-10-18 16:40:34、health 200，未重启/未写台账
+
+### 3) D7 门禁（本地 + CI）
+
+- `python scripts/test_pixel_world.py` 连跑 **3 次：PASS/PASS/PASS**（3.1/3.1/2.9 s），
+  每次 `# tests 96 / # pass 96 / # fail 0`，exit 0
+- 门禁只跑 `npm run check` + `npm test`（cwd=pixel-world），**无浏览器/端口依赖**；继承 stdio 规避
+  Windows pipe EPERM；聚合失败返回 1
+- `150b2a7` 后 CI 统一为 `python scripts/test_pixel_world.py`（不再两处重复命令）：
+  `setup-node 22` + `setup-python 3.12` + `npm ci (working-directory: pixel-world)` + 调脚本；
+  push/PR paths 仍只 `pixel-world/**`、`scripts/test_pixel_world.py`、workflow 自身（合理）
+- 提交级干净快照（`git archive 340d0ab` 到工作区隔离目录）另跑：门禁 **3/3 PASS、90/90**，
+  smoke **53/53 + 21/21**，`/roster` 与基线一致——用于排除 task-10 写入期间的中间态污染
+- **P3 发现（与 150b2a7 提交说明不符）**：把 `PATH` 清空后跑门禁，仍出现
+  `OSError: [WinError 87]` **Traceback**（退出码 1，安全失败）。原因：`npm()` 返回 `""` 后
+  `subprocess.run(["", "run", "check"], ...)` 直接抛异常，没有先判空。
+  **该 P3 已由 8a95c94 修复，见 §5**。
+
+### 4) 并发期说明（为什么不采信当时的工作区单测）
+
+14:19 左右 task-10 正在写入 oracle/simulation/types/SandboxScene/smoke/world.test，
+期间原地 `npm run check/test` 出现一次 exit 2 与 89/90（正常中间态）；提交级结论改用
+`git archive 340d0ab` 隔离快照验证，未受写入影响。task-10 落完并静默后，本工作区复跑
+**96/96、59/59、21/21、门禁 3/3** 全绿。
+
+### 5) 后续提交 `8a95c94`（P3 修复）
+
+- 范围：**仅 `scripts/test_pixel_world.py` +4 行**（`npm()` 为空时直接 `FAIL npm not found` 并返回 1），
+  无其它文件
+- 复核：`PATH` 清空后运行门禁 → 输出 `FAIL npm not found …`、**exit 1、无 Traceback**
+  （`recon\task17-gate-npm-missing.log`）→ §3 的 P3 已关闭
+- 正常门禁复跑仍 PASS（task-17 期间 96/96；见卡 11）
+
+---
+
+# 卡 11：S2-1（task-17）多角色（独立作息 / 派活 / 排队 / 归属）
+
+## 结论：**通过**（2026-10-19 14:37–14:41 执行；task-17 改动仍为未提交工作区）
+
+### 1) diff 复核
+
+- `types.ts`：`TaskRecord.workerId`（归属）；`VillagerSnapshot.id`；`WorldSnapshot.villagers`
+  且 `villager` 保留 = `villagers[0]`（旧断言兼容）；`PendingDispatch.villagerId` 真正启用
+- `simulation.ts`（649 行变更）：
+  - `villagers: Villager[]`，构造函数 `villagerNames ?? [villagerName, 助手「阿雾」]`，id 为 `v0/v1/...`；
+    每角色独立 `mode/pos/path/taskId/routine/saluteUntil/deliverUntil` 等状态
+  - 错开作息：`nextRoutineAt = 1200 + index*1400`、`routineIndex = index*2` → 两人目的地/节奏不同
+  - 队列：`pending: Map<villagerId, PendingDispatch[]>`；`enqueuePendingDispatch()` 选排队最少的角色，
+    每角色上限 3（两人都满才拒）；`pumpPending()` 对每个空闲角色先 `assignFromLedgerTo()`（台账优先），
+    再取自己 FIFO 队首
+  - 台账派活：`assignFromLedgerTo` 用 `nextLedgerTasks()`（`workerId === null`）+ `buildingBusy()` 防同铺重复，
+    派前检查施工/故障/路径；`workerId` 在接单时写入
+  - 完成/归属：`finishActiveTask/finishInPlace` 按 `task.source` 记全局 ledger/mock 交付；
+    `completeManually()` 找第一个 `working` 的角色（台账单仍拒绝）
+  - `cancelPending(id?)`：按角色队列操作；省略 id 从后往前撤第一个非空队列的队尾
+- `SandboxScene.ts`：`Map<string, VillagerView>` 按快照 id 对齐多实例；气泡去重改 per-id；
+  状态行改多角色摘要（`莞尔：…　/　阿雾：…`），其余（天气/台账/交付/神恩/等待答复/排队）保留
+- `smoke.mjs`：新增「两个小人 / 派活不串任务 / 双忙排队 / 自动开工 / 所有单收尾」等断言
+- **`villager.ts` 未改，结论成立**：`createVillager/updateVillager` 本来就是"一个实例一个 view + 一份快照"，
+  module 内无共享可变状态；多实例管理放在 `SandboxScene` 的 Map（按 id 对齐）即可，无需改渲染层。
+  除 `report.ts` 仍读 `snapshot.villager`（主角色，见 P3）外，`src/` 无其它单角色假设
+
+### 2) 自跑与对抗
+
+| 检查 | 实测 |
+|---|---|
+| `npm run check` | exit 0 |
+| `npm test` | **100/100 pass、0 fail**（node 374.0 ms / 墙钟 900 ms）；新增 11 项 ok 79–89 |
+| 沙盒 smoke（本工作区 dev，5188） | **66/66 通过**，exit 0，50.3 s；dev 命令行确认为 `D:\project\neurosama\pixel-world` |
+| 台账 smoke（8000 只读） | **21/21 通过**，exit 0，7.2 s |
+| `check_protocol.py`（venv python） | PASS |
+| `test_core.py`（`.venv\Scripts\python.exe`） | **64 passed / 0 failed** |
+| 视觉证据 | `eval\screens\01-salute.png` 同屏可见两名小人（莞尔行礼 + 阿雾在街口），状态行 `莞尔：正向神谕行礼　/　阿雾：在街口站着看了一会儿` |
+
+**QA 独立对抗探针 26/26 ALL PASS**（`recon\qa-task17-multivillager-probe.mjs`）：
+- 默认 2 角色；开局作息标签不同、位置/路线独立；派活只叫一个，另一人继续日常
+- 第二单交给另一个空闲角色；两单 `workerId` 分别为 v0/v1、`buildingId` 不同、不串任务
+- 双忙时共 6 条队列（每人 3 条）都成功，第 7 条被拒「队列也满了」；排队不影响在干的两单
+- 两人各自交付：`deliveries.mock=2, ledger=0`，`workerId` 保留可追溯，无串单
+- 3 角色：传 `villagerNames` 3 个名字 → v0/v1/v2；3 单分别派 3 人；3 人都忙时第 4 单进队列
+- 两 sim 同命令同步长快照 **deepEqual**
+- 未回退：台账 `order` 先派高优先单、`blockedQuestion` 透传、同铺占位不重复、台账单人工完成仍被拒、queue 仍工作
+
+### 3) 问题分级
+
+| 级别 | 问题 | 说明 / 建议 |
+|---|---|---|
+| **P0/P1/P2** | 无 | — |
+| P3（信息） | `report.ts` 的日报/日记仍只写 `snapshot.villager`（主角色） | 助手交付不会进日报/日记；多人世界建议按 `workerId` 汇总或遍历 `villagers` |
+| P3（信息） | `completeManually()` 取第一个 `working` 角色 | 两人同时干活时单按钮无法指定收尾对象；UI 入口限制，逻辑本身未串单 |
+| P3（信息） | 3 角色只有 `Simulation` API（`villagerNames`）支持 | `SandboxScene`/`main.ts` 没有配置入口，要 3 人仍需改代码；文档已注明"传 3 个名字即可扩" |
+| P3（信息） | `cancelPending()` 省略 id 时从最后角色的队尾撤 | 与单角色时"最后一条"语义略有差别（非全局入队时间序）；有 id 时行为明确 |
+
+**总评：通过。** 两个角色拥有独立作息/任务/队列/计时器，派活、归属、统计、确定性均实测正确；
+50 项渲染冒烟 + 双人截图证明渲染层多实例成立；既有 complete/order/blocked/queue 行为未回退。
+
+---
+
 # 附录 A：证据文件清单（工作区 `C:\Users\18712\.dsh\bot\workspace\recon\`）
 
 ## task-7
@@ -987,6 +1185,34 @@ Remove-Item Env:E2E_EVIDENCE
 | `e2e-task16-snapshot-evidence.json` + `recon\e2e-task16-copy.mjs` | e2e 临时副本手工抓完整浏览器快照 `blockedQuestion`（与真实帧 id/文本一致） |
 | `eval\screens\15-blocked-question-status.png` / `16-blocked-question-cleared.png` | 状态行展示 / 转 running 后清除 |
 
+## task-10 / 提交与重构复验
+
+| 文件 | 内容 |
+|---|---|
+| `task10-check.log` / `task10-npm-test.log` | check 0、**96/96**（新增 7 项 ok 79–85） |
+| `s1-task10-queue-probe.log` | QA 排队对抗 24/24（入队/上限/撤销/自动开工/确定性/台账优先/行礼 sync） |
+| `task10-smoke-sandbox.log` / `task10-smoke-ledger.log` | 沙盒 **59/59**、台账 **21/21** |
+| `task10-check-protocol.log` / `task10-test-core.log` | 主产品 PASS / 64 passed 0 failed |
+| `task10-cross-task15.log` / `task10-cross-task12.log` | 交叉 16/16、8/8 |
+| `task10-gate-run1..3.log` | 门禁 3 连跑 PASS，每次 96/96 |
+| `task10-gate-npm-missing.log` | P3 证据：PATH 清空后仍 Traceback（WinError 87），exit 1 |
+| `refactor\roster.before.json` / `refactor\roster.after.json` | /roster 重构前后基线（SHA256 相同，823 字符） |
+| `s1-task12-adapters-8001.json` / 运行时对比 | /adapters 结构未变（1478 字符，与 8000 一致） |
+| `commit-340d0ab\`（git archive 隔离快照） | 提交级门禁 3/3、90/90、smoke 53/21 的干净环境 |
+| `task10-cleanup.log` | 端口释放、8000 PID/启动时间锚点、data 未被写（commissions.db） |
+
+## task-17（S2-1 多角色）
+
+| 文件 | 内容 |
+|---|---|
+| `task17-check.log` / `task17-npm-test.log` | check 0、**100/100**（新增 11 项 ok 79–89） |
+| `s1-task17-multivillager-probe.log` | QA 多角色对抗 26/26（独立作息/换人/双忙队列/归属/3 人/确定性/回归） |
+| `task17-smoke-sandbox.log` / `task17-smoke-ledger.log` | 沙盒 **66/66**、台账 **21/21** |
+| `task17-check-protocol.log` / `task17-test-core.log` | 主产品 PASS / **64 passed 0 failed**（venv python） |
+| `eval\screens\01-salute.png` | 双人同屏 + 多角色状态行（莞尔行礼 / 阿雾在街口） |
+| `task17-gate-npm-missing.log` | 8a95c94 复验：npm 缺失时 FAIL 且无 Traceback |
+| `task17-cleanup.log` | 端口释放、8000 PID/启动时间锚点 |
+
 # 附录 B：复验顺序（各卡）
 
 ```powershell
@@ -1042,6 +1268,27 @@ Get-NetTCPConnection -LocalPort 5188,5190,8001,8000 -State Listen -ErrorAction S
   60 **码点**截断（emoji surrogate 不劈开）、转 running/收工清除、空值不显示；QA 纯逻辑 27/27 + 浏览器 17/17；
   全程仅 GET、无 answer 入口；真帧 e2e 23/23 并手工抓到浏览器 `blockedQuestion` 与真实帧逐字一致（push=0）。
   `projection.ts` 本卡未改（原因见卡 9）
+- **task-10（S1-10）：通过**（14:24–14:28）——忙时入队不拒单、MAX_PENDING=3、台账优先+FIFO、
+  撤最后/按 id/空队列撤、clearDeparture 四路径、两 sim 同命令同步长 deepEqual、行礼中 sync 收工/撤单
+  不残留；96/96、check 0、smoke **59/59 + 21/21**、check_protocol PASS、test_core 64/0；
+  task-15/12 交叉 16/16、8/8；P3：smoke 里程碑断言放宽为 `>=1`
+- **提交与重构复验（340d0ab / b656488 / 150b2a7）：通过（1 条 P3）**——提交范围 25/2/2 文件、
+  无主产品夹带；roster_view 已移除、`/roster` 自包含、823 字符与基线逐字一致、`/adapters` 1478 字符不变；
+  门禁 3/3 PASS（96/96）；150b2a7 的 CI 统一走脚本、paths 合理；**P3**：`PATH` 清空（npm 缺失）时
+  仍 `Traceback (WinError 87)`（exit 1，安全失败），与提交说明“不再 traceback”不符
+- **最终收口（14:28:40）**：5188/8001/5189 无监听；8000 PID 22996、start 2026-10-18 16:40:34 未重启；
+  `data/commissions.db` 未被写（mtime 仍 10:43:06）；`data/memory.db` 14:27:33 的 mtime 变化来自 8000
+  自身会话写入（ledger smoke WS 触发，非 QA 写台账）；临时 e2e 目录 0、无 `.tmp` 残留
 - **task-15/16 收口（14:00）**：5188/8001/5189 无监听；8000 PID 22996、start 2026-10-18 16:40:34 未重启；
   `data/commissions.db` 未被写（mtime 仍 10:43:06）；`data/memory.db` 因 8000 自身会话写入在 13:58:57 有 mtime 变化
   （非 QA 写台账；8000 进程未动）；临时 e2e 目录 0；仓库无 `.tmp*`；新增仅为 QA 文档与 task-14 的脚本/文档
+- **task-17（S2-1 多角色）：通过**（14:37–14:41）——`villagers[]` + `villager` 兼容、每角色独立 state/计时器、
+  队列 `Map<villagerId>`、派活只叫一个/第二单换人/双忙各自排队、`workerId` 归属不串、3 角色可扩、
+  两 sim deepEqual；**100/100**、check 0、smoke **66/66 + 21/21**、check_protocol PASS、test_core **64/0**
+  （venv python）；渲染层多实例由 `SandboxScene` Map 按 id 对齐（`villager.ts` 无需改，截图双人可见）；
+  P3：`report.ts` 仍只写主角色、手动完成不指定哪个角色、3 人无 UI 配置入口
+- **8a95c94（P3 修复）：通过**——仅 `scripts/test_pixel_world.py` +4 行；PATH 清空复测 → `FAIL npm not found`、
+  exit 1、**无 Traceback**，150b2a7 节的 P3 关闭
+- **task-17 收口（14:40:48）**：5188/8001/5189 无监听；8000 PID 22996、start 2026-10-18 16:40:34、health 200
+  未重启；`data/commissions.db` 未被写（mtime 10:43:06）；`data/memory.db` 14:40:25 的变化来自 8000 自身会话写入
+  （ledger smoke WS，非 QA 写台账）；临时目录 0、无 `.tmp` 残留

@@ -95,6 +95,11 @@ S3 视觉垂直切片（与 S2 并行，依赖 D5、D6）
 - S1-3 blocked_question：真帧→快照→状态行，60 码点截断，无回答入口（全程仅 GET）；QA 逻辑 27/27 + 浏览器 17/17，真帧 e2e 复跑 23/23。
 - 全量：`npm test` 90/90、沙盒 smoke 53/53、台账 smoke 21/21、`check_protocol.py` PASS、`test_core.py` 64/0；8000 全程未重启，`data/commissions.db` 未写。
 
+**D7 落地（2026-10-19，commit `b656488`）**：`.github/workflows/pixel-world.yml` 路径触发 CI + `scripts/test_pixel_world.py` 本地独立门禁（`npm run check` + `npm test`，不依赖浏览器/端口），启用前连跑 3 次 PASS（约 3s/次，90/90）。`scripts/run_gates.py` 的接入**暂缓**：该文件含 53 行主产品既有未提交改动，按路径加入一行会混合提交；等 durable 线收尾后接入或由用户批准一次混合提交。浏览器 smoke 按路径触发/本地手跑，不进稳定门禁。
+
+**S2 顺序（用户指定，2026-10-19）**：task-10 任务排队 → task-17 多角色 2–3 → task-20 存档 ADR（一页，先于实现）→ task-18 JSON 存档单槽 + 恢复 → task-19 调试面板。
+**S2 进度（2026-10-19）**：task-10 已完成并经 QA 复验（96/96、沙盒 59/59、台账 21/21）；task-17 已完成并经 QA 复验（**100/100、沙盒 66/66、台账 21/21、test_core 64/0**；P3：日报仍只写主角色）；task-20 ADR 已交付（`docs/ADR_SAVE.md`，状态 proposed，等用户批准后启动 task-18）。
+
 ---
 
 ## 4. S2 — MVP 1.0 硬缺口（依赖 D2、D6）
@@ -102,7 +107,7 @@ S3 视觉垂直切片（与 S2 并行，依赖 D5、D6）
 | # | 任务 | 主负责人 | 范围 | 验收标准 |
 | --- | --- | --- | --- | --- |
 | S2-1 | **多角色 2–3 个小人**：`WorldSnapshot.villager` 单数改角色数组；`Simulation` 内按 id 管理；渲染多实例；例行作息/派活/交付归属到具体角色 | World Builder | `types.ts`、`simulation.ts`、`routines.ts`、`render/villager.ts`、`SandboxScene.ts`、测试 | smoke 新增断言：2 个角色各自有独立 routine；一个在工坊、一个在祭坛；派活只叫一个且不串状态；旧单角色断言改造后全绿 |
-| S2-2 | **JSON 存档单槽 + 恢复**：`Simulation` 增 `toSnapshot()/restore()`（tasks/props/roads/faith/weather/constructions/ledger 状态 + 角色位置状态）；`#save/#load` 或自动槽 | World Builder | `simulation.ts`、`main.ts`、`index.html` 按钮、测试 | 刷新页面后建筑/道路/信仰/任务/角色位置一致（BRIEF 验收 4）；损坏存档不崩、有可读提示 |
+| S2-2 | **JSON 存档单槽 + 恢复**：`Simulation` 增 `toSave()/fromSave()`（tasks/props/roads/faith/weather/constructions + 角色位置/路径/计时 + 等待队列；台账链接态不入档）；`#save/#load` 或自动槽。**决策见 `docs/ADR_SAVE.md`（D-SAVE-1），用户批准后才开工** | World Builder | `simulation.ts`、`main.ts`、`index.html` 按钮、测试 | 刷新页面后建筑/道路/信仰/任务/角色位置一致（BRIEF 验收 4）；读档先与台账对账、未对账不驱动台账单；损坏/高版本不崩、有可读提示 |
 | S2-3 | **上帝调试面板 UI**：基于 `window.Oracle.view()` + `snapshot.events`（最近 50 条，可暂停/过滤），显示实体列表与事件流 | World Builder | `index.html`、新 `src/ui/debug-panel.ts` | 面板能开关；实体/事件实时更新；DOM 面板不遮挡世界，390px 视口不溢出 |
 | S2-4 | 生活工坊语义对齐（D6/`ARCHITECTURE_GAPS` D6）：按裁决改 `writing`→生活口径或新增蓝图 | World Builder | `prefabs.json`、`blueprints.ts`、`projection.ts` | 三工坊与 BRIEF 一一对应；不破坏世界不变量 |
 | S2-5 | 任务排队 + 取消未出发行礼（参考包采纳项 P3）：忙碌时新单进等待队列而非直接拒绝；任务在出发前结束时取消行礼计时器、清路线；队列在状态行/回执可见 | World Builder | `simulation.ts`、`types.ts`、`oracle-panel.ts` | 单测覆盖「忙碌时排队」「排队单被撤」「未出发即结束」；smoke 新增两条断言；不破坏确定性回放 |

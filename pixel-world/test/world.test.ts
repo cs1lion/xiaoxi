@@ -10,7 +10,7 @@ import {
   WorldSetupError,
   type BuiltWorld,
 } from '../src/world/setup.ts';
-import { Simulation } from '../src/world/simulation.ts';
+import { Simulation, MAX_PENDING_DISPATCHES } from '../src/world/simulation.ts';
 import { parseOracle } from '../src/world/oracle.ts';
 import { TASK_PROFILES } from '../src/world/tasks.ts';
 import { MILESTONE_POINTS, POINTS_PER_TASK } from '../src/world/faith.ts';
@@ -158,6 +158,8 @@ test('神谕按动词收敛，认不出的落 unknown', () => {
   assert.deepEqual(parseOracle('放晴吧'), { kind: 'weather', weather: 'clear' });
   assert.equal(parseOracle('今天真好看').kind, 'unknown');
   assert.equal(parseOracle('   ').kind, 'unknown');
+  assert.equal(parseOracle('撤销').kind, 'cancelPending');
+  assert.equal(parseOracle('取消排队').kind, 'cancelPending');
 });
 
 test('「顺手」走原地短活，不抢长活的活', () => {
@@ -250,17 +252,269 @@ test('短活原地办，不进铺子', () => {
   assert.equal(rig.state().tasks[0].status, 'done');
 });
 
-test('手上有活时不接新神谕，世界状态不变', () => {
-  const rig = makeRig();
+// 两个角色都忙时，新神谕才进等待队列。
+function makeBothBusy(rig: Rig): void {
   rig.sim.enqueue({ kind: 'dispatch', taskKind: 'code', summary: '写一个脚本' });
   rig.sim.update(16);
-  rig.tick(800);
-  rig.tick(200);
+  rig.sim.enqueue({ kind: 'dispatch', taskKind: 'research', summary: '查一下' });
+  rig.sim.update(16);
+  rig.runUntil(() => rig.state().villagers.every((item) => item.mode === 'working'), 20_000);
+}
+
+test('两个角色各有一条独立作息，派活只叫一个', () => {
+  const rig = makeRig();
+  rig.tick(3400);
+  const idle = rig.state();
+  assert.equal(idle.villagers.length, 2, '起步两个角色');
+  assert.deepEqual(idle.villagers.map((item) => item.name), ['莞尔', '阿雾']);
+  assert.deepEqual(idle.villagers.map((item) => item.id), ['v0', 'v1']);
+  assert.ok(idle.villagers.every((item) => item.routine !== null), '两个人各自在过日子');
+
+  rig.sim.enqueue({ kind: 'dispatch', taskKind: 'code', summary: '写一个脚本' });
+  rig.sim.update(16);
+  const state = rig.state();
+  assert.equal(state.tasks.length, 1, '一次派活只开一单');
+  assert.equal(state.villagers.filter((item) => item.mode === 'saluting').length, 1, '只叫一个人');
+  const worker = state.villagers.find((item) => item.taskId !== null);
+  assert.equal(state.tasks[0]?.workerId, worker?.id, '交付归属记在实际干活的角色上');
+});
+
+test('角色数量可配置：传 3 个名字就是 3 个人', () => {
+  const world = buildWorld(blueprints);
+  const sim = new Simulation({
+    grid: world.grid,
+    buildings: world.buildings,
+    altar: ALTAR,
+    villagerName: '甲',
+    villagerNames: ['甲', '乙', '丙'],
+    spawnBuilding: (prefabId, instanceId) => {
+      const blueprint = blueprints.get(prefabId);
+      return blueprint === undefined
+        ? null
+        : placeBlueprint(world.grid, blueprint, instanceId, ALTAR);
+    },
+  });
+  sim.update(16);
+  const state = sim.snapshot();
+  assert.equal(state.villagers.length, 3);
+  assert.deepEqual(state.villagers.map((item) => item.id), ['v0', 'v1', 'v2']);
+  assert.equal(state.villager.name, '甲', 'villager 兼容字段仍指向主角色');
+});
+
+test('一人在工坊、一人在祭坛；第二单交给另一个空闲角色', () => {
+  const rig = makeRig();
+  rig.sim.enqueue({ kind: 'dispatch', taskKind: 'code', summary: '写一个脚本' });
+  rig.runUntil(() => rig.state().villager.mode === 'working', 20_000);
+  let state = rig.state();
+  assert.equal(state.villagers[0]?.mode, 'working');
+  assert.equal(state.villagers[1]?.mode, 'idle', '另一个人还在祭坛');
+  assert.equal(state.villagers[1]?.taskId, null);
 
   rig.sim.enqueue({ kind: 'dispatch', taskKind: 'research', summary: '查一下' });
+  rig.sim.update(16);
+  rig.runUntil(
+    () => rig.state().villagers.every((item) => item.mode === 'working'),
+    20_000,
+  );
+  state = rig.state();
+  const workers = state.villagers.map((item) => item.taskId);
+  assert.notEqual(workers[0], workers[1], '两个人各干各的，不串任务');
+  const buildings = state.tasks
+    .filter((item) => item.status === 'in_progress')
+    .map((item) => item.buildingId);
+  assert.equal(new Set(buildings).size, 2, '两单在不同铺子');
+});
+
+test('两个角色都忙时新神谕进队列，交付后自动开工', () => {
+  const rig = makeRig();
+  makeBothBusy(rig);
+  assert.equal(rig.state().tasks.length, 2);
+
+  rig.sim.enqueue({ kind: 'dispatch', taskKind: 'writing', summary: '整理便笺' });
   const result = rig.sim.update(16);
-  assert.equal(result[0].ok, false);
-  assert.equal(rig.state().tasks.length, 1);
+  assert.equal(result[0].ok, true, '都忙时不拒单');
+  assert.ok(result[0].message.includes('已排队（第 1 位）'), result[0].message);
+  assert.equal(rig.state().pending.length, 1, '排队单在快照里可见');
+  assert.equal(rig.state().tasks.length, 2, '排队时还不建 TaskRecord');
+
+  // 交付主角色那单；队列在它空下来后自动派发。
+  rig.sim.enqueue({ kind: 'complete' });
+  rig.sim.update(16);
+  rig.runUntil(
+    () => rig.state().tasks[2]?.status === 'in_progress',
+    20_000,
+  );
+  const state = rig.state();
+  assert.equal(state.pending.length, 0, '出队后队列清空');
+  assert.equal(state.tasks[2]?.kind, 'writing', '按原任务类型开工');
+  assert.equal(state.tasks[2]?.status, 'in_progress');
+});
+
+test('等待队列按角色分：每人 3 条，全部占满才拒单', () => {
+  const rig = makeRig();
+  makeBothBusy(rig);
+
+  for (let i = 1; i <= MAX_PENDING_DISPATCHES * 2; i += 1) {
+    rig.sim.enqueue({ kind: 'dispatch', taskKind: 'quick', summary: `排队 ${i}` });
+  }
+  rig.sim.enqueue({ kind: 'dispatch', taskKind: 'quick', summary: '超出的那条' });
+  const results = rig.sim.update(16);
+  assert.ok(
+    results.slice(0, MAX_PENDING_DISPATCHES * 2).every((item) => item.ok),
+    '两个角色各 3 条都排得下',
+  );
+  assert.equal(results[MAX_PENDING_DISPATCHES * 2]?.ok, false, '全满才拒');
+  assert.ok(results[MAX_PENDING_DISPATCHES * 2]?.message.includes('队列也满了'));
+  const pending = rig.state().pending;
+  assert.equal(pending.length, MAX_PENDING_DISPATCHES * 2);
+  assert.deepEqual(
+    [...new Set(pending.map((item) => item.villagerId))].sort(),
+    ['v0', 'v1'],
+    '队列按角色分',
+  );
+  assert.equal(rig.state().tasks.length, 2, '被拒的单没有进台账');
+});
+
+test('撤销排队：省略 id 撤最后一条，可按 id 撤，空了再撤被拒', () => {
+  const rig = makeRig();
+  makeBothBusy(rig);
+  rig.sim.enqueue({ kind: 'dispatch', taskKind: 'quick', summary: '第一条' });
+  rig.sim.enqueue({ kind: 'dispatch', taskKind: 'quick', summary: '第二条' });
+  rig.sim.update(16);
+  const queued = rig.state().pending;
+  assert.deepEqual(queued.map((item) => item.summary), ['第一条', '第二条']);
+  assert.deepEqual(queued.map((item) => item.villagerId), ['v0', 'v1']);
+  assert.equal(queued[0]?.source, 'oracle');
+
+  // 撤销最后一条（省略 id）：全局最后一条在 v1 队列里。
+  rig.sim.enqueue({ kind: 'cancelPending' });
+  assert.equal(rig.sim.update(16)[0].ok, true);
+  assert.deepEqual(rig.state().pending.map((item) => item.summary), ['第一条']);
+
+  // 按 id 撤销剩下那条。
+  rig.sim.enqueue({ kind: 'cancelPending', id: queued[0]?.id });
+  assert.equal(rig.sim.update(16)[0].ok, true);
+  assert.equal(rig.state().pending.length, 0);
+
+  // 队列空了再撤：拒绝，但世界不动。
+  rig.sim.enqueue({ kind: 'cancelPending' });
+  assert.equal(rig.sim.update(16)[0].ok, false);
+  assert.equal(rig.state().tasks.length, 2, '撤销不碰正在干的活');
+});
+
+test('交付归属到实际干活的角色，交付统计不串', () => {
+  const rig = makeRig();
+  makeBothBusy(rig);
+  assert.equal(rig.state().deliveries.mock, 0);
+
+  rig.sim.enqueue({ kind: 'complete' });
+  rig.sim.update(16);
+  let state = rig.state();
+  assert.equal(state.villagers[0]?.mode, 'delivering', '主角色那单先交付');
+  assert.equal(state.villagers[1]?.mode, 'working', '另一人还在工坊');
+  assert.equal(state.deliveries.mock, 1);
+
+  rig.sim.enqueue({ kind: 'complete' });
+  rig.sim.update(16);
+  state = rig.state();
+  assert.equal(state.villagers[1]?.mode, 'delivering', '第二单由它自己的角色交付');
+  assert.equal(state.deliveries.mock, 2);
+});
+
+test('固定步长回放：同样的命令与步长，快照完全一致', () => {
+  const script = (rig: Rig): void => {
+    rig.sim.enqueue({ kind: 'dispatch', taskKind: 'code', summary: '写一个脚本' });
+    rig.sim.update(16);
+    rig.sim.enqueue({ kind: 'dispatch', taskKind: 'research', summary: '查一下' });
+    rig.sim.update(16);
+    rig.sim.enqueue({ kind: 'dispatch', taskKind: 'writing', summary: '整理便笺' });
+    rig.sim.update(100);
+    rig.tick(800);
+    rig.sim.enqueue({ kind: 'dispatch', taskKind: 'quick', summary: '顺手看一眼' });
+    rig.sim.update(100);
+    rig.sim.enqueue({ kind: 'cancelPending' });
+    rig.sim.update(100);
+  };
+  const a = makeRig();
+  const b = makeRig();
+  script(a);
+  script(b);
+  assert.deepEqual(a.state(), b.state(), '同命令同步长必须逐字段一致');
+});
+
+test('台账优先：空闲时先派台账单，oracle 排队单继续等', () => {
+  const rig = makeRig();
+  makeBothBusy(rig);
+  rig.sim.enqueue({ kind: 'dispatch', taskKind: 'quick', summary: '排队的 oracle 单' });
+  rig.sim.update(16);
+  assert.equal(rig.state().pending.length, 1);
+
+  // 主角色那单交付后：台账有单在册，先派台账的。
+  rig.sim.enqueue({
+    kind: 'sync',
+    tasks: [{ commissionId: 'c_ledger', kind: 'writing', title: '台账的活', agentName: '甲' }],
+    finished: [],
+    connected: true,
+    order: ['c_ledger'],
+  });
+  rig.sim.enqueue({ kind: 'complete' });
+  rig.sim.update(16);
+  rig.runUntil(
+    () =>
+      rig.state().villagers[0]?.taskId === 'c_ledger' &&
+      (rig.state().villagers[0]?.mode === 'saluting' || rig.state().villagers[0]?.mode === 'toWork'),
+    20_000,
+  );
+  const state = rig.state();
+  assert.equal(state.villagers[0]?.taskId, 'c_ledger', '台账单先派给空出来的人');
+  assert.equal(state.pending.length, 1, 'oracle 排队单还在等');
+});
+
+test('行礼还没出发时台账收工：取消行礼、清路线，不残留旧目标', () => {
+  const rig = makeRig();
+  rig.sim.enqueue({
+    kind: 'sync',
+    tasks: [{ commissionId: 'c_1', kind: 'writing', title: '台账的活', agentName: '甲' }],
+    finished: [],
+    connected: true,
+  });
+  rig.sim.update(16);
+  assert.equal(rig.state().villager.mode, 'saluting');
+
+  // 还在行礼（未出发）时台账收工：直接转交付，不能继续行礼/走旧路线。
+  rig.sim.enqueue({ kind: 'sync', tasks: [], finished: ['c_1'], connected: true });
+  rig.sim.update(16);
+  const state = rig.state();
+  assert.equal(state.villager.mode, 'delivering', '行礼被取消，直接交付');
+  assert.equal(state.villager.bubble, '任务交付！');
+
+  // 交付完回祭坛；再派一单走新路线，不残留上一单的 pendingRoute。
+  rig.runUntil(() => rig.state().villager.mode === 'idle', 20_000);
+  rig.sim.enqueue({ kind: 'dispatch', taskKind: 'code', summary: '新活' });
+  rig.sim.update(16);
+  rig.runUntil(() => rig.state().villager.mode === 'working', 20_000);
+  assert.equal(rig.state().tasks.at(-1)?.summary, '新活');
+});
+
+test('行礼还没出发时台账撤单：回到空闲，旧行礼计时器不再推进', () => {
+  const rig = makeRig();
+  rig.sim.enqueue({
+    kind: 'sync',
+    tasks: [{ commissionId: 'c_1', kind: 'writing', title: '台账的活', agentName: '甲' }],
+    finished: [],
+    connected: true,
+  });
+  rig.sim.update(16);
+  assert.equal(rig.state().villager.mode, 'saluting');
+
+  rig.sim.enqueue({ kind: 'sync', tasks: [], finished: [], connected: true });
+  rig.sim.update(16);
+  assert.equal(rig.state().villager.mode, 'idle');
+  assert.equal(rig.state().tasks.length, 0);
+
+  // 已经过了旧的 saluteUntil：不能再把她推进 toWork。
+  rig.tick(1000);
+  assert.equal(rig.state().villager.mode, 'idle', '旧行礼计时器已取消');
 });
 
 test('空手时交付被拒绝', () => {

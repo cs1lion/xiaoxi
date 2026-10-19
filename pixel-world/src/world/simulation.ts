@@ -2,6 +2,8 @@
  *
  * 外部只能从一个口子进来：enqueue()。命令在下次 update() 开头统一结算，
  * 渲染循环里不会出现半更新的中间态。
+ *
+ * 角色是数组：每个小人各自有状态机、路线、任务与等待队列；命令一次只叫一个人。
  */
 
 import type { WorldGrid } from './grid.ts';
@@ -24,11 +26,13 @@ import type {
   ConstructionSnapshot,
   Facing,
   GridPoint,
+  PendingDispatch,
   PlacedBuilding,
   TaskRecord,
   TaskKind,
   Vec2,
   VillagerMode,
+  VillagerSnapshot,
   Weather,
   WorkstationActivity,
   WorkstationSnapshot,
@@ -41,6 +45,7 @@ import { excerptBlockedQuestion } from './types.ts';
 export type WorldCommand =
   | { readonly kind: 'dispatch'; readonly taskKind: TaskKind; readonly summary: string }
   | { readonly kind: 'complete' }
+  | { readonly kind: 'cancelPending'; readonly id?: string }
   | { readonly kind: 'setWeather'; readonly weather: Weather }
   | { readonly kind: 'build'; readonly prefabId: string; readonly instanceId: string }
   /** 台账快照。这是世界接真实工作的唯一入口。 */
@@ -81,11 +86,19 @@ export interface SimulationDeps {
   readonly buildings: readonly PlacedBuilding[];
   readonly altar: GridPoint;
   readonly villagerName: string;
+  /**
+   * 角色名。至少 1 个；省略时是「主角色 + 助手」两人。
+   * 传 3 个名字即可扩到 3 人，逻辑不需要再改。
+   */
+  readonly villagerNames?: readonly string[];
   /** 造物主：把一栋新楼落进世界。返回 null 表示空间不够。 */
   readonly spawnBuilding?: (prefabId: string, instanceId: string) => NewBuilding | null;
 }
 
+/** 一个角色的完整本地状态。渲染层只读快照，不碰这里。 */
 interface Villager {
+  readonly id: string;
+  readonly name: string;
   mode: VillagerMode;
   pos: Vec2;
   facing: Facing;
@@ -100,6 +113,15 @@ interface Villager {
   routineIndex: number;
   routineLabel: string | null;
   inPlaceUntil: number;
+  /** 神谕下达时算好的路线，等行礼结束再交给她走。 */
+  pendingRoute: GridPoint[];
+  /** 这一趟要去哪栋楼。台账同步派活时同样走这条路。 */
+  pendingBuilding: PlacedBuilding | null;
+}
+
+interface WorkstationState {
+  readonly remainingMs: number;
+  readonly totalMs: number;
 }
 
 const SPEED_CELLS_PER_SECOND = 3;
@@ -109,6 +131,9 @@ const COOLING_MS = 900;
 const EVENT_LIMIT = 60;
 const CONSTRUCTION_MS = 3200;
 const QUICK_DONE_MS = 900;
+const DEFAULT_ASSISTANT_NAME = '阿雾';
+/** 每个角色自己的等待队列上限。两位都忙且各自满了才拒单。 */
+export const MAX_PENDING_DISPATCHES = 3;
 
 /** 交付攒到里程碑时，世界多一件东西。 */
 const FAITH_MILESTONE = MILESTONE_POINTS;
@@ -116,11 +141,10 @@ const FAITH_MILESTONE = MILESTONE_POINTS;
 export class Simulation {
   private readonly grid: WorldGrid;
   private readonly altar: GridPoint;
-  private readonly villagerName: string;
   private readonly spawnBuilding: ((prefabId: string, instanceId: string) => NewBuilding | null) | undefined;
 
   private readonly buildings: PlacedBuilding[];
-  private readonly villager: Villager;
+  private readonly villagers: Villager[];
   private readonly tasks: TaskRecord[] = [];
   private readonly activities = new Map<string, WorkstationActivity>();
   private readonly events: WorldEvent[] = [];
@@ -128,7 +152,7 @@ export class Simulation {
   private readonly lastResults: CommandResult[] = [];
   private readonly props: WorldProp[] = [];
   private readonly roads: GridPoint[] = [];
-  private readonly constructions = new Map<string, { remainingMs: number; totalMs: number }>();
+  private readonly constructions = new Map<string, WorkstationState>();
 
   private readonly beats: readonly RoutineBeat[];
   private weather: WeatherState = clearWeather();
@@ -148,10 +172,9 @@ export class Simulation {
   /** 台账给的派活优先级（commissionId 从高到低）；空表示没给顺序，退回插入序。 */
   private ledgerOrder: readonly string[] = [];
 
-  /** 神谕下达时算好的路线，等行礼结束再交给她走。 */
-  private pendingRoute: GridPoint[] = [];
-  /** 这一趟要去哪栋楼。台账同步派活时同样走这条路。 */
-  private pendingBuilding: PlacedBuilding | null = null;
+  /** 每个角色自己的等待队列（FIFO）。只存在 Simulation 内，随快照暴露。 */
+  private readonly pending = new Map<string, PendingDispatch[]>();
+  private nextPendingNumber = 1;
 
   private now = 0;
   private nextTaskNumber = 1;
@@ -159,14 +182,16 @@ export class Simulation {
   constructor(deps: SimulationDeps) {
     this.grid = deps.grid;
     this.altar = deps.altar;
-    this.villagerName = deps.villagerName;
     this.spawnBuilding = deps.spawnBuilding;
     this.buildings = [...deps.buildings];
     this.beats = routineBeats(deps.altar, deps.grid);
-    this.villager = {
-      mode: 'idle',
+    const names = deps.villagerNames ?? [deps.villagerName, DEFAULT_ASSISTANT_NAME];
+    this.villagers = names.map((name, index) => ({
+      id: `v${index}`,
+      name,
+      mode: 'idle' as const,
       pos: { x: deps.altar.x, y: deps.altar.y },
-      facing: 'down',
+      facing: 'down' as const,
       visible: true,
       path: [],
       taskId: null,
@@ -174,11 +199,15 @@ export class Simulation {
       bubbleUntil: 0,
       saluteUntil: 0,
       deliverUntil: 0,
-      nextRoutineAt: 1200,
-      routineIndex: 0,
+      // 错开作息起点，两个人不会像复制粘贴一样同进同出。
+      nextRoutineAt: 1200 + index * 1400,
+      routineIndex: index * 2,
       routineLabel: null,
       inPlaceUntil: 0,
-    };
+      pendingRoute: [],
+      pendingBuilding: null,
+    }));
+    for (const villager of this.villagers) this.pending.set(villager.id, []);
     for (const building of this.buildings) {
       this.activities.set(building.instanceId, { kind: 'idle' });
     }
@@ -201,9 +230,11 @@ export class Simulation {
     }
     this.weather = stepWeather(this.weather, deltaMs);
     this.stepConstructions(deltaMs);
-    this.stepVillager(deltaMs);
+    for (const villager of this.villagers) this.stepVillager(villager, deltaMs);
     this.stepWorkstations();
-    this.expireBubble();
+    for (const villager of this.villagers) this.expireBubble(villager);
+    // 固定步长的最后一拍：每个空闲角色先接台账的活，再轮到自己队列里的神谕。
+    this.pumpPending();
     return this.lastResults;
   }
 
@@ -232,24 +263,18 @@ export class Simulation {
         totalMs: state.totalMs,
       }),
     );
+    const villagers = this.villagers.map((villager) => this.snapshotVillager(villager));
     return {
       now: this.now,
       altar: this.altar,
-      villager: {
-        name: this.villagerName,
-        mode: this.villager.mode,
-        pos: this.villager.pos,
-        facing: this.villager.facing,
-        visible: this.villager.visible,
-        taskId: this.villager.taskId,
-        bubble: this.villager.bubble,
-        routine: this.villager.routineLabel,
-        umbrella: this.weather.kind === 'rain' && this.villager.mode !== 'working',
-      },
+      /** 兼容旧调用方：villager 等于 villagers[0]（主角色）。 */
+      villager: villagers[0] as VillagerSnapshot,
+      villagers,
       buildings: this.buildings,
       workstations,
       constructions,
       tasks: this.tasks.map((task) => ({ ...task })),
+      pending: this.allPending(),
       props: this.props,
       roads: this.roads,
       events: this.events.slice(-12),
@@ -280,6 +305,8 @@ export class Simulation {
         return this.dispatch(command.taskKind, command.summary);
       case 'complete':
         return this.completeManually();
+      case 'cancelPending':
+        return this.cancelPending(command.id);
       case 'setWeather':
         return this.setWeather(command.weather);
       case 'build':
@@ -293,9 +320,6 @@ export class Simulation {
   /**
    * 台账快照落地。这是世界接真实工作的入口，也是唯一一条**替换**式命令：
    * 沙盒的活照旧由计时器收尾，台账的活只有台账说完了才算完。
-   *
-   * 正在跑的活如果被台账撤回（单被取消/归档），她手上那单要收掉，不能
-   * 继续对着一个不存在的督办冒烟。
    */
   private sync(
     incoming: readonly {
@@ -303,9 +327,7 @@ export class Simulation {
       readonly kind: TaskKind;
       readonly title: string;
       readonly agentName: string;
-      /** 台账状态；blocked 表示这单在等用户答复。旧调用方省略时按无 blocked 处理。 */
       readonly status?: string;
-      /** blocked 单要请示的问题；只透传，世界不回答。省略/空串即没有。 */
       readonly blockedQuestion?: string;
     }[],
     finished: readonly string[],
@@ -343,14 +365,14 @@ export class Simulation {
       task.blockedQuestion = blockedQuestions.get(task.id) ?? null;
     }
 
-    // 台账说收工了：她手上的这单走正常交付，不是被撤。
-    // 快照不完整时，"不在快照里"不等于被撤回：只认明确的收工，其余保持现状。
-    const active = this.activeTask();
-    if (active !== null && active.source === 'ledger') {
+    // 台账说收工了：由实际接下这单的角色走正常交付；被撤则停手。
+    for (const villager of this.villagers) {
+      const active = this.activeTaskOf(villager);
+      if (active === null || active.source !== 'ledger') continue;
       if (finishedIds.has(active.id)) {
-        this.finishActiveTask();
+        this.finishActiveTask(villager);
       } else if (complete && !next.has(active.id)) {
-        this.abandonActiveTask();
+        this.abandonActiveTask(villager);
       }
     }
 
@@ -377,12 +399,12 @@ export class Simulation {
         createdAt: this.now,
         completedAt: null,
         blockedQuestion: blockedQuestions.get(item.commissionId) ?? null,
+        workerId: null,
       });
       added += 1;
     }
 
     if (added > 0) this.log('info', `台账来了 ${added} 条新督办。`);
-    this.assignFromLedger();
     let message = `台账已同步，${this.tasks.length} 条在册。`;
     const waiting = this.tasks.find((task) => task.blockedQuestion !== null);
     if (waiting !== undefined && waiting.blockedQuestion !== null) {
@@ -403,65 +425,75 @@ export class Simulation {
   }
 
   /**
-   * 台账有活、她闲着，就挑优先级最高的那条派下去。
-   *
-   * 这就是「操作台和世界连通」的那一步：你在屏幕外派单，她在屏幕里动起来。
-   * 只在她闲着时派；已经在干活就不打断，因为打断是神谕的语义，不是同步器的。
-   * 优先级来自台账：LedgerView.order（blocked→running→auditing→其它，同级稳定）；
-   * 没带顺序（旧服务/旧快照）时保持插入序，与改造前一致。
+   * 给一个空闲角色派台账的活：按台账 order 挑第一条接得下的。
+   * 一个角色一次只接一单；铺子被占/施工/走不通就跳过，等下一拍。
    */
-  private assignFromLedger(): void {
-    if (!this.isFree()) return;
-    const task = this.nextLedgerTask();
-    if (task === undefined) return;
-    const building = this.buildings.find((item) => item.boundTask === task.kind);
-    if (building === undefined) {
-      this.log('warn', `没有承接 ${task.kind} 的铺子，「${task.summary}」派不下去。`);
+  private assignFromLedgerTo(villager: Villager): void {
+    if (!this.isFree(villager)) return;
+    for (const task of this.nextLedgerTasks()) {
+      const building = this.buildings.find((item) => item.boundTask === task.kind);
+      if (building === undefined) {
+        this.log('warn', `没有承接 ${task.kind} 的铺子，「${task.summary}」派不下去。`);
+        continue;
+      }
+      if (this.constructions.has(building.instanceId)) continue;
+      if (this.activities.get(building.instanceId)?.kind === 'overheating') continue;
+      if (this.buildingBusy(building)) continue;
+      const path = this.grid.path(this.cellOf(villager.pos), building.door);
+      if (path.length === 0) continue;
+      task.buildingId = building.instanceId;
+      task.workerId = villager.id;
+      this.routeToBuilding(villager, task, building, path);
+      this.log('oracle', `台账派活：${task.summary} → ${building.displayName}（${villager.name}）`);
       return;
     }
-    if (this.constructions.has(building.instanceId)) return;
-    if (this.activities.get(building.instanceId)?.kind === 'overheating') return;
-    const path = this.grid.path(this.cellOf(this.villager.pos), building.door);
-    if (path.length === 0) return;
-    task.buildingId = building.instanceId;
-    this.routeToBuilding(task, building, path);
-    this.log('oracle', `台账派活：${task.summary} → ${building.displayName}`);
   }
 
-  /**
-   * 按台账给的优先级挑下一单：不在顺序表里的排后面，同级保持插入序
-   * （Array.prototype.sort 在 V8 里是稳定排序）。台账撤单后下一拍就用新顺序重排。
-   */
-  private nextLedgerTask(): TaskRecord | undefined {
+  /** 按台账给的优先级排好的、还没人接的台账单。 */
+  private nextLedgerTasks(): readonly TaskRecord[] {
     const candidates = this.tasks.filter(
-      (item) => item.source === 'ledger' && item.status === 'assigned',
+      (item) =>
+        item.source === 'ledger' && item.status === 'assigned' && item.workerId === null,
     );
-    if (candidates.length === 0) return undefined;
+    if (candidates.length === 0) return [];
     const rank = (task: TaskRecord): number => {
       const index = this.ledgerOrder.indexOf(task.id);
       return index < 0 ? Number.MAX_SAFE_INTEGER : index;
     };
-    return [...candidates].sort((a, b) => rank(a) - rank(b))[0];
+    return [...candidates].sort((a, b) => rank(a) - rank(b));
+  }
+
+  /** 这栋铺子是否已经被一单活着的工作占着（含正在赶路的那一单）。 */
+  private buildingBusy(building: PlacedBuilding): boolean {
+    const activity = this.activities.get(building.instanceId);
+    if (activity !== undefined && activity.kind !== 'idle') return true;
+    return this.tasks.some(
+      (task) =>
+        task.buildingId === building.instanceId &&
+        task.status !== 'done' &&
+        task.status !== 'failed',
+    );
   }
 
   /** 她手上的活被上游撤回：状态机收回 idle，铺子熄火。 */
-  private abandonActiveTask(): void {
-    const task = this.activeTask();
+  private abandonActiveTask(villager: Villager): void {
+    const task = this.activeTaskOf(villager);
     if (task === null) return;
+    this.clearDeparture(villager);
     task.blockedQuestion = null;
     const building = this.buildingOf(task);
     if (building !== undefined) {
       this.activities.set(building.instanceId, { kind: 'idle' });
     }
-    this.villager.mode = 'idle';
-    this.villager.taskId = null;
-    this.villager.visible = true;
-    this.villager.path = [];
-    this.villager.bubble = '这单被撤了。';
-    this.villager.bubbleUntil = this.now + 1600;
-    this.villager.nextRoutineAt = this.now + 1800;
-    this.villager.routineLabel = null;
-    this.log('warn', `${task.summary} 被上游撤回，她停手了。`);
+    villager.mode = 'idle';
+    villager.taskId = null;
+    villager.visible = true;
+    villager.path = [];
+    villager.bubble = '这单被撤了。';
+    villager.bubbleUntil = this.now + 1600;
+    villager.nextRoutineAt = this.now + 1800;
+    villager.routineLabel = null;
+    this.log('warn', `${task.summary} 被上游撤回，${villager.name}停手了。`);
   }
 
   private setWeather(weather: Weather): CommandResult {
@@ -479,40 +511,45 @@ export class Simulation {
     return { ok: true, message: '天放晴了。' };
   }
 
-  /** 下雨的那一刻，户外的她立刻改主意，不等到下一个作息拍。 */
+  /** 下雨的那一刻，户外还闲着的角色立刻改主意，不等到下一个作息拍。 */
   private scatterToShelter(): void {
-    if (this.villager.mode !== 'idle') return;
-    const cell = this.cellOf(this.villager.pos);
-    const door = shelterTarget(this.buildings, cell);
-    if (door === null) return;
-    const path = this.grid.path(cell, door);
-    if (path.length === 0) return;
-    this.villager.mode = 'sheltering';
-    this.villager.path = path;
-    this.villager.bubble = '下雨了，快躲！';
-    this.villager.bubbleUntil = this.now + 2200;
-    this.villager.routineLabel = '跑到屋檐下躲雨';
+    for (const villager of this.villagers) {
+      if (villager.mode !== 'idle') continue;
+      const cell = this.cellOf(villager.pos);
+      const door = shelterTarget(this.buildings, cell);
+      if (door === null) continue;
+      const path = this.grid.path(cell, door);
+      if (path.length === 0) continue;
+      villager.mode = 'sheltering';
+      villager.path = path;
+      villager.bubble = '下雨了，快躲！';
+      villager.bubbleUntil = this.now + 2200;
+      villager.routineLabel = '跑到屋檐下躲雨';
+    }
   }
 
   private dispatch(taskKind: TaskKind, summary: string): CommandResult {
-    if (!this.isFree()) {
-      const message = '她手上有活，神谕排在后面。';
-      this.log('warn', message);
-      return { ok: false, message };
-    }
+    // 有人空着就叫一个人；全都在忙才进等待队列。
+    const free = this.freeVillager();
+    if (free === null) return this.enqueuePendingDispatch(taskKind, summary);
+    return this.startDispatch(free, taskKind, summary);
+  }
+
+  /** 真正派活给某个角色。调用方保证这个角色空闲。 */
+  private startDispatch(villager: Villager, taskKind: TaskKind, summary: string): CommandResult {
     const profile = TASK_PROFILES[taskKind];
     if (profile.venue === 'in_place') {
-      const task = this.openTask(taskKind, summary, null);
-      this.villager.mode = 'working';
-      this.villager.taskId = task.id;
-      this.villager.visible = true;
-      this.villager.bubble = '这个我顺手就办了。';
-      this.villager.bubbleUntil = this.now + 1400;
-      this.villager.routineLabel = profile.label;
-      this.villager.inPlaceUntil = this.now + profile.estimateMs;
-      this.villager.path = [];
+      const task = this.openTask(taskKind, summary, null, villager.id);
+      villager.mode = 'working';
+      villager.taskId = task.id;
+      villager.visible = true;
+      villager.bubble = '这个我顺手就办了。';
+      villager.bubbleUntil = this.now + 1400;
+      villager.routineLabel = profile.label;
+      villager.inPlaceUntil = this.now + profile.estimateMs;
+      villager.path = [];
       task.status = 'in_progress';
-      this.log('oracle', `神谕：${summary}（原地办）`);
+      this.log('oracle', `神谕：${summary}（${villager.name}原地办）`);
       return { ok: true, message: '这点小事她当场就办。' };
     }
 
@@ -532,39 +569,154 @@ export class Simulation {
       this.log('warn', message);
       return { ok: false, message };
     }
-    const path = this.grid.path(this.cellOf(this.villager.pos), building.door);
+    if (this.buildingBusy(building)) {
+      const message = `${building.displayName} 正忙，这单得等它空出来。`;
+      this.log('warn', message);
+      return { ok: false, message };
+    }
+    const path = this.grid.path(this.cellOf(villager.pos), building.door);
     if (path.length === 0) {
       const message = `${building.displayName} 门口走不过去。`;
       this.log('warn', message);
       return { ok: false, message };
     }
 
-    const task = this.openTask(taskKind, summary, building.instanceId);
-    this.routeToBuilding(task, building, path);
+    const task = this.openTask(taskKind, summary, building.instanceId, villager.id);
+    this.routeToBuilding(villager, task, building, path);
 
-    this.log('oracle', `神谕：${summary} → ${building.displayName}`);
+    this.log('oracle', `神谕：${summary} → ${building.displayName}（${villager.name}）`);
     return { ok: true, message: `神谕已送达 ${building.displayName}。` };
+  }
+
+  /** 所有人都忙时把神谕放进等待队列；按角色分，选排队最少的那位。 */
+  private enqueuePendingDispatch(taskKind: TaskKind, summary: string): CommandResult {
+    let target = this.villagers[0] as Villager;
+    for (const villager of this.villagers) {
+      if (this.pendingOf(villager).length < this.pendingOf(target).length) target = villager;
+    }
+    const queue = this.pendingOf(target);
+    if (queue.length >= MAX_PENDING_DISPATCHES) {
+      const message = `她手上有活，队列也满了（每人最多 ${MAX_PENDING_DISPATCHES} 条）；这条先不接。`;
+      this.log('warn', message);
+      return { ok: false, message };
+    }
+    queue.push({
+      id: `p${this.nextPendingNumber}`,
+      kind: taskKind,
+      summary,
+      requestedAt: this.now,
+      source: 'oracle',
+      villagerId: target.id,
+    });
+    this.nextPendingNumber += 1;
+    const position = queue.length;
+    this.log('info', `神谕排队：${summary}（${target.name}，第 ${position} 位）`);
+    return { ok: true, message: `她手上有活，神谕已排队（第 ${position} 位）。` };
+  }
+
+  /**
+   * 每个空闲角色各自推进：先接台账的活（真实活优先），再按 FIFO 开自己的排队单。
+   * 固定步长末尾调用一次；只依赖 this.now 与命令顺序，回放可复现。
+   */
+  private pumpPending(): void {
+    for (const villager of this.villagers) {
+      if (!this.isFree(villager)) continue;
+      this.assignFromLedgerTo(villager);
+      if (!this.isFree(villager)) continue;
+      const queue = this.pendingOf(villager);
+      const next = queue[0];
+      if (next === undefined) continue;
+      // 场地原因暂时派不下去就留在队首，下一拍再试，不丢单。
+      if (!this.startDispatch(villager, next.kind, next.summary).ok) continue;
+      queue.shift();
+      this.log('oracle', `排队的神谕开工：${next.summary}（${villager.name}）`);
+    }
+  }
+
+  /** 撤销排队中的神谕；省略 id 撤最后一条。只动等待队列，不动正在干的活。 */
+  private cancelPending(id?: string): CommandResult {
+    const queues = this.villagers.flatMap((villager) => this.pendingOf(villager));
+    if (queues.length === 0) {
+      const message = '没有排队的单可撤销。';
+      this.log('warn', message);
+      return { ok: false, message };
+    }
+    if (id === undefined) {
+      // 撤全局最后一条：从后往前找第一个非空队列。
+      for (let index = this.villagers.length - 1; index >= 0; index -= 1) {
+        const villager = this.villagers[index] as Villager;
+        const queue = this.pendingOf(villager);
+        const removed = queue.pop();
+        if (removed !== undefined) return this.finishCancel(removed);
+      }
+      const message = '没有排队的单可撤销。';
+      this.log('warn', message);
+      return { ok: false, message };
+    }
+    const target = queues.find((item) => item.id === id);
+    if (target === undefined) {
+      const message = `队列里没有 ${id}。`;
+      this.log('warn', message);
+      return { ok: false, message };
+    }
+    const villager = this.villagers.find((item) => item.id === target.villagerId);
+    if (villager === undefined) {
+      const message = `队列里没有 ${id}。`;
+      this.log('warn', message);
+      return { ok: false, message };
+    }
+    const queue = this.pendingOf(villager);
+    const index = queue.findIndex((item) => item.id === id);
+    const removed = queue.splice(index, 1)[0];
+    if (removed === undefined) {
+      const message = `队列里没有 ${id}。`;
+      this.log('warn', message);
+      return { ok: false, message };
+    }
+    return this.finishCancel(removed);
+  }
+
+  private finishCancel(removed: PendingDispatch): CommandResult {
+    const remaining = this.villagers.reduce(
+      (sum, villager) => sum + this.pendingOf(villager).length,
+      0,
+    );
+    this.log('info', `撤销排队：${removed.summary}（剩 ${remaining} 条）`);
+    return { ok: true, message: `已撤销排队单「${removed.summary}」，队列还剩 ${remaining} 条。` };
+  }
+
+  /** 任务在出发前就结束了：取消行礼计时器、清掉还没交出去的路线与目标楼。 */
+  private clearDeparture(villager: Villager): void {
+    villager.saluteUntil = 0;
+    villager.pendingRoute = [];
+    villager.pendingBuilding = null;
   }
 
   /** 让她停下手上的事、行礼、走进这栋铺子。派活与台账同步共用这一条路。 */
   private routeToBuilding(
+    villager: Villager,
     task: TaskRecord,
     building: PlacedBuilding,
     path: readonly GridPoint[],
   ): void {
-    this.villager.mode = 'saluting';
-    this.villager.path = [];
-    this.villager.taskId = task.id;
-    this.villager.bubble = '！吾神降旨！';
-    this.villager.bubbleUntil = this.now + 1500;
-    this.villager.saluteUntil = this.now + SALUTE_MS;
-    this.villager.facing = 'down';
-    this.villager.routineLabel = null;
-    this.pendingRoute = [...path];
-    this.pendingBuilding = building;
+    villager.mode = 'saluting';
+    villager.path = [];
+    villager.taskId = task.id;
+    villager.bubble = '！吾神降旨！';
+    villager.bubbleUntil = this.now + 1500;
+    villager.saluteUntil = this.now + SALUTE_MS;
+    villager.facing = 'down';
+    villager.routineLabel = null;
+    villager.pendingRoute = [...path];
+    villager.pendingBuilding = building;
   }
 
-  private openTask(kind: TaskKind, summary: string, buildingId: string | null): TaskRecord {
+  private openTask(
+    kind: TaskKind,
+    summary: string,
+    buildingId: string | null,
+    workerId: string,
+  ): TaskRecord {
     const task: TaskRecord = {
       id: `t${this.nextTaskNumber}`,
       kind,
@@ -575,6 +727,7 @@ export class Simulation {
       createdAt: this.now,
       completedAt: null,
       blockedQuestion: null,
+      workerId,
     };
     this.nextTaskNumber += 1;
     this.tasks.push(task);
@@ -582,12 +735,15 @@ export class Simulation {
   }
 
   private completeManually(): CommandResult {
-    if (this.villager.mode !== 'working') {
+    const villager = this.villagers.find(
+      (item) => item.mode === 'working' && this.activeTaskOf(item) !== null,
+    );
+    if (villager === undefined) {
       const message = '她现在没有在干活，无需交付。';
       this.log('warn', message);
       return { ok: false, message };
     }
-    const task = this.activeTask();
+    const task = this.activeTaskOf(villager);
     if (task === null) {
       const message = '她现在没有在干活，无需交付。';
       this.log('warn', message);
@@ -601,10 +757,10 @@ export class Simulation {
     }
     const label = this.ledgerConnected ? '沙盒 Mock' : '离线 Mock';
     if (task.buildingId === null) {
-      this.finishInPlace(task);
+      this.finishInPlace(villager, task);
       return { ok: true, message: `这单办了（${label}，不计入台账）。` };
     }
-    this.finishActiveTask();
+    this.finishActiveTask(villager);
     return { ok: true, message: `成果已交付（${label}，不计入台账）。` };
   }
 
@@ -632,154 +788,184 @@ export class Simulation {
     return { ok: true, message: `${spawned.building.displayName} 开工建造。` };
   }
 
-  // ---------------------------------------------------------------- villager
+  // ---------------------------------------------------------------- villagers
 
-  private isFree(): boolean {
-    return this.villager.mode === 'idle' || this.villager.mode === 'sheltering';
+  private pendingOf(villager: Villager): PendingDispatch[] {
+    return this.pending.get(villager.id) ?? [];
   }
 
-  private stepVillager(deltaMs: number): void {
-    switch (this.villager.mode) {
+  private allPending(): PendingDispatch[] {
+    return this.villagers.flatMap((villager) =>
+      this.pendingOf(villager).map((item) => ({ ...item })),
+    );
+  }
+
+  private isFree(villager: Villager): boolean {
+    return villager.mode === 'idle' || villager.mode === 'sheltering';
+  }
+
+  private freeVillager(): Villager | null {
+    return this.villagers.find((villager) => this.isFree(villager)) ?? null;
+  }
+
+  private snapshotVillager(villager: Villager): VillagerSnapshot {
+    return {
+      id: villager.id,
+      name: villager.name,
+      mode: villager.mode,
+      pos: villager.pos,
+      facing: villager.facing,
+      visible: villager.visible,
+      taskId: villager.taskId,
+      bubble: villager.bubble,
+      routine: villager.routineLabel,
+      umbrella: this.weather.kind === 'rain' && villager.mode !== 'working',
+    };
+  }
+
+  private stepVillager(villager: Villager, deltaMs: number): void {
+    switch (villager.mode) {
       case 'saluting':
-        if (this.now >= this.villager.saluteUntil) {
-          this.villager.mode = 'toWork';
-          this.villager.path = this.pendingRoute;
-          this.pendingRoute = [];
-          if (this.villager.path.length === 0) this.arriveAtWork();
+        if (this.now >= villager.saluteUntil) {
+          villager.mode = 'toWork';
+          villager.path = villager.pendingRoute;
+          villager.pendingRoute = [];
+          if (villager.path.length === 0) this.arriveAtWork(villager);
         }
         return;
       case 'toWork':
-        this.walk(deltaMs);
-        if (this.villager.path.length === 0) this.arriveAtWork();
+        this.walk(villager, deltaMs);
+        if (villager.path.length === 0) this.arriveAtWork(villager);
         return;
       case 'working':
-        this.stepWorking();
+        this.stepWorking(villager);
         return;
       case 'delivering':
-        if (this.now >= this.villager.deliverUntil) {
-          this.villager.mode = 'toAltar';
-          this.villager.path = this.grid.path(this.cellOf(this.villager.pos), this.altar);
-          this.villager.bubble = null;
-          if (this.villager.path.length === 0) this.arriveAtAltar();
+        if (this.now >= villager.deliverUntil) {
+          villager.mode = 'toAltar';
+          villager.path = this.grid.path(this.cellOf(villager.pos), this.altar);
+          villager.bubble = null;
+          if (villager.path.length === 0) this.arriveAtAltar(villager);
         }
         return;
       case 'toAltar':
-        this.walk(deltaMs);
-        if (this.villager.path.length === 0) this.arriveAtAltar();
+        this.walk(villager, deltaMs);
+        if (villager.path.length === 0) this.arriveAtAltar(villager);
         return;
       case 'sheltering':
-        this.walk(deltaMs);
-        if (this.villager.path.length === 0) {
-          this.villager.mode = 'idle';
-          this.villager.nextRoutineAt = this.now + 2500;
-          this.villager.routineLabel =
+        this.walk(villager, deltaMs);
+        if (villager.path.length === 0) {
+          villager.mode = 'idle';
+          villager.nextRoutineAt = this.now + 2500;
+          villager.routineLabel =
             this.weather.kind === 'rain' ? '在屋檐下看雨' : '雨停了，抖了抖身上的水';
         }
         return;
       case 'idle':
-        this.stepIdle(deltaMs);
+        this.stepIdle(villager, deltaMs);
         return;
     }
   }
 
   /** 原地办的短活：不占铺子，时间一到自己结束。 */
-  private stepWorking(): void {
-    const task = this.activeTask();
+  private stepWorking(villager: Villager): void {
+    const task = this.activeTaskOf(villager);
     if (task === null || task.buildingId !== null) return;
-    if (this.now < this.villager.inPlaceUntil) return;
-    this.finishInPlace(task);
+    if (this.now < villager.inPlaceUntil) return;
+    this.finishInPlace(villager, task);
   }
 
-  private finishInPlace(task: TaskRecord): void {
+  private finishInPlace(villager: Villager, task: TaskRecord): void {
     if (task.status === 'done') return;
+    this.clearDeparture(villager);
     task.status = 'done';
     task.completedAt = this.now;
     task.blockedQuestion = null;
     this.recordDelivery(task.source);
-    this.villager.mode = 'idle';
-    this.villager.taskId = null;
-    this.villager.bubble = '办好了。';
-    this.villager.bubbleUntil = this.now + QUICK_DONE_MS;
-    this.villager.nextRoutineAt = this.now + 1800;
-    this.villager.routineLabel = null;
+    villager.mode = 'idle';
+    villager.taskId = null;
+    villager.bubble = '办好了。';
+    villager.bubbleUntil = this.now + QUICK_DONE_MS;
+    villager.nextRoutineAt = this.now + 1800;
+    villager.routineLabel = null;
     this.accrueFaith();
     this.log('done', `${task.summary} 办完了。`);
   }
 
-  private stepIdle(deltaMs: number): void {
-    if (this.villager.path.length > 0) {
-      this.walk(deltaMs);
+  private stepIdle(villager: Villager, deltaMs: number): void {
+    if (villager.path.length > 0) {
+      this.walk(villager, deltaMs);
       return;
     }
-    if (this.now < this.villager.nextRoutineAt) return;
+    if (this.now < villager.nextRoutineAt) return;
 
     // 已经站在这一拍的落点上就跳过它，否则开局会在祭坛上干坐一轮。
-    const here = this.cellOf(this.villager.pos);
+    const here = this.cellOf(villager.pos);
     for (let attempt = 0; attempt < this.beats.length; attempt += 1) {
-      const beat = routineFor(this.weather.kind, this.beats, this.villager.routineIndex);
-      this.villager.routineIndex += 1;
-      const target = this.resolvedTarget(beat);
+      const beat = routineFor(this.weather.kind, this.beats, villager.routineIndex);
+      villager.routineIndex += 1;
+      const target = this.resolvedTarget(beat, villager);
       if (target === null) continue;
       if (target.x === here.x && target.y === here.y) continue;
-      this.villager.routineLabel = beat.label;
-      this.villager.nextRoutineAt = this.now + beat.dwellMs;
-      this.villager.path = this.grid.path(here, target);
-      if (this.villager.path.length > 0) return;
+      villager.routineLabel = beat.label;
+      villager.nextRoutineAt = this.now + beat.dwellMs;
+      villager.path = this.grid.path(here, target);
+      if (villager.path.length > 0) return;
     }
-    this.villager.nextRoutineAt = this.now + 1600;
+    villager.nextRoutineAt = this.now + 1600;
   }
 
-  private resolvedTarget(beat: RoutineBeat): GridPoint | null {
+  private resolvedTarget(beat: RoutineBeat, villager: Villager): GridPoint | null {
     if (beat.id === 'shelter') {
-      return shelterTarget(this.buildings, this.cellOf(this.villager.pos));
+      return shelterTarget(this.buildings, this.cellOf(villager.pos));
     }
     return this.grid.isWalkable(beat.target) ? beat.target : null;
   }
 
-  private walk(deltaMs: number): void {
+  private walk(villager: Villager, deltaMs: number): void {
     let budget = (SPEED_CELLS_PER_SECOND * deltaMs) / 1000;
-    while (budget > 0 && this.villager.path.length > 0) {
-      const next = this.villager.path[0];
-      const dx = next.x - this.villager.pos.x;
-      const dy = next.y - this.villager.pos.y;
+    while (budget > 0 && villager.path.length > 0) {
+      const next = villager.path[0] as GridPoint;
+      const dx = next.x - villager.pos.x;
+      const dy = next.y - villager.pos.y;
       const distance = Math.hypot(dx, dy);
       if (distance <= budget) {
-        this.villager.pos = { x: next.x, y: next.y };
+        villager.pos = { x: next.x, y: next.y };
         budget -= distance;
-        this.villager.path.shift();
+        villager.path.shift();
         continue;
       }
       const scale = budget / distance;
-      this.villager.pos = {
-        x: this.villager.pos.x + dx * scale,
-        y: this.villager.pos.y + dy * scale,
+      villager.pos = {
+        x: villager.pos.x + dx * scale,
+        y: villager.pos.y + dy * scale,
       };
-      this.villager.facing = facingFor(dx, dy);
+      villager.facing = facingFor(dx, dy);
       budget = 0;
     }
   }
 
-  private arriveAtWork(): void {
-    const task = this.activeTask();
+  private arriveAtWork(villager: Villager): void {
+    const task = this.activeTaskOf(villager);
     if (task === null) {
-      this.villager.mode = 'idle';
+      villager.mode = 'idle';
       return;
     }
     // 台账的活没有 buildingId（上游不知道我们的铺子），用派活时记下的那栋。
-    const building = this.buildingOf(task) ?? this.pendingBuilding ?? undefined;
-    this.pendingBuilding = null;
+    const building = this.buildingOf(task) ?? villager.pendingBuilding ?? undefined;
+    villager.pendingBuilding = null;
     if (building === undefined) {
       // 楼没了（被拆/被撤），这单退回空闲，不让她对着空气干活。
-      this.villager.mode = 'idle';
-      this.villager.taskId = null;
+      villager.mode = 'idle';
+      villager.taskId = null;
       return;
     }
     task.status = 'in_progress';
-    this.villager.mode = 'working';
-    this.villager.visible = false;
-    this.villager.bubble = null;
-    this.villager.routineLabel = null;
-    this.villager.pos = { x: building.workSpot.x, y: building.workSpot.y };
+    villager.mode = 'working';
+    villager.visible = false;
+    villager.bubble = null;
+    villager.routineLabel = null;
+    villager.pos = { x: building.workSpot.x, y: building.workSpot.y };
     this.activities.set(building.instanceId, {
       kind: 'operating',
       taskId: task.id,
@@ -788,14 +974,15 @@ export class Simulation {
       // 台账的活只有台账知道还要多久；沙盒的活由计时器收尾。
       determinate: task.source === 'sandbox',
     });
-    this.log('work', `${building.displayName} 开工。`);
+    this.log('work', `${building.displayName} 开工（${villager.name}）。`);
   }
 
-  private arriveAtAltar(): void {
-    this.villager.mode = 'idle';
-    this.villager.taskId = null;
-    this.villager.routineLabel = null;
-    this.villager.nextRoutineAt = this.now + 1600;
+  private arriveAtAltar(villager: Villager): void {
+    this.clearDeparture(villager);
+    villager.mode = 'idle';
+    villager.taskId = null;
+    villager.routineLabel = null;
+    villager.nextRoutineAt = this.now + 1600;
   }
 
   private stepWorkstations(): void {
@@ -808,12 +995,11 @@ export class Simulation {
         this.now - activity.startedAt >= activity.estimateMs
       ) {
         const task = this.tasks.find((item) => item.id === activity.taskId);
-        if (
-          task !== undefined &&
-          task.status === 'in_progress' &&
-          this.villager.mode === 'working'
-        ) {
-          this.finishActiveTask();
+        const owner = this.villagers.find(
+          (villager) => villager.taskId === activity.taskId && villager.mode === 'working',
+        );
+        if (task !== undefined && task.status === 'in_progress' && owner !== undefined) {
+          this.finishActiveTask(owner);
         } else {
           this.activities.set(building.instanceId, { kind: 'idle' });
         }
@@ -825,9 +1011,10 @@ export class Simulation {
     }
   }
 
-  private finishActiveTask(): void {
-    const task = this.activeTask();
+  private finishActiveTask(villager: Villager): void {
+    const task = this.activeTaskOf(villager);
     if (task === null || task.status === 'done') return;
+    this.clearDeparture(villager);
     task.status = 'done';
     task.completedAt = this.now;
     task.blockedQuestion = null;
@@ -839,17 +1026,17 @@ export class Simulation {
         taskId: task.id,
         until: this.now + COOLING_MS,
       });
-      this.villager.pos = { x: building.door.x, y: building.door.y };
+      villager.pos = { x: building.door.x, y: building.door.y };
     }
-    this.villager.mode = 'delivering';
-    this.villager.visible = true;
-    this.villager.facing = 'down';
-    this.villager.bubble = '任务交付！';
-    this.villager.bubbleUntil = this.now + DELIVER_MS;
-    this.villager.deliverUntil = this.now + DELIVER_MS;
-    this.villager.path = [];
+    villager.mode = 'delivering';
+    villager.visible = true;
+    villager.facing = 'down';
+    villager.bubble = '任务交付！';
+    villager.bubbleUntil = this.now + DELIVER_MS;
+    villager.deliverUntil = this.now + DELIVER_MS;
+    villager.path = [];
     this.accrueFaith();
-    this.log('done', `${task.summary} 已交付。`);
+    this.log('done', `${task.summary} 已交付（${villager.name}）。`);
   }
 
   /** 交付按来源分开记账：台账的活与沙盒/离线 Mock 的活不合并。 */
@@ -884,9 +1071,9 @@ export class Simulation {
     }
   }
 
-  private activeTask(): TaskRecord | null {
-    if (this.villager.taskId === null) return null;
-    return this.tasks.find((item) => item.id === this.villager.taskId) ?? null;
+  private activeTaskOf(villager: Villager): TaskRecord | null {
+    if (villager.taskId === null) return null;
+    return this.tasks.find((item) => item.id === villager.taskId) ?? null;
   }
 
   private buildingOf(task: TaskRecord): PlacedBuilding | undefined {
@@ -894,9 +1081,9 @@ export class Simulation {
     return this.buildings.find((item) => item.instanceId === task.buildingId);
   }
 
-  private expireBubble(): void {
-    if (this.villager.bubble !== null && this.now >= this.villager.bubbleUntil) {
-      this.villager.bubble = null;
+  private expireBubble(villager: Villager): void {
+    if (villager.bubble !== null && this.now >= villager.bubbleUntil) {
+      villager.bubble = null;
     }
   }
 
