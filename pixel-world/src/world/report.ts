@@ -22,18 +22,32 @@ export function composeReport(snapshot: WorldSnapshot): DailyReport {
   const lines: string[] = [];
 
   if (delivered > 0) {
-    // 台账交付与 Mock 交付分开写，不合并成一个总数。
-    const parts: string[] = [];
-    if (ledgerDelivered > 0) parts.push(`台账交付 ${ledgerDelivered} 单`);
-    if (mockDelivered > 0) {
-      const label = snapshot.ledger.mock ? '离线 Mock' : 'Mock';
-      parts.push(`${label} 交付 ${mockDelivered} 单`);
-    }
+    // 先按角色分账，再在每个人名下把台账与 Mock 分开；不合并成一个总数。
+    const workers =
+      snapshot.deliveriesByVillager.length > 0
+        ? snapshot.deliveriesByVillager
+        : [
+            {
+              villagerId: snapshot.villager.id,
+              name: snapshot.villager.name,
+              ledger: ledgerDelivered,
+              mock: mockDelivered,
+            },
+          ];
+    const mockLabel = snapshot.ledger.mock ? '离线 Mock' : 'Mock';
+    const parts = workers.map((worker) => {
+      const total = worker.ledger + worker.mock;
+      if (total === 0) return `${worker.name}交付 0 单`;
+      const sources: string[] = [];
+      if (worker.ledger > 0) sources.push(`台账 ${worker.ledger}`);
+      if (worker.mock > 0) sources.push(`${mockLabel} ${worker.mock}`);
+      return `${worker.name}交付 ${total} 单（${sources.join(' / ')}）`;
+    });
     const latest = done[done.length - 1];
     lines.push(
       latest === undefined
-        ? parts.join('，')
-        : `${parts.join('，')}，最近一单：${latest.summary}`,
+        ? parts.join(' / ')
+        : `${parts.join(' / ')}，最近一单：${latest.summary}`,
     );
   } else {
     lines.push('还没有交付。祭坛在等第一条神谕。');
@@ -53,7 +67,7 @@ export function composeReport(snapshot: WorldSnapshot): DailyReport {
   }
 
   const weather = snapshot.weather === 'rain' ? '今天下了雨' : '今天晴';
-  lines.push(`${weather}。${snapshot.villager.name}${villagerTail(snapshot)}`);
+  lines.push(`${weather}。${villagerTail(snapshot)}`);
 
   // 没有里程碑时不能写"第 1 次神恩"：那是还没发生的事。
   const headline =
@@ -86,10 +100,26 @@ export function formatDate(nowMs: number): string {
   return `第 ${minutes} 分 ${String(seconds).padStart(2, '0')} 秒`;
 }
 
+/** 多角色收尾：谁在忙、谁在祭坛，都按名字写清；全闲/全忙各有可读措辞。 */
 function villagerTail(snapshot: WorldSnapshot): string {
-  const task = snapshot.tasks.find((item) => item.id === snapshot.villager.taskId);
-  if (task === undefined) return '在祭坛边坐着。';
-  return `手上是「${task.summary}」。`;
+  const states = snapshot.villagers.map((villager) => ({
+    villager,
+    task: snapshot.tasks.find((item) => item.id === villager.taskId),
+  }));
+  const busy = states.filter((item) => item.task !== undefined);
+  const idleNames = states
+    .filter((item) => item.task === undefined)
+    .map((item) => item.villager.name);
+  if (busy.length === 0) {
+    return snapshot.villagers.length > 1
+      ? `${idleNames.join('、')}都在祭坛边坐着。`
+      : '在祭坛边坐着。';
+  }
+  const parts = busy.map(
+    ({ villager, task }) => `${villager.name}手上是「${task?.summary ?? ''}」`,
+  );
+  if (idleNames.length > 0) parts.push(`${idleNames.join('、')}在祭坛边坐着`);
+  return `${parts.join('，')}。`;
 }
 
 export { LINE_LIMIT };

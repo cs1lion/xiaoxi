@@ -8,7 +8,8 @@ export interface OracleApi {
   /** 只表示这句话认没认出。世界是否照办在下一个逻辑拍结算，结果走 onResult。 */
   readonly say: (text: string) => { readonly ok: boolean; readonly message: string };
   readonly dispatch: (kind: 'code' | 'research' | 'writing' | 'quick', summary: string) => void;
-  readonly finish: () => void;
+  /** 人工交付；target 可选（角色 id 或名字），省略时收第一个在干活的人的单。 */
+  readonly finish: (target?: string) => void;
   readonly build: (prefabId: string) => void;
   readonly feed: (message: {
     readonly type: 'task.assigned';

@@ -565,6 +565,85 @@ test('沙盒单可以人工收尾，回执标明离线 Mock 且不计入台账',
   assert.equal(state.deliveries.ledger, 0, '不冒充台账交付');
 });
 
+test('人工交付可指定角色 id 或名字，不串任务与统计', () => {
+  const rig = makeRig();
+  rig.sim.enqueue({ kind: 'dispatch', taskKind: 'code', summary: '写个脚本' });
+  rig.sim.update(16);
+  rig.sim.enqueue({ kind: 'dispatch', taskKind: 'research', summary: '查一下' });
+  rig.sim.update(16);
+  rig.runUntil(() => rig.state().villagers.every((item) => item.mode === 'working'));
+  assert.equal(rig.state().villagers[0]?.taskId, 't1');
+  assert.equal(rig.state().villagers[1]?.taskId, 't2');
+
+  // 指定 v1：只收助手那单，主角色继续干。
+  rig.sim.enqueue({ kind: 'complete', target: 'v1' });
+  let result = rig.sim.update(16);
+  assert.equal(result[0].ok, true);
+  assert.ok(result[0].message.includes('阿雾'), result[0].message);
+  let state = rig.state();
+  assert.equal(state.villagers[1]?.mode, 'delivering');
+  assert.equal(state.villagers[0]?.mode, 'working', '不串到另一个人');
+  assert.equal(state.tasks[1]?.status, 'done');
+  assert.equal(state.tasks[0]?.status, 'in_progress');
+  assert.deepEqual(
+    state.deliveriesByVillager.map((item) => [item.name, item.mock]),
+    [
+      ['莞尔', 0],
+      ['阿雾', 1],
+    ],
+  );
+
+  // 用名字指定 v0。
+  rig.sim.enqueue({ kind: 'complete', target: '莞尔' });
+  result = rig.sim.update(16);
+  assert.equal(result[0].ok, true);
+  assert.ok(result[0].message.includes('莞尔'), result[0].message);
+  state = rig.state();
+  assert.equal(state.villagers[0]?.mode, 'delivering');
+  assert.equal(state.tasks[0]?.status, 'done');
+  assert.deepEqual(
+    state.deliveriesByVillager.map((item) => [item.name, item.mock]),
+    [
+      ['莞尔', 1],
+      ['阿雾', 1],
+    ],
+  );
+});
+
+test('人工交付指定未知角色：明确拒绝，世界不动', () => {
+  const rig = makeRig();
+  rig.sim.enqueue({ kind: 'dispatch', taskKind: 'code', summary: '写个脚本' });
+  rig.runUntil(() => rig.state().villager.mode === 'working');
+  const before = rig.state();
+  for (const target of ['v9', '不存在的人']) {
+    rig.sim.enqueue({ kind: 'complete', target });
+    const result = rig.sim.update(16);
+    assert.equal(result[0].ok, false);
+    assert.ok(result[0].message.includes('没有叫'), result[0].message);
+  }
+  const after = rig.state();
+  assert.equal(after.villager.mode, 'working');
+  assert.equal(after.tasks[0]?.status, 'in_progress');
+  assert.deepEqual(after.deliveries, before.deliveries);
+});
+
+test('指定角色也不能绕过台账完成权', () => {
+  const rig = makeRig();
+  rig.sim.enqueue({
+    kind: 'sync',
+    tasks: [{ commissionId: 'c_1', kind: 'code', title: '写爬虫', agentName: '甲' }],
+    finished: [],
+    connected: true,
+  });
+  rig.runUntil(() => rig.state().villager.mode === 'working');
+  rig.sim.enqueue({ kind: 'complete', target: 'v0' });
+  const result = rig.sim.update(16);
+  assert.equal(result[0].ok, false);
+  assert.ok(result[0].message.includes('完成权在台账'), result[0].message);
+  assert.equal(rig.state().tasks[0]?.status, 'in_progress');
+  assert.equal(rig.state().deliveries.ledger, 0);
+});
+
 test('快照的离线 Mock 标记随台账连接变化', () => {
   const rig = makeRig();
   assert.equal(rig.state().ledger.mock, true, '没接台账就是离线 Mock');

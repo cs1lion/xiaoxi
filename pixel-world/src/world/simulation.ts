@@ -44,7 +44,7 @@ import { excerptBlockedQuestion } from './types.ts';
 
 export type WorldCommand =
   | { readonly kind: 'dispatch'; readonly taskKind: TaskKind; readonly summary: string }
-  | { readonly kind: 'complete' }
+  | { readonly kind: 'complete'; readonly target?: string }
   | { readonly kind: 'cancelPending'; readonly id?: string }
   | { readonly kind: 'setWeather'; readonly weather: Weather }
   | { readonly kind: 'build'; readonly prefabId: string; readonly instanceId: string }
@@ -161,6 +161,8 @@ export class Simulation {
   /** 交付统计按来源分开：台账的活只有台账能收，沙盒/离线 Mock 另计。 */
   private ledgerDeliveries = 0;
   private mockDeliveries = 0;
+  /** 每个角色各自的交付归属（台账/Mock 分开），日报按人分账用。 */
+  private readonly deliveryTally = new Map<string, { ledger: number; mock: number }>();
   /** 上游台账是否在线。离线时世界照常过日子，但状态行必须说出来。 */
   private ledgerConnected = false;
   private ledgerSyncedAt: number | null = null;
@@ -208,6 +210,9 @@ export class Simulation {
       pendingBuilding: null,
     }));
     for (const villager of this.villagers) this.pending.set(villager.id, []);
+    for (const villager of this.villagers) {
+      this.deliveryTally.set(villager.id, { ledger: 0, mock: 0 });
+    }
     for (const building of this.buildings) {
       this.activities.set(building.instanceId, { kind: 'idle' });
     }
@@ -282,6 +287,16 @@ export class Simulation {
       faith: { points: this.faithPoints, milestones: this.milestones },
       /** 台账交付与 Mock 交付分开计，不合并成一个数。 */
       deliveries: { ledger: this.ledgerDeliveries, mock: this.mockDeliveries },
+      /** 按角色分账：日报与状态行据此写清是谁交付的。 */
+      deliveriesByVillager: this.villagers.map((villager) => {
+        const tally = this.deliveryTally.get(villager.id) ?? { ledger: 0, mock: 0 };
+        return {
+          villagerId: villager.id,
+          name: villager.name,
+          ledger: tally.ledger,
+          mock: tally.mock,
+        };
+      }),
       ledger: {
         connected: this.ledgerConnected,
         lastSyncAt: this.ledgerSyncedAt,
@@ -304,7 +319,7 @@ export class Simulation {
       case 'dispatch':
         return this.dispatch(command.taskKind, command.summary);
       case 'complete':
-        return this.completeManually();
+        return this.completeManually(command.target);
       case 'cancelPending':
         return this.cancelPending(command.id);
       case 'setWeather':
@@ -734,14 +749,31 @@ export class Simulation {
     return task;
   }
 
-  private completeManually(): CommandResult {
-    const villager = this.villagers.find(
-      (item) => item.mode === 'working' && this.activeTaskOf(item) !== null,
-    );
-    if (villager === undefined) {
-      const message = '她现在没有在干活，无需交付。';
-      this.log('warn', message);
-      return { ok: false, message };
+  private completeManually(target?: string): CommandResult {
+    let villager: Villager | undefined;
+    if (target === undefined) {
+      // 省略目标：保持旧行为，收第一个在干活的人的单。
+      villager = this.villagers.find(
+        (item) => item.mode === 'working' && this.activeTaskOf(item) !== null,
+      );
+      if (villager === undefined) {
+        const message = '她现在没有在干活，无需交付。';
+        this.log('warn', message);
+        return { ok: false, message };
+      }
+    } else {
+      // 指定目标：按 id 或名字精确匹配，未知目标明确拒绝。
+      villager = this.villagers.find((item) => item.id === target || item.name === target);
+      if (villager === undefined) {
+        const message = `没有叫「${target}」的角色，世界没有动。`;
+        this.log('warn', message);
+        return { ok: false, message };
+      }
+      if (villager.mode !== 'working' || this.activeTaskOf(villager) === null) {
+        const message = `${villager.name}现在没有在干活，无需交付。`;
+        this.log('warn', message);
+        return { ok: false, message };
+      }
     }
     const task = this.activeTaskOf(villager);
     if (task === null) {
@@ -758,10 +790,10 @@ export class Simulation {
     const label = this.ledgerConnected ? '沙盒 Mock' : '离线 Mock';
     if (task.buildingId === null) {
       this.finishInPlace(villager, task);
-      return { ok: true, message: `这单办了（${label}，不计入台账）。` };
+      return { ok: true, message: `这单办了（${villager.name}，${label}，不计入台账）。` };
     }
     this.finishActiveTask(villager);
-    return { ok: true, message: `成果已交付（${label}，不计入台账）。` };
+    return { ok: true, message: `成果已交付（${villager.name}，${label}，不计入台账）。` };
   }
 
   private build(prefabId: string, instanceId: string): CommandResult {
@@ -881,7 +913,7 @@ export class Simulation {
     task.status = 'done';
     task.completedAt = this.now;
     task.blockedQuestion = null;
-    this.recordDelivery(task.source);
+    this.recordDelivery(villager.id, task.source);
     villager.mode = 'idle';
     villager.taskId = null;
     villager.bubble = '办好了。';
@@ -889,7 +921,7 @@ export class Simulation {
     villager.nextRoutineAt = this.now + 1800;
     villager.routineLabel = null;
     this.accrueFaith();
-    this.log('done', `${task.summary} 办完了。`);
+    this.log('done', `${task.summary} 办完了（${villager.name}）。`);
   }
 
   private stepIdle(villager: Villager, deltaMs: number): void {
@@ -1018,7 +1050,7 @@ export class Simulation {
     task.status = 'done';
     task.completedAt = this.now;
     task.blockedQuestion = null;
-    this.recordDelivery(task.source);
+    this.recordDelivery(villager.id, task.source);
     const building = this.buildingOf(task);
     if (building !== undefined) {
       this.activities.set(building.instanceId, {
@@ -1039,10 +1071,14 @@ export class Simulation {
     this.log('done', `${task.summary} 已交付（${villager.name}）。`);
   }
 
-  /** 交付按来源分开记账：台账的活与沙盒/离线 Mock 的活不合并。 */
-  private recordDelivery(source: TaskRecord['source']): void {
+  /** 交付按人和来源分开记账：台账/沙盒各自分开，角色之间也不合并。 */
+  private recordDelivery(villagerId: string, source: TaskRecord['source']): void {
     if (source === 'ledger') this.ledgerDeliveries += 1;
     else this.mockDeliveries += 1;
+    const tally = this.deliveryTally.get(villagerId);
+    if (tally === undefined) return;
+    if (source === 'ledger') tally.ledger += 1;
+    else tally.mock += 1;
   }
 
   /** 攒够一个里程碑，世界多一件东西；不够就只是点数。 */

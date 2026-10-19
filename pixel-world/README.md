@@ -22,7 +22,7 @@ npm run dev        # http://127.0.0.1:5188
 
 ```bash
 cd pixel-world
-npm test           # 纯逻辑，100 项，不需要浏览器
+npm test           # 纯逻辑，106 项，不需要浏览器
 npm run check      # 类型检查
 npm run build      # tsc + vite build
 ```
@@ -31,7 +31,7 @@ npm run build      # tsc + vite build
 
 ```bash
 cd pixel-world
-node scripts/smoke.mjs              # 沙盒闭环，66 项，不依赖本地服务
+node scripts/smoke.mjs              # 沙盒闭环，74 项，不依赖本地服务
 LEDGER=1 node scripts/smoke.mjs     # 台账连通，21 项，需先起 8000
 ```
 
@@ -64,7 +64,7 @@ src/render/         只读 WorldSnapshot，画地形、建筑、小人、烟、�
 src/scenes/         唯一的 Phaser 场景：驱动 tick、转输入、转快照
 src/ui/             DOM 神谕面板与报纸。中文永远归 DOM，不画进 canvas
 src/audio/          哇啦哇啦拟音，Web Audio 现场合成，无素材、无 TTS
-test/               100 项纯逻辑用例（337 条断言）
+test/               106 项纯逻辑用例（377 条断言）
 scripts/smoke.mjs   浏览器闭环回归
 ```
 

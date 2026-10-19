@@ -205,6 +205,14 @@ export interface DeliveryStats {
   readonly mock: number;
 }
 
+/** 单个角色的交付归属：按人分账，Mock 与台账仍分开。 */
+export interface VillagerDeliveries {
+  readonly villagerId: string;
+  readonly name: string;
+  readonly ledger: number;
+  readonly mock: number;
+}
+
 /** 累积式改变：交付多了，世界多一件东西。不可花掉、不贬值。 */
 export type PropKind = 'lamp' | 'tree' | 'banner';
 
@@ -252,6 +260,8 @@ export interface WorldSnapshot {
   readonly faith: { readonly points: number; readonly milestones: number };
   /** 交付统计：台账交付与离线 Mock 交付分开计，禁止合并成一个数。 */
   readonly deliveries: DeliveryStats;
+  /** 按角色分账的交付归属（顺序同 villagers）；日报据此写「谁交付了几单」。 */
+  readonly deliveriesByVillager: readonly VillagerDeliveries[];
   /** 上游台账的在线情况。离线时世界照常过日子，但不再谎报"没有活"。 */
   readonly ledger: {
     readonly connected: boolean;

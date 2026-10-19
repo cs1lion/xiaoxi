@@ -211,8 +211,9 @@ export class SandboxScene extends Phaser.Scene {
     this.sim.enqueue({ kind: 'dispatch', taskKind: kind, summary });
   }
 
-  finish(): void {
-    this.sim.enqueue({ kind: 'complete' });
+  /** 人工交付；target 可选（id 或名字），省略时收第一个在干活的人的单。 */
+  finish(target?: string): void {
+    this.sim.enqueue(target === undefined ? { kind: 'complete' } : { kind: 'complete', target });
   }
 
   build(prefabId: string): void {
@@ -243,7 +244,7 @@ export class SandboxScene extends Phaser.Scene {
       say: (text: string): CommandResult => this.say(text),
       dispatch: (kind: 'code' | 'research' | 'writing' | 'quick', summary: string): void =>
         this.dispatch(kind, summary),
-      finish: (): void => this.finish(),
+      finish: (target?: string): void => this.finish(target),
       build: (prefabId: string): void => this.build(prefabId),
       feed: (message: AgentToWorld): CommandResult => this.feed(message),
       pushLedger: (commission: unknown): void => this.pushLedger(commission),
@@ -383,7 +384,10 @@ export class SandboxScene extends Phaser.Scene {
           idle: villager.routine ?? '在祭坛边闲逛',
           saluting: '正向神谕行礼',
           toWork: where === null ? '赶路' : `赶往 ${where}`,
-          working: where === null ? '在祭坛边当场办' : `在 ${where} 干活`,
+          working:
+            where === null
+              ? `在祭坛边办「${task?.summary ?? ''}」`
+              : `在 ${where} 干活「${task?.summary ?? ''}」`,
           delivering: '正在交付',
           toAltar: '回到祭坛',
           sheltering: '跑到屋檐下躲雨',
@@ -408,7 +412,13 @@ export class SandboxScene extends Phaser.Scene {
     const queued = this.snapshot.pending;
     const queue =
       queued.length === 0 ? '' : `　　排队 ${queued.length} 条：${queued[0]?.summary ?? ''}`;
-    return `${summary}　　${weather}　　${ledger}　　台账交付 ${ledgerDelivered} 单 · Mock 交付 ${mockDelivered} 单　　神恩 ${faith.points}/${3}${waiting}${queue}`;
+    // 省略 target 的「交付」收谁的单：写清对象，免得两个都在干活时靠猜。
+    const defaultWorker = this.snapshot.villagers.find(
+      (villager) => villager.mode === 'working' && villager.taskId !== null,
+    );
+    const finishHint =
+      defaultWorker === undefined ? '' : `　　默认交付：${defaultWorker.name}的单`;
+    return `${summary}　　${weather}　　${ledger}　　台账交付 ${ledgerDelivered} 单 · Mock 交付 ${mockDelivered} 单　　神恩 ${faith.points}/${3}${waiting}${queue}${finishHint}`;
   }
 
   private buildingName(id: string | null): string | null {

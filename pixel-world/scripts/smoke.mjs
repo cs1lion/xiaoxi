@@ -259,6 +259,8 @@ async function runSandboxSuite() {
     (b) => b.instanceId === operating[0].buildingId,
   );
   check(activeBuilding?.boundTask === 'code', '开工的是接代码活的那栋');
+  const workingStatus = await page.textContent('#status');
+  check(workingStatus.includes('默认交付：莞尔'), '状态行写清默认交付对象');
   await page.waitForTimeout(700);
   await page.screenshot({ path: `${OUT}/02-working.png` });
 
@@ -303,8 +305,8 @@ async function runSandboxSuite() {
   );
   check(true, '状态行显示排队数');
 
-  // 「现实完成」只对沙盒单生效：回执必须标出离线 Mock，且不计入台账。
-  await page.click('#finish');
+  // 「现实完成」可指定角色（id 或名字）且只对沙盒单生效。
+  await page.evaluate(() => window.Oracle.finish('v0'));
   const manual = await waitFor((s) => s.villager.mode === 'delivering', '人工交付也能结束这单');
   check(manual.tasks[1]?.status === 'done', '人工交付对沙盒单生效');
   const manualReply = await page.textContent('#reply');
@@ -312,9 +314,26 @@ async function runSandboxSuite() {
     manualReply.includes('离线 Mock') && manualReply.includes('不计入台账'),
     '沙盒单人工交付回执标明离线 Mock、不计入台账',
   );
+  check(manualReply.includes('莞尔'), '回执写清收的是谁的单');
   check(
     manual.deliveries.ledger === 0 && manual.deliveries.mock >= 2,
     '交付统计把 Mock 单独计，不混进台账',
+  );
+  check(manual.deliveriesByVillager[0]?.mock >= 1, '交付归属到指定角色');
+
+  // 按名字指定另一个人：只收阿雾那单。
+  await waitFor((s) => s.villagers[1]?.mode === 'working', '助手也在干活', 20000);
+  await page.evaluate(() => window.Oracle.finish('阿雾'));
+  await page.waitForFunction(
+    () => (document.querySelector('#reply')?.textContent ?? '').includes('阿雾'),
+    null,
+    { timeout: 5000 },
+  );
+  check(true, '按名字指定交付对象');
+  const perWorker = await state();
+  check(
+    perWorker.deliveriesByVillager.every((item) => item.mock >= 1),
+    '两个角色都各自记了交付',
   );
 
   // 主角色空下来后，排队单自动开工，不需要再点任何按钮。
@@ -325,6 +344,15 @@ async function runSandboxSuite() {
   );
   check(queuedStarted.tasks[3]?.summary === '再整理一份便笺', '自动开工的是排队的那条神谕');
   check(queuedStarted.pending.length === 0, '出队后 pending 清空');
+
+  // 未知角色：明确拒绝，不碰任何人的活。
+  await page.evaluate(() => window.Oracle.finish('v9'));
+  await page.waitForFunction(
+    () => (document.querySelector('#reply')?.textContent ?? '').includes('没有叫'),
+    null,
+    { timeout: 5000 },
+  );
+  check(true, '未知角色的交付被明确拒绝');
 
   // 把剩下的活逐单收尾，最后两个人都回到日常。
   for (let i = 0; i < 20; i += 1) {
@@ -340,6 +368,12 @@ async function runSandboxSuite() {
   }
   const settled = await state();
   check(settled.tasks.every((task) => task.status === 'done'), '所有单都收尾');
+  const paperByWorker = await page.evaluate(() => window.Oracle.report());
+  const workerLine = paperByWorker.lines.find((line) => line.includes('交付')) ?? '';
+  check(
+    workerLine.includes('莞尔交付') && workerLine.includes('阿雾交付'),
+    '日报按角色分账，两个人都写清交付数',
+  );
   await waitFor(
     (s) => s.villagers.every((item) => item.mode === 'idle'),
     '两个人都回到日常',

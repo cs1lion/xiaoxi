@@ -53,9 +53,9 @@ test('交付一单之后，日报写的是这单本身', () => {
   assert.equal(report.headline, '今日有交付', '没攒满里程碑就不能写"神恩"');
 });
 
-test('日报把台账交付与 Mock 交付分开写，不合并计数', () => {
+test('日报按角色与来源分账：Mock 与台账分开，不合并计数', () => {
   const sim = makeSim();
-  // 台账单：完成权在台账，由 sync 收尾。
+  // 台账单：完成权在台账，由 sync 收尾，归实际接单的角色。
   sim.enqueue({
     kind: 'sync',
     tasks: [{ commissionId: 'c_1', kind: 'code', title: '写爬虫', agentName: '甲' }],
@@ -90,12 +90,127 @@ test('日报把台账交付与 Mock 交付分开写，不合并计数', () => {
   const snapshot = sim.snapshot();
   assert.equal(snapshot.deliveries.ledger, 1);
   assert.equal(snapshot.deliveries.mock, 1);
+  assert.deepEqual(
+    snapshot.deliveriesByVillager.map((item) => [item.name, item.ledger, item.mock]),
+    [
+      ['莞尔', 1, 1],
+      ['阿雾', 0, 0],
+    ],
+  );
 
   const report = composeReport(snapshot);
   const line = report.lines.find((item) => item.includes('交付')) ?? '';
-  assert.ok(line.includes('台账交付 1 单'), line);
-  assert.ok(line.includes('离线 Mock 交付 1 单'), line);
+  assert.ok(line.includes('莞尔交付 2 单'), line);
+  assert.ok(line.includes('台账 1'), line);
+  assert.ok(line.includes('离线 Mock 1'), line);
+  assert.ok(!line.includes('交付 3 单'), '不能把两个人/两种来源合并成一个数');
   assert.equal(report.headline, '今日有交付');
+});
+
+test('日报写清每个角色交付了几单', () => {
+  const sim = makeSim();
+  sim.enqueue({ kind: 'dispatch', taskKind: 'code', summary: '写脚本' });
+  sim.update(16);
+  sim.enqueue({ kind: 'dispatch', taskKind: 'research', summary: '查资料' });
+  sim.update(16);
+  let guard = 0;
+  while (!sim.snapshot().villagers.every((item) => item.mode === 'working')) {
+    sim.update(100);
+    if ((guard += 1) > 300) throw new Error('两个人没同时开工');
+  }
+  sim.enqueue({ kind: 'complete', target: 'v0' });
+  sim.update(16);
+  assert.equal(sim.snapshot().villagers[1]?.mode, 'working', '指定交付不能串到另一个人');
+  sim.enqueue({ kind: 'complete', target: '阿雾' });
+  sim.update(16);
+
+  const snapshot = sim.snapshot();
+  assert.deepEqual(
+    snapshot.deliveriesByVillager.map((item) => [item.name, item.ledger, item.mock]),
+    [
+      ['莞尔', 0, 1],
+      ['阿雾', 0, 1],
+    ],
+  );
+  const report = composeReport(snapshot);
+  const line = report.lines.find((item) => item.includes('交付')) ?? '';
+  assert.ok(line.includes('莞尔交付 1 单'), line);
+  assert.ok(line.includes('阿雾交付 1 单'), line);
+  assert.ok(line.includes('离线 Mock 1'), line);
+  assert.equal(report.headline, '今日有交付');
+});
+
+test('台账单按实际接单的角色分账', () => {
+  const sim = makeSim();
+  sim.enqueue({
+    kind: 'sync',
+    tasks: [
+      { commissionId: 'c_a', kind: 'code', title: '写爬虫', agentName: '甲' },
+      { commissionId: 'c_b', kind: 'research', title: '查资料', agentName: '乙' },
+    ],
+    finished: [],
+    connected: true,
+    order: ['c_a', 'c_b'],
+  });
+  sim.update(16);
+  let guard = 0;
+  while (!sim.snapshot().villagers.every((item) => item.mode === 'working')) {
+    sim.update(100);
+    if ((guard += 1) > 300) throw new Error('两个人没各接一单');
+  }
+  sim.enqueue({
+    kind: 'sync',
+    tasks: [],
+    finished: ['c_a', 'c_b'],
+    connected: true,
+  });
+  sim.update(16);
+  const snapshot = sim.snapshot();
+  assert.equal(snapshot.deliveries.ledger, 2);
+  assert.deepEqual(
+    snapshot.deliveriesByVillager.map((item) => [item.name, item.ledger, item.mock]),
+    [
+      ['莞尔', 1, 0],
+      ['阿雾', 1, 0],
+    ],
+  );
+  const report = composeReport(snapshot);
+  const line = report.lines.find((item) => item.includes('交付')) ?? '';
+  assert.ok(line.includes('莞尔交付 1 单'), line);
+  assert.ok(line.includes('阿雾交付 1 单'), line);
+  assert.ok(line.includes('台账 1'), line);
+});
+
+test('日报收尾写清谁在忙、谁在祭坛', () => {
+  // 两个人都在祭坛：措辞要能读。
+  const idle = composeReport(makeSim().snapshot());
+  assert.ok(
+    idle.lines.some((line) => line.includes('莞尔、阿雾都在祭坛边坐着')),
+    idle.lines.join('|'),
+  );
+
+  // 一个人接活：另一个人写名字。
+  const sim = makeSim();
+  sim.enqueue({ kind: 'dispatch', taskKind: 'code', summary: '写脚本' });
+  sim.update(16);
+  const mixed = composeReport(sim.snapshot());
+  assert.ok(
+    mixed.lines.some(
+      (line) => line.includes('莞尔手上是「写脚本」') && line.includes('阿雾在祭坛边坐着'),
+    ),
+    mixed.lines.join('|'),
+  );
+
+  // 两个人都忙：两个名字与两单都写出来。
+  sim.enqueue({ kind: 'dispatch', taskKind: 'research', summary: '查资料' });
+  sim.update(16);
+  const busy = composeReport(sim.snapshot());
+  assert.ok(
+    busy.lines.some(
+      (line) => line.includes('莞尔手上是「写脚本」') && line.includes('阿雾手上是「查资料」'),
+    ),
+    busy.lines.join('|'),
+  );
 });
 
 test('攒满里程碑后，标题写的是已经落地的那次神恩', () => {

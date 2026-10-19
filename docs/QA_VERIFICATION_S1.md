@@ -1,9 +1,9 @@
 # S1 各卡独立验收记录（QA Verification · S1）
 
 - 验收方：qa-runtime（Agent Teams · QA Engineer），独立于各卡作者
-- 验收时间：2026-10-19 13:06–13:10（task-7）；**13:13–13:18（task-9 + task-8）**；**13:23–13:29（task-12 D4-A + task-11 D3-A）**；**13:41–13:49（task-13 S1-5）**；**13:47–13:53（task-14 S1-6）**；**13:56–14:01（task-15 + task-16）**；**14:18–14:29（task-10 + 提交与重构复验）**；**14:37–14:41（task-17 S2-1 多角色）**（Asia/Shanghai）
-- 验收对象：task-7（WS 退避）/ task-9（fixture 契约）/ task-8（`/ws` Origin）/ task-12（D4-A 花名册只读端点）/ task-11（D3-A 人工交付+离线 Mock）/ task-13（S1-5 周期对账+分页截断+超时）/ task-14（S1-6 真帧端到端+三项未验证）/ task-15（pickActive 接线）/ task-16（blocked_question 透传仅展示）/ task-10（排队+取消未出发行礼）/ task-17（S2-1 多角色）/ 提交链 340d0ab、b656488、150b2a7、8a95c94
-- 仓库：`D:\project\neurosama`，分支 `feat/pixel-world-oracle-world`，HEAD `8a95c94`（本次验收期间作者改动均在未提交的工作区）
+- 验收时间：2026-10-19 13:06–13:10（task-7）；**13:13–13:18（task-9 + task-8）**；**13:23–13:29（task-12 D4-A + task-11 D3-A）**；**13:41–13:49（task-13 S1-5）**；**13:47–13:53（task-14 S1-6）**；**13:56–14:01（task-15 + task-16）**；**14:18–14:29（task-10 + 提交与重构复验）**；**14:37–14:41（task-17 S2-1 多角色）**；**14:54–14:58（task-21 多角色 P3）**（Asia/Shanghai）
+- 验收对象：task-7 / task-9 / task-8 / task-12（D4-A）/ task-11（D3-A）/ task-13（S1-5）/ task-14（S1-6）/ task-15 / task-16 / task-10（排队）/ task-17（S2-1 多角色）/ task-21（多角色 P3：日报归属+手动完成对象）/ 提交链 340d0ab、b656488、150b2a7、8a95c94、d8a57f9
+- 仓库：`D:\project\neurosama`，分支 `feat/pixel-world-oracle-world`，HEAD `d8a57f9`（本次验收期间作者改动均在未提交的工作区）
 - 方法：不采信作者自述；自己看 diff、跑测试与冒烟、做对抗性探针；临时脚本/日志只放工作区
   `C:\Users\18712\.dsh\bot\workspace\recon\`，只在本文件留结论
 - 执行节奏：task-7 于 13:06–13:10 复验；task-9、task-8 于 13:13–13:18 收到 Lead 通知后按本文方案执行并回填结论。
@@ -25,6 +25,7 @@
 | **S1-10 / task-10** | 排队 + 取消未出发行礼 | **通过** | 忙时入队（不拒单）、MAX_PENDING=3、台账优先+FIFO、撤最后/按 id、clearDeparture 四条路径、两 sim 同命令同步长 deepEqual；96/96、check 0、smoke 59/59 + 21/21、check_protocol/test_core 不变；task-15/12 交叉通过 |
 | **提交与门禁** | 340d0ab / b656488 / 150b2a7 | **通过（1 条 P3）** | 25 文件范围正确、无主产品夹带；roster_view 已移除、`/roster` 自包含、823 字符与基线一致、`/adapters` 不变；门禁 3/3 PASS（96/96）；workflow 统一走脚本、paths 合理；P3：npm 缺失时仍 traceback（退出码 1，安全失败）→ 已由 8a95c94 修复并复验 |
 | **S1-17 / task-17（S2-1）** | 多角色（独立作息/派活/排队/归属） | **通过** | `villagers[]`+`villager` 兼容、每角色独立 state、队列 Map<villagerId>、派活只叫一个/第二单换人/双忙各自排队、workerId 归属、3 角色可扩、双 sim deepEqual；**100/100**、check 0、smoke **66/66 + 21/21**、check_protocol/test_core 64/0；渲染层按 id 多实例（截图双人可见） |
+| **S1-21 / task-21（多角色 P3）** | 日报归属 + 手动完成对象 | **通过** | 新增 `deliveriesByVillager` 按人分账（台账/Mock 不混）；日报每人都写清、全闲/全忙/混合措辞；`complete` 带 `target`（id/名字）、未知目标拒绝、台账完成权不回退；**106/106**、check 0、smoke **74/74 + 21/21**、check_protocol/test_core 64/0；P3：DOM `#finish` 无 target 入口（仅 Oracle API） |
 
 ---
 
@@ -1075,6 +1076,92 @@ task-12 roster 探针 **8/8**（旧服务 `/roster 404 → /adapters` 回退未�
 
 ---
 
+# 卡 12：task-21（多角色 P3）日报归属 + 手动完成对象
+
+## 结论：**通过**（2026-10-19 14:54–14:58 执行；task-21 改动仍为未提交工作区）
+
+### 1) diff 复核（范围）
+
+只改：`report.ts`、`simulation.ts`、`types.ts`、`SandboxScene.ts`、`oracle-panel.ts`、`smoke.mjs`、
+`test/surface.test.ts`、`test/world.test.ts`；**未改** `ledger.ts` / `projection.ts` / `server/*`
+（工作区里 main.ts 与 server 的改动是既有遗留，不是本卡）。
+
+- **日报归属**：`report.ts` 先按 `deliveriesByVillager` 逐人写，再在每个人名下分「台账 N / Mock M」；
+  `villagerTail` 改为遍历 `villagers`：全闲写「A、B都在祭坛边坐着」，全忙写「A手上是「x」，B手上是「y」」，
+  混合写「…，X在祭坛边坐着」；headline 仍按全局交付数（与正文一致）
+- **手动完成对象**：`WorldCommand` 的 `complete` 增 `target?: string`；`completeManually(target?)`
+  按 id 或 name 精确匹配，未知目标拒绝、目标空闲拒绝、台账单仍拒绝；成功回执写「（{name}，…，不计入台账）」
+- **UI/接口**：`OracleApi.finish(target?: string)`；`SandboxScene.finish(target?)` 传给 sim；
+  状态行在有 `working` 角色时追加「默认交付：{name}的单」；working 文案带任务摘要
+- `villager.ts` / 渲染层未改（本卡不涉及）
+
+### 2) 新增字段 / 接口清单（供 ADR schema 冻结）
+
+**A. 快照结构（`WorldSnapshot`）新增**
+- `deliveriesByVillager: readonly VillagerDeliveries[]`（**新增**；顺序与 `villagers` 一致）
+- `VillagerDeliveries { villagerId: string; name: string; ledger: number; mock: number }`（**新增**）
+- 既有归属相关字段（引用，不新增）：`deliveries { ledger, mock }`（全局按来源）、`tasks[].workerId: string|null`、
+  `villagers[]`（每项含 `id`）、`villager`（兼容 = `villagers[0]`）、`pending[].villagerId`、
+  `ledger { connected, lastSyncAt, mock, complete }`。**没有名为 `settled` 的字段**；归属结算由
+  `deliveriesByVillager + deliveries + workerId` 表达
+
+**B. 命令 / JS 接口新增**
+- `WorldCommand`: `{ kind: 'complete', target?: string }`（**新增可选 `target`**；值为角色 id 或 name）
+- `OracleApi.finish(target?: string): void`（**新增可选参数**；`window.Oracle.finish` 同步暴露）
+- `Simulation.completeManually(target?: string)`（private）；内部 `deliveryTally: Map<villagerId, {ledger,mock}>`
+- 既有（不新增）：`dispatch` / `cancelPending(id?)` / `sync` / `finish()`（省略 target 走旧行为）
+
+**C. 输出字符串契约（供前端/日报消费，非结构体）**
+- 日报行：`{name}交付 {total} 单（台账 {n} / {Mock|离线 Mock} {m}）`，多角色用 ` / ` 连接（0 单写 `{name}交付 0 单`）
+- 日报收尾：全闲 `A、B都在祭坛边坐着`；全忙 `A手上是「…」，B手上是「…」`；混合追加 `X在祭坛边坐着`
+- 状态行：`默认交付：{name}的单`（有 working 者时）；working 文案含 `「{summary}」`
+- 回执：成功 `（{name}，{沙盒 Mock|离线 Mock}，不计入台账）`；未知目标 `没有叫「{target}」的角色`；
+  目标空闲 `{name}现在没有在干活`；台账单 `这单的完成权在台账…`
+- 未新增任何网络/服务端字段、无回答入口
+
+### 3) 自跑与对抗
+
+| 检查 | 实测 |
+|---|---|
+| `npm run check` | exit 0 |
+| `npm test` | **106/106 pass、0 fail**（≥104；新增 7 项 ok 50–53、96–98） |
+| 沙盒 smoke（本工作区 dev，5188） | **74/74 通过**（≥70，46.0 s） |
+| 台账 smoke（8000 只读） | **21/21 通过**（未回退） |
+| `check_protocol.py` / `test_core.py`（venv python） | PASS / **64 passed 0 failed** |
+| 浏览器 UI 探针（15/15） | 见下 |
+
+**QA 纯逻辑对抗 26/26**（`qa-task21-attribution-probe.mjs`）：
+- 两人的 Mock 交付各记 1，`deliveriesByVillager` 顺序/名字与 `villagers` 一致；日报两人都出现、来源标签正确
+- 混合来源：v0 mock=1、v1 ledger=1，全局 ledger/mock 未合并；日报行含两人且 `台账 1`/`Mock 1` 分列
+- 日报收尾：全闲「都在祭坛边坐着」、全忙「两人手上是…」、混合「一人忙一人在祭坛」均可读
+- 指定 `v0` 收工 → 只 v0 delivering、v1 仍 working、计入 v0；指定名字「阿雾」收 v1 → 计入 v1、总数 +1
+- 未知 id → `没有叫「nobody」…` 且世界不动；目标存在但空闲 → 明确拒绝
+- **台账单指定角色完成仍被拒**（完成权不回退）
+- 两 sim 同命令同步长（含 target 完成）快照 deepEqual，且快照含 `deliveriesByVillager`
+
+**浏览器 UI 15/15**（`qa-task21-ui-probe.mjs`）：
+- 单人干活时状态行「默认交付：莞尔的单」；点 `#finish` 回执「成果已交付（莞尔，离线 Mock，…）」，
+  只影响默认角色
+- `window.Oracle.finish('nobody')` → 明确拒绝且世界不动
+- 两人同时干活：指定 `finish('v0')` → v0 delivering、v1 working；再 `finish('阿雾')` → v1 delivering；
+  两人分账各计各的（v0:2 / v1:1）
+- 报纸/Oracle.report 均写出「莞尔交付 2 单（离线 Mock 2） / 阿雾交付 1 单（离线 Mock 1）」；全闲收尾措辞正确
+- 截图 `17-task21-attribution.png`；浏览器零 JS 报错
+
+### 4) 问题分级
+
+| 级别 | 问题 | 说明 / 建议 |
+|---|---|---|
+| **P0/P1/P2** | 无 | — |
+| P3（接口/UI 差异） | DOM 的 `#finish` 按钮没有 target 选择入口（点击走省略 target 的旧行为）；指定对象只能经 `window.Oracle.finish(id/name)` | 当前用「默认交付：{name}的单」提示默认对象；若验收要求按钮层可选对象，需要加 UI（下拉/参数） |
+| P3（信息） | 日报 Mock 标签用全局 `snapshot.ledger.mock`，非按角色历史 | 若某角色在离线期交付、之后台账恢复，标签会随当前状态变化；不影响计数 |
+| P3（信息） | target 按 id/name 匹配，重名角色会命中第一个 | 当前默认名唯一；多角色命名约束可写进 schema 文档 |
+
+**总评：通过。** 日报按人分账、不合并来源、助手不再漏报；手动完成可指定对象且未知目标/台账单均正确拒绝；
+106 项单测、74+21 冒烟、主产品门禁与 UI 探针全部回绿。
+
+---
+
 # 附录 A：证据文件清单（工作区 `C:\Users\18712\.dsh\bot\workspace\recon\`）
 
 ## task-7
@@ -1213,6 +1300,18 @@ task-12 roster 探针 **8/8**（旧服务 `/roster 404 → /adapters` 回退未�
 | `task17-gate-npm-missing.log` | 8a95c94 复验：npm 缺失时 FAIL 且无 Traceback |
 | `task17-cleanup.log` | 端口释放、8000 PID/启动时间锚点 |
 
+## task-21（多角色 P3）
+
+| 文件 | 内容 |
+|---|---|
+| `task21-check.log` / `task21-npm-test.log` | check 0、**106/106**（新增 7 项 ok 50–53、96–98） |
+| `s1-task21-attribution-probe.log` | QA 归属/指定完成对抗 26/26（分账、来源、收尾措辞、指定 id/名字、未知拒绝、台账完成权、确定性） |
+| `task21-ui-probe.log` | 浏览器 15/15（默认交付提示、#finish、Oracle.finish、未知目标、两人分账、报纸） |
+| `task21-smoke-sandbox.log` / `task21-smoke-ledger.log` | 沙盒 **74/74**、台账 **21/21** |
+| `task21-check-protocol.log` / `task21-test-core.log` | 主产品 PASS / 64 passed 0 failed |
+| `eval\screens\17-task21-attribution.png` | 两人分账后的状态行/报纸截图 |
+| `task21-cleanup.log` | 端口释放、8000 PID/启动时间锚点、`commissions.db` 未被写 |
+
 # 附录 B：复验顺序（各卡）
 
 ```powershell
@@ -1291,4 +1390,14 @@ Get-NetTCPConnection -LocalPort 5188,5190,8001,8000 -State Listen -ErrorAction S
   exit 1、**无 Traceback**，150b2a7 节的 P3 关闭
 - **task-17 收口（14:40:48）**：5188/8001/5189 无监听；8000 PID 22996、start 2026-10-18 16:40:34、health 200
   未重启；`data/commissions.db` 未被写（mtime 10:43:06）；`data/memory.db` 14:40:25 的变化来自 8000 自身会话写入
+  （ledger smoke WS，非 QA 写台账）；临时目录 0、无 `.tmp` 残留
+- **task-21（多角色 P3）：通过**（14:54–14:58）——新增 snapshot `deliveriesByVillager`
+  （`VillagerDeliveries{villagerId,name,ledger,mock}`）、`complete` 命令可选 `target`（id/名字）、
+  `OracleApi.finish(target?)`；日报按人分账且来源不合并、全闲/全忙/混合措辞可读、助手不漏报；
+  指定 v0/名字各自收工不串、未知目标拒绝、台账完成权不回退；**106/106**、check 0、
+  smoke **74/74 + 21/21**、check_protocol PASS、test_core **64/0**；浏览器 15/15（含 `#finish` 默认提示、
+  `window.Oracle.finish` 指定对象、报纸分账）。P3：DOM `#finish` 无 target 选择入口、Mock 标签随全局台账状态、
+  target 按名字匹配重名取第一个。新增字段/接口清单见卡 12 §2（供 ADR schema 冻结）
+- **task-21 收口（14:58:03）**：5188/8001/5189 无监听；8000 PID 22996、start 2026-10-18 16:40:34、health 200
+  未重启；`data/commissions.db` 未被写（mtime 10:43:06）；`data/memory.db` 14:57:43 的变化来自 8000 自身会话写入
   （ledger smoke WS，非 QA 写台账）；临时目录 0、无 `.tmp` 残留
