@@ -82,12 +82,16 @@ export type VillagerMode =
 
 export type TaskStatus = 'assigned' | 'in_progress' | 'done' | 'failed';
 
+/** 这条活的完成权归谁。沙盒自己造的活由计时器收尾；台账来的活只有台账能收。 */
+export type TaskSource = 'sandbox' | 'ledger';
+
 export interface TaskRecord {
   readonly id: string;
   readonly kind: TaskKind;
   readonly summary: string;
-  /** 原地做的活没有铺子。 */
-  readonly buildingId: string | null;
+  /** 原地做的活没有铺子；台账的活等派下去才写。 */
+  buildingId: string | null;
+  readonly source: TaskSource;
   status: TaskStatus;
   readonly createdAt: number;
   completedAt: number | null;
@@ -123,6 +127,11 @@ export type WorkstationActivity =
       readonly taskId: string;
       readonly startedAt: number;
       readonly estimateMs: number;
+      /**
+       * 世界知不知道这条活还要多久。沙盒的活由计时器估，所以是 true；
+       * 台账的活只有台账自己知道，世界不许编一个百分比，所以是 false。
+       */
+      readonly determinate: boolean;
     }
   | {
       /** 工具报错后的滑稽故障态，黑烟，不会自己恢复。 */
@@ -137,8 +146,11 @@ export interface WorkstationSnapshot {
   readonly activity: WorkstationActivity;
   /** 本次开工已经过去多久（毫秒）。只驱动烟雾浓淡。 */
   readonly elapsedMs: number;
-  /** 0..1。粗估进度，用于铺子上方那条细线；任务仍以状态机终态为准。 */
-  readonly progress: number;
+  /**
+   * 0..1。粗估进度，用于铺子上方那条细线；任务仍以状态机终态为准。
+   * 台账的活是 null：世界不知道真实工作跑到哪了，就不画一条假的进度。
+   */
+  readonly progress: number | null;
 }
 
 /** 在建工地。期间不能接活，画成脚手架。 */
@@ -187,6 +199,8 @@ export interface WorldSnapshot {
   readonly weather: Weather;
   /** 交付积累的信仰点数与已达成的世界记忆数。 */
   readonly faith: { readonly points: number; readonly milestones: number };
+  /** 上游台账的在线情况。离线时世界照常过日子，但不再谎报"没有活"。 */
+  readonly ledger: { readonly connected: boolean; readonly lastSyncAt: number | null };
 }
 
 /** 神谕解析结果。世界只认这几种动词，别的都落到 unknown。 */

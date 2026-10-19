@@ -498,6 +498,35 @@ def test_dispatcher_retry_cap() -> None:
     raises("blocked 后不能直接交差", lambda: service.submit(commission["id"], GOOD_ARTIFACT), ValueError)
 
 
+def test_answer_starts_a_new_attempt() -> None:
+    """请示获答是一次新开工，attempt 必须动。
+
+    durable 执行体按 `commission_id@attempt` 幂等。answer() 若不动计数，
+    内核里那个已终态（failed）的任务会被原样拿回，执行体不再被拉起——
+    实测表现就是"答了一句再试，DSH 一次都没再跑，台账仍停在 blocked"。
+    manual / cli_subproc 不读 attempt，对这个计数不敏感。
+    """
+    print("[answer bumps the attempt]")
+    service = build_stub_service()
+    commission = service.open("整理一版", "把《七月选题》理成三版标题")
+    service.dispatch(commission["id"], intent="整理 mock产出")
+    service.start(commission["id"])
+    service.dispatcher.block(commission["id"], "换将还是等一轮？")
+    before = service.commission(commission["id"])["retry_count"]
+    # answer() 自己会驱动执行体跑到终态，所以先取"刚回到 running"的那一态：
+    # dispatcher.answer 返回的 commission 是迁移后、驱动前的快照。
+    moved = service.dispatcher.answer(commission["id"], "等一轮")[0]
+    after = service.commission(commission["id"])["retry_count"]
+    check("答完先回到 running", moved["status"] == "running", moved["status"])
+    check("请示获答记一次新开工", after == before + 1, f"{before} -> {after}")
+    # attempt 是 _run_adapter 现派的，不落进 packet（协议 §19 的形状不变），
+    # 所以验适配器真正收到的那一份：StubAdapter 把 briefing_packet 记了下来。
+    asyncio.run(service.run_commission(commission["id"]))
+    prepared = [item.get("attempt") for item in StubAdapter.instances[-1].prepared]
+    check("新 attempt 递到了适配器", after in prepared, str(prepared))
+    service.close()
+
+
 def test_boss_rejection_learns() -> None:
     print("[boss rejection]")
     service = build_service()
@@ -811,13 +840,57 @@ def test_rest_seam() -> None:
                 pass
 
 
+def test_commission_change_notifications() -> None:
+    """台账变更通知：世界靠它把督办状态变化看在眼里（协议 §19 变更通知）。
+
+    订阅者拿到的必须是**已投影**的那一条（与 REST 同形），否则前端要维护第二套
+    字段映射；回调抛异常不能连累写台账本身。
+    """
+    print("[commission notifications]")
+    store = CommissionStore(":memory:")
+    seen: list[dict] = []
+    unsubscribe = store.subscribe(seen.append)
+
+    item = store.create("写爬虫", "抓一下这个站点")
+    check("开票就通知一次", len(seen) == 1 and seen[0]["id"] == item["id"])
+    check("通知是已投影的形状", seen[0]["delivery"] == {} and seen[0]["audit"] == {})
+
+    store.transition(item["id"], "briefing", agent_id="scribe")
+    check("状态迁移也通知", seen[-1]["status"] == "briefing" and seen[-1]["agent_id"] == "scribe")
+
+    before = len(seen)
+    store.transition(item["id"], "running")
+    store.record_step(item["id"], 3)
+    check("步骤推进也通知", len(seen) == before + 2 and seen[-1]["step_idx"] == 3)
+
+    unsubscribe()
+    after = len(seen)
+    store.transition(item["id"], "blocked", blocked_question="换将还是等一轮？")
+    check("退订之后不再通知", len(seen) == after)
+
+    # 回调抛异常不许影响写台账，也不许连累其它订阅者。
+    store2 = CommissionStore(":memory:")
+    other: list[dict] = []
+
+    def explode(_commission):
+        raise RuntimeError("订阅者坏了")
+
+    store2.subscribe(explode)
+    store2.subscribe(other.append)
+    created = store2.create("坏订阅者", "")
+    check("坏订阅者不影响写台账", created["status"] == "drafting")
+    check("坏订阅者不连累其它订阅者", len(other) == 1)
+
+
 def main() -> int:
-    for test in (test_commission_state_machine, test_briefing_packet, test_roster_selection_and_capacity,
+    for test in (test_commission_state_machine, test_commission_change_notifications,
+                 test_briefing_packet, test_roster_selection_and_capacity,
                  test_memory_block_is_framed, test_memory_block_survives_serialization,
                  test_telemetry_store_and_summary, test_spinning_guard,
                  test_telemetry_gateway_proxy, test_evaluator_layers,
                  test_evaluator_self_evolution, test_dispatcher_lifecycle,
-                 test_dispatcher_retry_cap, test_boss_rejection_learns,
+                 test_dispatcher_retry_cap, test_answer_starts_a_new_attempt,
+                 test_boss_rejection_learns,
                  test_delegate_without_worker, test_real_usage_and_partial_failure,
                  test_spinning_alert_lands_in_telemetry, test_front_intents,
                  test_front_samples_and_report, test_orchestrator_route_needs_real_state,

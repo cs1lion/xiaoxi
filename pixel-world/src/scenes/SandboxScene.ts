@@ -20,6 +20,7 @@ import { createDecorView, type DecorView } from '../render/decor.ts';
 import { composeReport, type DailyReport } from '../world/report.ts';
 import { createLazyAnimalese, type Animalese } from '../audio/animalese.ts';
 import { toWorldCommand, type AgentToWorld } from '../world/bridge.ts';
+import { LedgerClient } from '../world/ledger.ts';
 
 export interface ScenePayload {
   readonly world: BuiltWorld;
@@ -54,6 +55,7 @@ export class SandboxScene extends Phaser.Scene {
   private lastConstructionKey = '';
   private lastBubble: string | null = null;
   private readonly animalese: Animalese = createLazyAnimalese();
+  private ledger: LedgerClient | null = null;
   private readonly resultListeners = new Set<(result: CommandResult) => void>();
   private readonly statusListeners = new Set<(line: string) => void>();
   private readonly bubbleListeners = new Set<(text: string) => void>();
@@ -106,6 +108,33 @@ export class SandboxScene extends Phaser.Scene {
     });
     this.snapshot = this.sim.snapshot();
     this.registerOracleApi();
+    this.connectLedger();
+  }
+
+  /**
+   * 接主服务的台账。连不上不算错误：世界照常过日子，状态行会写明离线。
+   * 用 `?ledger=off` 可以显式跑纯沙盒（离线演示与浏览器回归都用它）。
+   */
+  private connectLedger(): void {
+    const params = new URLSearchParams(window.location.search);
+    if (params.get('ledger') === 'off') return;
+    const client = new LedgerClient({
+      onChange: (view) => {
+        this.sim.enqueue({
+          kind: 'sync',
+          tasks: view.tasks,
+          finished: view.finished,
+          connected: view.connected,
+        });
+      },
+    });
+    this.ledger = client;
+    void client.start();
+  }
+
+  shutdown(): void {
+    this.ledger?.stop();
+    this.ledger = null;
   }
 
   private drawAltar(originX: number, originY: number): void {
@@ -187,6 +216,14 @@ export class SandboxScene extends Phaser.Scene {
     return { ok: true, message: '外部消息已投递。' };
   }
 
+  /**
+   * 喂一帧台账增量给客户端，等价于服务端真的发了一帧 commission_update。
+   * 浏览器回归用它验证"操作台与世界连通"，不写主服务。
+   */
+  pushLedger(commission: unknown): void {
+    this.ledger?.applyPush(commission);
+  }
+
   view(): WorldSnapshot {
     return this.snapshot;
   }
@@ -199,6 +236,7 @@ export class SandboxScene extends Phaser.Scene {
       finish: (): void => this.finish(),
       build: (prefabId: string): void => this.build(prefabId),
       feed: (message: AgentToWorld): CommandResult => this.feed(message),
+      pushLedger: (commission: unknown): void => this.pushLedger(commission),
       onResult: (listener: (result: CommandResult) => void): (() => void) => {
         this.resultListeners.add(listener);
         return () => this.resultListeners.delete(listener);
@@ -329,7 +367,8 @@ export class SandboxScene extends Phaser.Scene {
     };
     const weather = this.snapshot.weather === 'rain' ? '雨' : '晴';
     const faith = this.snapshot.faith;
-    return `${villager.name}：${modeLabel[villager.mode]}　　${weather}　　已交付 ${this.completedCount()} 单　　神恩 ${faith.points}/${3}`;
+    const ledger = this.snapshot.ledger.connected ? '台账在线' : '台账离线';
+    return `${villager.name}：${modeLabel[villager.mode]}　　${weather}　　${ledger}　　已交付 ${this.completedCount()} 单　　神恩 ${faith.points}/${3}`;
   }
 
   private buildingName(id: string | null): string | null {

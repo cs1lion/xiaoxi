@@ -1,0 +1,150 @@
+/** 台账 → 世界事实。这是唯一的映射点，纯函数，可离线断言。
+ *
+ * 上游是 `GET /api/executive/commissions` 的 items（协议 §19）。世界不认识
+ * commission / agent_id 这些词，只认识「哪栋楼在干活、她手上有没有活」。
+ * 换台账字段只改这里，世界与渲染一行不动。
+ */
+
+import type { TaskKind, WorkshopTask } from './types.ts';
+
+/** 台账里一条督办的最小形状。多余字段一律忽略，不猜。 */
+export interface CommissionRow {
+  readonly id: string;
+  readonly title: string;
+  readonly agent_id: string;
+  readonly status: string;
+  readonly step_idx: number;
+  readonly blocked_question: string;
+}
+
+/** 花名册里的一个 Worker，用来把 agent_id 归到某一类活。 */
+export interface AgentRow {
+  readonly id: string;
+  readonly name: string;
+  readonly strengths: readonly string[];
+}
+
+export interface ProjectionInput {
+  readonly commissions: readonly CommissionRow[];
+  readonly agents: readonly AgentRow[];
+}
+
+/** 世界侧看到的一条活。 */
+export interface WorldTask {
+  readonly commissionId: string;
+  readonly kind: TaskKind;
+  readonly title: string;
+  readonly agentId: string;
+  readonly agentName: string;
+  readonly status: string;
+  readonly blockedQuestion: string;
+  /** 台账已判完成，等她收尾交付；与"还在干"分开，世界才能正确收尾。 */
+  readonly finished: boolean;
+}
+
+export interface Projection {
+  readonly tasks: readonly WorldTask[];
+  /** 需要她立刻去做的那一条（按优先级挑出的唯一一条）。 */
+  readonly active: WorldTask | null;
+  /** 台账里已经收工、世界还没交付的那几条。 */
+  readonly finished: readonly WorldTask[];
+}
+
+/** 能力关键词 → 三类活。顺序即优先级，先命中的算数。 */
+const KIND_RULES: readonly { readonly kind: WorkshopTask; readonly words: readonly string[] }[] = [
+  {
+    kind: 'code',
+    words: ['代码', '实现', '脚本', '重构', '命令', '修复', '测试', '文件', '写入', '多步', '长任务'],
+  },
+  { kind: 'research', words: ['检索', '查找', '搜索', '调研', '比对', '资料', '汇总', '看看有没有'] },
+  { kind: 'writing', words: ['写作', '整理', '标题', '摘要', '便笺', '笔记', '文案', '改写', '润色', '文档', '表格', '汇报', '归纳', '总结'] },
+];
+
+/** 台账状态 → 该不该让她动。ready_to_report 已经是活干完了，不再开工。 */
+const ACTIVE_STATUSES = new Set(['briefing', 'running', 'blocked', 'auditing']);
+/** 这些状态表示这一单已经收工，世界该收尾交付而不是继续开工。 */
+const FINISHED_STATUSES = new Set(['ready_to_report', 'done']);
+
+export function project(input: ProjectionInput): Projection {
+  const agents = new Map(input.agents.map((agent) => [agent.id, agent]));
+  const tasks: WorldTask[] = [];
+  const finished: WorldTask[] = [];
+  for (const commission of input.commissions) {
+    const active = ACTIVE_STATUSES.has(commission.status);
+    const done = FINISHED_STATUSES.has(commission.status);
+    if (!active && !done) continue;
+    const agent = agents.get(commission.agent_id);
+    const task: WorldTask = {
+      commissionId: commission.id,
+      kind: kindForAgent(agent, commission),
+      title: commission.title,
+      agentId: commission.agent_id,
+      agentName: agent?.name ?? commission.agent_id,
+      status: commission.status,
+      blockedQuestion: commission.blocked_question,
+      finished: done,
+    };
+    if (done) finished.push(task);
+    else tasks.push(task);
+  }
+  return { tasks, active: pickActive(tasks), finished };
+}
+
+/** 优先 blocked（要请示），其次 running，最后 briefing/auditing。同级按 id 稳定排序。 */
+export function pickActive(tasks: readonly WorldTask[]): WorldTask | null {
+  const rank = (task: WorldTask): number => {
+    if (task.status === 'blocked') return 0;
+    if (task.status === 'running') return 1;
+    if (task.status === 'auditing') return 2;
+    return 3;
+  };
+  const sorted = [...tasks].sort((a, b) => rank(a) - rank(b) || a.commissionId.localeCompare(b.commissionId));
+  return sorted[0] ?? null;
+}
+
+/** 用花名册的能力关键词归类。认不出的 Agent 落到写作，因为它是唯一不碰代码的默认档。 */
+export function kindForAgent(agent: AgentRow | undefined, commission: CommissionRow): TaskKind {
+  const haystack = [
+    ...(agent?.strengths ?? []),
+    agent?.name ?? '',
+    commission.title,
+  ].join(' ');
+  for (const rule of KIND_RULES) {
+    if (rule.words.some((word) => haystack.includes(word))) return rule.kind;
+  }
+  return 'writing';
+}
+
+/** 解析上游载荷。字段缺失一律拒绝，不用默认值把坏数据蒙混进来。 */
+export function parseCommissionRow(raw: unknown): CommissionRow {
+  if (typeof raw !== 'object' || raw === null) throw new Error('督办不是对象');
+  const row = raw as Record<string, unknown>;
+  const str = (key: string, fallback = ''): string => {
+    const value = row[key];
+    if (value === undefined || value === null) return fallback;
+    if (typeof value !== 'string') throw new Error(`${key} 必须是字符串`);
+    return value;
+  };
+  const id = str('id');
+  if (id === '') throw new Error('督办缺 id');
+  const step = row.step_idx;
+  return {
+    id,
+    title: str('title'),
+    agent_id: str('agent_id'),
+    status: str('status'),
+    step_idx: typeof step === 'number' && Number.isFinite(step) ? step : 0,
+    blocked_question: str('blocked_question'),
+  };
+}
+
+export function parseAgentRow(raw: unknown): AgentRow {
+  if (typeof raw !== 'object' || raw === null) throw new Error('花名册条目不是对象');
+  const row = raw as Record<string, unknown>;
+  const id = row.id;
+  if (typeof id !== 'string' || id === '') throw new Error('花名册条目缺 id');
+  const strengths = Array.isArray(row.strengths)
+    ? row.strengths.filter((item): item is string => typeof item === 'string')
+    : [];
+  return { id, name: typeof row.name === 'string' ? row.name : id, strengths };
+}

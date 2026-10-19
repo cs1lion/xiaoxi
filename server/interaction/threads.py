@@ -18,6 +18,7 @@ import sqlite3
 import threading
 import time
 import uuid
+from typing import Callable
 
 
 class RevisionConflict(ValueError):
@@ -534,6 +535,10 @@ class CommissionStore:
             raise ValueError('path must be a nonempty filesystem path or :memory:')
         self._lock = threading.RLock()
         self._closed = False
+        # 变更通知：台账是唯一真相，谁改的都得从这里过，所以钩子只挂一处。
+        # 订阅者拿到的是一条已投影的督办（与 GET /api/executive/commissions 同形）。
+        # 回调异常一律吞掉——推送坏了不能把写台账本身带崩。
+        self._listeners: list[Callable[[dict], None]] = []
         self._db = sqlite3.connect(path, isolation_level=None, check_same_thread=False)
         self._db.row_factory = sqlite3.Row
         try:
@@ -623,7 +628,9 @@ class CommissionStore:
                 VALUES (?,?,?,?,?, 'drafting', 0, 0, '', '{}', '{}', '{}', '[]', ?, ?, NULL)''',
                 (commission_id, thread_id, title, brief, agent_id, now, now))
             self._event(commission_id, 'opened', {'title': title, 'brief': brief[:200]}, now)
-            return self._row(commission_id)
+            created = self._row(commission_id)
+        self._publish(commission_id)
+        return created
 
     def transition(self, commission_id, status, **changes):
         """Move one commission along the 6-phase machine; illegal moves raise ValueError."""
@@ -669,7 +676,9 @@ class CommissionStore:
             self._db.execute(f'UPDATE commissions SET {columns} WHERE id=?',
                              (*updates.values(), commission_id))
             self._event(commission_id, 'transition', payload, now)
-            return self._row(commission_id)
+            updated = self._row(commission_id)
+        self._publish(commission_id)
+        return updated
 
     def record_step(self, commission_id, step_idx):
         with self._transaction():
@@ -681,12 +690,47 @@ class CommissionStore:
             self._db.execute('UPDATE commissions SET step_idx=?, updated_at=? WHERE id=?',
                              (step, now, commission_id))
             self._event(commission_id, 'step', {'step_idx': step}, now)
-            return self._row(commission_id)
+            stepped = self._row(commission_id)
+        self._publish(commission_id)
+        return stepped
 
     def _event(self, commission_id, kind, payload, now):
         self._db.execute('INSERT INTO commission_events (commission_id, kind, payload, created_at)'
                          ' VALUES (?,?,?,?)',
                          (commission_id, kind, json.dumps(payload, ensure_ascii=False), now))
+
+    # ---------- 变更通知 ----------
+    def subscribe(self, listener: Callable[[dict], None]) -> Callable[[], None]:
+        """订阅每一次落库之后的督办投影。返回取消订阅函数。
+
+        只推"这一条督办现在长什么样"，不推差异：订阅者拿到的形状和 REST 完全
+        一致，就不必维护第二套字段映射。回调在写事务之外调用。
+        """
+        self._listeners.append(listener)
+
+        def unsubscribe():
+            try:
+                self._listeners.remove(listener)
+            except ValueError:
+                pass
+
+        return unsubscribe
+
+    def _publish(self, commission_id):
+        """在事务外读一次投影再分发。读失败不推，也不影响已经写成功的台账。"""
+        listeners = list(self._listeners)
+        if not listeners:
+            return
+        try:
+            commission = self.get(commission_id)
+        except (KeyError, sqlite3.Error):
+            return
+        for listener in listeners:
+            try:
+                listener(commission)
+            except Exception:
+                # 推送是旁路：一个订阅者坏了不能连累其它订阅者，更不能回滚台账。
+                continue
 
     # ---------- 读取 ----------
     def get(self, commission_id):

@@ -22,19 +22,24 @@ npm run dev        # http://127.0.0.1:5188
 
 ```bash
 cd pixel-world
-npm test           # 纯逻辑，45 项，不需要浏览器
+npm test           # 纯逻辑，59 项，不需要浏览器
 npm run check      # 类型检查
 npm run build      # tsc + vite build
 ```
 
-浏览器回归（需要 dev server 已起，且主仓库根目录装过 Playwright）：
+浏览器回归：
 
 ```bash
 cd pixel-world
-node scripts/smoke.mjs
+node scripts/smoke.mjs              # 沙盒闭环，49 项，不依赖本地服务
+LEDGER=1 node scripts/smoke.mjs     # 台账连通，10 项，需先起 8000
 ```
 
-它跑完整闭环并断言 50 条用户可观察的行为，截图落在 `eval/screens/`。
+`LEDGER=1` 那一档验的是"操作台与世界连通"：世界从 `GET /api/executive/commissions`
+拉到全量，之后靠 WS 的 `commission_update` 增量推进；脚本用一帧注入的督办验
+"上游派活 → 她动起来"和"上游收工 → 她交付"。
+
+两种模式都靠 `?ledger=off` / `?ledger=on` 切换，默认接台账；离线演示用 `off`。
 
 ## 目录与职责
 
@@ -46,6 +51,8 @@ src/world/          纯逻辑，不 import Phaser，可被 node --test 直接加
   setup.ts          世界规格（尺寸/分区/预算）、落位、自动铺路、不变量校验
   oracle.ts         一句话 → 派活 / 交付 / 天气 / 认不出
   simulation.ts     状态机 + 命令队列。固定步长，无内部时钟，可确定性回放
+  projection.ts     台账 → 世界事实。唯一的映射点
+  ledger.ts         台账客户端：REST 全量 + WS 增量 + 断线兜底
   tasks.ts          长短任务分级：短活原地办，长活进城
   routines.ts       日常作息：没活干时她去哪，不花 token
   weather.ts        天气浓淡与自动退场，渐变不秒切
@@ -67,9 +74,19 @@ scripts/smoke.mjs   浏览器闭环回归
    `WorldGrid` 结算，渲染层不判断"能不能走"。
 2. **命令只有一个入口。** 外部只能 `sim.enqueue()`。命令在下一个逻辑拍开头统一结算，
    所以渲染循环里不会看到半更新的世界。`say()` 返回的"已投递"不代表世界照办了，
-   真正的回执走 `onResult`。外部 Agent 走 `feed()`，同样落到这条队列。
+   真正的回执走 `onResult`。外部 Agent 走 `feed()`，台账走 `sync`，同样落到这条队列。
 3. **中文不画进 canvas。** canvas 只画世界，状态行、回执、报纸、按钮全在 DOM。
    像素中文低于 12px 不可读，长文本必须留在纸面。
+
+## 接台账时的四条纪律
+
+1. **世界不编进度。** 台账的活一律 `determinate: false`，铺子上方不画百分比。
+   活跑多久只有台账知道，计时器估出来的那条线是假的。
+2. **完成权在台账手里。** 台账说收工她才交付；台账撤单她就停手。沙盒的活才由计时器收尾。
+3. **台账是唯一真相。** 世界只读不写，不新建督办、不改状态。断线时照常过日子，
+   但状态行必须写"台账离线"。
+4. **映射只在一处。** `projection.ts` 是台账字段 ↔ 世界活类的唯一映射点，
+   换台账只改那里。
 
 ## 世界预算（写成常量，不许破）
 
@@ -86,16 +103,17 @@ scripts/smoke.mjs   浏览器闭环回归
 - 昼夜与 2D 光照。天气已有（雨/晴），但没有时段与灯光。
 - 真实的工具失败。工坊有 `overheating` 态，但 `shouldOverheat()` 恒为 false：
   没有真实工具时伪造失败就是假动作。
-- 接真实台账（`/api/executive/commissions`）。当前是自洽沙盒，
-  `Bridge` 与 `WorldCommand` 已经就位，接台账时只换运输层。
-- 造物主的 LLM 生成。扩建走的是固定样板 + `findBestSlot`，生成侧没做。
-- 多角色。只有一个她。
+- 造物主的 LLM 生成。扩建走的是固定样板 + `findBestSlot`，生成层留着没做。
+- 多角色。只有一个她；7 个 Agent 的活都归到她一个人头上。
+- 回写。世界是纯投影，验收/打回/换将这些动作还在纸面做。
 
 ## 下一步的岔口
 
-1. **接真实台账**：把 commission 六阶段映射到 `VillagerMode` 与 `WorkstationActivity`，
-   沙盒的队列接上 WS。这一步决定这个世界是"玩具"还是"产品的一扇窗"。
-2. **像素化 3D**：现有 VRM 渲进 48×64 render target，量化 16 色，接进来替换色块小人。
+1. **像素化 3D**：现有 VRM 渲进 48×64 render target，量化 16 色，接进来替换色块小人。
    这一步决定美术路线是否成立，是架构笔记里的 E2 实验。
-3. **造物主接 LLM**：只让模型输出 `{ prefab_id, placement, palette }`，落位交给
+2. **多角色**：一个铺子一个店主，7 个 Agent 各自有人。当前是一人干全部活，
+   台账一忙就会露怯。
+3. **世界里的动作**：在镇子里点一下铺子就能验收/打回，走
+   `POST /api/executive/commissions/{id}/accept`。需要先定同源策略。
+4. **造物主接 LLM**：只让模型输出 `{ prefab_id, placement, palette }`，落位交给
    `findBestSlot`。解析、校验、施工、铺路都已就位，只差生成侧。

@@ -6,9 +6,14 @@
  *   3. 交付 → 人出现在门口 → 回到祭坛
  *   4. 认不出的话不让世界动
  *
+ * 两种模式：
+ *   - 默认（?ledger=off）：纯沙盒，不依赖本地服务
+ *   - `LEDGER=1 node scripts/smoke.mjs`：接主服务台账，验"操作台与世界连通"
+ *
  * 跑法：
  *   1. npm run dev（端口 5188）
- *   2. node scripts/smoke.mjs
+ *   2. node scripts/smoke.mjs                # 沙盒模式
+ *      LEDGER=1 node scripts/smoke.mjs       # 台账模式（需先起 8000）
  * 浏览器用主仓库根目录的 Playwright；原型目录不带这份依赖。
  */
 import { chromium } from '../../node_modules/@playwright/test/index.mjs';
@@ -17,6 +22,8 @@ import assert from 'node:assert/strict';
 
 const URL_BASE = process.env.PIXEL_WORLD_URL ?? 'http://127.0.0.1:5188/';
 const OUT = 'eval/screens';
+// 台账模式：先起主服务（8000），再 `LEDGER=1 node scripts/smoke.mjs`。
+const LEDGER = process.env.LEDGER === '1';
 
 const browser = await chromium.launch({ headless: true });
 const context = await browser.newContext({ viewport: { width: 1010, height: 940 } });
@@ -46,16 +53,62 @@ const waitFor = async (predicate, label, timeout = 25000) => {
   }
 };
 
-try {
-  await mkdir(OUT, { recursive: true });
-  await page.goto(URL_BASE, { waitUntil: 'load' });
-  await page.waitForFunction(() => window.Oracle !== undefined, null, { timeout: 15000 });
-  check(errors.length === 0, '页面加载无 JS 报错');
+const report = (title) => {
+  console.log(`\n${title}：${checks.length} 项通过`);
+  for (const label of checks) console.log(`  ok  ${label}`);
+};
 
+/** 台账模式：验主服务的督办状态真的能驱动这个世界。 */
+async function runLedgerSuite() {
+  await waitFor((s) => s.ledger.connected === true, '台账连接建立', 15000);
+  const linked = await state();
+  check(linked.ledger.lastSyncAt !== null, '世界拿到过一次台账快照');
+  const statusText = await page.textContent('#status');
+  check(
+    statusText.includes('台账在线') || statusText.includes('台账离线'),
+    '状态行读得出台账状态',
+  );
+
+  // 注入一帧 commission_update，等价于服务端真发了一帧。不写主服务：
+  // 推送帧本来就是外部数据，用它验"上游派活 → 世界动起来"这条链。
+  const driven = await page.evaluate(async () => {
+    window.Oracle.pushLedger({
+      id: 'c_smoke_probe',
+      title: '把便笺整理成三版标题',
+      agent_id: 'scribe',
+      status: 'running',
+      step_idx: 2,
+      blocked_question: '',
+    });
+    await new Promise((resolve) => setTimeout(resolve, 400));
+    return window.Oracle.view();
+  });
+  check(driven.tasks.some((t) => t.id === 'c_smoke_probe'), '上游单进了世界的活动清单');
+  check(driven.villager.mode !== 'idle', '她停下日常，去干上游派的活');
+
+  // 上游说收工，她走正常交付，不是凭空结束。
+  const delivered = await page.evaluate(async () => {
+    window.Oracle.pushLedger({
+      id: 'c_smoke_probe',
+      title: '把便笺整理成三版标题',
+      agent_id: 'scribe',
+      status: 'ready_to_report',
+      step_idx: 3,
+      blocked_question: '',
+    });
+    await new Promise((resolve) => setTimeout(resolve, 300));
+    return window.Oracle.view();
+  });
+  check(
+    delivered.villager.mode === 'delivering' || delivered.villager.mode === 'toAltar',
+    '台账说收工，她走交付',
+  );
+  check(!delivered.tasks.some((t) => t.id === 'c_smoke_probe'), '收工的单退出活动清单');
+}
+
+/** 沙盒模式：神谕闭环 + 日常 + 天气 + 造物主 + 信仰 + 日报 + 外部桥接。 */
+async function runSandboxSuite() {
   const opening = await state();
-  check(opening.buildings.length === 3, '世界里摆了三栋铺子');
-  check(opening.villager.mode === 'idle', '开局她在闲逛');
-
   // 她自己会动，不是屏保。
   const before = opening.villager.pos;
   await page.waitForTimeout(3200);
@@ -74,7 +127,6 @@ try {
   // 一句代码活：行礼 → 赶路 → 开工。
   await page.fill('#utterance', '帮我写个爬虫脚本');
   await page.click('button[type="submit"]');
-  // 界面不再抢答：文案来自世界结算后的回执。
   await page.waitForFunction(
     () => (document.querySelector('#reply')?.textContent ?? '').includes('神谕已送达'),
     null,
@@ -83,7 +135,6 @@ try {
   check(true, '界面回了世界结算后的神谕回执');
   const saluting = await waitFor((s) => s.villager.mode === 'saluting', '她停下手里的事行礼');
   check(saluting.villager.bubble !== null, '行礼时头上有字');
-
   await page.screenshot({ path: `${OUT}/01-salute.png` });
 
   const working = await waitFor((s) => s.villager.mode === 'working', '她走进铺子开始干活');
@@ -97,12 +148,13 @@ try {
   await page.waitForTimeout(700);
   await page.screenshot({ path: `${OUT}/02-working.png` });
 
-  // 自动干完：铺子进入冷却，人出现在门口交付。
   const delivering = await waitFor((s) => s.villager.mode === 'delivering', '活干完，她出门交付');
   check(delivering.villager.visible === true, '交付时人重新出现在画面里');
   check(delivering.tasks[0]?.status === 'done', '台账里这单已完成');
-  const cooling = delivering.workstations.find((w) => w.activity.kind === 'cooling');
-  check(cooling !== undefined, '铺子进入冷却');
+  check(
+    delivering.workstations.some((w) => w.activity.kind === 'cooling'),
+    '铺子进入冷却',
+  );
   await page.screenshot({ path: `${OUT}/03-deliver.png` });
 
   const back = await waitFor((s) => s.villager.mode === 'idle', '她回到祭坛恢复闲逛');
@@ -118,18 +170,18 @@ try {
     null,
     { timeout: 5000 },
   );
-  const refusal = await page.textContent('#reply');
-  check(refusal.includes('手上有活'), '手上有活时新神谕被拒，理由回到界面');
+  check(
+    (await page.textContent('#reply')).includes('手上有活'),
+    '手上有活时新神谕被拒，理由回到界面',
+  );
   check((await state()).tasks.length === 2, '被拒的神谕没有进台账');
 
   // 「现实完成」是人工交付通道：活还没到时间，也能从外面结束。
   await page.click('#finish');
   const manual = await waitFor((s) => s.villager.mode === 'delivering', '人工交付也能结束这单');
   check(manual.tasks[1]?.status === 'done', '人工交付写进台账');
-
   await waitFor((s) => s.villager.mode === 'idle', '交付完回到日常');
 
-  // 日常：没人派活时她自己换地方，状态行说得出她在做什么。
   const routine = await waitFor(
     (s) => typeof s.villager.routine === 'string' && s.villager.routine.length > 0,
     '日常作息给出了一句可读的状态',
@@ -137,7 +189,6 @@ try {
   );
   check(routine.villager.mode === 'idle', '日常状态不是被神谕打断的');
 
-  // 短活原地办：不占铺子。
   await page.click('button[data-kind="quick"]');
   const quick = await waitFor((s) => s.villager.mode === 'working', '短活当场开始');
   check(
@@ -146,7 +197,7 @@ try {
   );
   await waitFor((s) => s.villager.mode === 'idle', '短活自己结束');
 
-  // 世界法则：下雨 → 她躲雨 → 雨停
+  // 世界法则：下雨 → 她躲雨 → 雨停。
   await page.click('#rain');
   const raining = await waitFor((s) => s.weather === 'rain', '神谕让世界下雨了');
   check(raining.villager.umbrella === true, '下雨时她撑起伞');
@@ -169,7 +220,6 @@ try {
   await page.screenshot({ path: `${OUT}/05-build.png` });
   await waitFor((s) => s.constructions.length === 0, '施工结束，新楼落成');
 
-  // 信仰：再交付两单，攒满里程碑，世界多一件东西。
   for (let i = 0; i < 2; i += 1) {
     await page.click('button[data-kind="quick"]');
     await waitFor((s) => s.villager.mode === 'working', `第 ${i + 1} 单短活开始`);
@@ -190,15 +240,40 @@ try {
   // 桥接：外部消息进世界，结果能从快照里读回来。
   const bridged = await page.evaluate(async () => {
     const before = window.Oracle.view().tasks.length;
-    window.Oracle.feed({ type: 'task.assigned', taskId: 'ext-1', taskKind: 'quick', summary: '外部派来的小事' });
+    window.Oracle.feed({
+      type: 'task.assigned',
+      taskId: 'ext-1',
+      taskKind: 'quick',
+      summary: '外部派来的小事',
+    });
     await new Promise((resolve) => setTimeout(resolve, 500));
     return { before, after: window.Oracle.view().tasks.length };
   });
   check(bridged.after === bridged.before + 1, '外部 Agent 的消息进了同一条命令队列');
+}
+
+try {
+  await mkdir(OUT, { recursive: true });
+  await page.goto(
+    LEDGER ? `${URL_BASE}?ledger=on` : `${URL_BASE}?ledger=off`,
+    { waitUntil: 'load' },
+  );
+  await page.waitForFunction(() => window.Oracle !== undefined, null, { timeout: 15000 });
+  check(errors.length === 0, '页面加载无 JS 报错');
+
+  const opening = await state();
+  check(opening.buildings.length === 3, '世界里摆了三栋铺子');
+  check(opening.villager.mode === 'idle', '开局她在闲逛');
+
+  if (LEDGER) {
+    await runLedgerSuite();
+    report('台账模式');
+  } else {
+    await runSandboxSuite();
+    report('神谕闭环');
+  }
 
   check(errors.length === 0, '全程无 JS 报错');
-  console.log(`\n神谕闭环：${checks.length} 项通过`);
-  for (const label of checks) console.log(`  ok  ${label}`);
 } catch (error) {
   console.error(`\n失败：${error.message}`);
   console.error(`已完成 ${checks.length} 项：`);

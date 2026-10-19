@@ -66,6 +66,13 @@ app.include_router(create_starmap_router(manager))
 _scheduler_task: asyncio.Task | None = None
 # 启动期续跑的督办：create_task 的返回值必须有人拿住，否则可能被回收。
 _startup_tasks: set[asyncio.Task] = set()
+# 已连上的 /ws 连接。督办状态变化要推给所有在线连接（协议 §19 变更通知）。
+# 用集合而不是列表：连接断开的清理顺序不确定，重复删也要幂等。
+_connections: set["Connection"] = set()
+# 台账订阅的取消函数。shutdown 时解绑，避免测试里残留订阅者。
+_commission_unsubscribe = None
+# startup 时抓住的主事件循环。台账回调可能来自别的线程，靠它转回事件循环。
+_loop: asyncio.AbstractEventLoop | None = None
 # 慢环执行内核（agent-runtime sidecar）。默认不启用，见 config 的 durable 段。
 _durable_supervisor = None
 
@@ -956,10 +963,53 @@ async def _executive_finish(commission_id: str, action: str, feedback: str = "")
         return
 
 
+async def _broadcast_commission(commission: dict[str, Any]) -> None:
+    """把一条督办的状态变化推给所有在线连接。
+
+    载荷就是台账里那一条（与 GET /api/executive/commissions 的 items 元素同形），
+    前端不必维护第二套字段映射。没有在线连接时静默丢弃：这是旁路通知，
+    状态永远以 REST 台账为准，漏掉一次推送不该让人以为台账坏了。
+    """
+    if not _connections:
+        return
+    payload = {"type": "commission_update", "commission": commission}
+    for conn in list(_connections):
+        if conn.closed:
+            continue
+        try:
+            await conn.send(payload)
+        except Exception:
+            # 一个连接发送失败不影响其它连接；它的清理走自己的 finally。
+            continue
+
+
+def _commission_changed(commission: dict[str, Any]) -> None:
+    """台账回调是同步的，可能来自任意线程（写库路径），所以不能就地 create_task。
+
+    在 startup 时抓住主事件循环，这里用 call_soon_threadsafe 把它转过去。
+    没抓住循环（比如单元测试里没跑 startup）就静默丢弃：推送是旁路，
+    状态永远以 REST 台账为准。
+    """
+    if _loop is None:
+        return
+    try:
+        _loop.call_soon_threadsafe(_spawn_broadcast, commission)
+    except RuntimeError:
+        # 循环已经关了：服务在关闭途中，丢掉这次推送。
+        return
+
+
+def _spawn_broadcast(commission: dict[str, Any]) -> None:
+    task = asyncio.create_task(_broadcast_commission(commission))
+    _startup_tasks.add(task)
+    task.add_done_callback(_startup_tasks.discard)
+
+
 @app.websocket("/ws")
 async def websocket_endpoint(ws: WebSocket) -> None:
     await ws.accept()
     conn = Connection(ws)
+    _connections.add(conn)
     store.start_session(conn.session_id)
     await conn.send(
         {
@@ -1154,6 +1204,7 @@ async def websocket_endpoint(ws: WebSocket) -> None:
     except WebSocketDisconnect:
         pass
     finally:
+        _connections.discard(conn)
         await conn.close()
         store.end_session(conn.session_id)
 
@@ -1226,6 +1277,9 @@ async def _start_durable_if_enabled() -> None:
         node=str(cfg.get("node") or "node"),
         startup_timeout=float(cfg.get("startup_timeout") or 15.0),
         auto_restart=bool(cfg.get("auto_restart", True)),
+        # 审批工具白名单是 sidecar 进程的环境变量，必须随进程一起给出：此前只有
+        # 测试设过它，生产里一个工具都没登记，审批 hook 因此从未生效过。
+        extra_env={"XIAOXI_APPROVAL_TOOLS": str(cfg.get("approval_tools") or "")},
     )
     try:
         await supervisor.start()
@@ -1234,6 +1288,9 @@ async def _start_durable_if_enabled() -> None:
         bound = executive.bind_durable(
             supervisor.config(),
             apply_to=cfg.get("switch_agents") or None,
+            # 内核被硬杀后监督器会换端口重起，写死的 endpoint 就失效了。适配器
+            # 每次派单前问一次当前端点，重试才不会连到死端口。
+            endpoint_provider=supervisor.current_endpoint,
         )
         print(f"[durable] 执行内核就绪 {supervisor.endpoint}；已绑定 {bound} 个 Worker")
         if cfg.get("shadow"):
@@ -1252,15 +1309,51 @@ async def _start_durable_if_enabled() -> None:
             pass
 
 
+def _durable_lookup():
+    """给重启对账用的内核查询函数；内核没起来就返回 None。
+
+    返回的是同步函数而不是协程：`recover_interrupted` 是同步收口，它需要的只是
+    "这一单在内核里现在是什么状态"。sidecar 只监听 loopback，查询走一次短连接
+    即可，查询失败一律当作"内核里没有这一单"，由原有收口转 BLOCKED。
+    """
+    if _durable_supervisor is None or not _durable_supervisor.available:
+        return None
+    endpoint = _durable_supervisor.endpoint
+    token = _durable_supervisor.token
+
+    def lookup(commission_id: str, attempt: int = 0):
+        """按 `commission_id@attempt` 查单；attempt 缺省 0 只为兼容旧调用。"""
+        import httpx
+        headers = {"authorization": f"Bearer {token}"}
+        try:
+            with httpx.Client(timeout=10.0) as client:
+                found = client.get(f"{endpoint}/v1/lookup", headers=headers,
+                                   params={"commission_id": commission_id,
+                                           "attempt": int(attempt)}).json()
+                if not found.get("found"):
+                    return None
+                task_id = int(found.get("task_id") or 0)
+                if task_id <= 0:
+                    return None
+                return client.get(f"{endpoint}/v1/runs/{task_id}", headers=headers).json()
+        except Exception:
+            return None
+
+    return lookup
+
+
 @app.on_event("startup")
 async def startup() -> None:
-    global _scheduler_task
+    global _scheduler_task, _loop, _commission_unsubscribe
+    _loop = asyncio.get_running_loop()
+    # 督办状态变化是旁路推送：台账写成功后通知所有在线连接（协议 §19）。
+    _commission_unsubscribe = executive.ledger.subscribe(_commission_changed)
     orchestrator.set_proactivity(False)
     # 先把执行内核绑好，再收口续跑；否则重派出去的 durable 单没有端点可用。
     await _start_durable_if_enabled()
     # 重启收口要排在调度器之前：先把上次没跑完的单转成请示状态或重新派出，
     # 否则它们会一直占着 worker 的并发槽，新单直接没人接。
-    recovered = executive.recover_interrupted()
+    recovered = executive.recover_interrupted(durable_lookup=_durable_lookup())
     _scheduler_task = asyncio.create_task(scheduler(assistant))
     for commission_id in recovered["resumed"]:
         task = asyncio.create_task(executive.resume(commission_id))
@@ -1270,7 +1363,11 @@ async def startup() -> None:
 
 @app.on_event("shutdown")
 async def shutdown() -> None:
-    global _durable_supervisor
+    global _durable_supervisor, _commission_unsubscribe, _loop
+    if _commission_unsubscribe is not None:
+        _commission_unsubscribe()
+        _commission_unsubscribe = None
+    _loop = None
     editor_insights.close()
     if _durable_supervisor is not None:
         await _durable_supervisor.stop()

@@ -345,6 +345,13 @@ V3 内阁总管的督办台账，与共同事项同库同规约（`server/intera
 - `retry_count` 上限 2（`Evaluator.MAX_RETRY`）。打回时 `retry_count+1` 并回到 `running`；已达上限仍不过则转 `blocked` 并带完整批注请示，不无限重试。
 - `blocked_question` 非空是 `blocked` 状态的前置条件。问题必须是一句话、二选一或可一句话回答；琐事由总管依花名册 `trivia_policy` 或已有偏好代答，大事才起气泡请示。
 - 台账只存公开决定与结果，**不存模型思考过程，不存凭据**。缺失 ID 抛 `KeyError`；事件表 `commission_events` 只追加不改写。
+- **变更通知 `commission_update`**：台账每次落库（开票、迁移、记录步骤）后，向所有在线 `/ws` 连接广播一条
+  `{"type":"commission_update","commission":{…}}`。`commission` 就是 `GET /api/executive/commissions` 的 items 元素本身，
+  不另立一套字段，消费方不必维护第二份映射。
+  - 这是**旁路通知**，不是新的真相源：状态永远以 REST 台账为准，漏掉一次推送不算事故；没有在线连接时静默丢弃。
+  - 订阅回调的异常一律吞掉，**推送坏了不能连累写台账**，也不能连累其它订阅者。
+  - 旧客户端读到未知类型整条忽略（既有约定），因此本事件是纯增量，不构成破坏性变更。
+  - 没有状态变化的推送**不补发**：客户端初次接入用 REST 拉全量，之后靠本事件增量。
 
 ## 二十、观测统计（TelemetrySummary）结构
 

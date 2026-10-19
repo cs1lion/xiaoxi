@@ -41,7 +41,20 @@ export type WorldCommand =
   | { readonly kind: 'dispatch'; readonly taskKind: TaskKind; readonly summary: string }
   | { readonly kind: 'complete' }
   | { readonly kind: 'setWeather'; readonly weather: Weather }
-  | { readonly kind: 'build'; readonly prefabId: string; readonly instanceId: string };
+  | { readonly kind: 'build'; readonly prefabId: string; readonly instanceId: string }
+  /** 台账快照。这是世界接真实工作的唯一入口。 */
+  | {
+      readonly kind: 'sync';
+      readonly tasks: readonly {
+        readonly commissionId: string;
+        readonly kind: TaskKind;
+        readonly title: string;
+        readonly agentName: string;
+      }[];
+      /** 台账里已经收工的督办；世界据此把她的活收尾。 */
+      readonly finished: readonly string[];
+      readonly connected: boolean;
+    };
 
 export interface NewBuilding {
   readonly building: PlacedBuilding;
@@ -106,9 +119,14 @@ export class Simulation {
   private weather: WeatherState = clearWeather();
   private faithPoints = 0;
   private milestones = 0;
+  /** 上游台账是否在线。离线时世界照常过日子，但状态行必须说出来。 */
+  private ledgerConnected = false;
+  private ledgerSyncedAt: number | null = null;
 
   /** 神谕下达时算好的路线，等行礼结束再交给她走。 */
   private pendingRoute: GridPoint[] = [];
+  /** 这一趟要去哪栋楼。台账同步派活时同样走这条路。 */
+  private pendingBuilding: PlacedBuilding | null = null;
 
   private now = 0;
   private nextTaskNumber = 1;
@@ -171,7 +189,9 @@ export class Simulation {
         activity.kind === 'operating' ? Math.max(0, this.now - activity.startedAt) : 0;
       const progress =
         activity.kind === 'operating'
-          ? Math.min(1, elapsedMs / Math.max(1, activity.estimateMs))
+          ? activity.determinate
+            ? Math.min(1, elapsedMs / Math.max(1, activity.estimateMs))
+            : null
           : activity.kind === 'cooling' || activity.kind === 'overheating'
             ? 1
             : 0;
@@ -210,6 +230,7 @@ export class Simulation {
       events: this.events.slice(-12),
       weather: this.weather.kind,
       faith: { points: this.faithPoints, milestones: this.milestones },
+      ledger: { connected: this.ledgerConnected, lastSyncAt: this.ledgerSyncedAt },
     };
   }
 
@@ -230,7 +251,134 @@ export class Simulation {
         return this.setWeather(command.weather);
       case 'build':
         return this.build(command.prefabId, command.instanceId);
+      case 'sync':
+        return this.sync(command.tasks, command.finished, command.connected);
     }
+  }
+
+  /**
+   * 台账快照落地。这是世界接真实工作的入口，也是唯一一条**替换**式命令：
+   * 沙盒的活照旧由计时器收尾，台账的活只有台账说完了才算完。
+   *
+   * 正在跑的活如果被台账撤回（单被取消/归档），她手上那单要收掉，不能
+   * 继续对着一个不存在的督办冒烟。
+   */
+  private sync(
+    incoming: readonly {
+      readonly commissionId: string;
+      readonly kind: TaskKind;
+      readonly title: string;
+      readonly agentName: string;
+    }[],
+    finished: readonly string[],
+    connected: boolean,
+  ): CommandResult {
+    this.ledgerConnected = connected;
+    if (!connected) {
+      const message = '台账连不上了，世界照常过日子。';
+      this.log('warn', message);
+      return { ok: false, message };
+    }
+    this.ledgerSyncedAt = this.now;
+
+    const finishedIds = new Set(finished);
+    const next = new Set([...incoming.map((item) => item.commissionId), ...finished]);
+
+    // 台账说收工了：她手上的这单走正常交付，不是被撤。
+    const active = this.activeTask();
+    if (active !== null && active.source === 'ledger') {
+      if (finishedIds.has(active.id)) {
+        this.finishActiveTask();
+      } else if (!next.has(active.id)) {
+        this.abandonActiveTask();
+      }
+    }
+
+    // 已收工的条不再进活动清单；已消失的直接删掉。
+    for (const task of [...this.tasks]) {
+      if (task.source !== 'ledger') continue;
+      if (finishedIds.has(task.id) || !next.has(task.id)) {
+        const index = this.tasks.indexOf(task);
+        if (index >= 0) this.tasks.splice(index, 1);
+        this.idleWorkstationFor(task.id);
+      }
+    }
+
+    let added = 0;
+    for (const item of incoming) {
+      if (this.tasks.some((task) => task.id === item.commissionId)) continue;
+      this.tasks.push({
+        id: item.commissionId,
+        kind: item.kind,
+        summary: item.title,
+        buildingId: null,
+        source: 'ledger',
+        status: 'assigned',
+        createdAt: this.now,
+        completedAt: null,
+      });
+      added += 1;
+    }
+
+    if (added > 0) this.log('info', `台账来了 ${added} 条新督办。`);
+    this.assignFromLedger();
+    return { ok: true, message: `台账已同步，${this.tasks.length} 条在册。` };
+  }
+
+  /** 把还挂着这条活的铺子熄火。 */
+  private idleWorkstationFor(taskId: string): void {
+    for (const building of this.buildings) {
+      const activity = this.activities.get(building.instanceId);
+      if (activity === undefined || activity.kind === 'idle') continue;
+      if ('taskId' in activity && activity.taskId === taskId) {
+        this.activities.set(building.instanceId, { kind: 'idle' });
+      }
+    }
+  }
+
+  /**
+   * 台账有活、她闲着，就挑优先级最高的那条派下去。
+   *
+   * 这就是「操作台和世界连通」的那一步：你在屏幕外派单，她在屏幕里动起来。
+   * 只在她闲着时派；已经在干活就不打断，因为打断是神谕的语义，不是同步器的。
+   */
+  private assignFromLedger(): void {
+    if (!this.isFree()) return;
+    const task = this.tasks.find(
+      (item) => item.source === 'ledger' && item.status === 'assigned',
+    );
+    if (task === undefined) return;
+    const building = this.buildings.find((item) => item.boundTask === task.kind);
+    if (building === undefined) {
+      this.log('warn', `没有承接 ${task.kind} 的铺子，「${task.summary}」派不下去。`);
+      return;
+    }
+    if (this.constructions.has(building.instanceId)) return;
+    if (this.activities.get(building.instanceId)?.kind === 'overheating') return;
+    const path = this.grid.path(this.cellOf(this.villager.pos), building.door);
+    if (path.length === 0) return;
+    task.buildingId = building.instanceId;
+    this.routeToBuilding(task, building, path);
+    this.log('oracle', `台账派活：${task.summary} → ${building.displayName}`);
+  }
+
+  /** 她手上的活被上游撤回：状态机收回 idle，铺子熄火。 */
+  private abandonActiveTask(): void {
+    const task = this.activeTask();
+    if (task === null) return;
+    const building = this.buildingOf(task);
+    if (building !== undefined) {
+      this.activities.set(building.instanceId, { kind: 'idle' });
+    }
+    this.villager.mode = 'idle';
+    this.villager.taskId = null;
+    this.villager.visible = true;
+    this.villager.path = [];
+    this.villager.bubble = '这单被撤了。';
+    this.villager.bubbleUntil = this.now + 1600;
+    this.villager.nextRoutineAt = this.now + 1800;
+    this.villager.routineLabel = null;
+    this.log('warn', `${task.summary} 被上游撤回，她停手了。`);
   }
 
   private setWeather(weather: Weather): CommandResult {
@@ -309,6 +457,18 @@ export class Simulation {
     }
 
     const task = this.openTask(taskKind, summary, building.instanceId);
+    this.routeToBuilding(task, building, path);
+
+    this.log('oracle', `神谕：${summary} → ${building.displayName}`);
+    return { ok: true, message: `神谕已送达 ${building.displayName}。` };
+  }
+
+  /** 让她停下手上的事、行礼、走进这栋铺子。派活与台账同步共用这一条路。 */
+  private routeToBuilding(
+    task: TaskRecord,
+    building: PlacedBuilding,
+    path: readonly GridPoint[],
+  ): void {
     this.villager.mode = 'saluting';
     this.villager.path = [];
     this.villager.taskId = task.id;
@@ -317,10 +477,8 @@ export class Simulation {
     this.villager.saluteUntil = this.now + SALUTE_MS;
     this.villager.facing = 'down';
     this.villager.routineLabel = null;
-    this.pendingRoute = path;
-
-    this.log('oracle', `神谕：${summary} → ${building.displayName}`);
-    return { ok: true, message: `神谕已送达 ${building.displayName}。` };
+    this.pendingRoute = [...path];
+    this.pendingBuilding = building;
   }
 
   private openTask(kind: TaskKind, summary: string, buildingId: string | null): TaskRecord {
@@ -329,6 +487,7 @@ export class Simulation {
       kind,
       summary,
       buildingId,
+      source: 'sandbox',
       status: 'assigned',
       createdAt: this.now,
       completedAt: null,
@@ -507,22 +666,30 @@ export class Simulation {
       this.villager.mode = 'idle';
       return;
     }
+    // 台账的活没有 buildingId（上游不知道我们的铺子），用派活时记下的那栋。
+    const building = this.buildingOf(task) ?? this.pendingBuilding ?? undefined;
+    this.pendingBuilding = null;
+    if (building === undefined) {
+      // 楼没了（被拆/被撤），这单退回空闲，不让她对着空气干活。
+      this.villager.mode = 'idle';
+      this.villager.taskId = null;
+      return;
+    }
     task.status = 'in_progress';
     this.villager.mode = 'working';
     this.villager.visible = false;
     this.villager.bubble = null;
     this.villager.routineLabel = null;
-    const building = this.buildingOf(task);
-    if (building !== undefined) {
-      this.villager.pos = { x: building.workSpot.x, y: building.workSpot.y };
-      this.activities.set(building.instanceId, {
-        kind: 'operating',
-        taskId: task.id,
-        startedAt: this.now,
-        estimateMs: TASK_PROFILES[task.kind].estimateMs,
-      });
-      this.log('work', `${building.displayName} 开工。`);
-    }
+    this.villager.pos = { x: building.workSpot.x, y: building.workSpot.y };
+    this.activities.set(building.instanceId, {
+      kind: 'operating',
+      taskId: task.id,
+      startedAt: this.now,
+      estimateMs: TASK_PROFILES[task.kind].estimateMs,
+      // 台账的活只有台账知道还要多久；沙盒的活由计时器收尾。
+      determinate: task.source === 'sandbox',
+    });
+    this.log('work', `${building.displayName} 开工。`);
   }
 
   private arriveAtAltar(): void {
@@ -536,7 +703,11 @@ export class Simulation {
     for (const building of this.buildings) {
       const activity = this.activities.get(building.instanceId);
       if (activity === undefined) continue;
-      if (activity.kind === 'operating' && this.now - activity.startedAt >= activity.estimateMs) {
+      if (
+        activity.kind === 'operating' &&
+        activity.determinate &&
+        this.now - activity.startedAt >= activity.estimateMs
+      ) {
         const task = this.tasks.find((item) => item.id === activity.taskId);
         if (
           task !== undefined &&
