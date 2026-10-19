@@ -65,8 +65,8 @@
 - [x] **S2-2 JSON 存档单槽 + 恢复**（task-18/23/24：刷新恢复、对账三分支、settled 去重、坏档/配额/高版本、v1 指纹冻结；P3：配额暂停无运行时恢复接线、DEBUG 面板未做）。
 - [x] **S2-3 调试面板 UI**（task-19/25，QA 通过：实体/事件/暂停/过滤/注入区；P3：390px 页面级溢出另开卡）。
 - [x] **S3-2a 调色板审计**（task-26，QA 通过：世界 71 唯一/越界 55、UI 17/越界 9、并集 86；报告 `docs/ART_PALETTE_AUDIT.md`，只报告不阻断）。
-- [x] **S3-1 中文迁 DOM overlay**（task-27，QA 有条件通过；唯一 P2 附录未更新已由 Chief 按脚本输出重生成；canvas 中文 0 处、对齐误差 0.00–0.40px）。
-- [ ] **S3-2b 调色板收敛到 16+8**（task-28，进行中/待开工）。
+- [x] **S3-1 中文迁 DOM overlay**（task-27，QA 最终通过、P2 关闭：附录 A 与 `--md` 实跑逐行 132/132 全等；canvas 中文 0 处、对齐误差 0.00–0.40px）。
+- [x] **S3-2b 调色板收敛到 16+8**（task-28，QA 最终通过：世界 16/UI 8/共享 1/并集 23、越界 0/0、`--strict` 0；`test:inprocess` 150/150；读档按 prefabId 重解 palette（gap A）；截图脚本 `scripts/capture-palette.mjs` 同种子可复现；P3：3 秒指认待用户评审、smoke CDP 运行属作者侧证据）。
 - [ ] S3-3 帧动画 + 12fps；S3-4 垂直切片评审与 ART_SPEC/DEMO_SCRIPT 草案。
 - [ ] **S2-2b 存档手动导出/导入**（task-22，排在 S3 后）。
 - [ ] 定稿并批准 `DEMO_SCRIPT.md` v0.1 与 `ART_SPEC.md` v0.1（用 `docs/DEMO_ART_SPEC_TODO.md` 的清单）。

@@ -121,3 +121,13 @@
   task-8 服务器改动仅 `server/app.py` +24 行、只限 `/ws`，未触碰 assistant/memory/自进化。
   D3、D4、参考包三卡与 S1 剩余四项（周期对账/分页、真帧端到端、pickActive、blocked_question）已全部完成并经 QA 复验；未验证仅 D7 上游派活。
 - 在 D3/D4 拍板前，不开始大规模编码；不重构 Agent 核心；不更换已确认的技术栈（D1 已定）。
+
+## 六、后续决策追加（S1–S3，2026-10-19）
+
+- **D3-A / D4-A**：人工交付只对沙盒单生效；新增只读 `GET /api/executive/roster`，`/adapters` 返回结构零改动。
+- **D7-A**：像素世界独立门禁（tsc + 测试 + smoke）按路径触发；`scripts/run_gates.py` 因含主产品既有未提交改动，接入暂缓。
+- **存档 D-SAVE-1**：final，v1 schema 冻结；只存世界自有事实、读档先与台账对账、带版本号；冻结样例 `docs/save-v1.sample.json`、指纹 `f53a0736d782d657`（99 条路径）。
+- **D5-A / D6-A**（15:57 批准）：动态中文走 DOM、静态文字改图标、overlay 按画布实际位置换算；16px tile / 480×320 / 世界 16 色 + UI 8 色 / 12fps 只管动画采样；色数口径排除运行时叠加与透明度；校验器先只报告；切片评审后凭截图走 ADR。
+- **task-28 收敛裁决**：workshop 屋顶 `#450f43` → W13 `#30506b`，不加第 17 色；token 以语义名（`WORLD.ink` 等）为唯一命名，W01–W16 只作文档索引；`--strict` 收敛后 exit 0；`--strict` 接本地 gate 另开卡。
+- **夜景试验结论**：16 色下路径/石面并团（W05/W06 1.27:1，压暗后更弱）；1.0 不做昼夜，若 1.1 做夜景需 18 色并走 ADR，不擅自加色。
+- **G2 / S5**（2026-10-19）：用户批准「范围预批准」——S3/S4 收口前不动 `server/assistant/**`；S5 开工前重贴 `git status`，`executive.py` 未提交 durable 改动若仍在则停下报告；§4.4 选 A（只扩显式点名世界的短语 + 改动前后 `should_route` 差分测试）；落点 5 处编辑（`service.py` 4 + `executive.py` 1）；ADR 状态「范围已批准，实施待 S5」。

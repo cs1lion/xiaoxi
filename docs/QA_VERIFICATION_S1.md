@@ -2060,3 +2060,240 @@ Get-NetTCPConnection -LocalPort 5188,5190,8001,8000 -State Listen -ErrorAction S
 - **task-27 收口（16:25:37）**：5188/8001/5189 无监听；8000 PID 22996、start 2026-10-18 16:40:34、health 200
   未重启；`data/commissions.db` 未被写（mtime 10:43:06）；`data/memory.db` 16:25:03 变化来自 8000 自身会话写入；
   无临时目录/.tmp 残留；截图 100/200/400/390 均存在
+
+---
+
+## task-27 最终签收复验（2026-10-19 16:33–16:40，lead · QA Engineer）
+
+- **基线声明**：HEAD `5214eb5 feat(pixel-world): 中文迁 DOM overlay、调色板审计与图标化（S3-1/S3-2a)`；
+  `docs/ART_PALETTE_AUDIT.md` 已包含在该提交内、`git status -- docs/` 干净。16:36 起主工作区 `pixel-world/`
+  已被 task-28 施工改为脏树（13 个 M + `test/palette-budget.test.ts` 未跟踪，均未提交），故本轮用
+  `git archive 5214eb5 pixel-world`（外加 `docs/save-v1.sample.json`）抽取到 TEMP 独立副本验证：
+  **不触碰主工作区、不回退任何作者改动**。副本内 `palette.ts` 35 行与 HEAD 一致（主工作区已 64 行，差异即 task-28）。
+- **task-27 最终结论：通过（P2 关闭）**。该 P2 是文档一致性缺陷（附录 A 与脚本实跑不一致），本条按
+  「附录 A ↔ `--md` 实跑逐行全等」闭环，未改动历史记录。
+- **附录 A 逐行核对（核心证据）**：`node scripts/audit-palette.mjs --md` 取「## 世界层 Top（按使用次数）」
+  至「## 提案 8 色 UI」表尾，与 `docs/ART_PALETTE_AUDIT.md` 附录 A 对应段（L340–484）做大小写敏感的
+  元素级比对：**非空行 132 / 132 全等，0 处不一致**。
+- **表格行数**：世界层 Top **16 行**、UI 层 Top 10 行、越界色世界层 **55 行**、越界色 UI 层 **9 行**、
+  提案 16 色世界 **16 行**、提案 8 色 UI **8 行**——与文档正文及 Chief 复核口径一致。
+- **计数口径**：世界 **71 唯一 / 85 引用**、越界 **55**；UI **17 / 45**、越界 **9**；共享 **2**
+  （`#000000`、`#e3a13c`）；并集 **86**——与 §0 摘要、§2.1、§8.3「预期（task-27 后）」、§8.4 完全一致。
+- **每文件表 §2.2 独立手算复核**（不采信脚本自述）：`villager.ts` `0x` 字面量 **10 个 / 10 唯一**；
+  `decor.ts` **11 个 / 9 唯一**（`#2b2b28`×2、`#f0cf7a`×2，其余各 1）；`index.html` hex 字面量 22 个
+  + `rgba(...)` 2 个 = **24 次 / 17 唯一**（两条 rgba 均归一为 `#000000`，不增加唯一色）——与脚本及文档一致。
+- **退出码**（pinned 副本）：默认 `node scripts/audit-palette.mjs` → **exit 0**；`--strict` → **exit 1**，
+  提示文案「已启用；默认仍返回 0」，与 §8.1 / §8.3 一致。
+- **类型检查与测试**（pinned 副本）：`npx tsc --noEmit` → **exit 0**；测试 **139/139 全绿**
+  （debug-panel 4 / grid 7 / labels 4 / ledger-fixtures 7 / ledger 41 / no-cjk-canvas 2 /
+  save-fingerprint 4 / save-quota 5 / save 6 / surface 17 / world 42）。
+  注：`npm test`（`node --test test/*.test.ts`）在 QA 沙箱下 **spawn EPERM**（沙箱禁止管道捕获子进程 stdio，
+  属环境限制而非项目缺陷），故改为逐文件 in-process 运行同一批测试文件，计数与 `isolation=none` 口径一致。
+- **遗留不变**：P3（390px 页面级溢出，既有 canvas 布局，overlay 自身不溢出）不阻塞；剩余 55 个越界色
+  收敛清单见 `docs/ART_PALETTE_AUDIT.md` §5.3，交 task-28。
+- **快照提醒**：16:36 后 `pixel-world/` 为 task-28 施工中的脏树（未提交）。task-28 验收时必须重新声明
+  基线（HEAD 或工作区快照 + `git status` 复核），不可沿用本条 5214eb5 的数字。
+
+---
+
+## task-28 验收方案（待施工完成后执行；口径经 Chief 2026-10-19 16:39 修订）
+
+- **基线**：开工前声明 HEAD / 工作区快照，复跑前再核一次 `git status`；确认 `git diff` 不含 task-28 之外的
+  无关改动（16:41 观察：`palette.ts` 已被删除、新增 `src/world/palette-data.ts`、`test/palette-budget.test.ts`、
+  `docs/ADR_AGENT_BRIDGE.md`，`docs/ART_PALETTE_AUDIT.md` 亦在工作区被改——均需在验收时重新核对）。
+- **P1 必验（旧存档 palette 兼容）**：构造一份 `PlacedBuilding.palette` 为旧 hex 的存档 → 读档 → 断言渲染取到
+  新 WORLD token 色（而非存档里的旧值）；同时确认存档 v1 指纹/样例未被动（99 路径、`f53a0736d782d657`）。
+- **色数按源码色数验**（`audit-palette --json` 的 `counts`）：世界 **≤16**、UI **≤8**、共享 **≤1**
+  （只剩 `#e3a13c`）、并集 **= 23**（16 + 8 − 1；**不是 ≤17**）。不按截图唯一色数判（运行时 alpha/叠加
+  必然 >16，属假失败）；截图只验可读性。
+- **退出码**：`--strict` 收敛后必须 **exit 0**，默认也 exit 0；strict 仅在超预算时 exit 1。
+- **门禁范围**：本地 gate 接 strict、CI 只报告属后续卡，**不在本轮验收范围**。
+- **对抗验证**：① 临时把某个已收敛的世界/UI token 改回旧 hex → `--strict` 必须 exit 1 → 字节级还原并核
+  SHA256 一致；② 核 prefab 旧 hex 兼容分支（旧存档仍能解析）。
+- **截图三项前置**：清 localStorage；zoom 2 的降采样方法记录（临时 zoom=1 或 960×640 最近邻）；暂停固定帧 +
+  雨滴固定种子——否则每张雨帧不同、不可比。雨帧要 **100% 全图 + 480×320 原生 + 400% 最近邻** 三张，
+  主角/雨幕/路径可区分。
+- **夜景**：只读试验要给「并团 / 可辨」的明确结论。
+- **回归**：`npm run check`（tsc）exit 0、tests 139/139（isolation=none）、smoke 不降、台账 21。
+- **人类判定项**：「3 秒指认」由用户最终判定，报告只能写「待用户评审」，不得写成通过。
+
+---
+
+## task-28（D6-A 调色板收敛）独立复验（2026-10-19 16:51–17:12，lead · QA Engineer）
+
+- **基线声明**：HEAD `5214eb5 feat(pixel-world): 中文迁 DOM overlay、调色板审计与图标化（S3-1/S3-2a)`；
+  工作区脏树。`pixel-world/` 实测 **13 M + 1 D + 2 ??**（Chief 预期 14 M + 1 D + 2 新，M 数差 1，已核对无遗漏文件）：
+  M = `index.html`、`scripts/audit-palette.mjs`、`src/main.ts`、`src/render/{buildings,decor,smoke,tilemap,villager,weather}.ts`、
+  `src/scenes/SandboxScene.ts`、`src/world/{blueprints.ts,prefabs.json,setup.ts}`；D = `src/render/palette.ts`；
+  ?? = `src/world/palette-data.ts`、`test/palette-budget.test.ts`。docs：`ART_PALETTE_AUDIT.md`、`QA_VERIFICATION_S1.md`、
+  `PI_DURABLE_MIGRATION.md`、`TESTING.md`、`pixel-agent-chief-starter/docs/PROJECT_PROGRESS.md`；
+  新增 `docs/ADR_AGENT_BRIDGE.md`、`docs/ART_SLICE_REVIEW_CHECKLIST.md`。
+  **主产品既有 35 个改动（.env.example / .gitignore / config×2 / scripts×11 / server×8 / web×7）与 16:41 快照逐条一致，未被动**。
+  本轮我对仓库的唯一改动是本文件。
+- **最终结论：有条件通过**（2 条 P2 + 3 条 P3；1 项未验证、1 项待用户评审）。代码收敛本身全部实测达标。
+
+### 通过项（全部本会话自跑）
+
+| # | 验收项 | 实测结果 |
+|---|---|---|
+| 1 | `npm run check` | `npx tsc --noEmit` → **exit 0** |
+| 2 | tests 148/148 | `node --test --experimental-test-isolation=none test/*.test.ts` → **148/148，exit 0**（139 原有 + 9 新增 palette-budget） |
+| 3 | 色数 | `audit-palette` → 世界 **16**（引用 90）/ UI **8**（引用 45）/ 共享 **1**（仅 `#e3a13c`）/ 并集 **23** / 越界 **0 / 0**；`unusedTokens` 空；`--strict` **exit 0**、默认 **exit 0** |
+| 4 | 对抗 M1（世界加色） | `WORLD` 注入 `ghost: 0x8f7a4c` → 世界 17 / 并集 24 / `--strict` **exit 1**；字节级还原后 SHA256 `C95D1CAB…C1E2` 与改前一致、strict 回 0 |
+| 5 | 对抗 M3（UI 加第 9 色） | `index.html` 注入 `.qa-ghost{color:#8f7a4c}` → UI 9 / `--strict` **exit 1**；还原后 SHA256 `BC58F4BB…A994` 一致 |
+| 6 | 对抗 M4（prefab 槽写回旧 hex） | `star_archive.body` → `"#6b7a6a"` → 世界 17 / `--strict` **exit 1**；解析器兼容分支实测解析为 `0x6b7a6a` 并给出可用 token 清单告警；预算测试 **3 条变红**；还原后 SHA256 `03B9FD94…E572` 一致 |
+| 7 | gap A 旧存档 palette | 自写独立探针（不采信施工方测试）：旧数字色 / 旧 `#rrggbb` 字符串 / 单槽位旧色，读档后**全部重解为当前 prefab 色**；不传蓝图表时保留存档色（向后兼容）；`ghost_forge` 保留存档色不崩，且**同一缺失 id 只告警 1 次**（2 栋、3 栋同 id 均实测 1 次；两个不同缺失 id → 2 次）；全命中 → 0 告警 |
+| 8 | 存档 v1 指纹/样例 | `src/world/save.ts`、`docs/save-v1.sample.json`、`test/save-fingerprint.test.ts` 三者**相对 HEAD 零改动**；独立重算（自带 collectSavePaths + FNV-1a 实现，不 import 项目代码）→ **99 条叶子路径、指纹 `f53a0736d782d657`**，与常量及样例 `meta.schemaFingerprint` 一致；加字段变异 → 指纹变 `fe6f2990f94b5f34`（门有效） |
+| 9 | 截图技术规格 | native 实测 **480×320**；400pct 实测 **1920×1280**，且是 native 的**严格 4× 最近邻**放大（3 张图各 2,457,600 次像素比较，**0 处不匹配**）；canvas 960×640 → native 为 **2× 最近邻降采样取左上像素**（3 张图共 460,800 个 2×2 块，**0 处块外不匹配**） |
+| 10 | 晴/雨/夜同构图 | 48×32 网格亮度结构相关性：sunny↔night **0.9906**、sunny↔rain **0.9446**、rain↔night **0.9318**；对照组 sunny vs 水平镜像 sunny = **0.662**（证明该指标能分辨构图差异，0.93+ 即同构图不同叠加） |
+| 11 | 夜景结论独立核验 | **成立**。地形类间对比度：grass/stone **1.10:1**、grass/farm **1.04:1**、grassLit/stone **1.01:1**、grass/plaza(路径) **1.40:1**；均匀压暗后进一步压缩：×0.6 → 1.05 / 1.02 / 1.18，×0.45 → 1.02 / 1.02 / 1.12。实测夜帧为晴帧的 **0.5554 倍**（153,136 像素平均 R 比），落在 ×0.6 区间 → **路径与石面确实并团，16 色不足以支撑有层次的夜景**，可作为 18 色申请素材 |
+| 12 | `node_modules` 补丁不进 git | `pixel-world/.gitignore:1` 忽略 `node_modules/`；`git ls-files pixel-world/node_modules` = **0 个跟踪文件**；`git status` 对 node_modules 为空 → vite 的 try/catch 补丁**不可能进 git** |
+| 13 | 应用可构建 | `npx vite build` → **exit 0**（产出 1,280.42 kB，仅 chunk 大小告警）；`node --check scripts/smoke.mjs` → exit 0；vite dev server 起得来（`http://127.0.0.1:5188/` HTTP 200） |
+
+### 未验证 / 待用户评审
+
+- **未验证：smoke 114/114**。官方 `npm run test:browser` 在本沙箱 **`browserType.launch: spawn EPERM`**
+  （Playwright 用 `--remote-debugging-pipe` + 管道 stdio，被沙箱禁）。我做了一轮绕开尝试：用
+  `Start-Process` 起系统 Chrome headless + `--remote-debugging-port`（9222/9223/9224 三种参数组合），
+  Chrome **均以退出码 1 立即退出**、无任何输出、不生成 `DevToolsActivePort`——Chrome 自身的多进程 IPC
+  同样依赖命名管道，也被沙箱挡。故 114/114 **无法复跑，按未验证处理，不计入通过**。
+  静态侧只能确认：smoke.mjs 有 **106 个 `check(` 调用点**（运行期 114 条说明有循环内调用），无法静态证实 114。
+- **不通过（可复现性）：截图前置不可复现**。`pixel-world/eval/` 下**只有 PNG、没有任何拍摄脚本**，
+  仓库里也查不到记录前置步骤的文档；且 `src/render/weather.ts:31,32,55,56` 的 140 个雨滴用
+  **`Math.random()`、没有种子注入点**（splash 是确定性的、地形抖动 `tilemap.ts:53-57` 是哈希种子，
+  但雨滴不是）→「雨滴固定种子」无法通过应用自身 API 达成，只能是外部注入，而注入方式没有记录。
+  因此这组图**不能作为可复现的验收证据**（技术规格本身合格，见通过项 9/10）。
+- **待用户评审：3 秒指认 / 主角·雨幕·路径可读性的人类判定**。本会话模型无图像输入能力，无法看图。
+  已做的客观替代测量：角色亮部 vs 草地 = 皮肤 **6.23:1**、围巾 **3.02:1**、琥珀 **5.31:1**、饰边 **5.23:1**
+  → 主角可靠亮部读出；但斗篷 **1.40:1**、斗篷暗部 **1.00:1**（与草地完全同亮度）→ 斗篷本体并团。
+  晴帧中角色精确命中 token 像素仅 **174 px**（皮肤 38 / 斗篷 60 / 斗篷暗 20 / 围巾 24 / 轮廓 32，全部聚在 x≈247.5），
+  占 153,600 px 帧的 0.11%；路径 vs 草地 1.40:1 偏弱。**以上是数据，不是人类判定，不得据此写通过。**
+
+### 缺陷列表
+
+- **P2-1 `docs/ART_PALETTE_AUDIT.md` 全文停留在 task-28 之前，与实跑全面不符**。task-28 对该文档只 +1 行
+  （task-27 的 6 色溯源说明），没有随收敛重生成。实跑已是 16/8/1/23/0/0，文档仍写世界 71/85、UI 17/45、
+  共享 2、并集 86、世界越界 55、UI 越界 9（§0 摘要、§2.1、§3.1/§3.2 Top 表、§5.1/§5.2 收敛清单、§8.3
+  「预期（task-27 后）」、附录 A 全部过期）；§1.2/§1.3 仍称 token 定义在**已删除的 `src/render/palette.ts`**；
+  §2.2 每文件表仍是 palette.ts 21/21、buildings 4/4、decor 11/9、tilemap 2/2、villager 10/10、weather 4/3，
+  而实跑这些文件 **全部 0/0**（token 已移到 `src/world/palette-data.ts`，且该文件不再进每文件表）；
+  §1.4/§8.1 的 `--strict` 文案「本轮未接入 CI」也与脚本实际的「已启用」不一致。
+  复现：`node pixel-world/scripts/audit-palette.mjs` 与文档任一处计数对照。预期：文档计数与实跑一致。
+  这与 task-27 已关闭的 P2 是同一类失败，建议按同一标准重生成附录 A 与正文。
+- **P2-2 调色板截图证据不可复现**（见上「不通过（可复现性）」）。预期：`eval/` 附拍摄脚本 + 前置步骤
+  （清 localStorage / zoom 与降采样方法 / 冻结帧 / 种子注入方式）可复跑。
+- **P3-1 `--strict` 门禁比验收口径窄**。`audit-palette.mjs:803-805` 只判唯一色**数量**（≤16/≤8），
+  不判色值是否在提案内、不判共享数与并集。实测变异 **M2**：把 `WORLD.ink` 从 `#14110d` 改成 `#000000`
+  → 世界仍 16、共享仍 1、并集仍 23 → `--strict` **exit 0**、`palette-budget.test.ts` **9/9 仍绿**，
+  只有人读报告的越界表多出 1 行 `#000000`。即「把某个已收敛 token 换回旧 hex」**不会**被任何自动门禁挡住
+  （Chief 该条对抗预期不成立；只有"加新色"和"prefab 槽写旧 hex"会红，见 M1/M3/M4）。
+  建议给 `palette-budget.test.ts` 补一条「`Object.values(WORLD)` 的 hex 集合 == 提案 16 色集合」断言。
+- **P3-2 施工方夜景结论的数对不准**。原文「路径与广场石面并团（W05/W06 1.10:1）」：实测 W05 stone vs
+  W06 plaza = **1.27:1**，而 **1.10:1 实际是 W03 grass vs W05 stone**。结论方向正确（已独立复验），
+  但引用的色对与数值错配，建议改正，避免后续按错误数对做决策。
+- **P3-3 `npm test` 在本沙箱不可用**。`package.json` 的 `test` 是 `node --test test/*.test.ts`（默认子进程
+  隔离 → 每文件 spawn → EPERM）；加 `--experimental-test-isolation=none` 单进程跑则 148/148。
+  建议把该 flag 写进 `test` 脚本并在 `docs/TESTING.md` 记录，否则任何人照 README/AGENTS.md 跑都会撞墙。
+
+### 观察（非缺陷，交像素美术裁决）
+
+- 三栋常驻铺子当前 palette：`code_forge` 与 `ink_house` **四个槽完全相同**（body `#8a5a44` / roof `#4a3f39` /
+  trim `#c9a86a` / window `#e3a13c`），只有 `star_archive` 不同（roof `#2d3b2e` / trim `#d8dad3`）。
+  即 §4.1/§7 预言的「退化为剪影 + 饰边区分」已成事实，且其中两栋**连饰色都没差别**，只能靠剪影与分区。
+- 晴帧中 `W11 amber #e3a13c` 精确命中 **0 px**（当前无点亮的窗光/进度），焦点色在静帧里不出现。
+
+---
+
+## task-28 修复后最终签收复验（2026-10-19 17:15–17:40，lead · QA Engineer）
+
+- **基线声明**：HEAD `5214eb5`；工作区脏树。`pixel-world/` 实测 **15 M + 1 D + 4 ??**（Chief 预期 16 M + 1 D + 4 新；
+  M 数差 1，已逐条核对：README/package.json/audit-palette.mjs/index.html/main.ts/render×6/scenes/SandboxScene.ts/
+  world/{blueprints.ts,prefabs.json,setup.ts}；D = `src/render/palette.ts`；4 个新文件与预期完全一致）。
+  docs：`ART_PALETTE_AUDIT.md`、`TESTING.md`、`PROJECT_PROGRESS.md`、`QA_VERIFICATION_S1.md` +
+  新增 `ADR_AGENT_BRIDGE.md`、`ART_SLICE_REVIEW_CHECKLIST.md`、`pixel-world/docs/E2E_PALETTE.md`、
+  `pixel-world/scripts/capture-palette.mjs`。**主产品原有 35 个已跟踪改动逐条未动**（本次 37 个 M = 35 + 上述两个 task-28 文档）。
+- **最终结论：通过**（附 2 条 P3；1 项因沙箱限制记未验证，不计入通过）。上一轮 2 条 P2 的修复机制均已独立复核生效。
+
+### 现场数字（本会话重跑）
+
+| 项 | 结果 |
+|---|---|
+| `npm run check` | `npx tsc --noEmit` → **exit 0** |
+| `npm run test:inprocess` | **150/150，exit 0**（148 + 2 新增：提案值断言 ×2；`palette-budget.test.ts` 由 9 → 11 条） |
+| `node scripts/audit-palette.mjs` | 世界 **16**（引用 90）/ UI **8**（45）/ 共享 **1**（`#e3a13c`）/ 并集 **23** / 越界 **0 / 0** |
+| 退出码 | `--strict` **exit 0**、默认 **exit 0** |
+| `test` 入口 | 仍为 `node --test test/*.test.ts`（**未改**）；新增 `test:inprocess` 用 isolation=none，可用 |
+
+### P2-1 复验：审计文档已按实跑重生成
+
+- 头部计数 **16 / 8 / 1 / 23**、越界 **0 / 0**、`--strict` exit **0**，与实跑一致；token 位置已改为
+  `src/world/palette-data.ts`；两张越界表为空表（保留表头）；§「收敛记录」把 task-26/27 时点快照（71/17/2/86、55/9）
+  明确移交给提交 `5214eb5` 的历史版本，本文只写当前事实——这个处理方式比上一轮更好。
+- **逐行比对（按 task-27 的同一标准）**：`--md` 输出「## 计数」至文末 vs 文档 L11–144，
+  非空行 **script 111 / doc 112**，其中 **109 行全等、2 行不一致**。Chief 报的「111/111 全等」不准确。
+  两处差异**都是 `weather.ts` 的文件:行号**：文档写 `weather.ts:51,63`（pale）与 `weather.ts:19,43`（cloakDark），
+  实跑为 `weather.ts:78,90` 与 `weather.ts:45,69`。原因是 `src/render/weather.ts` 的 mtime **17:20:51** 晚于
+  文档重生成的 **17:16:10**——种子支持是后加进去的，行号因此整体下移。
+  计数、色值、token 名、引用数、站点前三后位全部一致，**仅 2 处行号引用过期**。
+- 判定：P2-1 **实质性关闭**，残留记 **P3-2**（见缺陷列表）；提交前用同一条命令再生成一次即可全等。
+
+### P2-2 复验：截图可复现机制已建立
+
+- **脚本只连不启**：`scripts/capture-palette.mjs:167` 只有 `chromium.connectOverCDP(CDP_URL)`，
+  全文无 `chromium.launch`；CDP 连不上时（实测把 `CDP_URL` 指向 9399）打印
+  「无法连接 CDP 端点 … 这个脚本不会自己 launch Chrome（沙箱会 EPERM）」+ 可直接复制的启动命令，**exit 1**，
+  不会自行拉起浏览器 ✓
+- **三把锁都在代码里**：① `window.__RAIN_SEED__` → `weather.ts` 的 LCG 种子；② `Math.random` 被同一 LCG 覆盖；
+  ③ rAF 改为帧计数 + 固定 `1000/60`ms 时间戳，冻结在第 240 帧、雨在第 30 帧按下；另有热身页丢首帧差异。
+- **默认行为未变（重点核过）**：`weather.ts:26-31` `rainSeed === null` 时**直接走 `Math.random()`**；
+  全仓库 grep `__RAIN_SEED__` 只有捕获脚本写入、`weather.ts` 只读，应用自身不设 → **线上行为不变** ✓
+- **LCG 一致性实测**：捕获脚本注入的 LCG 与 `weather.ts` 的 `rainRandom()` 在种子 20261019 下
+  **前 5 项完全同序列**（0.443158 0.987910 0.134867 0.960879 0.895569），且各自动复跑结果一致 → 确定性成立 ✓
+- **文档**：`pixel-world/docs/E2E_PALETTE.md`（前置/命令/环境变量/产物/方法/自检）与 README 新增段一致，
+  都写清了「脚本不负责起浏览器」和沙箱 EPERM 的原因 ✓
+- **未验证：双跑字节一致**。Chromium 在本沙箱**起不来**：完整 Chrome 与 `chrome-headless-shell` 共 5 种参数组合
+  （9222/9223/9224/9334/9335，含 `--single-process`、`--disable-gpu`、cmd 重定向捕获输出）**全部以退出码 1 立即退出、
+  无任何输出、不生成 `DevToolsActivePort`**——Chromium 自身的多进程 IPC 也依赖命名管道。
+  因此「跑两次、比 12 个产物 sha 全等」**我无法复现，按未验证处理，不计入通过**。
+  旁证（非独立证据）：`eval/screens/palette-*` 12 个文件 mtime 为 **17:21:22–17:21:30**，按 sunny→rain→night
+  顺序每态 4 个连续生成，与一次 `capture-palette.mjs` 运行的产物时序吻合；且这些图**晚于**脚本与 `weather.ts` 的
+  落盘时间，说明确由新流程产出。但这是施工方的运行，不是我的复跑。
+
+### P3-1 复验：换值门禁已补上
+
+- `palette-budget.test.ts` 新增两条：`WORLD 的每个 token 值都等于提案 16 色（换值必须变红）`、
+  `UI 的源色集合等于提案 8 色（换值必须变红）`，提案表逐字抄在测试里。
+- **四方交叉核验（我自己抠数据，不采信任何一方的自述）**：审计脚本内 `PROPOSED_WORLD/PROPOSED_UI` ==
+  测试里抄的提案表 == `WORLD` 实际值（**token 顺序也一致**）== `index.html` 实跑 UI 源色集合 —— **6/6 PASS**。
+- **对抗 M2b**：`WORLD.ink` `0x14110d` → `0x000000` → `--strict` 仍 **exit 0**（证实上一轮的判断：strict 只判色数），
+  但新断言 **`not ok 3 - WORLD 的每个 token 值都等于提案 16 色`** → 11 条里 1 红 ✓ 门禁缺口已闭合。
+  字节级还原后 SHA256 `C95D1CAB…C1E2` 与改前一致，post-restore 11/11 全绿。
+
+### P3-3 复验
+
+- `package.json` 新增 `test:inprocess`（`node --test --experimental-test-isolation=none test/*.test.ts`），实测 150/150；
+  `test` 入口保持原样未改 ✓。（`test` 入口本身在本沙箱仍会 spawn EPERM，这是沙箱限制，`test:inprocess` 就是为此给的口子。）
+
+### 缺陷列表（本轮）
+
+- **P3-2**：`docs/ART_PALETTE_AUDIT.md` 有 **2 处 `weather.ts` 行号引用过期**（pale 51/63→78/90、cloakDark 19/43→45/69），
+  因 `weather.ts`（17:20:51）晚于文档重生成（17:16:10）。计数/色值/token 全对，仅行号。提交前重跑一次 `--md` 即全等。
+- **P3-3**：`pixel-world/docs/E2E_PALETTE.md` §5 自检写「**八个产物**应逐字节一致」，但 §3 与脚本实际产出是
+  **12 个**（3 态 × 4 变体）——文档自相矛盾，改数字即可。
+- **P3-4**：`docs/_palette_band_check.py`、`_palette_band_crop.py`、`_palette_screen_check.py` 三个未跟踪临时脚本
+  17:2x 仍在仓库里（Chief 已让美术清理、提交前会确认）。提醒：`git add -A` 会把它们一起卷进去。
+
+### 上一轮遗留项的最终状态
+
+- P2-1（审计文档过期）→ **已修复**，残留 P3-2（2 行行号）。
+- P2-2（截图不可复现）→ **机制已修复并文档化**；双跑字节一致因沙箱禁 Chromium 记**未验证**。
+- P3-1（strict 只判色数）→ **已修复**（M2b 实测变红）。
+- P3-3（npm test 沙箱不可用）→ **已修复**（`test:inprocess`）。
+- 上一轮 P3-2（夜景数对错配：W05/W06 1.10:1）→ 施工方已在 `ART_SLICE_REVIEW_CHECKLIST.md` 侧修正映射，
+  本轮审计文档的对比度表由脚本生成，不再有手写数对；该条关闭。
+
+### 收口
+
+- 我对仓库的唯一改动仍是 `docs/QA_VERIFICATION_S1.md`（纯追加）；变异过的 `palette-data.ts` 已字节级还原
+  （SHA256 与改前一致）；我起的 vite 5188 已停、无残留监听、无 dist 残留。
+- **待用户评审**：3 秒指认 / 晴雨夜可读性的人类判定（本会话模型无图像输入，只做了对比度与构图的数据测量）。
