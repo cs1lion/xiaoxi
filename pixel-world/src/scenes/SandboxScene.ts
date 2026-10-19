@@ -15,6 +15,7 @@ import { UI } from '../render/palette.ts';
 import { drawTerrain } from '../render/tilemap.ts';
 import { createBuilding, updateBuilding, type BuildingView } from '../render/buildings.ts';
 import { createVillager, updateVillager, type VillagerView } from '../render/villager.ts';
+import { createWorldOverlay, type WorldOverlay } from '../render/world-overlay.ts';
 import { createAccentEmitter, ensureAccentTextures, type AccentEmitter } from '../render/smoke.ts';
 import { createWeatherView, type WeatherView } from '../render/weather.ts';
 import { createDecorView, type DecorView } from '../render/decor.ts';
@@ -51,6 +52,7 @@ export class SandboxScene extends Phaser.Scene {
   private sim!: Simulation;
   private snapshot!: WorldSnapshot;
   private readonly villagerViews = new Map<string, VillagerView>();
+  private overlay: WorldOverlay | null = null;
   private weatherView!: WeatherView;
   private decor!: DecorView;
   private entries: BuildingEntry[] = [];
@@ -133,6 +135,8 @@ export class SandboxScene extends Phaser.Scene {
         ? Simulation.fromSave(this.loadedSave, simDeps)
         : new Simulation(simDeps);
     this.snapshot = this.sim.snapshot();
+    const overlayRoot = document.querySelector<HTMLDivElement>('#world-overlay');
+    if (overlayRoot !== null) this.overlay = createWorldOverlay(this, overlayRoot);
     this.lastSaveKey = this.saveStateKey();
     this.onPageHide = () => {
       this.saveStore.write(this.sim.toSave());
@@ -169,6 +173,8 @@ export class SandboxScene extends Phaser.Scene {
   shutdown(): void {
     this.ledger?.stop();
     this.ledger = null;
+    this.overlay?.dispose();
+    this.overlay = null;
     if (this.onPageHide !== null) {
       window.removeEventListener('pagehide', this.onPageHide);
       this.onPageHide = null;
@@ -190,14 +196,14 @@ export class SandboxScene extends Phaser.Scene {
     altar.fillRect(ax + 9, ay + 9, 14, 2);
     altar.fillRect(ax + 15, ay + 13, 2, 8);
     altar.setDepth(ALTITUDE + ay + 40);
-    this.add
-      .text(ax + 16, ay - 10, '神谕祭坛', {
-        fontFamily: 'ui-monospace, monospace',
-        fontSize: '10px',
-        color: '#cfc7ae',
-      })
-      .setOrigin(0.5, 1)
-      .setDepth(ALTITUDE + ay + 41);
+    // 祭坛的静态文字改符文图标（D5-A）：不再画「神谕祭坛」。
+    const rune = this.add.graphics();
+    rune.lineStyle(1, UI.amber, 0.9);
+    rune.strokeRect(ax + 9, ay - 14, 8, 8);
+    rune.fillStyle(UI.amber, 0.9);
+    rune.fillRect(ax + 12, ay - 12, 2, 4);
+    rune.fillRect(ax + 17, ay - 10, 2, 2);
+    rune.setDepth(ALTITUDE + ay + 41);
   }
 
   update(_time: number, delta: number): void {
@@ -410,7 +416,7 @@ export class SandboxScene extends Phaser.Scene {
     for (const villager of snapshot.villagers) {
       let view = this.villagerViews.get(villager.id);
       if (view === undefined) {
-        view = createVillager(this, villager.name, 0, 0);
+        view = createVillager(this, 0, 0);
         this.villagerViews.set(villager.id, view);
       }
       updateVillager(view, villager, 0, 0, ALTITUDE);
@@ -429,6 +435,9 @@ export class SandboxScene extends Phaser.Scene {
         this.lastBubbles.set(villager.id, null);
       }
     }
+
+    // 动态中文（名字/气泡）走 DOM overlay：按 canvas 实际位置每帧同步（D5-A）。
+    this.overlay?.sync(snapshot);
 
     const line = this.statusLine();
     if (line !== this.lastStatus) {
@@ -474,13 +483,14 @@ export class SandboxScene extends Phaser.Scene {
       g.fillStyle(0x2a241c, 0.55);
       g.fillRect(x + 1, y + 1, w - 2, h - 2);
       container.add(g);
-      const label = this.add.text(x + w / 2, y - 4, `施工中 ${Math.round(progress * 100)}%`, {
-        fontFamily: 'ui-monospace, monospace',
-        fontSize: '10px',
-        color: '#e0c98b',
-      });
-      label.setOrigin(0.5, 1);
-      container.add(label);
+      // 施工标签改图标（D5-A）：进度用线，不再画「施工中 xx%」中文。
+      const icon = this.add.graphics();
+      icon.fillStyle(0xc9a86a, 0.95);
+      icon.fillRect(x + w / 2 - 4, y - 10, 9, 3);
+      icon.fillRect(x + w / 2 - 1, y - 7, 2, 5);
+      icon.fillStyle(0x8f7a4c, 0.9);
+      icon.fillRect(x + w / 2 - 4, y - 10, 1, 3);
+      container.add(icon);
     }
   }
 

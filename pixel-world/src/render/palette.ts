@@ -11,7 +11,6 @@ export const UI = {
   farm: 0x3b3423,
   tree: 0x1a2a1d,
   street: 0x2f3634,
-  paper: 0xe8e2d2,
   ink: 0x14110d,
   amber: 0xe3a13c,
   ember: 0xf2c14e,

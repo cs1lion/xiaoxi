@@ -229,6 +229,49 @@ async function runSandboxSuite() {
     '两个角色各自有独立作息',
   );
 
+  // D5-A：动态中文走 DOM overlay，按 canvas 实际位置换算（≤1 逻辑像素）。
+  const overlayFit = await page.evaluate(() => {
+    const canvas = document.querySelector('#app canvas');
+    const overlay = document.querySelector('#world-overlay');
+    const names = [...document.querySelectorAll('#world-overlay .overlay-name')];
+    const snapshot = window.Oracle.view();
+    const canvasRect = canvas.getBoundingClientRect();
+    const villager = snapshot.villagers[0];
+    const nameEl = names[0];
+    const scale = canvasRect.width / 480;
+    const expectedX = (villager.pos.x + 0.5) * 16 * scale;
+    const expectedY = ((villager.pos.y + 1) * 16 - 30) * scale;
+    const actualX = Number.parseFloat(nameEl?.style.left ?? 'NaN');
+    const actualY = Number.parseFloat(nameEl?.style.top ?? 'NaN');
+    return {
+      names: names.length,
+      villagers: snapshot.villagers.length,
+      text: nameEl?.textContent ?? '',
+      expectedName: villager.name,
+      error: Math.hypot(actualX - expectedX, actualY - expectedY),
+      tolerance: Math.max(1, scale),
+      overlayWidth: overlay?.getBoundingClientRect().width ?? 0,
+      canvasWidth: canvasRect.width,
+      bubblesVisible: [...document.querySelectorAll('#world-overlay .overlay-bubble')].filter(
+        (node) => node.style.display !== 'none',
+      ).length,
+    };
+  });
+  check(
+    overlayFit.names === overlayFit.villagers && overlayFit.text === overlayFit.expectedName,
+    'overlay 名字节点数与快照角色一致、文案正确',
+  );
+  check(
+    overlayFit.error <= overlayFit.tolerance,
+    `overlay 与 canvas 对齐误差 ${overlayFit.error.toFixed(2)}px ≤ ${overlayFit.tolerance}px`,
+  );
+  check(
+    Math.abs(overlayFit.overlayWidth - overlayFit.canvasWidth) < 2,
+    'overlay 与 canvas 同宽',
+  );
+  check(overlayFit.bubblesVisible <= overlayFit.villagers, '气泡节点不超过角色数');
+
+
   // 认不出的句子不让世界动。
   const unknown = await page.evaluate(() => window.Oracle.say('今天天气不错'));
   check(unknown.ok === false, '认不出的输入被拒');
@@ -245,6 +288,22 @@ async function runSandboxSuite() {
   check(true, '界面回了世界结算后的神谕回执');
   const saluting = await waitFor((s) => s.villager.mode === 'saluting', '她停下手里的事行礼');
   check(saluting.villager.bubble !== null, '行礼时头上有字');
+  const overlayBubble = await page.evaluate(() => {
+    const bubbles = [...document.querySelectorAll('#world-overlay .overlay-bubble')];
+    const shown = bubbles.filter((node) => node.style.display !== 'none');
+    const names = [...document.querySelectorAll('#world-overlay .overlay-name')];
+    return {
+      texts: shown.map((node) => node.textContent),
+      shown: shown.length,
+      hiddenNames: names.filter((node) => node.style.display === 'none').length,
+    };
+  });
+  check(
+    overlayBubble.shown >= 1 &&
+      overlayBubble.texts.some((text) => (text ?? '').includes('吾神降旨')),
+    '气泡在 DOM overlay 里显示（canvas 无中文）',
+  );
+  check(overlayBubble.hiddenNames >= 1, '有气泡时对应名字让位');
   await page.screenshot({ path: `${OUT}/01-salute.png` });
 
   const working = await waitFor((s) => s.villager.mode === 'working', '她走进铺子开始干活');
@@ -448,6 +507,58 @@ async function runSandboxSuite() {
     return { before, after: window.Oracle.view().tasks.length };
   });
   check(bridged.after === bridged.before + 1, '外部 Agent 的消息进了同一条命令队列');
+
+  // D5-A：100%/200%/400% 缩放截图，验证 DOM overlay 仍贴合 canvas。
+  for (const zoom of [1, 2, 4]) {
+    await page.evaluate((value) => {
+      const stage = document.querySelector('#stage');
+      stage.style.transformOrigin = 'top left';
+      stage.style.transform = value === 1 ? '' : `scale(${value})`;
+    }, zoom);
+    await page.waitForTimeout(300);
+    const fit = await page.evaluate(() => {
+      const canvas = document.querySelector('#app canvas');
+      const overlay = document.querySelector('#world-overlay');
+      const canvasRect = canvas.getBoundingClientRect();
+      const overlayRect = overlay.getBoundingClientRect();
+      return {
+        sameWidth: Math.abs(canvasRect.width - overlayRect.width) < 2,
+        sameOrigin: Math.abs(canvasRect.left - overlayRect.left) < 2,
+        contained: overlayRect.right <= canvasRect.right + 0.5,
+      };
+    });
+    check(
+      fit.sameWidth && fit.sameOrigin && fit.contained,
+      `${zoom * 100}% 缩放下 overlay 仍贴合 canvas`,
+    );
+    await page.locator('#stage').screenshot({ path: `${OUT}/08-overlay-${zoom * 100}.png` });
+  }
+  await page.evaluate(() => {
+    const stage = document.querySelector('#stage');
+    stage.style.transform = '';
+  });
+  await page.waitForTimeout(300);
+
+  // 390px：overlay 不超出 canvas（页面级 960px canvas 溢出属既有 P3）。
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.waitForTimeout(350);
+  const overlayNarrow = await page.evaluate(() => {
+    const canvas = document.querySelector('#app canvas');
+    const overlay = document.querySelector('#world-overlay');
+    const canvasRect = canvas.getBoundingClientRect();
+    const overlayRect = overlay.getBoundingClientRect();
+    return {
+      contained: overlayRect.right <= canvasRect.right + 0.5,
+      width: overlayRect.width,
+      canvasWidth: canvasRect.width,
+    };
+  });
+  check(
+    overlayNarrow.contained && Math.abs(overlayNarrow.width - overlayNarrow.canvasWidth) < 2,
+    '390px 下 overlay 不溢出 canvas',
+  );
+  await page.setViewportSize({ width: 1010, height: 940 });
+  await page.waitForTimeout(250);
 
   // 上帝调试面板（S2-3）：只读浮层，不改变仿真。
   const panelInitial = await page.evaluate(() => ({

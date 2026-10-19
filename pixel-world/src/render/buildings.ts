@@ -10,7 +10,8 @@ export interface BuildingView {
   readonly chimney: Phaser.GameObjects.Graphics;
   readonly window: Phaser.GameObjects.Graphics;
   readonly progress: Phaser.GameObjects.Graphics;
-  readonly nameLabel: Phaser.GameObjects.Text;
+  /** 招牌图标（静态文字已改图标，D5-A）。 */
+  readonly sign: Phaser.GameObjects.Graphics;
   /** 烟囱口的场景坐标，粒子发射器挂在这里。 */
   readonly chimneyWorld: Phaser.Math.Vector2;
   /** 屋顶上沿，Y-Sort 用。 */
@@ -72,24 +73,61 @@ export function createBuilding(
   const progress = scene.add.graphics();
   progress.setVisible(false);
 
-  const nameLabel = scene.add.text(w / 2, -18, building.displayName, {
-    fontFamily: 'ui-monospace, monospace',
-    fontSize: '11px',
-    color: '#d9d4c5',
-  });
-  nameLabel.setOrigin(0.5, 1);
+  // 静态招牌：不再画中文，按接的活画一枚像素图标（D5-A）。
+  const sign = scene.add.graphics();
+  drawSignIcon(sign, building, w);
 
-  container.add([g, chimney, windowG, progress, nameLabel]);
+  container.add([g, chimney, windowG, progress, sign]);
 
   return {
     container,
     chimney,
     window: windowG,
     progress,
-    nameLabel,
+    sign,
     chimneyWorld: new Phaser.Math.Vector2(px + w - 10, py - 2),
     baseY: py + h,
   };
+}
+
+/** 招牌图标：<>（代码）/ 书（研究）/ 笔（写作）/ 锤（空工坊）。只用现有色。 */
+function drawSignIcon(g: Phaser.GameObjects.Graphics, building: PlacedBuilding, w: number): void {
+  const x = Math.round(w / 2) - 7;
+  const y = -22;
+  g.fillStyle(UI.shadow, 0.55);
+  g.fillRect(x, y, 15, 12);
+  g.fillStyle(building.palette.trim, 1);
+  g.fillRect(x + 1, y + 1, 13, 1);
+  g.fillRect(x + 1, y + 10, 13, 1);
+  g.fillStyle(UI.amber, 0.95);
+  if (building.boundTask === 'code') {
+    // 两个折角：< >
+    for (let step = 0; step < 3; step += 1) {
+      g.fillRect(x + 4 - step, y + 4 + step, 1, 1);
+      g.fillRect(x + 7 - step, y + 4 + step, 1, 1);
+      g.fillRect(x + 10 - step, y + 4 + step, 1, 1);
+    }
+    for (let step = 0; step < 3; step += 1) {
+      g.fillRect(x + 4 + step, y + 8 - step, 1, 1);
+      g.fillRect(x + 7 + step, y + 8 - step, 1, 1);
+      g.fillRect(x + 10 + step, y + 8 - step, 1, 1);
+    }
+  } else if (building.boundTask === 'research') {
+    // 一本书：外框 + 书脊
+    g.fillRect(x + 4, y + 3, 6, 1);
+    g.fillRect(x + 4, y + 8, 6, 1);
+    g.fillRect(x + 4, y + 3, 1, 6);
+    g.fillRect(x + 9, y + 3, 1, 6);
+    g.fillRect(x + 7, y + 3, 1, 6);
+  } else if (building.boundTask === 'writing') {
+    // 一支笔：斜杆 + 笔尖
+    for (let step = 0; step < 5; step += 1) g.fillRect(x + 4 + step, y + 8 - step, 1, 2);
+    g.fillRect(x + 9, y + 3, 2, 2);
+  } else {
+    // 空工坊：锤子
+    g.fillRect(x + 5, y + 3, 6, 3);
+    g.fillRect(x + 7, y + 5, 2, 5);
+  }
 }
 
 /** 三种剪影：尖顶、塔楼、平顶。远看就能分出是哪一栋。 */
@@ -142,7 +180,7 @@ export function updateBuilding(
   const busy = working || broken;
 
   view.container.setDepth(altitude + view.baseY);
-  view.nameLabel.setAlpha(busy ? 1 : 0.72);
+  view.sign.setAlpha(busy ? 1 : 0.72);
   view.chimney.setAlpha(busy ? 1 : 0);
 
   view.progress.clear();

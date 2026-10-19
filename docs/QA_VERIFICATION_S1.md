@@ -1,9 +1,9 @@
 # S1 各卡独立验收记录（QA Verification · S1）
 
 - 验收方：qa-runtime（Agent Teams · QA Engineer），独立于各卡作者
-- 验收时间：2026-10-19 13:06–13:10（task-7）；**13:13–13:18（task-9 + task-8）**；**13:23–13:29（task-12 D4-A + task-11 D3-A）**；**13:41–13:49（task-13 S1-5）**；**13:47–13:53（task-14 S1-6）**；**13:56–14:01（task-15 + task-16）**；**14:18–14:29（task-10 + 提交与重构复验）**；**14:37–14:41（task-17 S2-1 多角色）**；**14:54–14:58（task-21 多角色 P3）**；**15:13–15:18（task-18 存档单槽+恢复）**；**15:24–15:28（task-23 台账时间戳透传）**；**15:32–15:36（task-24 v1 字段漂移修复）**；**15:44–15:49（task-19 调试面板 UI）**；**15:52–15:54（task-25 调试注入区 P2 修复）**（Asia/Shanghai）
-- 验收对象：task-7 / task-9 / task-8 / task-12（D4-A）/ task-11（D3-A）/ task-13（S1-5）/ task-14（S1-6）/ task-15 / task-16 / task-10（排队）/ task-17（S2-1 多角色）/ task-21（多角色 P3）/ task-18（存档 v1 + 恢复）/ task-23（台账时间戳透传）/ task-24（v1 字段漂移修复）/ task-19（S2-3 调试面板）/ task-25（调试注入区 P2 修复）/ 提交链 340d0ab、b656488、150b2a7、8a95c94、d8a57f9、2bde7cb、7e00d27、7db15ab、d3f757e
-- 仓库：`D:\project\neurosama`，分支 `feat/pixel-world-oracle-world`，HEAD `d3f757e`（本次验收期间作者改动均在未提交的工作区）
+- 验收时间：2026-10-19 13:06–13:10（task-7）；**13:13–13:18（task-9 + task-8）**；**13:23–13:29（task-12 D4-A + task-11 D3-A）**；**13:41–13:49（task-13 S1-5）**；**13:47–13:53（task-14 S1-6）**；**13:56–14:01（task-15 + task-16）**；**14:18–14:29（task-10 + 提交与重构复验）**；**14:37–14:41（task-17 S2-1 多角色）**；**14:54–14:58（task-21 多角色 P3）**；**15:13–15:18（task-18 存档单槽+恢复）**；**15:24–15:28（task-23 台账时间戳透传）**；**15:32–15:36（task-24 v1 字段漂移修复）**；**15:44–15:49（task-19 调试面板 UI）**；**15:52–15:54（task-25 调试注入区 P2 修复）**；**16:06–16:12（task-26 调色板审计）**；**16:23–16:31（task-27 中文迁 DOM overlay）**（Asia/Shanghai）
+- 验收对象：task-7 / task-9 / task-8 / task-12（D4-A）/ task-11（D3-A）/ task-13（S1-5）/ task-14（S1-6）/ task-15 / task-16 / task-10（排队）/ task-17（S2-1 多角色）/ task-21（多角色 P3）/ task-18（存档 v1 + 恢复）/ task-23（台账时间戳透传）/ task-24（v1 字段漂移修复）/ task-19（S2-3 调试面板）/ task-25（调试注入区 P2 修复）/ task-26（调色板审计，只报告）/ task-27（D5-A 中文迁 DOM overlay）/ 提交链 340d0ab、b656488、150b2a7、8a95c94、d8a57f9、2bde7cb、7e00d27、7db15ab、d3f757e、2b52d7c
+- 仓库：`D:\project\neurosama`，分支 `feat/pixel-world-oracle-world`，HEAD `2b52d7c`（本次验收期间作者改动均在未提交的工作区）
 - 方法：不采信作者自述；自己看 diff、跑测试与冒烟、做对抗性探针；临时脚本/日志只放工作区
   `C:\Users\18712\.dsh\bot\workspace\recon\`，只在本文件留结论
 - 执行节奏：task-7 于 13:06–13:10 复验；task-9、task-8 于 13:13–13:18 收到 Lead 通知后按本文方案执行并回填结论。
@@ -31,6 +31,8 @@
 | **S1-24 / task-24（v1 字段漂移修复）** | 剥离运行时字段 + 嵌套键集合防线 | **通过** | `toSave()` 落盘 tasks 键集合与样例 10 键完全一致、无 `ledgerCompletedAt`；样例 SHA `F24FBAEF…298402`、schemaVersion 1 不变；`SAVE_TASK_KEYS`/`SAVE_SETTLED_KEYS` 与样例逐键一致，`assertSaveV1` 校验 tasks/settled 键集合 + `done⊆settled`；变异（tasks 加字段/伪 done 无 settled/settled 加字段/少字段）全部抛；去掉剥离的临时副本测试 **9/1 FAIL**；**129/129**、check 0、smoke **85/85 + 21/21**、check_protocol/test_core 64/0；task-18 刷新/对账/坏档/配额/高版本与 task-23 真实台账时间戳回归全过 |
 | **S1-19 / task-19（S2-3 调试面板）** | 只读实体/事件流/连接存档面板 | **通过（P2 已由 task-25 关闭）** | 开关（按钮/快捷键 D/输入框内不触发）、实体行数与快照一致、任务 source/worker/blocked、按角色队列、最近 50 事件 + tone 过滤、暂停冻结而世界继续、台账四字段（离线/在线）、存档 v1/savedAt/paused、只读（无 fetch/WS、canvas 布局不变）、刷新 3.96Hz、无 JS 报错；**133/133**、check 0、smoke **96/96 + 21/21**、check_protocol/test_core 64/0。原 P2（注入区 250ms 后消失）已由 task-25 独立槽修复并实测关闭；P3（390px 页面级溢出/单测覆盖）不阻塞、记入后续卡 |
 | **S1-25 / task-25（调试注入区 P2 修复）** | 注入区移出刷新区 | **通过** | `#debug-inject` 移至 `#debug-inject-slot`（独立于 `#debug-content`），随面板创建一次；400ms/1s/2s 后仍在、2 按钮可用、文案含「仅调试、不写台账」；暂停/切 tone 后仍在且展开状态保留；点 feed 一次只触发一次、两次各 +1（无重复绑定）；刷新 3.98Hz、无 JS 报错；**133/133**、check 0、smoke **104/104 + 21/21**；check_protocol/test_core 沿用 task-19（本轮未改主产品/server） |
+| **S1-26 / task-26（调色板审计，只报告）** | 源色审计 + 16+8 提案 + 重画清单 | **通过（2 条 P3）** | 世界 77 唯一/86 引用、UI 17/41、共享 3、并集 91 **独立重算一致**；默认/--json/--md 两跑字节一致、3 个 cwd 结果一致、默认 exit 0、--strict exit 1；手算 villager.ts 13/13、prefabs 16/15、index.html 20/17 核对通过；越界表 61+9 行全部带 file:line；16+8 提案全部取自现有源色、无重复；11 组 WCAG 对比度独立复算一致；D4 未裁决/三栋材料趋同/prefab 十进制需同步测试均已写入报告。P3：--strict 提示仍写"本轮不启用"；77→71 为估算，需 task-27 后复跑 |
+| **S1-27 / task-27（D5-A 中文迁 DOM）** | 画布中文清零 + DOM overlay 跟随 | **有条件通过（1 条 P2：审计报告附录未完整更新）** | src 内 `.add.text(`/`.text(`/`setText(` **0 处**、no-cjk 测试 2/2、静态文字改图标；浏览器 100/200/400% 名字/气泡误差 **0.00–0.40px ≤1**（zoom200/resize 后仍 ≤0.4）、走动/气泡/进屋/多角色不串、390px overlay 与 canvas 同框不溢出；**139/139**、check 0、smoke **114/114 + 21/21**、check_protocol/test_core 64/0；交叉存档 32/24/多角色 26/归属 26 全过；审计复跑世界 **71/85**、UI **17/45**、共享 2、并集 86、世界越界 55，仅删 6 个预期文字/气泡色、无新增色、提案未动。**P2**：docs 附录世界 Top16 与实跑不一致、越界长表仍 61 行含已删 6 色（正文计数/每文件表/Top10/§5.1 均已更新） | 
 
 ---
 
@@ -1505,6 +1507,159 @@ task-23 的 **P2 关闭**；存档批次（task-18 → task-23 → task-24）最
 
 ---
 
+# 卡 18：task-26（调色板审计，只报告）
+
+## 结论：**通过（2 条 P3，只报告卡不阻断）**
+
+### 0) 范围与基线
+
+- 新增：`pixel-world/scripts/audit-palette.mjs`（33,343 B）、`docs/ART_PALETTE_AUDIT.md`（37,651 B）
+- **源码零改动**：`git status -- pixel-world` 只有新脚本；pixel-world `src/` 最新 mtime 15:50:32，
+  早于 audit 脚本 16:03:20 / 报告 16:05:57；HEAD `2b52d7c`
+- 当前数字作为 task-27 前基线：世界 **77 唯一色 / 86 引用**、UI **17 / 41**、共享 3、并集 **91**
+
+### 1) 可重复性（硬点 1）
+
+- 默认模式连续两次：exit 0，SHA256 均 `4BE6FE069F37F29477EBCD0B6A57336F0AB55716757A4295F7770ED9A41E33B6`（字节一致）
+- `--json` 两次字节一致；`--md` 两次字节一致
+- 换 cwd：`pixel-world/`、仓库根、`C:\Users\18712\.dsh\bot\workspace`、`D:\` 四处的 `--json` 输出 SHA 完全相同
+  （脚本以自身位置解析根目录，输出 root 为绝对路径但一致）
+- 默认 exit 0；`--strict` exit **1**（世界超 61 / UI 超 9）；`node --check` 通过
+
+### 2) 口径（硬点 2）
+
+- 世界层：`src/main.ts` + `src/render/*.ts`（含 palette.ts token 定义）+ `src/scenes/*.ts` + `prefabs.json` palette 槽位；
+  UI 层：`index.html` 的 `<style>` + `src/ui/*.ts`（当前无颜色字面量）
+- 只统计源码源色；**alpha 被忽略**（`rgba()` 只取 RGB 归一为 `#rrggbb`；`fillStyle` 的 alpha 不另算色），
+  不模拟运行时压暗/tint/叠加；CSS 变量定义不计为使用（但计入唯一色），`var(--x)` 使用计入引用；
+  `palette.ts` 的 token 定义单独计 defs、不算使用；prefab 的十进制裸值按 palette 槽位计入
+- 世界/UI 分开：独立重算得到 **77/86、17/41、共享 3（#000000/#e3a13c/#e8e2d2）、并集 91** 全部一致
+- 共享色判定合理：`#000000`（世界 UI.shadow + UI box-shadow）、`#e3a13c`（世界 amber token + UI accent）、
+  `#e8e2d2`（世界 ink/气泡 + UI 文字）
+
+### 3) 数字抽查（硬点 3，独立重算 12/12）
+
+| 文件 | 审计输出 | QA 独立重算 | 备注 |
+|---|---|---|---|
+| `src/render/villager.ts` | 13 / 13 | 13 / 13 | 行:色 = 35#f3dca8、42#14110d、43#e8e2d2、84#8c4a3a、86#a85c46、88#3a2d26、99#30506b、101#3f6584、104#223a4d、107#e0b48c、109#2b2320、114#c06a3e、127#1d1a17 |
+| `src/world/prefabs.json` | 16 / 15 | 16 / 15 | 4 套 × 4 槽；`#f0c070` 在 code_forge/workshop_plot 重复 1 次 → 15 唯一；十进制裸值未漏 |
+| `index.html` `<style>` | 20 / 17 | 20 / 17 | 5 变量 + 12 字面量 + 2 rgba + `#000` = 20；`#000000` 归一后合并 → 17 |
+| 世界层合计 | refs 86 | 61 字面量 + token 引用 + 16 prefab 槽位 | 独立实现（不 import 审计脚本）复算一致 |
+
+- 每文件字面量表也独立复算一致（main 0、buildings 5、decor 12/10、palette 22/22、smoke 0、tilemap 2、
+  villager 13、weather 4/3、SandboxScene 9、prefabs 16/15）
+- 未发现重复计数（跨文件重复色只在层内去重一次、refs 各站点分别计）或漏统计（十进制 prefab、`#rrggbb` 文本色、
+  CSS 变量/`#000`/rgba 均已覆盖）
+
+### 4) 报告质量（硬点 4）
+
+- 越界表：世界 **61** 行、UI **9** 行，**每行都带 `file:line`**（JSON `sites` 全部含 file/line；例如
+  `#000000 → buildings.ts:36,68 / villager.ts:26`、prefabs `#f0c070 → prefabs.json:14,56`）
+- 提案：世界 16 色 / UI 8 色，**全部取自现有源色集合**（独立 membership 检查 16/16、8/8；无重复、无新色相）
+- 重画清单：越界 61 色按最近提案色分类 **近似 4 / 微调 29 / 重画 28**；UI **1 / 3 / 5**；与 JSON `outSummary` 一致；
+  另给出按模块（暗部/草地/蓝图材质/文字色/speck/UI）的映射与顺序，可执行
+- 雨天/夜景：明确写「**初判（不是结论）**」，给出 11 组 WCAG 对比度；QA 独立复算
+  outline/grass 1.59、cloak/grass 1.40、skin/grass 6.23、paper/ink 12.41、amber/panel 7.82、smoke/night 13.34
+  等全部 ±0.02 内一致；夜景结论有地形亮度差 1.04–1.10:1 依据与 E-16 实验建议，没有冒充已定论
+- 风险：§7 明确写入 **D4 色数上限未裁决（16 vs 24/32）**、**三栋建筑材料趋同（靠剪影区分或批 18 色）**、
+  **prefab 十进制改色需同步 JSON/解析器/测试**，另有 alpha 滥用/夜景范围/最近色启发式等风险
+
+### 5) P3（不阻塞）
+
+1. `--strict` 模式下退出码正确为 1，但 stdout/`--md` 的提示文案仍写「（本轮不启用）」→ 建议按 strict 分支改文案。
+2. 报告「77 → 71」是**估算**：`#e8e2d2` 目前在世界层还有 1 个 def（未被引用的 `UI.paper` token）；
+   若 task-27 只删气泡引用、不删该 token 定义，世界层会是 **72** 而非 71。以 task-27 后复跑为准。
+
+### 6) task-27 开工前是否需要复跑审计？
+
+- **不需要**：当前源码自审计后未变（mtime 证据），数字已独立复算且可重复，现基线可直接交给 task-27。
+- **task-27 完成后必须复跑**：`node scripts/audit-palette.mjs` + `--md`，更新报告计数、Top、越界表、提案映射
+  （5 个画布文字色 + 气泡迁移会改变世界层数字；不要直接把 71 当验收数字）。
+- 若 task-27 期间还有任何源码改动，开工前也应重新出基线。
+
+**总评：通过。** 数字真实可复算、口径符合用户要求、报告可执行且风险写明；2 条 P3 属文案/估算口径，不影响
+「只报告」卡结论。
+
+---
+
+# 卡 19：task-27（D5-A 中文迁 DOM overlay）
+
+## 结论：**有条件通过（1 条 P2：审计报告附录未完整更新；1 条 P3 信息）**
+
+### 0) 范围 / 基线
+
+- 新增 `src/render/labels.ts`（投影/锚点纯函数）、`src/render/world-overlay.ts`（DOM 名字/气泡）；
+  改 `render/villager.ts`、`buildings.ts`、`decor.ts`、`palette.ts`（删 `UI.paper`）、`SandboxScene.ts`、
+  `index.html`（`#world-overlay`/`#stage`）、`smoke.mjs`、测试 `labels.test.ts`/`no-cjk-canvas.test.ts`
+- HEAD `2b52d7c`；相关文件 mtime 16:10–16:15，仓库安静；8000 未重启
+
+### 1) 红线（硬点 1）
+
+- `src` 内 `.add.text(` / `.text(` / `setText(` 扫描结果 **0 处**（连旧 `scene.add.text` 也不存在）；
+  `node --test test/no-cjk-canvas.test.ts` 2/2 通过
+- 6 处 canvas 文本删除（diff 可见）：角色名、建筑招牌、摆件标签、祭坛「神谕祭坛」、施工「施工中 X%」、气泡底；
+  替换为图标/图形：`drawSignIcon`（建筑招牌图形）、祭坛 rune、施工/摆件图标；元素截图 23-task27-dpr100.png
+  可见 canvas 内只剩图标（无中文）
+- 动态名字/气泡走 `#world-overlay`（DOM），`world-overlay.ts` 每帧按 canvas 实际 rect + 相机换算位置
+
+### 2) 对齐（硬点 2，QA 浏览器 15/15）
+
+| 场景 | 实测 |
+|---|---|
+| 100% / 200% / 400%（DPR 1/2/4，元素截图 `#stage`） | 名字与气泡锚点误差 **0.00px**（≤1 逻辑像素） |
+| 页面 zoom 200% | 名字误差 **0.40px** |
+| 窗口 resize（1010→800） | 名字/气泡误差 **0.00–0.40px** |
+| 走动跟随 | 名字 **0.00px**、气泡 **0.40px**（气泡「！吾神降旨！」） |
+| 进屋（`visible=false`） | 名字/气泡 `display:none`（不残留） |
+| 多角色 | v0/v1 名字分别对应「莞尔」「阿雾」，不串 |
+| 390px | overlay 与 canvas 同宽同边界（left/right 完全一致，不超出 canvas）；元素截图 `23-task27-390.png` |
+
+- 实现为**每帧同步**（`renderSnapshot` 末尾 `overlay.sync`）+ window resize 监听；无 ResizeObserver，但
+  resize/zoom 后下一帧即恢复对齐（上表为实测）。元素截图不是 `canvas.toDataURL`。
+- 说明：390px **页面级**横向溢出（doc=677>390）仍存在，属既有固定 960px canvas 布局，非 overlay 引入
+  （overlay 自身与 canvas 同框、不溢出）；记 P3 信息。
+
+### 3) 不回归（硬点 3）
+
+- 多角色名字/气泡不串（浏览器 + 多角色探针 26/26）；调试面板正常（含注入区，任务行可见）；
+  浏览器全程 **0 JS 报错**
+- 存档探针 32/32、排队探针 24/24、多角色 26/26、归属 26/26 全过；台账 smoke 21/21
+
+### 4) 审计复跑（硬点 4）
+
+- `node scripts/audit-palette.mjs --md/--json` 实测：世界 **71 唯一/85 引用**、UI **17/45**、
+  共享 **2**（#000000/#e3a13c）、并集 **86**、世界越界 **55**、UI 越界 9；`--strict` exit 1，
+  提示文案已修为「已启用；默认仍返回 0」（task-26 P3 关闭）
+- **没有偷改无关色值**：与 task-26 基线 JSON 对比，世界层仅删除 6 个预期色
+  （`#f3dca8/#d9d4c5/#a9b49f/#cfc7ae/#e0c98b/#e8e2d2`）、**无新增色**；UI 色集合完全不变
+  （引用 41→45，+4 来自 overlay 样式复用现有 CSS 色）；16+8 提案集合未动（task-28 才动）
+- docs 更新核对：§2.1 计数表（71/85、17/45、共享 2、并集 86）✓、§2.2 每文件表 ✓（buildings 4/4、
+  decor 11/9、palette 21/21、villager 10/10、SandboxScene 9/7、prefabs 16/15、index 24/17）、
+  正文 §3.1 Top10 ✓、§5.1 映射 55 ✓
+- **P2**：docs 附录**世界 Top16 与实跑 JSON 不一致**（6 个位次/颜色不同），且附录**越界长表仍有 61 行**
+  （含已删除的 6 个文字/气泡色，行号指向已删代码），与正文「世界越界 55」矛盾；附录注说"下表已按复跑更新
+  Top"与实际不符。建议：用 `--md` 直接重生成附录 Top/越界表（55 行），或把已删 6 色单独列为“已移除”且不混入表
+
+### 5) 回归（硬点 5）
+
+- `npm run check` 0；`npm test` **139/139**（新增 labels 4 项 + no-cjk 2 项）
+- 沙盒 smoke **114/114**（104 + 10 overlay 断言：节点数/文案/对齐/气泡让位/100–400% 贴合/390 不溢出 canvas）；
+  台账 smoke **21/21**
+- `check_protocol` PASS；`test_core`（venv）**64 passed / 0 failed**
+
+### 6) 问题分级
+
+| 级别 | 问题 | 建议 |
+|---|---|---|
+| **P2** | 审计报告附录 Top16/越界表未按 task-27 复跑更新（61 行含已删 6 色；Top16 与实跑不一致） | 从 `--md` 重生成附录两张表；或显式分“已移除色”区，保持 55 行口径 |
+| P3（信息） | 390px 页面级横向溢出（overlay 与 canvas 同框不溢出；既有固定 canvas 布局） | 已在 task-19/26 记录；留后续响应式卡 |
+| P3（信息） | overlay 用每帧同步 + window resize，无 ResizeObserver | 行为已实测正确；若后续要做窗口尺寸动画可加 observer 降开销 |
+
+**总评：有条件通过。** D5-A 的红线/对齐/跟随/多角色/回归全部实测通过；唯一缺口是审计报告附录表未同步
+（数据正文/每文件/正文 Top 已更新），修复文档后即可复验通过。task-28 可用「55 越界色、提案未动」口径开工。
+
+---
+
 # 附录 A：证据文件清单（工作区 `C:\Users\18712\.dsh\bot\workspace\recon\`）
 
 ## task-7
@@ -1724,6 +1879,32 @@ task-23 的 **P2 关闭**；存档批次（task-18 → task-23 → task-24）最
 | `eval\screens\22-task25-inject-fixed.png` | 修复后注入区（稳定存在、默认折叠） |
 | `task25-cleanup.log` | 端口释放、8000 PID/启动时间、样例 SHA |
 
+## task-26（调色板审计，只报告）
+
+| 文件 | 内容 |
+|---|---|
+| `task26-audit-default.log` / `task26-audit-json.log` / `task26-audit-md.md` | 默认 / `--json` / `--md` 三份输出（77/86、17/41、并集 91） |
+| `task26-rep-default-1/2.log`、`task26-rep-json-1/2.log`、`task26-rep-md-1/2.md` | 连续两次输出字节一致（SHA `4BE6FE…33B6`） |
+| `task26-cwd-root.json` / `task26-cwd-workspace.json` / `task26-cwd-d.json` | 三个不同 cwd 的 `--json`，SHA 与 pixel-world 运行一致 |
+| `task26-strict.log` | `--strict` exit 1（世界超 61 / UI 超 9），附「本轮不启用」文案问题 |
+| `task26-recount.log` / `qa-task26-recount.mjs` | QA 独立重算 **12/12**：77/86、17/41、共享 3、并集 91、三文件手算、提案 membership、11 组对比度 |
+| `qa-task26-json-checks.mjs`（输出见会话记录） | 越界表 61+9 行 file:line 完整、提案 16/8 无重复、分类合计与 outSummary 一致 |
+| `D:\project\neurosama\docs\ART_PALETTE_AUDIT.md`、`pixel-world/scripts/audit-palette.mjs` | 被审报告与脚本本身 |
+
+## task-27（D5-A 中文迁 DOM overlay）
+
+| 文件 | 内容 |
+|---|---|
+| `task27b-npm-test.log` / `task27b-check.log` | **139/139**、check 0；no-cjk 2/2、labels 4/4 |
+| `task27b-overlay-probe.log` | QA 浏览器 **15/15**：100/200/400% 对齐、zoom/resize、走动/气泡/进屋/多角色、390 overlay 不超 canvas、调试面板、0 JS 报错 |
+| `eval\screens\23-task27-dpr100.png`、`23-task27-dpr200.png`、`23-task27-dpr400.png`、`23-task27-390.png` | 元素截图（非 canvas.toDataURL） |
+| `task27b-audit-md.md` / `task27b-audit-json.log` / `task27b-strict.log` | 审计复跑 71/85、17/45、共享2、并集86、越界55；strict exit 1 且文案已修 |
+| `task27b-audit-consistency.mjs`（输出见日志） | 与 task-26 基线对比：仅删 6 色/无新增色/UI 集合不变/提案未动；docs 计数/每文件/Top10 一致；附录 Top16/越界表不一致（P2 证据） |
+| `task27b-smoke-sandbox.log` / `task27b-smoke-ledger.log` | 沙盒 **114/114**、台账 **21/21** |
+| `task27b-check-protocol.log` / `task27b-test-core.log` | 主产品 PASS / 64 passed 0 failed |
+| `task27b-cross-qa-task18/10/17/21*.log` | 存档 32、排队 24、多角色 26、归属 26 全过 |
+| `task27b-cleanup.log` | 端口释放、8000 PID/启动时间、截图/数据锚点 |
+
 # 附录 B：复验顺序（各卡）
 
 ```powershell
@@ -1861,3 +2042,21 @@ Get-NetTCPConnection -LocalPort 5188,5190,8001,8000 -State Listen -ErrorAction S
 - **task-25 收口（15:54:18）**：5188/8001/5189 无监听；8000 PID 22996、start 2026-10-18 16:40:34、health 200
   未重启；`data/commissions.db` 未被写（mtime 10:43:06）；`data/memory.db` 15:54:07 变化来自 8000 自身会话写入；
   样例 SHA 未变；无临时目录/.tmp 残留
+- **task-26（调色板审计，只报告）：通过（2 条 P3）**（16:06–16:12）——世界 **77 唯一/86 引用**、UI **17/41**、
+  共享 3、并集 **91** 与 QA 独立重算一致；默认/`--json`/`--md` 两跑字节一致、3 个 cwd 结果一致、
+  默认 exit 0、`--strict` exit 1；手算 villager.ts 13/13、prefabs 16/15、index.html 20/17 核对；
+  越界表 61+9 行全带 file:line；16+8 提案全部取自现有源色；11 组对比度独立复算一致；D4 未裁决/三栋材料趋同/
+  prefab 十进制需同步测试已写入报告。P3：`--strict` 提示仍写「本轮不启用」；77→71 为估算（`#e8e2d2` 可能因
+  未引用 token 留在世界层 → 72），**task-27 后必须复跑审计**。**task-27 开工前无需复跑**（源码未变、数字已验）
+- **task-26 收口（16:12）**：本卡只报告，未起 dev/临时端口；8000 PID 22996、start 2026-10-18 16:40:34、
+  health 200 未重启；`data/commissions.db` 未被写；pixel-world `src/` 无改动（最新 mtime 15:50:32 < 审计 16:03）
+- **task-27（D5-A 中文迁 DOM overlay）：有条件通过（1 条 P2 文档 + 1 条 P3 信息）**（16:23–16:31）——src 内
+  `.add.text(` 等 **0 处**、no-cjk 2/2、6 处静态文字改图标；浏览器 100/200/400% 名字/气泡误差 **0.00–0.40px**、
+  zoom/resize/走动/进屋/多角色均通过、390px overlay 与 canvas 同框不溢出；**139/139**、check 0、
+  smoke **114/114 + 21/21**、check_protocol/test_core 64/0；交叉存档 32/排队 24/多角色 26/归属 26 全过；
+  审计复跑世界 **71/85**、UI **17/45**、共享 2、并集 86、世界越界 55，且仅删 6 个预期色、无新增色、提案未动。
+  **P2**：docs 附录世界 Top16 与实跑不一致、越界长表仍 61 行含已删 6 色（正文计数/每文件表/Top10/§5.1 已更新）；
+  P3：390px 页面级溢出（既有 canvas 布局，overlay 自身不溢出）
+- **task-27 收口（16:25:37）**：5188/8001/5189 无监听；8000 PID 22996、start 2026-10-18 16:40:34、health 200
+  未重启；`data/commissions.db` 未被写（mtime 10:43:06）；`data/memory.db` 16:25:03 变化来自 8000 自身会话写入；
+  无临时目录/.tmp 残留；截图 100/200/400/390 均存在

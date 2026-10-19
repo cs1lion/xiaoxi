@@ -12,13 +12,10 @@ export interface VillagerView {
   readonly container: Phaser.GameObjects.Container;
   readonly body: Phaser.GameObjects.Graphics;
   readonly shadow: Phaser.GameObjects.Graphics;
-  readonly bubble: Phaser.GameObjects.Text;
-  readonly name: Phaser.GameObjects.Text;
 }
 
 export function createVillager(
   scene: Phaser.Scene,
-  name: string,
   originX: number,
   originY: number,
 ): VillagerView {
@@ -29,25 +26,9 @@ export function createVillager(
   const body = scene.add.graphics();
   drawBody(body, 'down', 0);
 
-  const nameText = scene.add.text(0, -30, name, {
-    fontFamily: 'ui-monospace, monospace',
-    fontSize: '10px',
-    color: '#f3dca8',
-  });
-  nameText.setOrigin(0.5, 1);
-
-  const bubble = scene.add.text(0, -36, '', {
-    fontFamily: 'ui-monospace, monospace',
-    fontSize: '11px',
-    color: '#14110d',
-    backgroundColor: '#e8e2d2',
-    padding: { x: 4, y: 2 },
-  });
-  bubble.setOrigin(0.5, 1);
-  bubble.setVisible(false);
-
-  const container = scene.add.container(originX, originY, [shadow, body, nameText, bubble]);
-  return { container, body, shadow, bubble, name: nameText };
+  // 名字/气泡已迁 DOM overlay（D5-A）：canvas 里不再画中文。
+  const container = scene.add.container(originX, originY, [shadow, body]);
+  return { container, body, shadow };
 }
 
 /** 每帧把快照画出来；坐标换算只在这里做一次。 */
@@ -69,11 +50,6 @@ export function updateVillager(
   const hop = villager.mode === 'delivering' ? -1 : 0;
   drawBody(view.body, villager.facing, bob + hop);
   if (villager.umbrella) drawUmbrella(view.body);
-
-  view.bubble.setVisible(villager.bubble !== null);
-  if (villager.bubble !== null) view.bubble.setText(villager.bubble);
-  // 气泡出现时让出位置，名字压在建筑招牌上会读不清。
-  view.name.setVisible(villager.bubble === null);
 
   const walking = villager.mode === 'toWork' || villager.mode === 'toAltar';
   view.shadow.setAlpha(walking ? 0.28 : 0.35);

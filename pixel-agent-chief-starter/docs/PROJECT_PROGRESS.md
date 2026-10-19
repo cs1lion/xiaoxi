@@ -11,7 +11,7 @@
 - 像素世界技术栈：**Phaser 3.90 + TypeScript 5.9.3 + Vite 8.3.4，已落地并实测可运行**。
 - **文档旧声称严重滞后**：旧进度写「Phase 0 / MVP 0.1 已完成，Phase 1 IN_PROGRESS，TASK-1.1 IN_PROGRESS，TASK-1.2 下一项」。真实情况：19 张任务卡全部落地，主体已到 Phase 6 + S2。
 - **MVP 1.0 九项**：7 DONE / 2 PARTIAL（三工坊语义、Mock/LLM 神谕层 尚未补齐）。
-- 门禁实测（2026-10-19 15:50）：`npm run check` 通过；`npm test` **133/133**；`npm run build` 通过；浏览器冒烟沙盒 **104/104**、台账 **21/21**、显式离线 7/7；`check_protocol.py` PASS、`test_core.py` 64/0。
+- 门禁实测（2026-10-19 16:30）：`npm run check` 通过；`npm test` **139/139**；`npm run build` 通过；浏览器冒烟沙盒 **114/114**、台账 **21/21**、显式离线 7/7；`check_protocol.py` PASS、`test_core.py` 64/0。
 - S2 全部完成：任务排队（task-10）、多角色 2–3（task-17）、多角色 P3（task-21）、JSON 存档（task-18/23/24，v1 冻结）、调试面板（task-19/25）。下一项 S3 视觉垂直切片，等 D5/D6 拍板。
 
 ## 一、阶段与任务卡（核验后）
@@ -64,8 +64,11 @@
 - [x] **S2-2 存档 ADR**（task-20，`docs/ADR_SAVE.md`，final，§1 frozen）。
 - [x] **S2-2 JSON 存档单槽 + 恢复**（task-18/23/24：刷新恢复、对账三分支、settled 去重、坏档/配额/高版本、v1 指纹冻结；P3：配额暂停无运行时恢复接线、DEBUG 面板未做）。
 - [x] **S2-3 调试面板 UI**（task-19/25，QA 通过：实体/事件/暂停/过滤/注入区；P3：390px 页面级溢出另开卡）。
-- [ ] **S2-2b 存档手动导出/导入**（task-22，排在 S2-3 后）。
-- [ ] 视觉垂直切片：中文迁出 canvas、调色板收敛 + 校验器、idle/walk 帧动画 + 12fps 采样、证据链重建。
+- [x] **S3-2a 调色板审计**（task-26，QA 通过：世界 71 唯一/越界 55、UI 17/越界 9、并集 86；报告 `docs/ART_PALETTE_AUDIT.md`，只报告不阻断）。
+- [x] **S3-1 中文迁 DOM overlay**（task-27，QA 有条件通过；唯一 P2 附录未更新已由 Chief 按脚本输出重生成；canvas 中文 0 处、对齐误差 0.00–0.40px）。
+- [ ] **S3-2b 调色板收敛到 16+8**（task-28，进行中/待开工）。
+- [ ] S3-3 帧动画 + 12fps；S3-4 垂直切片评审与 ART_SPEC/DEMO_SCRIPT 草案。
+- [ ] **S2-2b 存档手动导出/导入**（task-22，排在 S3 后）。
 - [ ] 定稿并批准 `DEMO_SCRIPT.md` v0.1 与 `ART_SPEC.md` v0.1（用 `docs/DEMO_ART_SPEC_TODO.md` 的清单）。
 - [ ] 3 分钟演示跑通 + QA 独立复验 + 用户验收后，才进入 Agent 正式双向集成。
 

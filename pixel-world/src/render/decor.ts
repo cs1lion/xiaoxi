@@ -98,12 +98,5 @@ function drawProp(
   }
   g.setPosition(px, py);
   parent.add(g);
-  const label = scene.add.text(px, py + 3, prop.label, {
-    fontFamily: 'ui-monospace, monospace',
-    fontSize: '9px',
-    color: '#a9b49f',
-  });
-  label.setOrigin(0.5, 0);
-  label.setAlpha(0.75);
-  parent.add(label);
+  // 摆件标签已随 D5-A 删除：图形自己说明是什么，中文不进 canvas。
 }
