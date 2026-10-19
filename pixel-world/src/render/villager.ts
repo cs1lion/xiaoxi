@@ -1,9 +1,13 @@
-/** 小人层：16×32 的色块精灵，动作由状态机给，渲染层不猜。 */
+/** 小人层：16×32 的色块精灵，动作由状态机给，渲染层不猜。
+ *
+ * 16 色收敛后不再有“斗篷亮部”这种单独色：亮部靠 1px 暗轮廓 + 围巾/皮肤的面积撑起来。
+ * 审计 §6.2：轮廓/草地只有 1.59:1，所以先补轮廓，再谈换色。
+ */
 
 import Phaser from 'phaser';
 import { TILE_PX } from '../world/setup.ts';
 import type { VillagerSnapshot } from '../world/types.ts';
-import { UI } from './palette.ts';
+import { WORLD } from '../world/palette-data.ts';
 
 export const VILLAGER_W = 12;
 export const VILLAGER_H = 20;
@@ -20,7 +24,7 @@ export function createVillager(
   originY: number,
 ): VillagerView {
   const shadow = scene.add.graphics();
-  shadow.fillStyle(UI.shadow, 0.35);
+  shadow.fillStyle(WORLD.ink, 0.35);
   shadow.fillEllipse(0, 0, 14, 5);
 
   const body = scene.add.graphics();
@@ -57,11 +61,11 @@ export function updateVillager(
 
 /** 伞只在下雨且她在户外时出现；世界给的事实，渲染层不自己判断天气。 */
 function drawUmbrella(g: Phaser.GameObjects.Graphics): void {
-  g.fillStyle(0x8c4a3a, 1);
+  g.fillStyle(WORLD.timber, 1);
   g.fillRect(-7, -30, 14, 3);
-  g.fillStyle(0xa85c46, 1);
+  g.fillStyle(WORLD.ember, 1);
   g.fillRect(-5, -32, 10, 2);
-  g.fillStyle(0x3a2d26, 1);
+  g.fillStyle(WORLD.timberDark, 1);
   g.fillRect(0, -27, 1, 8);
 }
 
@@ -71,26 +75,32 @@ function drawBody(
   offsetY: number,
 ): void {
   const y = -VILLAGER_H + offsetY;
-  // 斗篷
-  g.fillStyle(0x30506b, 1);
-  g.fillRect(-5, y + 8, 10, 10);
-  g.fillStyle(0x3f6584, 1);
-  g.fillRect(-5, y + 8, 10, 2);
-  // 底边
-  g.fillStyle(0x223a4d, 1);
-  g.fillRect(-5, y + 16, 10, 2);
+  // 轮廓：头和斗篷各一圈 1px 最暗色，草地/雨天压暗时仍能读出剪影。
+  g.fillStyle(WORLD.ink, 1);
+  g.fillRect(-5, y, 10, 10);
+  g.fillRect(-6, y + 7, 12, 11);
+
   // 头
-  g.fillStyle(0xe0b48c, 1);
-  g.fillRect(-4, y + 1, 8, 8);
-  g.fillStyle(0x2b2320, 1);
-  g.fillRect(-4, y, 8, 3);
-  g.fillRect(-6, y + 2, 2, 5);
-  g.fillRect(4, y + 2, 2, 5);
-  // 围巾
-  g.fillStyle(0xc06a3e, 1);
-  g.fillRect(-5, y + 8, 10, 2);
+  g.fillStyle(WORLD.skin, 1);
+  g.fillRect(-4, y + 3, 8, 6);
+  // 发
+  g.fillStyle(WORLD.timberDark, 1);
+  g.fillRect(-4, y + 1, 8, 2);
+  g.fillRect(-5, y + 1, 1, 6);
+  g.fillRect(4, y + 1, 1, 6);
+
+  // 斗篷：基色 + 下摆暗部（替代原来的斗篷亮部，亮部靠轮廓与围巾区分）
+  g.fillStyle(WORLD.cloak, 1);
+  g.fillRect(-5, y + 8, 10, 10);
+  g.fillStyle(WORLD.cloakDark, 1);
+  g.fillRect(-5, y + 16, 10, 2);
+
+  // 围巾：2px 横贯到轮廓外，远景靠这条暖色认出她。
+  g.fillStyle(WORLD.ember, 1);
+  g.fillRect(-6, y + 8, 12, 2);
+
   // 眼
-  g.fillStyle(UI.ink, 1);
+  g.fillStyle(WORLD.ink, 1);
   if (facing === 'down') {
     g.fillRect(-2, y + 5, 1, 1);
     g.fillRect(2, y + 5, 1, 1);
@@ -99,8 +109,9 @@ function drawBody(
   } else if (facing === 'right') {
     g.fillRect(2, y + 5, 1, 1);
   }
-  // 脚
-  g.fillStyle(0x1d1a17, 1);
+
+  // 靴子
+  g.fillStyle(WORLD.timberDark, 1);
   g.fillRect(-4, y + 18, 3, 2);
   g.fillRect(1, y + 18, 3, 2);
 }

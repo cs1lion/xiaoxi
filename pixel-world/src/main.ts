@@ -10,7 +10,7 @@ import { bindDebugPanel, type SaveStatusView } from './ui/debug-panel.ts';
 import { SaveStore } from './ui/save-store.ts';
 import type { AgentToWorld } from './world/bridge.ts';
 import type { WorldEvent, WorldSnapshot } from './world/types.ts';
-import { UI } from './render/palette.ts';
+import { WORLD } from './world/palette-data.ts';
 
 const blueprints = parseBlueprintTable(prefabs);
 // 读档必须在建世界/起 Phaser 之前：有档按存档 buildings 顺序重放网格（ADR_SAVE §1.2）。
@@ -18,7 +18,7 @@ const saveNotices: string[] = [];
 const saveStore = new SaveStore({ onWarning: (message) => saveNotices.push(message) });
 const loadedSave = saveStore.read();
 const world = loadedSave.ok
-  ? buildWorldFromSave(loadedSave.save.world.buildings)
+  ? buildWorldFromSave(loadedSave.save.world.buildings, blueprints)
   : buildWorld(blueprints);
 
 const WIDTH = GRID_WIDTH * TILE_PX;
@@ -29,7 +29,7 @@ const game = new Phaser.Game({
   parent: 'app',
   width: WIDTH,
   height: HEIGHT,
-  backgroundColor: UI.sky,
+  backgroundColor: WORLD.ink,
   pixelArt: true,
   roundPixels: true,
   // 逻辑分辨率保持 480×320（30×20 格 ×16px），只放大画布显示尺寸。非整数缩放会让像素边缘渗色，

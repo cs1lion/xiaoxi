@@ -11,7 +11,7 @@ import { excerptBlockedQuestion } from '../world/types.ts';
 import { parseOracle } from '../world/oracle.ts';
 import { placeBlueprint, type BuiltWorld } from '../world/setup.ts';
 import type { PrefabBlueprint } from '../world/types.ts';
-import { UI } from '../render/palette.ts';
+import { WORLD } from '../world/palette-data.ts';
 import { drawTerrain } from '../render/tilemap.ts';
 import { createBuilding, updateBuilding, type BuildingView } from '../render/buildings.ts';
 import { createVillager, updateVillager, type VillagerView } from '../render/villager.ts';
@@ -102,7 +102,7 @@ export class SandboxScene extends Phaser.Scene {
   create(): void {
     const originX = 0;
     const originY = 0;
-    this.cameras.main.setBackgroundColor(UI.sky);
+    this.cameras.main.setBackgroundColor(WORLD.ink);
 
     drawTerrain(this, this.world.grid, originX, originY);
     ensureAccentTextures(this);
@@ -186,21 +186,21 @@ export class SandboxScene extends Phaser.Scene {
     const ax = originX + altarPx.x * TILE_PX;
     const ay = originY + altarPx.y * TILE_PX;
     const altar = this.add.graphics();
-    altar.fillStyle(0x5a5f4c, 1);
+    altar.fillStyle(WORLD.plaza, 1);
     altar.fillRect(ax - 6, ay - 6, 44, 44);
-    altar.lineStyle(1, 0x8d8f74, 0.8);
+    altar.lineStyle(1, WORLD.trim, 0.8);
     altar.strokeRect(ax - 6, ay - 6, 44, 44);
-    altar.fillStyle(0x2c302a, 1);
+    altar.fillStyle(WORLD.soil, 1);
     altar.fillRect(ax + 3, ay + 3, 26, 26);
-    altar.fillStyle(0xd9c27a, 0.9);
+    altar.fillStyle(WORLD.amber, 0.9);
     altar.fillRect(ax + 9, ay + 9, 14, 2);
     altar.fillRect(ax + 15, ay + 13, 2, 8);
     altar.setDepth(ALTITUDE + ay + 40);
     // 祭坛的静态文字改符文图标（D5-A）：不再画「神谕祭坛」。
     const rune = this.add.graphics();
-    rune.lineStyle(1, UI.amber, 0.9);
+    rune.lineStyle(1, WORLD.amber, 0.9);
     rune.strokeRect(ax + 9, ay - 14, 8, 8);
-    rune.fillStyle(UI.amber, 0.9);
+    rune.fillStyle(WORLD.amber, 0.9);
     rune.fillRect(ax + 12, ay - 12, 2, 4);
     rune.fillRect(ax + 17, ay - 10, 2, 2);
     rune.setDepth(ALTITUDE + ay + 41);
@@ -473,22 +473,22 @@ export class SandboxScene extends Phaser.Scene {
       const h = building.footprint.h * TILE_PX;
       const g = this.add.graphics();
       const progress = 1 - construction.remainingMs / construction.totalMs;
-      g.lineStyle(1, 0xc9a86a, 0.85);
+      g.lineStyle(1, WORLD.trim, 0.85);
       g.strokeRect(x + 1, y + 1, w - 2, h - 2);
       for (let px = x + 4; px < x + w; px += 8) {
         g.lineBetween(px, y + 2, px, y + h - 2);
       }
-      g.lineStyle(1, 0x8f7a4c, 0.6);
+      g.lineStyle(1, WORLD.trim, 0.6);
       g.lineBetween(x + 1, y + h * progress, x + w - 1, y + h * progress);
-      g.fillStyle(0x2a241c, 0.55);
+      g.fillStyle(WORLD.ink, 0.55);
       g.fillRect(x + 1, y + 1, w - 2, h - 2);
       container.add(g);
       // 施工标签改图标（D5-A）：进度用线，不再画「施工中 xx%」中文。
       const icon = this.add.graphics();
-      icon.fillStyle(0xc9a86a, 0.95);
+      icon.fillStyle(WORLD.trim, 0.95);
       icon.fillRect(x + w / 2 - 4, y - 10, 9, 3);
       icon.fillRect(x + w / 2 - 1, y - 7, 2, 5);
-      icon.fillStyle(0x8f7a4c, 0.9);
+      icon.fillStyle(WORLD.trim, 0.9);
       icon.fillRect(x + w / 2 - 4, y - 10, 1, 3);
       container.add(icon);
     }

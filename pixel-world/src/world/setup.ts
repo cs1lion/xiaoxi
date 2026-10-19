@@ -147,11 +147,53 @@ export function rebuildGridFromPlacements(buildings: readonly PlacedBuilding[]):
   return grid;
 }
 
-/** 读档后的世界：网格按存档重放，分区/铺子不变量仍要过一遍。 */
-export function buildWorldFromSave(buildings: readonly PlacedBuilding[]): BuiltWorld {
-  const grid = rebuildGridFromPlacements(buildings);
-  assertWorldInvariants(grid, buildings);
-  return { grid, buildings: [...buildings], altar: ALTAR };
+/** 蓝图表的两种形态（数组或 Map）都能收：调用方不必先转一手。 */
+export type BlueprintSource =
+  | readonly PrefabBlueprint[]
+  | ReadonlyMap<string, PrefabBlueprint>;
+
+function indexBlueprints(blueprints: BlueprintSource): Map<string, PrefabBlueprint> {
+  if (blueprints instanceof Map) return new Map(blueprints);
+  return new Map((blueprints as readonly PrefabBlueprint[]).map((item) => [item.id, item]));
+}
+
+/** 读档后的世界：网格按存档重放，分区/铺子不变量仍要过一遍。
+ *
+ * 颜色是“显示事实”，以当前 prefab 表为准：存档里的 palette 可能是旧色表留下的，
+ * 直接拿来渲染会让老档永远停在旧配色（D6-A P1）。所以按 prefabId 重解，
+ * 找不到 prefab（比如蓝图被删）才回退存量 palette 并告警。
+ * 存档 schema 不动：v1 已冻结，读档只做内存里的显示修正。
+ */
+export function buildWorldFromSave(
+  buildings: readonly PlacedBuilding[],
+  blueprints?: BlueprintSource,
+): BuiltWorld {
+  const resolved = blueprints === undefined ? [...buildings] : rehydratePalettes(buildings, blueprints);
+  const grid = rebuildGridFromPlacements(resolved);
+  assertWorldInvariants(grid, resolved);
+  return { grid, buildings: resolved, altar: ALTAR };
+}
+
+/** 按当前 prefab 表重解每栋楼的 palette；prefab 缺失时保留存档值并告警。 */
+export function rehydratePalettes(
+  buildings: readonly PlacedBuilding[],
+  blueprints: BlueprintSource,
+): PlacedBuilding[] {
+  const byId = indexBlueprints(blueprints);
+  const seenMissing = new Set<string>();
+  return buildings.map((building) => {
+    const blueprint = byId.get(building.prefabId);
+    if (blueprint === undefined) {
+      if (!seenMissing.has(building.prefabId)) {
+        seenMissing.add(building.prefabId);
+        console.warn(
+          `[setup] 读档时找不到蓝图 ${building.prefabId}，${building.displayName} 沿用存档里的颜色（可能是旧版/外部存档）。`,
+        );
+      }
+      return building;
+    }
+    return { ...building, palette: blueprint.palette };
+  });
 }
 
 /** 世界预算校验：像 check_protocol 一样，不合规就不许开工。 */

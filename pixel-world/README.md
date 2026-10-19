@@ -41,6 +41,21 @@ LEDGER=1 node scripts/smoke.mjs     # 台账连通，21 项，需先起 8000
 
 两种模式都靠 `?ledger=off` / `?ledger=on` 切换，默认接台账；离线演示用 `off`。
 
+调色板截图（晴 / 雨 / 夜三态，可复现）：
+
+```bash
+# 1. 另开终端：起世界
+cd pixel-world && npm run dev
+# 2. 另开终端：起浏览器（脚本不自己 launch，沙箱里会 EPERM）
+chrome-headless-shell --headless --remote-debugging-port=9333 --no-sandbox \
+  --enable-unsafe-swiftshader --window-size=1010,1400 about:blank
+# 3. 截图
+cd pixel-world && node scripts/capture-palette.mjs
+```
+
+产物在 `eval/screens/palette-{sunny,rain,night}-{100,canvas,native-480x320,400pct}.png`，
+同种子复跑字节一致。前置、种子、方法与常见报错见 [docs/E2E_PALETTE.md](docs/E2E_PALETTE.md)。
+
 ## 目录与职责
 
 ```

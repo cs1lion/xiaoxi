@@ -87,7 +87,7 @@ const WORLD_FILES = [
 const UI_TS_FILES = listFiles('src/ui', '.ts');
 const PREFABS_FILE = 'src/world/prefabs.json';
 const HTML_FILE = 'index.html';
-const PALETTE_FILE = 'src/render/palette.ts';
+const PALETTE_FILE = 'src/world/palette-data.ts';
 
 // ---------------------------------------------------------------- color utils
 
@@ -227,7 +227,8 @@ function scanCssColorSites(text, file, offsetLine = 0) {
 function parsePaletteTokens() {
   const source = stripLineComments(stripBlockComments(read(PALETTE_FILE)));
   const tokens = [];
-  for (const objectName of ['UI', 'TERRAIN_COLORS', 'TERRAIN_SPECK']) {
+  // D6-A 之后 token 定义在 WORLD（世界 16 色）；TERRAIN_COLORS/TERRAIN_SPECK 是指向 WORLD 的别名表。
+  for (const objectName of ['WORLD', 'TERRAIN_COLORS', 'TERRAIN_SPECK']) {
     const startMatch = new RegExp(`export const ${objectName}\\s*=\\s*\\{`).exec(source);
     if (startMatch === null) continue;
     const start = startMatch.index + startMatch[0].length;
@@ -241,7 +242,7 @@ function parsePaletteTokens() {
     const block = source.slice(start, end - 1);
     const lineOffset = source.slice(0, start).split('\n').length;
     for (const [index, line] of block.split('\n').entries()) {
-      const match = /^\s*([a-zA-Z0-9_]+)\s*:\s*(0x[0-9a-fA-F]{6}|UI\.[a-zA-Z0-9_]+)/.exec(line);
+      const match = /^\s*([a-zA-Z0-9_]+)\s*:\s*(0x[0-9a-fA-F]{6}|(?:WORLD|UI)\.[a-zA-Z0-9_]+)/.exec(line);
       if (match === null) continue;
       tokens.push({
         object: objectName,
@@ -249,16 +250,16 @@ function parsePaletteTokens() {
         fullName: `${objectName}.${match[1]}`,
         raw: match[2],
         hex: match[2].startsWith('0x') ? normalizeHex(match[2].slice(2), 6) : null,
-        aliasOf: match[2].startsWith('UI.') ? match[2] : null,
+        aliasOf: match[2].includes('.') ? match[2] : null,
         file: PALETTE_FILE,
         line: lineOffset + index,
       });
     }
   }
-  const uiByName = new Map(tokens.filter((token) => token.object === 'UI').map((token) => [token.name, token]));
+  const byFullName = new Map(tokens.map((token) => [token.fullName, token]));
   for (const token of tokens) {
     if (token.aliasOf === null) continue;
-    const target = uiByName.get(token.aliasOf.replace('UI.', ''));
+    const target = byFullName.get(token.aliasOf);
     if (target !== undefined) token.hex = target.hex;
   }
   return tokens.filter((token) => token.hex !== null);
@@ -271,7 +272,7 @@ function scanPaletteTokenRefs(tokens) {
   for (const file of WORLD_FILES.filter((item) => item !== PALETTE_FILE)) {
     const text = stripLineComments(stripBlockComments(read(file)));
     for (const [index, line] of text.split('\n').entries()) {
-      for (const objectName of ['UI', 'TERRAIN_COLORS', 'TERRAIN_SPECK']) {
+      for (const objectName of ['WORLD', 'TERRAIN_COLORS', 'TERRAIN_SPECK']) {
         const direct = new RegExp(`\\b${objectName}\\.([a-zA-Z0-9_]+)\\b`, 'g');
         for (;;) {
           const match = direct.exec(line);
@@ -294,7 +295,10 @@ function scanPaletteTokenRefs(tokens) {
 
 // ---------------------------------------------------------------- prefabs / UI / CSS
 
-function scanPrefabSites() {
+function scanPrefabSites(worldTokens) {
+  const byTokenName = new Map(
+    worldTokens.filter((token) => token.object === 'WORLD').map((token) => [token.name, token.hex]),
+  );
   const text = read(PREFABS_FILE);
   const lines = text.split('\n');
   const idLines = new Map();
@@ -312,6 +316,17 @@ function scanPrefabSites() {
     const palette = data[prefabId]?.palette;
     if (palette === undefined || paletteLine < 0) continue;
     for (const [slot, value] of Object.entries(palette)) {
+      // D6-A 之后槽位是 WORLD token 名；旧值（整数 / "#rrggbb"）仍然计入。
+      if (typeof value === 'string' && !value.startsWith('#')) {
+        const hex = byTokenName.get(value);
+        if (hex === undefined) continue; // 非法 token 由蓝图解析器报错，审计只跳过
+        sites.push({ hex, prefab: prefabId, slot, token: value, file: PREFABS_FILE, line: paletteLine + 1, alpha: null });
+        continue;
+      }
+      if (typeof value === 'string' && /^#[0-9a-fA-F]{6}$/.test(value)) {
+        sites.push({ hex: normalizeHex(value.slice(1), 6), prefab: prefabId, slot, file: PREFABS_FILE, line: paletteLine + 1, alpha: null });
+        continue;
+      }
       if (!Number.isInteger(value)) continue;
       sites.push({
         hex: normalizeHex(value.toString(16).padStart(6, '0'), 6),
@@ -388,7 +403,7 @@ function scanUiTs() {
 
 const paletteTokens = parsePaletteTokens();
 const paletteRefs = scanPaletteTokenRefs(paletteTokens);
-const prefabSites = scanPrefabSites();
+const prefabSites = scanPrefabSites(paletteTokens);
 const uiCss = scanUiCss();
 const uiTs = scanUiTs();
 
@@ -573,7 +588,9 @@ const report = {
     hex: color.hex,
     refs: color.world.refs.length,
     sites: color.world.refs.slice(0, 4),
-    tokens: color.world.defs.filter((def) => def.kind === 'palette-token').map((def) => def.token),
+    tokens: color.world.defs
+      .filter((def) => def.kind === 'palette-token')
+      .map((def) => def.token.replace(/^WORLD\./, '')),
   })),
   topUi: sortByRefs(uiColors, 'ui').slice(0, 10).map((color) => ({
     hex: color.hex,
@@ -613,9 +630,12 @@ const useMarkdown = process.argv.includes('--md');
 const strict = process.argv.includes('--strict');
 
 function fmtSite(site) {
+  if (site.prefab !== undefined) {
+    const detail = site.token !== undefined ? `${site.slot}=${site.token}` : site.slot;
+    return `${site.file}:${site.line} (${site.prefab}.${detail})`;
+  }
   if (site.token !== undefined) return `${site.file}:${site.line} (${site.token})`;
   if (site.varName !== undefined) return `${site.file}:${site.line} (${site.varName})`;
-  if (site.prefab !== undefined) return `${site.file}:${site.line} (${site.prefab}.${site.slot})`;
   return `${site.file}:${site.line}`;
 }
 

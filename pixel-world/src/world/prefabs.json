@@ -11,7 +11,7 @@
     "accent": "smoke",
     "silhouette": "gable",
     "boundTask": "code",
-    "palette": { "body": 9067076, "roof": 4147786, "trim": 13208383, "window": 15777904 }
+    "palette": { "body": "timber", "roof": "timberDark", "trim": "trim", "window": "amber" }
   },
   "star_archive": {
     "id": "star_archive",
@@ -25,7 +25,7 @@
     "accent": "pages",
     "silhouette": "tower",
     "boundTask": "research",
-    "palette": { "body": 7043690, "roof": 3095347, "trim": 9412746, "window": 15918000 }
+    "palette": { "body": "timber", "roof": "grass", "trim": "pale", "window": "amber" }
   },
   "ink_house": {
     "id": "ink_house",
@@ -39,7 +39,7 @@
     "accent": "ink",
     "silhouette": "flat",
     "boundTask": "writing",
-    "palette": { "body": 8020562, "roof": 4865849, "trim": 13082730, "window": 16177568 }
+    "palette": { "body": "timber", "roof": "timberDark", "trim": "trim", "window": "amber" }
   },
   "workshop_plot": {
     "id": "workshop_plot",
@@ -53,6 +53,6 @@
     "accent": "smoke",
     "silhouette": "gable",
     "boundTask": null,
-    "palette": { "body": 7035951, "roof": 4525891, "trim": 12624582, "window": 15777904 }
+    "palette": { "body": "timber", "roof": "cloak", "trim": "pale", "window": "amber" }
   }
 }

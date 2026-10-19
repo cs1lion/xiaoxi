@@ -1,5 +1,6 @@
 /** 蓝图注册表。JSON 是外部数据，在边界解析成强类型；解析失败直接抛，不带着半个世界开工。 */
 
+import { WORLD } from './palette-data.ts';
 import { WORKSHOP_TASKS } from './tasks.ts';
 import type {
   PrefabBlueprint,
@@ -192,6 +193,55 @@ function requirePoints(raw: Record<string, unknown>, key: string, fail: Fail): P
   });
 }
 
+const WORLD_COLOR_NAMES = Object.keys(WORLD) as (keyof typeof WORLD)[];
+
+/** 旧值只提示一次，避免每套蓝图都刷一遍日志。 */
+const legacyWarned = new Set<string>();
+
+function warnLegacy(slot: string, raw: unknown): void {
+  const key = `${slot}:${String(raw)}`;
+  if (legacyWarned.has(key)) return;
+  legacyWarned.add(key);
+  console.warn(
+    `[blueprints] 调色板槽 ${slot} 用的是旧值 ${String(raw)}；已按原值生效，建议改成世界 16 色的名字（${WORLD_COLOR_NAMES.join(', ')}）。`,
+  );
+}
+
+/**
+ * 调色板槽位：优先用世界 16 色的 token 名（D6-A 后的写法），
+ * 同时保留旧值兼容——`0..0xffffff` 整数与 `"#rrggbb"` 字符串仍然能用。
+ * 这样做是为了让旧 JSON（以及将来可能导入的外部蓝图）不会因为一次改值就整份失效。
+ */
+function readPaletteSlot(value: Record<string, unknown>, name: string, fail: Fail): number {
+  const raw = value[name];
+  if (typeof raw === 'string') {
+    const token = raw.trim();
+    if (token.startsWith('#')) {
+      const match = /^#([0-9a-fA-F]{6})$/.exec(token);
+      if (match !== null) {
+        warnLegacy(name, token);
+        return parseInt(match[1], 16);
+      }
+      return fail(`调色板槽 ${name} 的旧值 "${token}" 不合法：形如 "#8a5a44" 的 6 位十六进制`);
+    }
+    if (Object.prototype.hasOwnProperty.call(WORLD, token)) {
+      return WORLD[token as keyof typeof WORLD];
+    }
+    return fail(
+      `调色板槽 ${name} 的颜色名 "${token}" 不在世界 16 色里；` +
+        `可用：${WORLD_COLOR_NAMES.join(', ')}；也可以直接写旧值（0..0xffffff 整数或 "#rrggbb"）`,
+    );
+  }
+  if (!Number.isInteger(raw) || (raw as number) < 0 || (raw as number) > 0xffffff) {
+    return fail(
+      `调色板槽 ${name} 必须是世界 16 色的名字（${WORLD_COLOR_NAMES.join(', ')}），` +
+        `或旧值 0..0xffffff 整数 / "#rrggbb"`,
+    );
+  }
+  warnLegacy(name, raw);
+  return raw as number;
+}
+
 function requirePalette(
   raw: Record<string, unknown>,
   key: string,
@@ -199,14 +249,12 @@ function requirePalette(
 ): PrefabBlueprint['palette'] {
   const value = raw[key];
   if (!isRecord(value)) return fail(`${key} 必须是对象`);
-  const read = (name: string): number => {
-    const channel = value[name];
-    if (!Number.isInteger(channel) || (channel as number) < 0 || (channel as number) > 0xffffff) {
-      return fail(`${key}.${name} 必须是 0..0xffffff 的整数`);
-    }
-    return channel as number;
+  return {
+    body: readPaletteSlot(value, 'body', fail),
+    roof: readPaletteSlot(value, 'roof', fail),
+    trim: readPaletteSlot(value, 'trim', fail),
+    window: readPaletteSlot(value, 'window', fail),
   };
-  return { body: read('body'), roof: read('roof'), trim: read('trim'), window: read('window') };
 }
 
 function inFootprint(p: Point, size: Size): boolean {

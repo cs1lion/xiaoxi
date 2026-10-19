@@ -6,6 +6,7 @@
 import Phaser from 'phaser';
 import { TILE_PX } from '../world/setup.ts';
 import type { ConstructionSnapshot, GridPoint, WorldProp } from '../world/types.ts';
+import { WORLD } from '../world/palette-data.ts';
 
 export interface DecorView {
   readonly roads: Phaser.GameObjects.Graphics;
@@ -32,9 +33,9 @@ export function createDecorView(scene: Phaser.Scene, originX: number, originY: n
       for (const cell of cells) {
         const px = originX + cell.x * TILE_PX;
         const py = originY + cell.y * TILE_PX;
-        roads.fillStyle(0x4b4f48, 0.85);
+        roads.fillStyle(WORLD.stone, 0.85);
         roads.fillRect(px + 2, py + 2, TILE_PX - 4, TILE_PX - 4);
-        roads.fillStyle(0x5c6158, 0.55);
+        roads.fillStyle(WORLD.plaza, 0.55);
         roads.fillRect(px + 3, py + 3, TILE_PX - 6, 2);
       }
     },
@@ -75,25 +76,25 @@ function drawProp(
   const py = originY + (prop.at.y + 0.8) * TILE_PX;
   const g = scene.add.graphics();
   if (prop.kind === 'lamp') {
-    g.fillStyle(0x2b2b28, 1);
+    g.fillStyle(WORLD.ink, 1);
     g.fillRect(-1, -12, 2, 12);
-    g.fillStyle(0xf0cf7a, 0.95);
+    g.fillStyle(WORLD.amber, 0.95);
     g.fillRect(-3, -16, 6, 4);
-    g.fillStyle(0xf0cf7a, 0.18);
+    g.fillStyle(WORLD.amber, 0.18);
     g.fillCircle(0, -14, 9);
   } else if (prop.kind === 'tree') {
-    g.fillStyle(0x4a3a28, 1);
+    g.fillStyle(WORLD.timberDark, 1);
     g.fillRect(-1, -8, 2, 8);
-    g.fillStyle(0x3c5f3c, 1);
+    g.fillStyle(WORLD.grass, 1);
     g.fillCircle(0, -11, 6);
-    g.fillStyle(0x4c744a, 1);
+    g.fillStyle(WORLD.grassLit, 1);
     g.fillCircle(-2, -13, 4);
   } else {
-    g.fillStyle(0x2b2b28, 1);
+    g.fillStyle(WORLD.ink, 1);
     g.fillRect(-4, -16, 1, 16);
-    g.fillStyle(0xb4553f, 0.95);
+    g.fillStyle(WORLD.ember, 0.95);
     g.fillRect(-3, -15, 8, 6);
-    g.fillStyle(0xd9c9a6, 0.8);
+    g.fillStyle(WORLD.trim, 0.8);
     g.fillRect(-3, -15, 8, 1);
   }
   g.setPosition(px, py);

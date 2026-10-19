@@ -3,7 +3,7 @@
 import Phaser from 'phaser';
 import { TILE_PX } from '../world/setup.ts';
 import type { PlacedBuilding, WorkstationSnapshot } from '../world/types.ts';
-import { UI } from './palette.ts';
+import { WORLD } from '../world/palette-data.ts';
 
 export interface BuildingView {
   readonly container: Phaser.GameObjects.Container;
@@ -34,7 +34,7 @@ export function createBuilding(
   const { body, roof, trim, window: windowColor } = building.palette;
   const roofH = Math.max(8, Math.round(h * 0.34));
 
-  g.fillStyle(UI.shadow, 0.32);
+  g.fillStyle(WORLD.ink, 0.32);
   g.fillRect(2, h - 2, w - 2, 4);
   g.fillStyle(body, 1);
   g.fillRect(0, roofH, w, h - roofH);
@@ -52,13 +52,13 @@ export function createBuilding(
   const chimney = scene.add.graphics();
   chimney.fillStyle(trim, 1);
   chimney.fillRect(w - 14, -6, 7, 10);
-  chimney.fillStyle(0x1a1a1a, 1);
+  chimney.fillStyle(WORLD.ink, 1);
   chimney.fillRect(w - 13, -6, 5, 2);
 
   const windowG = scene.add.graphics();
   const doorX = building.door.x * TILE_PX - px;
   const doorY = building.door.y * TILE_PX - py;
-  windowG.fillStyle(0x241f19, 1);
+  windowG.fillStyle(WORLD.soil, 1);
   windowG.fillRect(doorX - 4, doorY - 14, 10, 14);
   windowG.fillStyle(trim, 1);
   windowG.fillRect(doorX - 4, doorY - 14, 1, 14);
@@ -66,7 +66,7 @@ export function createBuilding(
   windowG.fillStyle(windowColor, 0.85);
   windowG.fillRect(6, roofH + 8, 8, 6);
   windowG.fillRect(w - 18, roofH + 8, 8, 6);
-  windowG.fillStyle(UI.shadow, 0.4);
+  windowG.fillStyle(WORLD.ink, 0.4);
   windowG.fillRect(10, roofH + 8, 1, 6);
   windowG.fillRect(w - 14, roofH + 8, 1, 6);
 
@@ -94,12 +94,12 @@ export function createBuilding(
 function drawSignIcon(g: Phaser.GameObjects.Graphics, building: PlacedBuilding, w: number): void {
   const x = Math.round(w / 2) - 7;
   const y = -22;
-  g.fillStyle(UI.shadow, 0.55);
+  g.fillStyle(WORLD.ink, 0.55);
   g.fillRect(x, y, 15, 12);
   g.fillStyle(building.palette.trim, 1);
   g.fillRect(x + 1, y + 1, 13, 1);
   g.fillRect(x + 1, y + 10, 13, 1);
-  g.fillStyle(UI.amber, 0.95);
+  g.fillStyle(WORLD.amber, 0.95);
   if (building.boundTask === 'code') {
     // 两个折角：< >
     for (let step = 0; step < 3; step += 1) {
@@ -188,21 +188,21 @@ export function updateBuilding(
   const width = building.footprint.w * TILE_PX - 8;
   if (working) {
     const filled = Math.round((width - 2) * (workstation?.progress ?? 0));
-    view.progress.fillStyle(UI.ink, 0.8);
+    view.progress.fillStyle(WORLD.ink, 0.8);
     view.progress.fillRect(4, -8, width, 3);
-    view.progress.fillStyle(UI.amber, 0.9);
+    view.progress.fillStyle(WORLD.amber, 0.9);
     view.progress.fillRect(5, -7, Math.max(1, filled), 1);
     // 进度线在走之外再加一层脉动，远处也能看出这台机器还活着。
-    view.progress.fillStyle(UI.ember, 0.35 + 0.35 * Math.sin(scene.time.now / 240));
+    view.progress.fillStyle(WORLD.amber, 0.35 + 0.35 * Math.sin(scene.time.now / 240));
     view.progress.fillRect(5, -7, Math.max(1, filled), 1);
   } else if (cooling) {
-    view.progress.fillStyle(UI.ember, 0.8);
+    view.progress.fillStyle(WORLD.amber, 0.8);
     view.progress.fillRect(4, -8, width, 3);
   } else if (broken) {
     // 故障：整条线闪红，不表示进度，只表示"这台机器坏了"。
-    view.progress.fillStyle(0x8f3b2f, 0.9);
+    view.progress.fillStyle(WORLD.ember, 0.9);
     view.progress.fillRect(4, -8, width, 3);
-    view.progress.fillStyle(0xd9583f, 0.5 + 0.5 * Math.sin(scene.time.now / 120));
+    view.progress.fillStyle(WORLD.amber, 0.5 + 0.5 * Math.sin(scene.time.now / 120));
     view.progress.fillRect(4, -8, width, 3);
   }
 }
