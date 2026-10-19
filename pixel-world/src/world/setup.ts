@@ -129,6 +129,31 @@ export function paveFrom(
   return road;
 }
 
+/** 读档重建网格：只按存档 buildings 顺序重放落位，不存 cells（ADR_SAVE §1.2）。 */
+export function rebuildGridFromPlacements(buildings: readonly PlacedBuilding[]): WorldGrid {
+  const grid = new WorldGrid(WORLD_SPEC);
+  for (const building of buildings) {
+    const placed = grid.place({
+      instanceId: building.instanceId,
+      origin: building.origin,
+      w: building.footprint.w,
+      h: building.footprint.h,
+      door: building.door,
+    });
+    if (!placed) {
+      throw new WorldSetupError(`读档重建失败：${building.displayName} 的落位放不进网格`);
+    }
+  }
+  return grid;
+}
+
+/** 读档后的世界：网格按存档重放，分区/铺子不变量仍要过一遍。 */
+export function buildWorldFromSave(buildings: readonly PlacedBuilding[]): BuiltWorld {
+  const grid = rebuildGridFromPlacements(buildings);
+  assertWorldInvariants(grid, buildings);
+  return { grid, buildings: [...buildings], altar: ALTAR };
+}
+
 /** 世界预算校验：像 check_protocol 一样，不合规就不许开工。 */
 export function assertWorldInvariants(
   grid: WorldGrid,

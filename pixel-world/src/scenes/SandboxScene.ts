@@ -22,11 +22,16 @@ import { composeReport, type DailyReport } from '../world/report.ts';
 import { createLazyAnimalese, type Animalese } from '../audio/animalese.ts';
 import { toWorldCommand, type AgentToWorld } from '../world/bridge.ts';
 import { LedgerClient } from '../world/ledger.ts';
+import { SaveStore } from '../ui/save-store.ts';
+import type { WorldSaveV1 } from '../world/save.ts';
 
 export interface ScenePayload {
   readonly world: BuiltWorld;
   readonly blueprints: ReadonlyMap<string, PrefabBlueprint>;
   readonly villagerName: string;
+  readonly saveStore?: SaveStore;
+  readonly save?: WorldSaveV1 | null;
+  readonly saveNotice?: string | null;
 }
 
 const LOGIC_STEP_MS = 100;
@@ -57,6 +62,12 @@ export class SandboxScene extends Phaser.Scene {
   private readonly lastBubbles = new Map<string, string | null>();
   private readonly animalese: Animalese = createLazyAnimalese();
   private ledger: LedgerClient | null = null;
+  private saveStore!: SaveStore;
+  private loadedSave: WorldSaveV1 | null = null;
+  private saveNotice: string | null = null;
+  private lastSaveKey = '';
+  private lastSaveAt = Number.NEGATIVE_INFINITY;
+  private onPageHide: (() => void) | null = null;
   private readonly resultListeners = new Set<(result: CommandResult) => void>();
   private readonly statusListeners = new Set<(line: string) => void>();
   private readonly bubbleListeners = new Set<(text: string) => void>();
@@ -74,6 +85,15 @@ export class SandboxScene extends Phaser.Scene {
     this.world = payload.world;
     this.blueprints = payload.blueprints;
     this.villagerName = payload.villagerName;
+    this.loadedSave = payload.save ?? null;
+    this.saveNotice = payload.saveNotice ?? null;
+    this.saveStore =
+      payload.saveStore ??
+      new SaveStore({
+        onWarning: (message) => {
+          this.saveNotice = message;
+        },
+      });
   }
 
   create(): void {
@@ -95,18 +115,28 @@ export class SandboxScene extends Phaser.Scene {
 
     this.drawAltar(originX, originY);
 
-    this.sim = new Simulation({
+    const simDeps = {
       grid: this.world.grid,
       buildings: this.world.buildings,
       altar: this.world.altar,
       villagerName: this.villagerName,
-      spawnBuilding: (prefabId, instanceId): NewBuilding | null => {
+      spawnBuilding: (prefabId: string, instanceId: string): NewBuilding | null => {
         const blueprint = this.blueprints.get(prefabId);
         if (blueprint === undefined) return null;
         return placeBlueprint(this.world.grid, blueprint, instanceId, this.world.altar);
       },
-    });
+    };
+    // 有档就重建世界；读档后台账标未对账，等首个 sync 走 reconcile。
+    this.sim =
+      this.loadedSave !== null
+        ? Simulation.fromSave(this.loadedSave, simDeps)
+        : new Simulation(simDeps);
     this.snapshot = this.sim.snapshot();
+    this.lastSaveKey = this.saveStateKey();
+    this.onPageHide = () => {
+      this.saveStore.write(this.sim.toSave());
+    };
+    window.addEventListener('pagehide', this.onPageHide);
     this.registerOracleApi();
     this.connectLedger();
   }
@@ -124,6 +154,7 @@ export class SandboxScene extends Phaser.Scene {
           kind: 'sync',
           tasks: view.tasks,
           finished: view.finished,
+          finishedAt: view.finishedAt,
           connected: view.connected,
           complete: view.complete,
           order: view.order,
@@ -137,6 +168,10 @@ export class SandboxScene extends Phaser.Scene {
   shutdown(): void {
     this.ledger?.stop();
     this.ledger = null;
+    if (this.onPageHide !== null) {
+      window.removeEventListener('pagehide', this.onPageHide);
+      this.onPageHide = null;
+    }
   }
 
   private drawAltar(originX: number, originY: number): void {
@@ -178,6 +213,8 @@ export class SandboxScene extends Phaser.Scene {
     }
     this.snapshot = this.sim.snapshot();
     this.renderSnapshot(delta);
+    // 只在 update() 返回后写档（命令已结算，ADR_SAVE §4）。
+    this.maybeAutoSave();
   }
 
   // ------------------------------------------------------------------ input
@@ -221,6 +258,51 @@ export class SandboxScene extends Phaser.Scene {
     this.sim.enqueue({ kind: 'build', prefabId, instanceId });
   }
 
+  /** 手动存档：立即把当前世界写进单槽。 */
+  saveNow(): CommandResult {
+    const result = this.saveStore.write(this.sim.toSave());
+    if (result.ok) {
+      this.lastSaveKey = this.saveStateKey();
+      this.lastSaveAt = this.snapshot.now;
+      this.saveNotice = null;
+    }
+    return { ok: result.ok, message: result.message };
+  }
+
+  /** 清档：只删主槽并停自动存档（防止 pagehide 又写回来）；刷新后从新世界开始。 */
+  clearSave(): CommandResult {
+    this.saveStore.clear();
+    this.saveStore.disableAutoSave();
+    return { ok: true, message: '存档已清除，刷新后从新世界开始。' };
+  }
+
+  private saveStateKey(): string {
+    const deliveries = this.snapshot.deliveries;
+    return [
+      deliveries.ledger,
+      deliveries.mock,
+      this.snapshot.faith.milestones,
+      this.snapshot.constructions.length,
+      this.snapshot.props.length,
+      this.snapshot.tasks.length,
+    ].join('|');
+  }
+
+  /** 交付/施工/神恩/30s 节流：只在 update 返回后调用（ADR_SAVE §4）。 */
+  private maybeAutoSave(): void {
+    if (!this.saveStore.isAutoSaveEnabled()) return;
+    const changed = this.saveStateKey() !== this.lastSaveKey;
+    const due = this.snapshot.now - this.lastSaveAt >= 30_000;
+    if (!changed && !due) return;
+    const result = this.saveStore.write(this.sim.toSave());
+    if (!result.ok) {
+      this.saveNotice = result.message;
+      return;
+    }
+    this.lastSaveKey = this.saveStateKey();
+    this.lastSaveAt = this.snapshot.now;
+  }
+
   /** 外部 Agent 的入口。它和打字、按钮走同一条队列。 */
   feed(message: AgentToWorld): CommandResult {
     this.sim.enqueue(toWorldCommand(message));
@@ -259,6 +341,12 @@ export class SandboxScene extends Phaser.Scene {
       },
       report: (): DailyReport => composeReport(this.snapshot),
       view: (): WorldSnapshot => this.view(),
+      saveNow: (): CommandResult => this.saveNow(),
+      clearSave: (): CommandResult => this.clearSave(),
+      loadSave: (): CommandResult => {
+        window.location.reload();
+        return { ok: true, message: '正在读档…' };
+      },
     };
     (window as unknown as { Oracle: typeof api }).Oracle = api;
   }
@@ -400,8 +488,15 @@ export class SandboxScene extends Phaser.Scene {
     const { ledger: ledgerDelivered, mock: mockDelivered } = this.snapshot.deliveries;
     // 离线 Mock 必须显式标出：状态行不只说"台账离线"，还说现在跑的是 Mock。
     const ledgerState = this.snapshot.ledger.connected ? '台账在线' : '台账离线 · 离线 Mock';
+    // 读档后未对账：明说，且此时台账单只读展示。
+    const reconciledState =
+      this.snapshot.ledger.reconciled ? ledgerState : `读档未对账 · ${ledgerState}`;
     // 分页取满时快照不完整：说出来，别让"少了一条"看起来像"被撤了"。
-    const ledger = this.snapshot.ledger.complete ? ledgerState : `${ledgerState} · 台账可能未取全`;
+    const ledger = this.snapshot.ledger.complete
+      ? reconciledState
+      : `${reconciledState} · 台账可能未取全`;
+    // 存档提示（坏档/高版本/配额）只写一次即可，这里保持可见直到下次成功写档。
+    const saveNote = this.saveNotice === null ? '' : `　　${this.saveNotice}`;
     // blocked_question 只展示，不在世界内回答：完整值留在快照，这里按 60 字符截断。
     const waitingTask = this.snapshot.tasks.find((item) => item.blockedQuestion !== null);
     const waiting =
@@ -418,7 +513,7 @@ export class SandboxScene extends Phaser.Scene {
     );
     const finishHint =
       defaultWorker === undefined ? '' : `　　默认交付：${defaultWorker.name}的单`;
-    return `${summary}　　${weather}　　${ledger}　　台账交付 ${ledgerDelivered} 单 · Mock 交付 ${mockDelivered} 单　　神恩 ${faith.points}/${3}${waiting}${queue}${finishHint}`;
+    return `${summary}　　${weather}　　${ledger}　　台账交付 ${ledgerDelivered} 单 · Mock 交付 ${mockDelivered} 单　　神恩 ${faith.points}/${3}${waiting}${queue}${finishHint}${saveNote}`;
   }
 
   private buildingName(id: string | null): string | null {

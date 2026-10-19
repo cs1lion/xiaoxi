@@ -9,7 +9,9 @@ import {
 } from '../src/world/projection.ts';
 import { parseBlueprintTable } from '../src/world/blueprints.ts';
 import { ALTAR, buildWorld, placeBlueprint } from '../src/world/setup.ts';
-import { Simulation } from '../src/world/simulation.ts';
+import { Simulation, ledgerCompletedAtMs } from '../src/world/simulation.ts';
+import type { SimulationDeps } from '../src/world/simulation.ts';
+import { assertSaveV1 } from '../src/world/save.ts';
 import {
   LedgerClient,
   reconnectDelay,
@@ -33,6 +35,7 @@ function commission(over: Partial<CommissionRow> & { id: string }): CommissionRo
     status: over.status ?? 'running',
     step_idx: over.step_idx ?? 0,
     blocked_question: over.blocked_question ?? '',
+    completedAt: over.completedAt ?? null,
   };
 }
 
@@ -42,9 +45,9 @@ const AGENTS: AgentRow[] = [
   { id: 'scribe', name: '笔录官', strengths: ['写作', '整理', '标题', '便笺'] },
 ];
 
-function makeSim(): Simulation {
+function simDeps(): SimulationDeps {
   const world = buildWorld(blueprints);
-  return new Simulation({
+  return {
     grid: world.grid,
     buildings: world.buildings,
     altar: ALTAR,
@@ -53,7 +56,11 @@ function makeSim(): Simulation {
       const blueprint = blueprints.get(prefabId);
       return blueprint === undefined ? null : placeBlueprint(world.grid, blueprint, instanceId, ALTAR);
     },
-  });
+  };
+}
+
+function makeSim(): Simulation {
+  return new Simulation(simDeps());
 }
 
 // ---------------------------------------------------------------- projection
@@ -850,4 +857,162 @@ test('blocked 问题按 60 字符截断展示，快照保留完整原文；空�
   });
   legacy.update(16);
   assert.equal(legacy.snapshot().tasks[0]?.blockedQuestion, null, '旧调用方省略字段按没有处理');
+});
+
+// ------------------------------- 台账时间戳 → settled.completedAt（task-23）
+
+/** 走到铺子里开工；超时抛错，避免死循环。 */
+function runUntilWorking(sim: Simulation): void {
+  let guard = 0;
+  while (sim.snapshot().villager.mode !== 'working') {
+    sim.update(100);
+    if ((guard += 1) > 400) throw new Error('没走到铺子');
+  }
+}
+
+test('台账时间戳解析：closed_at 优先、退 updated_at、都缺→null', () => {
+  const base = { title: 't', agent_id: '', status: 'running', step_idx: 0, blocked_question: '' };
+  const closed = parseCommissionRow({
+    ...base, id: 'a', closed_at: 1792377786.5, updated_at: 1792377700,
+  });
+  assert.equal(closed.completedAt, 1792377786.5, 'closed_at 优先');
+  const updated = parseCommissionRow({
+    ...base, id: 'b', closed_at: null, updated_at: 1792377700,
+  });
+  assert.equal(updated.completedAt, 1792377700, 'closed_at 为 null 退 updated_at');
+  const missing = parseCommissionRow({ ...base, id: 'c' });
+  assert.equal(missing.completedAt, null, '两个字段都缺→null');
+});
+
+test('ledgerCompletedAtMs：秒×1000、毫秒原样、缺失 null', () => {
+  assert.equal(ledgerCompletedAtMs(1792377786), 1_792_377_786_000);
+  assert.equal(ledgerCompletedAtMs(1_792_377_786_000), 1_792_377_786_000);
+  assert.equal(ledgerCompletedAtMs(null), null);
+  assert.equal(ledgerCompletedAtMs(undefined), null);
+  assert.equal(ledgerCompletedAtMs(Number.NaN), null);
+});
+
+test('LedgerView 携带 completedAt 与 finishedAt（settled 数据源）', async () => {
+  const clock = makeClock();
+  const { fetchImpl } = routedFetch({
+    '/api/executive/commissions': () => jsonResponse({
+      items: [
+        {
+          id: 'c_run', title: '跑着的', agent_id: 'scribe', status: 'running',
+          step_idx: 1, blocked_question: '', updated_at: 1792377700, closed_at: null,
+        },
+        {
+          id: 'c_done', title: '完了', agent_id: 'scribe', status: 'done',
+          step_idx: 0, blocked_question: '', updated_at: 1792377700, closed_at: 1792377786.5,
+        },
+      ],
+    }),
+  });
+  const { client, views } = makeLedgerClient(clock, fetchImpl);
+  await client.start();
+  const view = views.at(-1);
+  assert.equal(
+    view?.tasks.find((task) => task.commissionId === 'c_run')?.completedAt,
+    1792377700,
+    '活动单带 updated_at',
+  );
+  assert.deepEqual(view?.finishedAt, [{ commissionId: 'c_done', completedAt: 1792377786.5 }]);
+  client.stop();
+});
+
+test('ledger 交付的 settled.completedAt 取台账时间 ×1000，clock=ledger', () => {
+  const sim = makeSim();
+  sim.enqueue({
+    kind: 'sync',
+    tasks: [{
+      commissionId: 'c_1', kind: 'code', title: '写爬虫', agentName: '甲',
+      status: 'running', completedAt: 1792377700,
+    }],
+    finished: [],
+    connected: true,
+  });
+  runUntilWorking(sim);
+  sim.enqueue({
+    kind: 'sync',
+    tasks: [],
+    finished: ['c_1'],
+    finishedAt: [{ commissionId: 'c_1', completedAt: 1792377786 }],
+    connected: true,
+  });
+  sim.update(16);
+  const settled = sim.toSave().world.settled.find((record) => record.id === 'c_1');
+  assert.equal(settled?.source, 'ledger');
+  assert.equal(settled?.completedAt, 1_792_377_786_000, 'closed_at(秒) ×1000');
+  assert.equal(settled?.completedAtClock, 'ledger');
+  assert.doesNotThrow(() => assertSaveV1(sim.toSave()), '格式层接受非空 ledger 时间');
+});
+
+test('finishedAt 缺失时退回已见到的 updated_at，仍不用本地时间', () => {
+  const sim = makeSim();
+  sim.enqueue({
+    kind: 'sync',
+    tasks: [{
+      commissionId: 'c_2', kind: 'code', title: '写爬虫', agentName: '甲',
+      status: 'running', completedAt: 1792377700,
+    }],
+    finished: [],
+    connected: true,
+  });
+  runUntilWorking(sim);
+  // 旧客户端只给 finished id、不给时间：用上一拍记下的 updated_at。
+  sim.enqueue({ kind: 'sync', tasks: [], finished: ['c_2'], connected: true });
+  sim.update(16);
+  const settled = sim.toSave().world.settled.find((record) => record.id === 'c_2');
+  assert.equal(settled?.completedAt, 1_792_377_700_000);
+  assert.equal(settled?.completedAtClock, 'ledger');
+});
+
+test('台账时间缺失 → completedAt null + clock=ledger（绝不本地时间顶替）', () => {
+  const sim = makeSim();
+  sim.enqueue({
+    kind: 'sync',
+    tasks: [{ commissionId: 'c_3', kind: 'code', title: '写爬虫', agentName: '甲' }],
+    finished: [],
+    connected: true,
+  });
+  runUntilWorking(sim);
+  sim.enqueue({
+    kind: 'sync',
+    tasks: [],
+    finished: ['c_3'],
+    finishedAt: [{ commissionId: 'c_3', completedAt: null }],
+    connected: true,
+  });
+  sim.update(16);
+  const settled = sim.toSave().world.settled.find((record) => record.id === 'c_3');
+  assert.equal(settled?.completedAt, null);
+  assert.equal(settled?.completedAtClock, 'ledger');
+});
+
+test('读档对账也把台账时间写进 settled（reconcile 路径）', () => {
+  const sim1 = makeSim();
+  sim1.enqueue({
+    kind: 'sync',
+    tasks: [{
+      commissionId: 'c_4', kind: 'code', title: '写爬虫', agentName: '甲',
+      status: 'running', completedAt: 1792377700,
+    }],
+    finished: [],
+    connected: true,
+  });
+  runUntilWorking(sim1);
+  const sim2 = Simulation.fromSave(sim1.toSave(), simDeps());
+  sim2.enqueue({
+    kind: 'sync',
+    tasks: [],
+    finished: ['c_4'],
+    finishedAt: [{ commissionId: 'c_4', completedAt: 1792377786 }],
+    connected: true,
+    complete: true,
+    order: [],
+  });
+  sim2.update(16);
+  const settled = sim2.toSave().world.settled.find((record) => record.id === 'c_4');
+  assert.equal(settled?.completedAt, 1_792_377_786_000, '对账结算也用台账时间');
+  assert.equal(settled?.completedAtClock, 'ledger');
 });

@@ -96,6 +96,11 @@ export interface TaskRecord {
   readonly createdAt: number;
   completedAt: number | null;
   /**
+   * 台账事件时间（epoch 秒，closed_at ?? updated_at）。只给 settled 用：
+   * 交付/对账时 ×1000 写入 settled.completedAt；缺失保持 null，禁止本地时间顶替。
+   */
+  ledgerCompletedAt?: number | null;
+  /**
    * 台账 blocked 单要请示的问题。只透传、只展示，世界绝不在内部回答；
    * 非 blocked 单（转 running / 完成 / 撤单）必须清成 null，不残留。
    * 这里保留完整原文，展示截断由 excerptBlockedQuestion 负责。
@@ -270,6 +275,8 @@ export interface WorldSnapshot {
     readonly mock: boolean;
     /** 最近一次 REST 快照是否完整；false 表示"台账可能未取全"。 */
     readonly complete: boolean;
+    /** 读档后首个成功 sync 之前为 false；此时台账单只读展示、不驱动。 */
+    readonly reconciled: boolean;
   };
 }
 

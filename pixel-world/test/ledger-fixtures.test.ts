@@ -70,11 +70,30 @@ test('fixture 覆盖 blocked / running / done 三种状态，逐条可解析', (
   }
 });
 
-test('fixture 经 project 映射：blocked 进 active，done 进 finished', () => {
-  const result = project({ commissions: fixture.items, agents: AGENTS });
+test('fixture 的 closed_at/updated_at 是真实 epoch 秒，completedAt 按 ADR 取 closed_at ?? updated_at', () => {
+  type RawTimes = { readonly closed_at?: number | null; readonly updated_at?: number | null };
+  const done = fixture.items.find((item) => item.status === 'done');
   const blocked = fixture.items.find((item) => item.status === 'blocked');
-  const running = fixture.items.find((item) => item.status === 'running');
-  const finished = fixture.items.find((item) => item.status === 'done');
+  assert.ok(done !== undefined && blocked !== undefined);
+  const doneRaw = done as unknown as RawTimes;
+  const blockedRaw = blocked as unknown as RawTimes;
+
+  for (const raw of [doneRaw, blockedRaw]) {
+    const stamp = raw.closed_at ?? raw.updated_at ?? 0;
+    assert.ok(stamp > 1e9 && stamp < 1e12, `fixture 时间戳必须是 epoch 秒，实际 ${stamp}`);
+  }
+  assert.equal(parseCommissionRow(done).completedAt, doneRaw.closed_at, 'done 用 closed_at');
+  assert.equal(blockedRaw.closed_at, null, '派生行 closed_at 为 null');
+  assert.equal(parseCommissionRow(blocked).completedAt, blockedRaw.updated_at, 'blocked 退 updated_at');
+});
+
+test('fixture 经 project 映射：blocked 进 active，done 进 finished', () => {
+  // 生产链路是先 parseCommissionRow 再 project；fixture 是原始响应，必须先解析。
+  const rows = fixture.items.map((item) => parseCommissionRow(item));
+  const result = project({ commissions: rows, agents: AGENTS });
+  const blocked = rows.find((item) => item.status === 'blocked');
+  const running = rows.find((item) => item.status === 'running');
+  const finished = rows.find((item) => item.status === 'done');
   assert.ok(blocked !== undefined && running !== undefined && finished !== undefined);
 
   assert.equal(result.active?.commissionId, blocked.id, 'blocked 要请示，优先级最高');
@@ -89,6 +108,7 @@ test('fixture 经 project 映射：blocked 进 active，done 进 finished', () =
   assert.equal(blockedTask?.kind, 'writing');
   assert.equal(blockedTask?.title, '把便笺整理成三版标题');
   assert.equal(blockedTask?.blockedQuestion, '先按短句还是完整句式？');
+  assert.equal(blockedTask?.completedAt, blocked.completedAt, 'blocked 用 updated_at');
   assert.equal(blockedTask?.finished, false);
 
   const runningTask = result.tasks.find((task) => task.commissionId === running.id);
@@ -98,6 +118,7 @@ test('fixture 经 project 映射：blocked 进 active，done 进 finished', () =
   const finishedTask = result.finished[0];
   assert.equal(finishedTask?.kind, 'writing', '笔录官的能力关键词落到写作');
   assert.equal(finishedTask?.finished, true);
+  assert.equal(finishedTask?.completedAt, finished.completedAt, 'done 用 closed_at');
 });
 
 test('没有花名册时按真实 API 现状回退：agentName=agent_id，kind 靠标题关键词', () => {

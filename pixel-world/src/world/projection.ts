@@ -15,6 +15,8 @@ export interface CommissionRow {
   readonly status: string;
   readonly step_idx: number;
   readonly blocked_question: string;
+  /** 台账事件时间（epoch 秒）：`closed_at ?? updated_at`；两个字段都缺时为 null。 */
+  readonly completedAt: number | null;
 }
 
 /** 花名册里的一个 Worker，用来把 agent_id 归到某一类活。 */
@@ -38,6 +40,11 @@ export interface WorldTask {
   readonly agentName: string;
   readonly status: string;
   readonly blockedQuestion: string;
+  /**
+   * 台账事件时间（epoch 秒，来自 `closed_at ?? updated_at`）。settled 的
+   * completedAt 只认它（×1000），缺失时必须 null——不许拿本地时间顶替。
+   */
+  readonly completedAt: number | null;
   /** 台账已判完成，等她收尾交付；与"还在干"分开，世界才能正确收尾。 */
   readonly finished: boolean;
 }
@@ -84,6 +91,7 @@ export function project(input: ProjectionInput): Projection {
       agentName: agent?.name ?? commission.agent_id,
       status: commission.status,
       blockedQuestion: commission.blocked_question,
+      completedAt: commission.completedAt,
       finished: done,
     };
     if (done) finished.push(task);
@@ -137,6 +145,11 @@ export function parseCommissionRow(raw: unknown): CommissionRow {
     if (typeof value !== 'string') throw new Error(`${key} 必须是字符串`);
     return value;
   };
+  /** epoch 秒：数字才算数；null/缺失→null（协议 §19 的 REAL 字段）。 */
+  const epoch = (key: string): number | null => {
+    const value = row[key];
+    return typeof value === 'number' && Number.isFinite(value) ? value : null;
+  };
   const id = str('id');
   if (id === '') throw new Error('督办缺 id');
   const step = row.step_idx;
@@ -147,6 +160,8 @@ export function parseCommissionRow(raw: unknown): CommissionRow {
     status: str('status'),
     step_idx: typeof step === 'number' && Number.isFinite(step) ? step : 0,
     blocked_question: str('blocked_question'),
+    // ADR_SAVE §2.2：台账事件时间优先 closed_at，退回 updated_at；都缺则 null。
+    completedAt: epoch('closed_at') ?? epoch('updated_at'),
   };
 }
 

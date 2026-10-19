@@ -41,6 +41,18 @@ import type {
   WorldSnapshot,
 } from './types.ts';
 import { excerptBlockedQuestion } from './types.ts';
+import type { SavedVillager, SettledRecord, WorldSaveV1 } from './save.ts';
+import { SCHEMA_V1_FINGERPRINT } from './save.ts';
+
+/**
+ * 台账事件时间 → settled 用的 epoch 毫秒。协议 §19 给的是秒（×1000）；
+ * 已经是毫秒（>1e12，历史档/测试直给）就原样。缺失/非法 → null，
+ * **禁止用本地时间顶替**（ADR_SAVE §2.2）。
+ */
+export function ledgerCompletedAtMs(value: number | null | undefined): number | null {
+  if (typeof value !== 'number' || !Number.isFinite(value)) return null;
+  return Math.round(value > 1e12 ? value : value * 1000);
+}
 
 export type WorldCommand =
   | { readonly kind: 'dispatch'; readonly taskKind: TaskKind; readonly summary: string }
@@ -60,9 +72,16 @@ export type WorldCommand =
         readonly status?: string;
         /** blocked 单要请示的问题；只透传，世界不回答。省略/空串即没有。 */
         readonly blockedQuestion?: string;
+        /** 台账事件时间（epoch 秒，closed_at ?? updated_at）；缺失/省略 = 无台账时间。 */
+        readonly completedAt?: number | null;
       }[];
       /** 台账里已经收工的督办；世界据此把她的活收尾。 */
       readonly finished: readonly string[];
+      /** 收工条目的台账事件时间（epoch 秒）；settled.completedAt 的唯一来源。 */
+      readonly finishedAt?: readonly {
+        readonly commissionId: string;
+        readonly completedAt: number | null;
+      }[];
       readonly connected: boolean;
       /**
        * 快照是否完整（REST 没取满 limit）。false 时"不在快照里"不能当撤单，
@@ -93,6 +112,8 @@ export interface SimulationDeps {
   readonly villagerNames?: readonly string[];
   /** 造物主：把一栋新楼落进世界。返回 null 表示空间不够。 */
   readonly spawnBuilding?: (prefabId: string, instanceId: string) => NewBuilding | null;
+  /** 本地 wall clock（只给 settled.completedAt 的 mock 来源用，不喂逻辑）。 */
+  readonly wallClock?: () => number;
 }
 
 /** 一个角色的完整本地状态。渲染层只读快照，不碰这里。 */
@@ -163,6 +184,11 @@ export class Simulation {
   private mockDeliveries = 0;
   /** 每个角色各自的交付归属（台账/Mock 分开），日报按人分账用。 */
   private readonly deliveryTally = new Map<string, { ledger: number; mock: number }>();
+  /** 私有结算日志：save-only，不入快照（ADR_SAVE §2.1）。 */
+  private readonly settledLog: SettledRecord[] = [];
+  private readonly wallClock: () => number;
+  /** 是否已与台账对过账。读档后为 false：对账前不驱动台账单。 */
+  private ledgerReconciled = true;
   /** 上游台账是否在线。离线时世界照常过日子，但状态行必须说出来。 */
   private ledgerConnected = false;
   private ledgerSyncedAt: number | null = null;
@@ -185,6 +211,7 @@ export class Simulation {
     this.grid = deps.grid;
     this.altar = deps.altar;
     this.spawnBuilding = deps.spawnBuilding;
+    this.wallClock = deps.wallClock ?? (() => Date.now());
     this.buildings = [...deps.buildings];
     this.beats = routineBeats(deps.altar, deps.grid);
     const names = deps.villagerNames ?? [deps.villagerName, DEFAULT_ASSISTANT_NAME];
@@ -303,6 +330,8 @@ export class Simulation {
         mock: !this.ledgerConnected,
         /** 最近一次快照是否完整；false 时状态行标"台账可能未取全"。 */
         complete: this.ledgerComplete,
+        /** 读档后到首次成功对账前为 false；此时台账单只读展示。 */
+        reconciled: this.ledgerReconciled,
       },
     };
   }
@@ -328,7 +357,7 @@ export class Simulation {
         return this.build(command.prefabId, command.instanceId);
       case 'sync':
         return this.sync(command.tasks, command.finished, command.connected,
-          command.complete ?? true, command.order ?? []);
+          command.complete ?? true, command.order ?? [], command.finishedAt ?? []);
     }
   }
 
@@ -344,11 +373,13 @@ export class Simulation {
       readonly agentName: string;
       readonly status?: string;
       readonly blockedQuestion?: string;
+      readonly completedAt?: number | null;
     }[],
     finished: readonly string[],
     connected: boolean,
     complete: boolean,
     order: readonly string[],
+    finishedAt: readonly { readonly commissionId: string; readonly completedAt: number | null }[] = [],
   ): CommandResult {
     this.ledgerConnected = connected;
     if (!connected) {
@@ -363,8 +394,15 @@ export class Simulation {
     if (!complete && wasComplete) {
       this.log('warn', '台账快照可能未取全：暂不把不在快照里的督办当撤单。');
     }
+    // 读档后的第一次成功 sync：先对账；对账前台账单只读展示，不派活/不交付/不撤单。
+    if (!this.ledgerReconciled) {
+      return this.reconcile(incoming, finished, complete, order, finishedAt);
+    }
 
     const finishedIds = new Set(finished);
+    const finishedAtById = new Map(
+      finishedAt.map((item) => [item.commissionId, item.completedAt]),
+    );
     const next = new Set([...incoming.map((item) => item.commissionId), ...finished]);
 
     // blocked_question 只透传、只展示：只有仍处于 blocked 且问题非空的单才带问题。
@@ -385,7 +423,10 @@ export class Simulation {
       const active = this.activeTaskOf(villager);
       if (active === null || active.source !== 'ledger') continue;
       if (finishedIds.has(active.id)) {
-        this.finishActiveTask(villager);
+        // 先记下这单的台账事件时间，settled 只认它（缺失就是 null）。
+        active.ledgerCompletedAt = finishedAtById.get(active.id) ?? active.ledgerCompletedAt ?? null;
+        if (this.isSettled(active.id)) this.removeTask(active.id);
+        else this.finishActiveTask(villager);
       } else if (complete && !next.has(active.id)) {
         this.abandonActiveTask(villager);
       }
@@ -404,6 +445,8 @@ export class Simulation {
     let added = 0;
     for (const item of incoming) {
       if (this.tasks.some((task) => task.id === item.commissionId)) continue;
+      // 已结算的 id 不复活（ADR_SAVE §2.1）。
+      if (this.isSettled(item.commissionId)) continue;
       this.tasks.push({
         id: item.commissionId,
         kind: item.kind,
@@ -414,6 +457,7 @@ export class Simulation {
         createdAt: this.now,
         completedAt: null,
         blockedQuestion: blockedQuestions.get(item.commissionId) ?? null,
+        ledgerCompletedAt: item.completedAt ?? null,
         workerId: null,
       });
       added += 1;
@@ -445,6 +489,8 @@ export class Simulation {
    */
   private assignFromLedgerTo(villager: Villager): void {
     if (!this.isFree(villager)) return;
+    // 读档后对账前：台账单只读展示，不派活。
+    if (!this.ledgerReconciled) return;
     for (const task of this.nextLedgerTasks()) {
       const building = this.buildings.find((item) => item.boundTask === task.kind);
       if (building === undefined) {
@@ -913,7 +959,7 @@ export class Simulation {
     task.status = 'done';
     task.completedAt = this.now;
     task.blockedQuestion = null;
-    this.recordDelivery(villager.id, task.source);
+    if (!this.isSettled(task.id)) this.recordDelivery(villager.id, task);
     villager.mode = 'idle';
     villager.taskId = null;
     villager.bubble = '办好了。';
@@ -1050,7 +1096,7 @@ export class Simulation {
     task.status = 'done';
     task.completedAt = this.now;
     task.blockedQuestion = null;
-    this.recordDelivery(villager.id, task.source);
+    if (!this.isSettled(task.id)) this.recordDelivery(villager.id, task);
     const building = this.buildingOf(task);
     if (building !== undefined) {
       this.activities.set(building.instanceId, {
@@ -1072,13 +1118,29 @@ export class Simulation {
   }
 
   /** 交付按人和来源分开记账：台账/沙盒各自分开，角色之间也不合并。 */
-  private recordDelivery(villagerId: string, source: TaskRecord['source']): void {
+  private recordDelivery(villagerId: string, task: TaskRecord): void {
+    const source = task.source;
     if (source === 'ledger') this.ledgerDeliveries += 1;
     else this.mockDeliveries += 1;
-    const tally = this.deliveryTally.get(villagerId);
-    if (tally === undefined) return;
-    if (source === 'ledger') tally.ledger += 1;
-    else tally.mock += 1;
+    const tally = this.deliveryTally.get(villagerId) ?? this.deliveryTally.get(this.villagers[0].id);
+    if (tally !== undefined) {
+      if (source === 'ledger') tally.ledger += 1;
+      else tally.mock += 1;
+    }
+    this.settledLog.push({
+      id: task.id,
+      source: source === 'ledger' ? 'ledger' : 'mock',
+      workerId: villagerId,
+      // 台账时间只认 closed_at ?? updated_at（×1000）；缺失保持 null，绝不本地时间顶替。
+      completedAt: source === 'ledger'
+        ? ledgerCompletedAtMs(task.ledgerCompletedAt)
+        : this.wallClock(),
+      completedAtClock: source === 'ledger' ? 'ledger' : 'local',
+    });
+  }
+
+  private isSettled(taskId: string): boolean {
+    return this.settledLog.some((record) => record.id === taskId);
   }
 
   /** 攒够一个里程碑，世界多一件东西；不够就只是点数。 */
@@ -1121,6 +1183,310 @@ export class Simulation {
     if (villager.bubble !== null && this.now >= villager.bubbleUntil) {
       villager.bubble = null;
     }
+  }
+
+  // ---------------------------------------------------------------- save
+
+  /** 序列化世界自有事实；台账链接态与派生计数不入档（ADR_SAVE §1）。 */
+  toSave(): WorldSaveV1 {
+    const villagers: SavedVillager[] = this.villagers.map((villager) => ({
+      id: villager.id,
+      name: villager.name,
+      mode: villager.mode,
+      pos: { x: villager.pos.x, y: villager.pos.y },
+      facing: villager.facing,
+      visible: villager.visible,
+      path: villager.path.map((cell) => ({ x: cell.x, y: cell.y })),
+      taskId: villager.taskId,
+      bubble: villager.bubble,
+      bubbleUntil: villager.bubbleUntil,
+      saluteUntil: villager.saluteUntil,
+      deliverUntil: villager.deliverUntil,
+      nextRoutineAt: villager.nextRoutineAt,
+      routineIndex: villager.routineIndex,
+      routineLabel: villager.routineLabel,
+      inPlaceUntil: villager.inPlaceUntil,
+      pendingRoute: villager.pendingRoute.map((cell) => ({ x: cell.x, y: cell.y })),
+      pendingBuildingId: villager.pendingBuilding?.instanceId ?? null,
+    }));
+    return {
+      schemaVersion: 1,
+      world: {
+        now: this.now,
+        villagers,
+        buildings: this.buildings.map((building) => ({ ...building })),
+        roads: this.roads.map((cell) => ({ x: cell.x, y: cell.y })),
+        props: this.props.map((prop) => ({ ...prop })),
+        // 运行时字段不落盘：ledgerCompletedAt 只服务 settled；v1 schema 已冻结、样例无此键。
+        tasks: this.tasks.map((task) => {
+          const saved: TaskRecord = { ...task };
+          delete saved.ledgerCompletedAt;
+          return saved;
+        }),
+        pending: this.allPending(),
+        activities: [...this.activities.entries()].map(([buildingId, activity]) => ({
+          buildingId,
+          activity,
+        })),
+        constructions: [...this.constructions.entries()].map(([buildingId, state]) => ({
+          buildingId,
+          remainingMs: state.remainingMs,
+          totalMs: state.totalMs,
+        })),
+        weather: { ...this.weather },
+        faith: { points: this.faithPoints, milestones: this.milestones },
+        settled: this.settledLog.map((record) => ({ ...record })),
+        nextTaskNumber: this.nextTaskNumber,
+        nextPendingNumber: this.nextPendingNumber,
+      },
+      meta: {
+        savedAtWallClock: this.wallClock(),
+        savedReconciled: this.ledgerReconciled,
+        schemaFingerprint: SCHEMA_V1_FINGERPRINT,
+      },
+    };
+  }
+
+  /**
+   * 从存档重建世界。deps.grid 必须已按存档 buildings 顺序重放
+   * （`rebuildGridFromPlacements`），deps.buildings 用存档里的那批。
+   * 读档后台账一律标记未对账，等首个成功 sync 走 reconcile。
+   */
+  static fromSave(save: WorldSaveV1, deps: SimulationDeps): Simulation {
+    const names = save.world.villagers.map((villager) => villager.name);
+    const sim = new Simulation({
+      ...deps,
+      villagerName: names[0] ?? deps.villagerName,
+      villagerNames: names,
+    });
+    const world = save.world;
+    sim.now = world.now;
+    sim.buildings.length = 0;
+    sim.buildings.push(...world.buildings.map((building) => ({ ...building })));
+
+    for (const saved of world.villagers) {
+      const villager = sim.villagers.find((item) => item.id === saved.id);
+      if (villager === undefined) continue;
+      villager.mode = saved.mode;
+      villager.pos = { x: saved.pos.x, y: saved.pos.y };
+      villager.facing = saved.facing;
+      villager.visible = saved.visible;
+      villager.path = saved.path.map((cell) => ({ x: cell.x, y: cell.y }));
+      villager.taskId = saved.taskId;
+      villager.bubble = saved.bubble;
+      villager.bubbleUntil = saved.bubbleUntil;
+      villager.saluteUntil = saved.saluteUntil;
+      villager.deliverUntil = saved.deliverUntil;
+      villager.nextRoutineAt = saved.nextRoutineAt;
+      villager.routineIndex = saved.routineIndex;
+      villager.routineLabel = saved.routineLabel;
+      villager.inPlaceUntil = saved.inPlaceUntil;
+      villager.pendingRoute = saved.pendingRoute.map((cell) => ({ x: cell.x, y: cell.y }));
+      villager.pendingBuilding =
+        saved.pendingBuildingId === null
+          ? null
+          : (sim.buildings.find((item) => item.instanceId === saved.pendingBuildingId) ?? null);
+    }
+
+    for (const queue of sim.pending.values()) queue.length = 0;
+    for (const item of world.pending) {
+      const queue =
+        sim.pending.get(item.villagerId) ?? sim.pending.get(sim.villagers[0].id);
+      queue?.push({ ...item });
+    }
+
+    sim.tasks.length = 0;
+    sim.tasks.push(...world.tasks.map((task) => ({ ...task })));
+
+    sim.roads.length = 0;
+    sim.roads.push(...world.roads.map((cell) => ({ x: cell.x, y: cell.y })));
+    sim.props.length = 0;
+    sim.props.push(...world.props.map((prop) => ({ ...prop })));
+
+    sim.activities.clear();
+    for (const saved of world.activities) {
+      if (sim.buildings.some((building) => building.instanceId === saved.buildingId)) {
+        sim.activities.set(saved.buildingId, saved.activity);
+      }
+    }
+    for (const building of sim.buildings) {
+      if (!sim.activities.has(building.instanceId)) {
+        sim.activities.set(building.instanceId, { kind: 'idle' });
+      }
+    }
+
+    sim.constructions.clear();
+    for (const saved of world.constructions) {
+      if (!sim.buildings.some((building) => building.instanceId === saved.buildingId)) continue;
+      sim.constructions.set(saved.buildingId, {
+        remainingMs: saved.remainingMs,
+        totalMs: saved.totalMs,
+      });
+    }
+
+    sim.weather = { ...world.weather };
+    sim.faithPoints = world.faith.points;
+    sim.milestones = world.faith.milestones;
+
+    // settled 是分账唯一真相：由它重建私有日志与交付统计（不持久化计数）。
+    sim.settledLog.length = 0;
+    for (const record of world.settled) {
+      if (sim.settledLog.some((item) => item.id === record.id)) continue;
+      sim.settledLog.push({ ...record });
+    }
+    for (const tally of sim.deliveryTally.values()) {
+      tally.ledger = 0;
+      tally.mock = 0;
+    }
+    sim.ledgerDeliveries = 0;
+    sim.mockDeliveries = 0;
+    for (const record of sim.settledLog) {
+      if (record.source === 'ledger') sim.ledgerDeliveries += 1;
+      else sim.mockDeliveries += 1;
+      const tally =
+        sim.deliveryTally.get(record.workerId) ?? sim.deliveryTally.get(sim.villagers[0].id);
+      if (tally === undefined) continue;
+      if (record.source === 'ledger') tally.ledger += 1;
+      else tally.mock += 1;
+    }
+
+    sim.nextTaskNumber = world.nextTaskNumber;
+    sim.nextPendingNumber = world.nextPendingNumber;
+    sim.ledgerConnected = false;
+    sim.ledgerSyncedAt = null;
+    sim.ledgerComplete = true;
+    sim.ledgerOrder = [];
+    sim.ledgerReconciled = false;
+    sim.log('info', '读档回来：世界从关页那一刻继续。');
+    return sim;
+  }
+
+  /** 读档后的首次对账：台账覆盖本地、已结算不重复、缺席且完整不复活。 */
+  private reconcile(
+    incoming: readonly {
+      readonly commissionId: string;
+      readonly kind: TaskKind;
+      readonly title: string;
+      readonly agentName: string;
+      readonly status?: string;
+      readonly blockedQuestion?: string;
+      readonly completedAt?: number | null;
+    }[],
+    finished: readonly string[],
+    complete: boolean,
+    order: readonly string[],
+    finishedAt: readonly { readonly commissionId: string; readonly completedAt: number | null }[] = [],
+  ): CommandResult {
+    this.ledgerOrder = order;
+    this.ledgerComplete = complete;
+    const finishedIds = new Set(finished);
+    const finishedAtById = new Map(
+      finishedAt.map((item) => [item.commissionId, item.completedAt]),
+    );
+    const incomingById = new Map(incoming.map((item) => [item.commissionId, item]));
+    const questionOf = (item: {
+      readonly status?: string;
+      readonly blockedQuestion?: string;
+    }): string | null => {
+      if (item.status !== 'blocked') return null;
+      const question = (item.blockedQuestion ?? '').trim();
+      return question === '' ? null : question;
+    };
+
+    for (const task of [...this.tasks]) {
+      if (task.source !== 'ledger') continue;
+      const item = incomingById.get(task.id);
+      if (item !== undefined) {
+        const index = this.tasks.indexOf(task);
+        this.tasks[index] = {
+          ...task,
+          kind: item.kind,
+          summary: item.title,
+          blockedQuestion: questionOf(item),
+          // 台账在跑的单也会带 updated_at：先记住，settle 时没有 closed_at 就用它。
+          ledgerCompletedAt: item.completedAt ?? task.ledgerCompletedAt ?? null,
+        };
+        if (!this.villagers.some((villager) => villager.taskId === task.id)) {
+          this.tasks[index].workerId = null;
+        }
+        continue;
+      }
+      if (finishedIds.has(task.id)) {
+        // 台账事件时间从 finishedAt 映射取；缺失就保留上次见到的 updated_at，再没有就 null。
+        task.ledgerCompletedAt =
+          finishedAtById.get(task.id) ?? task.ledgerCompletedAt ?? null;
+        if (!this.isSettled(task.id)) {
+          const owner = this.villagers.find(
+            (villager) =>
+              villager.taskId === task.id &&
+              (villager.mode === 'working' ||
+                villager.mode === 'saluting' ||
+                villager.mode === 'toWork' ||
+                villager.mode === 'delivering'),
+          );
+          if (owner !== undefined) this.finishActiveTask(owner);
+          else this.settleDetachedLedgerTask(task);
+        }
+        this.removeTask(task.id);
+        continue;
+      }
+      // 台账完整快照里缺席：丢弃，不复活（沿用撤单语义）。
+      if (complete) this.removeTask(task.id);
+    }
+
+    let added = 0;
+    for (const item of incoming) {
+      if (this.tasks.some((task) => task.id === item.commissionId)) continue;
+      // 已结算的 id 不复活（ADR_SAVE §2.1）。
+      if (this.isSettled(item.commissionId)) continue;
+      this.tasks.push({
+        id: item.commissionId,
+        kind: item.kind,
+        summary: item.title,
+        buildingId: null,
+        source: 'ledger',
+        status: 'assigned',
+        createdAt: this.now,
+        completedAt: null,
+        blockedQuestion: questionOf(item),
+        ledgerCompletedAt: item.completedAt ?? null,
+        workerId: null,
+      });
+      added += 1;
+    }
+
+    this.ledgerReconciled = true;
+    this.ledgerConnected = true;
+    const message = `台账已对账，${this.tasks.length} 条在册。`;
+    this.log('info', message);
+    if (added > 0) this.log('info', `对账补进 ${added} 条新督办。`);
+    return { ok: true, message };
+  }
+
+  private settleDetachedLedgerTask(task: TaskRecord): void {
+    if (this.isSettled(task.id)) return;
+    task.status = 'done';
+    task.completedAt = this.now;
+    task.blockedQuestion = null;
+    const workerId = task.workerId ?? this.villagers[0].id;
+    this.recordDelivery(workerId, task);
+    this.log('done', `${task.summary} 按台账对账收尾。`);
+  }
+
+  private removeTask(taskId: string): void {
+    const index = this.tasks.findIndex((task) => task.id === taskId);
+    if (index >= 0) this.tasks.splice(index, 1);
+    for (const villager of this.villagers) {
+      if (villager.taskId !== taskId) continue;
+      villager.mode = 'idle';
+      villager.taskId = null;
+      villager.path = [];
+      villager.pendingRoute = [];
+      villager.pendingBuilding = null;
+      villager.bubble = null;
+      villager.nextRoutineAt = this.now + 1600;
+    }
+    this.idleWorkstationFor(taskId);
   }
 
   private cellOf(pos: Vec2): GridPoint {

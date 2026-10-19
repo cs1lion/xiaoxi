@@ -448,6 +448,52 @@ async function runSandboxSuite() {
     return { before, after: window.Oracle.view().tasks.length };
   });
   check(bridged.after === bridged.before + 1, '外部 Agent 的消息进了同一条命令队列');
+
+  // 存档：写单槽 → 刷新 → 世界恢复（BRIEF 验收目标 4）。
+  const beforeSave = await state();
+  const saveResult = await page.evaluate(() => window.Oracle.saveNow());
+  check(saveResult.ok === true, '手动存档写入单槽');
+  const savedRaw = await page.evaluate(() =>
+    localStorage.getItem('xiaoxi.pixel-world.save.v1'),
+  );
+  check(
+    typeof savedRaw === 'string' && savedRaw.includes('"schemaVersion":1'),
+    '单槽里是 v1 JSON',
+  );
+
+  await page.reload({ waitUntil: 'load' });
+  await page.waitForFunction(() => window.Oracle !== undefined, null, { timeout: 15000 });
+  const restored = await state();
+  check(restored.buildings.length === beforeSave.buildings.length, '刷新后建筑数量恢复');
+  check(restored.roads.length === beforeSave.roads.length, '刷新后道路恢复');
+  check(restored.faith.milestones === beforeSave.faith.milestones, '刷新后神恩恢复');
+  check(
+    JSON.stringify(restored.deliveriesByVillager) ===
+      JSON.stringify(beforeSave.deliveriesByVillager),
+    '刷新后按角色交付统计恢复',
+  );
+  check(restored.ledger.reconciled === false, '读档后标记未对账');
+  await page.waitForFunction(
+    () => (document.querySelector('#status')?.textContent ?? '').includes('读档未对账'),
+    null,
+    { timeout: 5000 },
+  );
+  check(true, '状态行标出读档未对账');
+
+  // 清档 → 刷新 → 回到新世界。
+  const cleared = await page.evaluate(() => window.Oracle.clearSave());
+  check(cleared.ok === true, '清档入口可用');
+  check(
+    (await page.evaluate(() => localStorage.getItem('xiaoxi.pixel-world.save.v1'))) === null,
+    '清档后单槽为空',
+  );
+  await page.reload({ waitUntil: 'load' });
+  await page.waitForFunction(() => window.Oracle !== undefined, null, { timeout: 15000 });
+  const freshWorld = await state();
+  check(
+    freshWorld.buildings.length === 3 && freshWorld.faith.milestones === 0,
+    '清档后从新世界开始',
+  );
 }
 
 try {

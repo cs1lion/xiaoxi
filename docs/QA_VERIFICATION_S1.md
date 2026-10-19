@@ -1,9 +1,9 @@
 # S1 各卡独立验收记录（QA Verification · S1）
 
 - 验收方：qa-runtime（Agent Teams · QA Engineer），独立于各卡作者
-- 验收时间：2026-10-19 13:06–13:10（task-7）；**13:13–13:18（task-9 + task-8）**；**13:23–13:29（task-12 D4-A + task-11 D3-A）**；**13:41–13:49（task-13 S1-5）**；**13:47–13:53（task-14 S1-6）**；**13:56–14:01（task-15 + task-16）**；**14:18–14:29（task-10 + 提交与重构复验）**；**14:37–14:41（task-17 S2-1 多角色）**；**14:54–14:58（task-21 多角色 P3）**（Asia/Shanghai）
-- 验收对象：task-7 / task-9 / task-8 / task-12（D4-A）/ task-11（D3-A）/ task-13（S1-5）/ task-14（S1-6）/ task-15 / task-16 / task-10（排队）/ task-17（S2-1 多角色）/ task-21（多角色 P3：日报归属+手动完成对象）/ 提交链 340d0ab、b656488、150b2a7、8a95c94、d8a57f9
-- 仓库：`D:\project\neurosama`，分支 `feat/pixel-world-oracle-world`，HEAD `d8a57f9`（本次验收期间作者改动均在未提交的工作区）
+- 验收时间：2026-10-19 13:06–13:10（task-7）；**13:13–13:18（task-9 + task-8）**；**13:23–13:29（task-12 D4-A + task-11 D3-A）**；**13:41–13:49（task-13 S1-5）**；**13:47–13:53（task-14 S1-6）**；**13:56–14:01（task-15 + task-16）**；**14:18–14:29（task-10 + 提交与重构复验）**；**14:37–14:41（task-17 S2-1 多角色）**；**14:54–14:58（task-21 多角色 P3）**；**15:13–15:18（task-18 存档单槽+恢复）**；**15:24–15:28（task-23 台账时间戳透传）**；**15:32–15:36（task-24 v1 字段漂移修复）**（Asia/Shanghai）
+- 验收对象：task-7 / task-9 / task-8 / task-12（D4-A）/ task-11（D3-A）/ task-13（S1-5）/ task-14（S1-6）/ task-15 / task-16 / task-10（排队）/ task-17（S2-1 多角色）/ task-21（多角色 P3）/ task-18（存档 v1 + 恢复）/ task-23（台账时间戳透传）/ task-24（v1 字段漂移修复）/ 提交链 340d0ab、b656488、150b2a7、8a95c94、d8a57f9、2bde7cb、7e00d27、7db15ab
+- 仓库：`D:\project\neurosama`，分支 `feat/pixel-world-oracle-world`，HEAD `7db15ab`（本次验收期间作者改动均在未提交的工作区）
 - 方法：不采信作者自述；自己看 diff、跑测试与冒烟、做对抗性探针；临时脚本/日志只放工作区
   `C:\Users\18712\.dsh\bot\workspace\recon\`，只在本文件留结论
 - 执行节奏：task-7 于 13:06–13:10 复验；task-9、task-8 于 13:13–13:18 收到 Lead 通知后按本文方案执行并回填结论。
@@ -26,6 +26,9 @@
 | **提交与门禁** | 340d0ab / b656488 / 150b2a7 | **通过（1 条 P3）** | 25 文件范围正确、无主产品夹带；roster_view 已移除、`/roster` 自包含、823 字符与基线一致、`/adapters` 不变；门禁 3/3 PASS（96/96）；workflow 统一走脚本、paths 合理；P3：npm 缺失时仍 traceback（退出码 1，安全失败）→ 已由 8a95c94 修复并复验 |
 | **S1-17 / task-17（S2-1）** | 多角色（独立作息/派活/排队/归属） | **通过** | `villagers[]`+`villager` 兼容、每角色独立 state、队列 Map<villagerId>、派活只叫一个/第二单换人/双忙各自排队、workerId 归属、3 角色可扩、双 sim deepEqual；**100/100**、check 0、smoke **66/66 + 21/21**、check_protocol/test_core 64/0；渲染层按 id 多实例（截图双人可见） |
 | **S1-21 / task-21（多角色 P3）** | 日报归属 + 手动完成对象 | **通过** | 新增 `deliveriesByVillager` 按人分账（台账/Mock 不混）；日报每人都写清、全闲/全忙/混合措辞；`complete` 带 `target`（id/名字）、未知目标拒绝、台账完成权不回退；**106/106**、check 0、smoke **74/74 + 21/21**、check_protocol/test_core 64/0；P3：DOM `#finish` 无 target 入口（仅 Oracle API） |
+| **S1-18 / task-18（存档）** | 单槽存档 v1 + 读档对账/失败降级 | **通过（P2 已由 task-23 关闭）** | `WorldSaveV1` 与样例一致、指纹 `f53a0736d782d657`（206 路径去重 99）、运行时快照无 settled；变异样例测试必红、指纹不符按坏档；settled/去重/对账三分支/坏档备份 3/5/高版本只读/配额降级/30s+pagehide/刷新续跑均实测；**118/118**、check 0、smoke **85/85 + 21/21**、check_protocol/test_core 64/0。原 P2（ledger completedAt 恒 null）已由 task-23 接线并实测关闭 |
+| **S1-23 / task-23（台账时间戳）** | `closed_at ?? updated_at` 透传 → settled | **通过（P2 已由 task-24 关闭）** | 解析三分支/秒×1000/毫秒原样/无本地兜底全部实测；真实 8000 行交付后 `settled.completedAt=1792377786778`（×1000）、clock=ledger；finishedAt 缺失退回已见 updated_at；都缺→null；样例指纹仍合法、`assertSaveV1(sim.toSave())` 通过、旧档可读；**126/126**、check 0、smoke **85/85 + 21/21**、check_protocol/test_core 64/0。原 P2（`toSave` 多出 `tasks[].ledgerCompletedAt`）已由 task-24 剥离+嵌套防线关闭 |
+| **S1-24 / task-24（v1 字段漂移修复）** | 剥离运行时字段 + 嵌套键集合防线 | **通过** | `toSave()` 落盘 tasks 键集合与样例 10 键完全一致、无 `ledgerCompletedAt`；样例 SHA `F24FBAEF…298402`、schemaVersion 1 不变；`SAVE_TASK_KEYS`/`SAVE_SETTLED_KEYS` 与样例逐键一致，`assertSaveV1` 校验 tasks/settled 键集合 + `done⊆settled`；变异（tasks 加字段/伪 done 无 settled/settled 加字段/少字段）全部抛；去掉剥离的临时副本测试 **9/1 FAIL**；**129/129**、check 0、smoke **85/85 + 21/21**、check_protocol/test_core 64/0；task-18 刷新/对账/坏档/配额/高版本与 task-23 真实台账时间戳回归全过 |
 
 ---
 
@@ -1162,6 +1165,243 @@ task-12 roster 探针 **8/8**（旧服务 `/roster 404 → /adapters` 回退未�
 
 ---
 
+# 卡 13：task-18（存档单槽 + 恢复，按 ADR_SAVE final 验）
+
+## 结论：**通过**（2026-10-19 15:13–15:18 初验；15:24–15:28 经 task-23 复验后 P2 关闭）
+
+- 初验唯一未达成的硬点是 **ADR §2.2/硬点 3 的「ledger completedAt 取台账 `closed_at ?? updated_at`」**：
+  当时运行时恒为 `null`（`simulation.ts` 自认"当前投影未带"），格式层支持非空（冻结样例里 ledger 记录
+  `completedAt=1700000000000` 且 `completedAtClock:'ledger'`）。**task-23 已把投影/LedgerView/WorldCommand
+  接线并将秒×1000 写入 settled，QA 用真实 8000 台账行复验通过（见卡 14）→ 本条 P2 关闭**。
+- 注意：task-23 复验同时发现一个新的 **P2（存档字段冻结漂移：运行时 toSave 多出
+  `world.tasks[].ledgerCompletedAt`，未升 v2）**，归属 task-23、见卡 14；不推翻本卡主体结论。
+
+### 1) 基准与交付
+
+- 基准：`docs/ADR_SAVE.md`（final，§1 frozen）、`docs/save-v1.sample.json`（5680 B）、
+  `SCHEMA_V1_FINGERPRINT = "f53a0736d782d657"`（`src/world/save.ts:25`）
+- task-18 新增/改动（未提交工作区）：`src/world/save.ts`、`src/ui/save-store.ts`、
+  `test/save.test.ts`、`test/save-fingerprint.test.ts`、`test/save-quota.test.ts` +
+  `simulation.ts/types.ts/setup.ts/SandboxScene.ts/oracle-panel.ts/index.html/smoke.mjs` 接线
+- **存档 schema 清单（供 ADR/实现对齐）**：
+  `WorldSaveV1 { schemaVersion:1, world: SaveWorld, meta:{ savedAtWallClock, savedReconciled, schemaFingerprint } }`；
+  `SaveWorld` 字段 = `now/villagers/buildings/roads/props/tasks/pending/activities/constructions/weather/faith/
+  settled/nextTaskNumber/nextPendingNumber`；`SettledRecord { id, source:'ledger'|'mock', workerId,
+  completedAt:number|null, completedAtClock:'ledger'|'local' }`；storage key
+  `xiaoxi.pixel-world.save.v1`；坏档备份前缀 `…save.v1.corrupt.<epochMs>`（保留 3）
+
+### 2) 字段边界 + 指纹（硬点 1/2）
+
+- 样例：`assertSaveV1` 通过；**206 条原始叶子路径 → 去重 99 条**；`fingerprintOfPaths(unique)=f53a0736d782d657`；
+  `saveFingerprint(sample)=` 同值；`sample.meta.schemaFingerprint=` 同值；`leafPaths=206/unique=99` 与 ADR 一致
+- 运行时 `WorldSnapshot` 序列化**不含 `"settled"`**（QA 实测 + smoke）；`toSave()` 才生成 `world.settled`
+- **QA 真实变异**：给实际 `docs/save-v1.sample.json` 的 `world` 加一个字段 →
+  `node test/save-fingerprint.test.ts` **红**（`expected 99, actual 100`，exit 1）；
+  字节级还原后 SHA256 `F24FBAEF…298402`（与变异前一致，5680 B）→ 再跑 **3/3 绿**（证据 `task18-fingerprint-*.log`）
+- 加载指纹不符：用 fake storage 写入 `meta.schemaFingerprint='deadbeefdeadbeef'` → `read()` 返回
+  `corrupt`、生成带时间戳备份、主槽原字节保留（不静默重置）；高版本 `schemaVersion:99` → `version` 拒绝、
+  `paused=true`、自动存档关闭、原槽字节不变、`write()` 被暂停（不降级写回）
+
+### 3) settled 去重 / 分账 / 时钟（硬点 3）
+
+- mock：`completedAt = wallClock()`、`completedAtClock:'local'`（QA 实测 6000；浏览器实测 epoch ms）
+- ledger：`completedAtClock:'ledger'`、初验时 `completedAt` 恒 null（**task-23 已接线关闭，见卡 14**）；
+  未用本地时间顶替（这一点满足）
+- 存档不写计数：`fromSave` 由 `settled` 重建 `deliveries`/`deliveriesByVillager`（QA 实测 1 单 mock →
+  `{ledger:0,mock:1}` 且按 workerId 归属）；重开后再 sync 不重复计数
+- 样例里 ledger/mock 两条 settled 的时钟字段与源码一致（`ledger/1700000000000`、`local/1234567890123`），
+  说明**格式层**已支持非空 ledger 时间，缺的只是运行时投影接线
+
+### 4) 对账三分支（硬点 4）
+
+- 读档后 `ledger.reconciled=false / connected=false / mock=true`；**首 sync 前不派台账单**
+  （QA 观察 5 拍，`c_demo000001` 未被派；`pumpPending` 内有 `!ledgerReconciled` 保护）
+- 首个 sync：`finished` 里已 settled id → **不重复交付/计数**；已 settled id 以活动单回来 → **不复活**；
+  `complete=false` 缺席 → **保留、不撤单**；`complete=true` 缺席 → **丢弃、不复活**；
+  活动单 kind/title/blockedQuestion 被台账覆盖；对账后 `reconciled=true`
+- 在线（8000）浏览器：读档后状态行「读档未对账」，首个 sync 后变「台账在线」且 `reconciled=true`；
+  `?ledger=off` 永久 `reconciled=false` 且状态行明示（smoke/浏览器均验）
+
+### 5) 失败路径（硬点 5，QA 独立 32 项探针）
+
+- 坏档 JSON → 备份原档（`corrupt.<epochMs>`）+ 提示一次，主槽原字节保留；连续 4 次坏档 → **只留最近 3 份**
+- 配额紧张：假存储首次 `setItem` 抛错 → **先删最旧备份再重试，主存档成功**（`ok:true`，备份被清 1）
+- 配额持续失败：`write()` **不抛**、返回 paused、自动存档关闭、提示一次；世界继续（测试断言）
+- `setItem` 抛 `QuotaExceededError` 的单元测试 + 高版本只读 + origin/端口提示（`getItem` 抛错）全部 PASS
+- `settled > 5000` → 只告警一次、不截断（测试 + QA 探针）
+- **P3**：`SaveStore.enableAutoSave()` 存在且测试可用，但运行时**没有接线**（无 UI/重试入口），
+  暂停后 `saveNow()` 也直接返回 paused → ADR §4「手动保存可重试 / 恢复后自动存档重开」当前只有 API 能力
+
+### 6) 真机刷新续跑（BRIEF 验收 4，硬点 6）
+
+- 离线 `?ledger=off`：交付 1 单 + 扩建 1 栋 + 雨/晴切换 → `saveNow()` → localStorage 单槽
+  `schemaVersion:1`、指纹同常量、`settled.length=1`（mock/local）、`savedReconciled:false`；刷新后
+  「建筑/道路/信仰/任务/交付/角色 id」结构一致，角色位置漂移 **0.9 格**（从关页那一刻续跑）
+- **pagehide**：派单并交付后 `dispatchEvent(pagehide)` → `__saveWrites` 1→4、存档 settled=2（有写入证据）
+- **30s**：真实等待 31s → 自动存档写入 4→5、`meta.savedAtWallClock` 更新（有写入证据）
+- 在线 `?ledger=on`：读档 → 首个 sync 对账成功（`reconciled:true`），写档 `savedReconciled:true`；
+  刷新后建筑 4 栋、mock 交付 2 单保留；全程零 JS 报错；截图 `18-task18-persist.png`
+
+### 7) 回归
+
+- `npm run check` exit 0；`npm test` **118/118 pass**（save 相关 ok 48–58 等）
+- 沙盒 smoke **85/85**（≥80，含「手动存档/刷新后建筑/道路/神恩/按角色统计恢复/读档未对账/清档」）；
+  台账 smoke **21/21** 不回退
+- `check_protocol.py` PASS；`test_core.py`（venv）**64/0**
+- 交叉探针：task-10 队列 24/24（单角色化口径）、task-15 16/16、task-17 26/26、task-21 26/26 →
+  complete/order/blockedQuestion/queue/multi-villager/deliveriesByVillager 未回退
+
+### 8) 问题分级
+
+| 级别 | 问题 | 说明 / 建议 |
+|---|---|---|
+| **P2** | ledger `settled.completedAt` 恒 null，未取 `closed_at ?? updated_at`（ADR §2.2 硬点 3） | 投影/WorldCommand 未带这两个字段；格式层已支持非空（样例可加载）。建议：`projection.parseCommissionRow` 增 `closed_at/updated_at` → LedgerView → sync → `recordDelivery` 用 `closed_at ?? updated_at`×1000，缺失才 null |
+| P3 | 配额暂停后运行时无恢复接线 | `enableAutoSave()` 只有 API；建议 UI「重试保存」或下次成功写入自动重开 |
+| P3 | `assertSaveV1` 形状校验较浅 | 未校验 `tasks.status==='done' ⊆ settled` 等写档不变量；指纹正确但内容异常的档可能部分加载（fromSave 静默跳过坏条目）。建议补写档不变量校验 |
+| P3 | `saveStateKey` 只含 deliveries/faith.milestones/constructions/props/tasks 数 | 天气/角色位置等变化靠 30s 或 pagehide 兜底（符合 ADR 写入点定义，记录为信息） |
+
+**总评：有条件通过。** 存档格式/指纹/备份/对账/降级/真机续跑全部实测通过；唯一硬缺口是台账时间未接线（P2），
+其余为 P3 增强项。若用户/ADR 明确接受"投影未带→null"，可改判通过。
+
+---
+
+# 卡 14：task-23（台账时间戳透传 `closed_at ?? updated_at` → settled）
+
+## 结论：**通过**（P2 已由 task-24 关闭；task-18 同步保持通过）
+
+- 初验标记的 P2（`toSave()` 多出 `world.tasks[].ledgerCompletedAt`、未升 v2）**已由 task-24 修复**：
+  落盘 task 键集合与样例完全一致（10 键、无 `ledgerCompletedAt`），并新增 `SAVE_TASK_KEYS`/`SAVE_SETTLED_KEYS`
+  嵌套键集合防线 + `done ⊆ settled` 校验；QA 独立变异/去剥离复现均验证（见卡 15）。
+
+### 1) 范围（硬点 1）
+
+- task-23 改动（mtime 15:20–15:22）：`projection.ts`、`ledger.ts`、`types.ts`、`simulation.ts`、
+  `SandboxScene.ts` + `test/ledger.test.ts`、`test/ledger-fixtures.test.ts`、`test/fixtures/commissions.json`；
+  `save.ts`/样例未改（mtime 15:10，SHA 仍 `F24FBAEF…298402`）
+- `git diff -- server` **非空，但全部是 task-23 之前就存在的既有 dirty**（server 最新 mtime
+  `14:14:16`，早于 task-23 的 15:20；无 server 文件 mtime > 15:13）→ **task-23 未改 server**，
+  server 返回结构未动；真实 API 响应仍带 `closed_at/updated_at`（下面实测）
+
+### 2) 解析三分支 + 秒/毫秒（硬点 2）
+
+- `parseCommissionRow`：`completedAt = epoch(closed_at) ?? epoch(updated_at)`；`epoch()` 只认有限数字，
+  字符串/NaN/缺失→null；`closed_at` 优先并保留原始秒值（1792377786.5）
+- QA 实测：closed 优先 ✓、closed=null 退 updated ✓、两者都缺→null ✓、非数字/NaN→null ✓
+- `ledgerCompletedAtMs`：秒→`Math.round(×1000)`（1792377786.5→1792377786500）；已是毫秒（>1e12）原样；
+  null/undefined/NaN→null；**没有任何本地时间兜底**
+
+### 3) 运行时（硬点 3，真实 8000 只读 + 浏览器）
+
+- 从 `GET /api/executive/commissions?limit=100` 取真实行：`closed_at=1792377786.7782023`；
+  `parseCommissionRow` 得同值；`LedgerClient.finishedAt` 携带同值且与 `finished` 同集合
+- 纯运行时：真实 id 以 running 进 sync → 开工 → `finishedAt` 收工 → `sim.toSave().world.settled`：
+  `{source:'ledger', completedAt:1792377786778, completedAtClock:'ledger'}`（=台账秒×1000）；
+  `assertSaveV1(sim.toSave())` 通过
+- 浏览器（5188 + 8000，`?ledger=on`）：`pushLedger` 真实行 running→ready_to_report，交付后
+  `settled.completedAt=1792377786778`、clock=ledger、source=ledger；saveNow 后 localStorage
+  `schemaVersion:1`、`meta.schemaFingerprint` 正确；快照无 settled；无 JS 报错；截图
+  `19-task23-ledger-time.png`
+- `finishedAt` 缺失：退回上一拍已见到的 `updated_at`×1000；两者都缺：`completedAt=null`、clock 仍 ledger
+  （未用本地墙钟，测试里墙钟设为 9999999999999 可区分）
+
+### 4) 存档格式（硬点 4）与 **新发现 P2**
+
+- 样例/指纹测试仍绿（126/126 内「冻结样例 99 路径/常量」「变异探针」均 PASS）；
+  `assertSaveV1(sim.toSave())` 在 ledger 结算后通过；旧档 `fromSave` 可读且样例 ledger 时间
+  `1700000000000` 原样保留
+- **P2（新发现）**：运行时 `toSave()` 的 task 对象多出 `ledgerCompletedAt` 字段
+  （样例 task 键集合无它；`schemaVersion` 仍 1、未升 v2、无迁移）。`save-fingerprint.test.ts` 的
+  compile-time `Equal` 只断言 top-level/world/meta/settled 的**顶层键**，不覆盖 `tasks[]` 嵌套字段；
+  `assertSaveV1` 只比对 `meta.schemaFingerprint` 字符串 → **该字段漂移不会被门禁/加载拦截**。
+  （注：任意运行时档的 `saveFingerprint` 本就不等于样例常量——空数组/可选字段，样例指纹只冻结样例；
+  但"运行时多序列化了一个冻结 schema 没有的字段"这一点是确定的）
+- 建议（二选一）：① `toSave()` 不序列化 `ledgerCompletedAt`（运行时字段，读档后需要时由 settled/台账再补）；
+  ② 正式升 `schemaVersion=2` + 迁移 + 更新样例与指纹，并把 `tasks[]` 字段纳入指纹断言
+
+### 5) 回归（硬点 5）
+
+- `npm run check` 0；`npm test` **126/126**（新增：fixture 时间戳、投影三分支、ledgerCompletedAtMs、
+  LedgerView finishedAt、settled×1000、finishedAt 缺失回退）
+- 沙盒 smoke **85/85**、台账 smoke **21/21**；`check_protocol` PASS；`test_core`（venv）**64/0**
+- 交叉：task-18 存档探针 32/32、task-10 24/24、task-15 16/16、task-17 26/26、task-21 26/26
+
+### 6) 问题分级
+
+| 级别 | 问题 | 说明 / 建议 |
+|---|---|---|
+| **P2** | 运行时存档多出 `world.tasks[].ledgerCompletedAt`，未升 v2（样例/指纹未覆盖嵌套字段） | 破坏 §1.2 frozen 字段边界；建议剥离运行时字段或升版+迁移+补指纹断言 |
+| P3 | 无其它 | — |
+
+**总评：有条件通过。** 时间戳透传的解析/归一/运行时/真实台账/存档可读全部通过，task-18 的 P2 关闭；
+但新序列化的 `tasks[].ledgerCompletedAt` 突破了 v1 冻结边界且指纹守卫存在嵌套盲区，需 Lead/用户裁决
+（剥离字段或升 v2）后才宜作为存档 schema 的最终形态。
+
+---
+
+# 卡 15：task-24（v1 存档字段漂移修复）
+
+## 结论：**通过**（2026-10-19 15:32–15:36 执行）
+
+task-23 的 **P2 关闭**；存档批次（task-18 → task-23 → task-24）最终形态可判 **通过**。
+
+### 1) 修复内容 / 范围
+
+- `simulation.ts` `toSave()`：tasks 序列化时 `delete saved.ledgerCompletedAt`（运行时字段只服务 settled，
+  v1 schema 已冻结、样例无此键）
+- `save.ts`：新增 `SAVE_TASK_KEYS`（10 键）、`SAVE_SETTLED_KEYS`（5 键）；`assertKeys()` 逐键比较
+  （排序 + 长度 + 每个 key）；`assertSaveV1` 新增：`world.tasks[]` 键集合校验、`world.settled[]` 元素键集合校验、
+  `status==='done'` 的任务必须能在 settled 找到
+- 测试（`save.test.ts` / `save-fingerprint.test.ts`）新增：样例键集合与常量逐键一致、
+  `toSave` 剥离后键集合=样例 + `done⊆settled`、嵌套漂移防线（加字段/伪 done 必红，还原恢复）
+- 改动 mtime 15:30–15:31；`save-quota.test.ts`、`save-v1.sample.json` 未改；无 server 改动
+  （server 最新 mtime 14:14:16）
+
+### 2) 样例与 schema（硬点 1/2）
+
+- 样例 SHA256 仍为 `F24FBAEF2B3B1543AEB0FEC9C242A96AA5D9C9F334B9C0CDD485540529298402`（5680 B）
+- `schemaVersion` 仍 1；`CURRENT_SCHEMA_VERSION=1`；指纹常量仍 `f53a0736d782d657`；样例指纹不变
+- 样例 `tasks[]` 键集合（排序）= `SAVE_TASK_KEYS`（10 键）；样例 `settled[]` 键集合 = `SAVE_SETTLED_KEYS`（5 键）
+- **无 task-24 新增迁移**：`MIGRATIONS` 仅保留 task-18 既有 v1→v2 样例迁移（key `1`），无 2→3
+
+### 3) 运行时落盘（硬点 1）
+
+- 造一个带 `ledgerCompletedAt=1792377786.7` 的活动台账单：**内存 task 对象确实带该字段**（证明剥离前存在）
+- `sim.toSave()` 后该 task 的键集合 = `[blockedQuestion,buildingId,completedAt,createdAt,id,kind,source,status,summary,workerId]`，
+  **无 `ledgerCompletedAt`**，与样例逐键一致；`assertSaveV1(sim.toSave())` 通过；
+  `save.schemaVersion===1`、`meta.schemaFingerprint` 不变
+- 结算后台账 settled 仍取内存台账时间 ×1000（剥离不影响结算）→ P2 关闭且 task-23 行为不回归
+
+### 4) 变异 / 嵌套防线（硬点 3，QA 独立）
+
+- `assertSaveV1` 必抛：tasks[] 加字段、tasks[] 少字段、伪造成 `done` 但无 settled、
+  settled[] 加字段、settled[] 少 `completedAtClock`
+- `done` 且 settled 命中 → 通过
+- **去剥离复现**：把 pixel-world 复制到工作区临时目录（不动仓库），删掉 `toSave` 的
+  `delete saved.ledgerCompletedAt` → `node --test test/save.test.ts test/save-fingerprint.test.ts`
+  由 **10/10 → 9 pass/1 fail**（`not ok 9 - toSave 剥离运行时字段：tasks[] 键集合=样例、done⊆settled、settled 键集合固定`），
+  与作者报的"去掉剥离 1 红"方向一致；临时副本已删除
+
+### 5) 回归（硬点 4）
+
+- `npm run check` 0；`npm test` **129/129 pass**
+- 沙盒 smoke **85/85**、台账 smoke **21/21**；`check_protocol` PASS；`test_core`（venv）**64/0**
+- task-18 存档行为：QA 存档探针 **32/32**；浏览器 **21/21**（离线写档/刷新续跑/pagehide/30s/在线对账）
+- task-23 时间戳：纯运行时 **20/20**（真实 8000 行 → settled.completedAt=1792377786778、clock ledger）；
+  浏览器 **6/6**
+- 交叉：task-10 24/24、task-15 16/16、task-17 26/26、task-21 26/26
+
+### 6) 问题分级
+
+| 级别 | 问题 | 说明 |
+|---|---|---|
+| **P0/P1/P2** | 无 | — |
+| P3（信息） | 运行时 `WorldSnapshot.tasks[]` 内存仍可带 `ledgerCompletedAt` | 该字段不落盘（已剥离），快照 schema 未冻结该字段；记录为信息 |
+
+**总评：通过。** 落盘字段集合与冻结样例逐键一致、样例 SHA/schemaVersion/指纹不变、嵌套防线可拦变异、
+去剥离测试必红；task-18/23 行为与全部回归绿。**task-23 P2 关闭，存档批次最终通过。**
+
+---
+
 # 附录 A：证据文件清单（工作区 `C:\Users\18712\.dsh\bot\workspace\recon\`）
 
 ## task-7
@@ -1312,6 +1552,52 @@ task-12 roster 探针 **8/8**（旧服务 `/roster 404 → /adapters` 回退未�
 | `eval\screens\17-task21-attribution.png` | 两人分账后的状态行/报纸截图 |
 | `task21-cleanup.log` | 端口释放、8000 PID/启动时间锚点、`commissions.db` 未被写 |
 
+## task-18（存档 v1 + 恢复）
+
+| 文件 | 内容 |
+|---|---|
+| `task18-npm-test.log` | 全量 **118/118**（save 相关 ok 48–58 等） |
+| `task18-check.log` | `npm run check` exit 0 |
+| `s1-task18-save-probe.log` | QA 存档探针 **32/32**（round-trip、settled 时钟、对账分支、坏档/配额/高版本/指纹不符/origin/阈值） |
+| `task18-fingerprint-mutated.log` / `task18-fingerprint-restored.log` | 样例真实变异 → 测试红；字节级还原 SHA 一致 → 3/3 绿 |
+| `save-v1.sample.orig.json` | 样例字节级备份（SHA256 `F24FBAEF…298402`，5680 B） |
+| `task18-sample-inspect.mjs` | 样例叶子路径 206/unique 99、指纹、settled 证据 |
+| `task18-browser-probe.log` | 浏览器 **21/21**：离线写档/刷新续跑/pagehide/30s/在线对账 |
+| `task18-smoke-sandbox.log` / `task18-smoke-ledger.log` | 沙盒 **85/85**、台账 **21/21** |
+| `task18-check-protocol.log` / `task18-test-core.log` | 主产品 PASS / 64 passed 0 failed |
+| `task18-cross-qa-task*.log` | 交叉 task-10/15/17/21：24/16/26/26 全过 |
+| `eval\screens\18-task18-persist.png` | 离线写档/刷新后续跑截图 |
+| `task18-cleanup.log` | 端口释放、8000 PID/启动时间锚点、样例 SHA 复核 |
+
+## task-23（台账时间戳透传）
+
+| 文件 | 内容 |
+|---|---|
+| `task23-npm-test.log` | 全量 **126/126**（新增时间戳 6 项） |
+| `task23-check.log` | `npm run check` exit 0 |
+| `s1-task23-timestamp-probe.log` | QA 纯运行时 **20 项**：三分支/秒毫秒/真实 8000 行/finishedAt 缺失/都缺/save 校验 |
+| `task23-browser-probe.log` | 浏览器 **6/6**：真实台账行 push → settled=×1000、clock ledger、存档/快照 |
+| `task23-fingerprint-drift.mjs` / `task23-task-field-drift.mjs` | 运行时档 vs 样例的路径/字段漂移证据（`world.tasks[].ledgerCompletedAt`） |
+| `task23-smoke-sandbox.log` / `task23-smoke-ledger.log` | 沙盒 **85/85**、台账 **21/21** |
+| `task23-check-protocol.log` / `task23-test-core.log` | 主产品 PASS / 64 passed 0 failed |
+| `task23-cross-*.log` | 交叉 task-18/10/15/17/21：32/24/16/26/26 全过 |
+| `eval\screens\19-task23-ledger-time.png` | 真实台账时间交付后的状态/存档证据 |
+| `task23-cleanup.log` | 端口释放、8000 PID/启动时间、样例 SHA、server mtime 复核 |
+
+## task-24（v1 字段漂移修复）
+
+| 文件 | 内容 |
+|---|---|
+| `task24-npm-test.log` | 全量 **129/129**（新增嵌套键集合/剥离/防线 3 项） |
+| `task24-check.log` | `npm run check` exit 0 |
+| `task24-nested-keys-probe.log` | QA 独立 **21/21**：样例 SHA/键集合、toSave 剥离、`assertSaveV1` 6 类变异、结算不回归 |
+| `task24-mut-baseline.log` / `task24-mut-nostrip.log` | 临时副本去剥离：10/10 → **9 pass / 1 fail**（测试必红） |
+| `task24-browser-task18.log` / `task24-browser-task23.log` | task-18 浏览器 **21/21**、task-23 浏览器 **6/6** |
+| `task24-smoke-sandbox.log` / `task24-smoke-ledger.log` | 沙盒 **85/85**、台账 **21/21** |
+| `task24-check-protocol.log` / `task24-test-core.log` | 主产品 PASS / 64 passed 0 failed |
+| `task24-cross-qa-task*.log` | 交叉 task-18/23/10/15/17/21：32/20/24/16/26/26 全过 |
+| `task24-cleanup.log` | 端口释放、8000 PID/启动时间、样例 SHA、server mtime、临时副本已清理 |
+
 # 附录 B：复验顺序（各卡）
 
 ```powershell
@@ -1401,3 +1687,33 @@ Get-NetTCPConnection -LocalPort 5188,5190,8001,8000 -State Listen -ErrorAction S
 - **task-21 收口（14:58:03）**：5188/8001/5189 无监听；8000 PID 22996、start 2026-10-18 16:40:34、health 200
   未重启；`data/commissions.db` 未被写（mtime 10:43:06）；`data/memory.db` 14:57:43 的变化来自 8000 自身会话写入
   （ledger smoke WS，非 QA 写台账）；临时目录 0、无 `.tmp` 残留
+- **task-18（存档 v1 + 恢复）：有条件通过（1 条 P2）**（15:13–15:18）——样例 206 路径去重 99、指纹
+  `f53a0736d782d657`；运行时快照无 settled；真实变异样例 → 指纹测试红、字节还原后绿；
+  settled 去重/分账/时钟、读档未对账→首 sync 三分支、坏档备份 3 份/配额先删旧再写主档/高版本只读/
+  指纹不符按坏档/origin 提示/30s+pagehide/刷新续跑（结构一致、漂移 0.9 格）均实测；**118/118**、check 0、
+  smoke **85/85 + 21/21**、check_protocol PASS、test_core 64/0；交叉 task-10/15/17/21 全过。
+  **P2**：ledger settled.completedAt 恒 null（未取 `closed_at ?? updated_at`，投影未接线）；P3：配额恢复无运行时接线、
+  `assertSaveV1` 形状校验较浅
+- **task-18 收口（15:18:17）**：5188/8001/5189 无监听；8000 PID 22996、start 2026-10-18 16:40:34、health 200
+  未重启；`data/commissions.db` 未被写（mtime 10:43:06）；`data/memory.db` 15:17:44 的变化来自 8000 自身会话写入
+  （ledger smoke WS，非 QA 写台账）；样例 SHA256 `F24FBAEF…298402`（5680 B）已复核；临时目录 0、无 `.tmp` 残留
+- **task-23（台账时间戳）：有条件通过（1 条 P2 新发现）；task-18 P2 关闭 → 通过**（15:24–15:28）——
+  三分支解析（closed_at 优先/退 updated_at/都缺 null）、秒×1000、毫秒原样、无本地兜底；
+  真实 8000 行 `closed_at=1792377786.7782023` → settled `completedAt=1792377786778`、clock=ledger
+  （纯运行时 + 浏览器各验一次）；finishedAt 缺失退回已见 updated_at；都缺→null；
+  `assertSaveV1(sim.toSave())` 通过、样例指纹/旧档读取不回归；**126/126**、check 0、smoke **85/85 + 21/21**、
+  check_protocol/test_core 64/0；交叉存档/排队/order/多角色/归属全过。
+  **P2（新）**：运行时 toSave 的 task 多出 `ledgerCompletedAt`（样例无、未升 v2；指纹断言只覆盖顶层键），
+  建议剥离运行时字段或升 v2+迁移+补嵌套断言
+- **task-23 收口（15:28:23）**：5188/8001/5189 无监听；8000 PID 22996、start 2026-10-18 16:40:34、health 200
+  未重启；`data/commissions.db` 未被写（mtime 10:43:06）；`data/memory.db` 15:27:44 变化来自 8000 自身会话写入；
+  样例 SHA `F24FBAEF…298402` 未变；server 最新 mtime 14:14:16（task-23 未碰 server）；临时目录 0、无 `.tmp` 残留
+- **task-24（v1 字段漂移修复）：通过**（15:32–15:36）——`toSave()` 剥离 `tasks[].ledgerCompletedAt`，
+  落盘 tasks 键集合与样例 10 键逐键一致；样例 SHA `F24FBAEF…298402`、schemaVersion 1、无新增迁移；
+  `SAVE_TASK_KEYS`/`SAVE_SETTLED_KEYS` 与样例逐键一致，`assertSaveV1` 校验 tasks/settled 键集合 + `done⊆settled`；
+  变异（加字段/伪 done/settled 加字段/少字段）全抛；临时副本去剥离 → **9 pass/1 fail**（测试必红）；
+  **129/129**、check 0、smoke **85/85 + 21/21**、check_protocol/test_core 64/0；task-18 刷新/对账/坏档/配额/高版本
+  与 task-23 真实台账时间戳回归全过。**task-23 P2 关闭，task-18/23/24 最终通过**
+- **task-24 收口（15:35:53）**：5188/8001/5189 无监听；8000 PID 22996、start 2026-10-18 16:40:34、health 200
+  未重启；`data/commissions.db` 未被写（mtime 10:43:06）；`data/memory.db` 15:35:46 变化来自 8000 自身会话写入；
+  样例 SHA `F24FBAEF…298402` 未变；server 最新 mtime 14:14:16；临时变异副本已删除、无 `.tmp` 残留

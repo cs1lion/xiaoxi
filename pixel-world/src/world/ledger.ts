@@ -22,8 +22,15 @@ export interface LedgerView {
     readonly status: string;
     /** blocked 单要请示的问题；空串表示没有。只透传，世界不回答。 */
     readonly blockedQuestion: string;
+    /** 台账事件时间（epoch 秒，closed_at ?? updated_at）；缺失 null。settled 只认它。 */
+    readonly completedAt?: number | null;
   }[];
   readonly finished: readonly string[];
+  /** 收工条目的台账事件时间（epoch 秒）；settled.completedAt 的唯一来源，缺就 null。 */
+  readonly finishedAt: readonly {
+    readonly commissionId: string;
+    readonly completedAt: number | null;
+  }[];
   readonly connected: boolean;
   /** 这份快照是否完整（REST 没取满 limit）。false 时世界不得把"不在快照里"当撤单。 */
   readonly complete: boolean;
@@ -337,8 +344,13 @@ export class LedgerClient {
         agentName: task.agentName,
         status: task.status,
         blockedQuestion: task.blockedQuestion,
+        completedAt: task.completedAt,
       })),
       finished: projected.finished.map((task) => task.commissionId),
+      finishedAt: projected.finished.map((task) => ({
+        commissionId: task.commissionId,
+        completedAt: task.completedAt,
+      })),
       connected: this.connected,
       complete: this.complete,
       order: projected.ordered.map((task) => task.commissionId),

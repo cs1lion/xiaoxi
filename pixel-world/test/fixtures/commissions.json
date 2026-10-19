@@ -1,7 +1,7 @@
 {
   "captured_at": "2026-10-19T13:05:53+08:00",
   "source": "GET http://127.0.0.1:8000/api/executive/commissions?limit=100",
-  "note": "字段集合与取值来自真实响应；captured 时台账只有 done。blocked/running 两条的 id/status/step_idx/blocked_question/agent_id/title 按 PROTOCOL.md §19 状态机派生，其余字段沿用真实响应。brief/packet/delivery/audit/blocked_question 里的用户文本已清空，只保留契约字段。",
+  "note": "字段集合与取值来自真实响应（closed_at/updated_at 是 epoch 秒，前端按 closed_at ?? updated_at 派生 completedAt，task-23）；captured 时台账只有 done。blocked/running 两条的 id/status/step_idx/blocked_question/agent_id/title 按 PROTOCOL.md §19 状态机派生，其余字段沿用真实响应。brief/packet/delivery/audit/blocked_question 里的用户文本已清空，只保留契约字段。",
   "items": [
     {
       "id": "c_3fea3a66ba86",
@@ -63,3 +63,4 @@
     }
   ]
 }
+

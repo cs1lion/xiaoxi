@@ -10,6 +10,12 @@ export interface OracleApi {
   readonly dispatch: (kind: 'code' | 'research' | 'writing' | 'quick', summary: string) => void;
   /** 人工交付；target 可选（角色 id 或名字），省略时收第一个在干活的人的单。 */
   readonly finish: (target?: string) => void;
+  /** 存档：立即写单槽。 */
+  readonly saveNow: () => { readonly ok: boolean; readonly message: string };
+  /** 读档：刷新页面，由启动流程从单槽恢复。 */
+  readonly loadSave: () => { readonly ok: boolean; readonly message: string };
+  /** 清档：删除单槽。 */
+  readonly clearSave: () => { readonly ok: boolean; readonly message: string };
   readonly build: (prefabId: string) => void;
   readonly feed: (message: {
     readonly type: 'task.assigned';
@@ -121,6 +127,22 @@ export function bindOraclePanel(getApi: () => OracleApi | undefined): void {
   }
 
   finish.addEventListener('click', () => submit('交付'));
+
+  document.querySelector<HTMLButtonElement>('#save-now')?.addEventListener('click', () => {
+    const api = getApi();
+    if (api === undefined) return;
+    const result = api.saveNow();
+    show(result.ok, result.message);
+  });
+  document.querySelector<HTMLButtonElement>('#load-save')?.addEventListener('click', () => {
+    getApi()?.loadSave();
+  });
+  document.querySelector<HTMLButtonElement>('#clear-save')?.addEventListener('click', () => {
+    const api = getApi();
+    if (api === undefined) return;
+    const result = api.clearSave();
+    show(result.ok, result.message);
+  });
 
   const rain = document.querySelector<HTMLButtonElement>('#rain');
   const clear = document.querySelector<HTMLButtonElement>('#clear');
