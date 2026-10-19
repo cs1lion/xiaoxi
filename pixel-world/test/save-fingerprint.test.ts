@@ -7,6 +7,9 @@ import {
   fingerprintOfPaths,
   SAVE_SETTLED_KEYS,
   SAVE_TASK_KEYS,
+  SAVE_V1_ALLOWED_PATHS,
+  SAVE_V1_OPTIONAL_PATHS,
+  SAVE_V1_PATHS,
   SCHEMA_V1_FINGERPRINT,
   saveFingerprint,
   type SaveWorld,
@@ -84,4 +87,95 @@ test('变异探针：字段变了但版本没升 → 指纹变化、测试必须
   };
   wrongMeta.meta.schemaFingerprint = 'deadbeefdeadbeef';
   assert.throws(() => assertSaveV1(wrongMeta));
+});
+
+// ------------------------------- P2：路径集合包含校验（只防新增路径，不重算双常量）
+
+test('冻结路径全集：99 条、与样例逐条一致、指纹等于常量', () => {
+  const fromSample = [...new Set(collectSavePaths(sample))].sort();
+  assert.equal(SAVE_V1_PATHS.length, 99);
+  assert.deepEqual([...SAVE_V1_PATHS].sort(), fromSample, '常量必须与 docs 样例路径逐条一致');
+  assert.equal(fingerprintOfPaths(SAVE_V1_PATHS), SCHEMA_V1_FINGERPRINT);
+  // 允许集合 = 样例 99 条 + 正在走路才会出现的可选嵌套路径。
+  assert.deepEqual(
+    new Set(SAVE_V1_ALLOWED_PATHS),
+    new Set([...SAVE_V1_PATHS, ...SAVE_V1_OPTIONAL_PATHS]),
+  );
+});
+
+test('P2：顶层 / world / meta / 任意数组元素加字段 → 拒绝，且报错指名越界路径', () => {
+  const mutate = (
+    apply: (copy: Record<string, unknown> & { world: Record<string, unknown>; meta: Record<string, unknown> }) => void,
+  ): unknown => {
+    const copy = JSON.parse(JSON.stringify(sample)) as Record<string, unknown> & {
+      world: Record<string, unknown>;
+      meta: Record<string, unknown>;
+    };
+    apply(copy);
+    return copy;
+  };
+  const cases: [string, unknown, string][] = [
+    ['顶层', mutate((copy) => { copy.unexpectedTopLevel = 1; }), 'unexpectedTopLevel'],
+    ['world', mutate((copy) => { copy.world.unexpectedWorldField = 1; }), 'world.unexpectedWorldField'],
+    ['meta', mutate((copy) => { copy.meta.unexpectedMetaField = 1; }), 'meta.unexpectedMetaField'],
+    [
+      'villagers 元素',
+      mutate((copy) => {
+        const villagers = copy.world.villagers as Record<string, unknown>[];
+        villagers[0].unexpectedVillagerField = 1;
+      }),
+      'world.villagers[].unexpectedVillagerField',
+    ],
+    [
+      'buildings 元素',
+      mutate((copy) => {
+        const buildings = copy.world.buildings as Record<string, unknown>[];
+        buildings[0].unexpectedBuildingField = 1;
+      }),
+      'world.buildings[].unexpectedBuildingField',
+    ],
+  ];
+  for (const [label, mutated, path] of cases) {
+    assert.throws(
+      () => assertSaveV1(mutated),
+      (error: unknown) => {
+        assert.ok(error instanceof Error);
+        assert.match(error.message, /字段漂移/);
+        assert.ok(error.message.includes(path), `${label}报错必须指名越界路径 ${path}：${error.message}`);
+        return true;
+      },
+      `${label}加字段必须被 assertSaveV1 拒绝`,
+    );
+  }
+});
+
+test('P2：meta.schemaFingerprint 缺失或不是字符串 → 拒绝', () => {
+  const missing = JSON.parse(JSON.stringify(sample)) as {
+    meta: Record<string, unknown>;
+  };
+  delete missing.meta.schemaFingerprint;
+  assert.throws(() => assertSaveV1(missing), /缺 meta\.schemaFingerprint/);
+
+  const notString = JSON.parse(JSON.stringify(sample)) as { meta: Record<string, unknown> };
+  notString.meta.schemaFingerprint = 12345;
+  assert.throws(() => assertSaveV1(notString), /缺 meta\.schemaFingerprint/);
+
+  const nulled = JSON.parse(JSON.stringify(sample)) as { meta: Record<string, unknown> };
+  nulled.meta.schemaFingerprint = null;
+  assert.throws(() => assertSaveV1(nulled), /缺 meta\.schemaFingerprint/);
+});
+
+test('P2：伪造 meta 字段骗不过校验（改值 / 加字段都拒）', () => {
+  const wrongValue = JSON.parse(JSON.stringify(sample)) as { meta: Record<string, unknown> };
+  wrongValue.meta.schemaFingerprint = 'deadbeefdeadbeef';
+  assert.throws(() => assertSaveV1(wrongValue), /指纹不符/);
+
+  const spoofed = JSON.parse(JSON.stringify(sample)) as Record<string, unknown> & {
+    world: Record<string, unknown>;
+    meta: Record<string, unknown>;
+  };
+  // 加字段 + meta 里仍写着"看起来合法"的常量：旧实现会放行，包含校验必须拒绝。
+  spoofed.world.smuggledField = 1;
+  spoofed.meta.schemaFingerprint = SCHEMA_V1_FINGERPRINT;
+  assert.throws(() => assertSaveV1(spoofed), /字段漂移/);
 });

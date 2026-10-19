@@ -24,6 +24,117 @@ export const SETTLED_WARN_THRESHOLD = 5000;
 /** 冻结指纹（ADR_SAVE §1，frozen）。样例 meta.schemaFingerprint 同值。 */
 export const SCHEMA_V1_FINGERPRINT = 'f53a0736d782d657';
 
+/** v1 冻结路径全集（99 条，来自 docs/save-v1.sample.json；指纹见上，单测核对）。
+ * `assertSaveV1` 做**集合包含**校验：存档出现的每条叶子路径都必须在这个集合里；
+ * 越界即按「字段漂移」拒绝，并指名越界路径。
+ *
+ * 语义边界（P2）：本校验只防「新增路径」。字段删除（路径合法缩小）、类型变化
+ * （number↔string↔null、null↔{} 等）不在这里拦——靠显式形状校验与 v2 迁移处理。
+ * 不给存档本身重算指纹再比常量，是因为空数组会让路径集合合法地缩小
+ * （fresh save 的重算值本来就不等于常量），那样会把正常存档全判成坏档。
+ */
+export const SAVE_V1_PATHS: readonly string[] = [
+  'meta.savedAtWallClock',
+  'meta.savedReconciled',
+  'schemaVersion',
+  'world.activities[]',
+  'world.activities[].activity.determinate',
+  'world.activities[].activity.estimateMs',
+  'world.activities[].activity.kind',
+  'world.activities[].activity.since',
+  'world.activities[].activity.startedAt',
+  'world.activities[].activity.taskId',
+  'world.activities[].activity.until',
+  'world.activities[].buildingId',
+  'world.buildings[]',
+  'world.buildings[].accent',
+  'world.buildings[].boundTask',
+  'world.buildings[].chimney.x',
+  'world.buildings[].chimney.y',
+  'world.buildings[].displayName',
+  'world.buildings[].door.x',
+  'world.buildings[].door.y',
+  'world.buildings[].footprint.h',
+  'world.buildings[].footprint.w',
+  'world.buildings[].instanceId',
+  'world.buildings[].origin.x',
+  'world.buildings[].origin.y',
+  'world.buildings[].palette.body',
+  'world.buildings[].palette.roof',
+  'world.buildings[].palette.trim',
+  'world.buildings[].palette.window',
+  'world.buildings[].prefabId',
+  'world.buildings[].silhouette',
+  'world.buildings[].workSpot.x',
+  'world.buildings[].workSpot.y',
+  'world.buildings[].zone',
+  'world.constructions[]',
+  'world.constructions[].buildingId',
+  'world.constructions[].remainingMs',
+  'world.constructions[].totalMs',
+  'world.faith.milestones',
+  'world.faith.points',
+  'world.nextPendingNumber',
+  'world.nextTaskNumber',
+  'world.now',
+  'world.pending[]',
+  'world.pending[].id',
+  'world.pending[].kind',
+  'world.pending[].requestedAt',
+  'world.pending[].source',
+  'world.pending[].summary',
+  'world.pending[].villagerId',
+  'world.props[]',
+  'world.props[].at.x',
+  'world.props[].at.y',
+  'world.props[].id',
+  'world.props[].kind',
+  'world.props[].label',
+  'world.roads[]',
+  'world.roads[].x',
+  'world.roads[].y',
+  'world.settled[]',
+  'world.settled[].completedAt',
+  'world.settled[].completedAtClock',
+  'world.settled[].id',
+  'world.settled[].source',
+  'world.settled[].workerId',
+  'world.tasks[]',
+  'world.tasks[].blockedQuestion',
+  'world.tasks[].buildingId',
+  'world.tasks[].completedAt',
+  'world.tasks[].createdAt',
+  'world.tasks[].id',
+  'world.tasks[].kind',
+  'world.tasks[].source',
+  'world.tasks[].status',
+  'world.tasks[].summary',
+  'world.tasks[].workerId',
+  'world.villagers[]',
+  'world.villagers[].bubble',
+  'world.villagers[].bubbleUntil',
+  'world.villagers[].deliverUntil',
+  'world.villagers[].facing',
+  'world.villagers[].id',
+  'world.villagers[].inPlaceUntil',
+  'world.villagers[].mode',
+  'world.villagers[].name',
+  'world.villagers[].nextRoutineAt',
+  'world.villagers[].path[]',
+  'world.villagers[].pendingBuildingId',
+  'world.villagers[].pendingRoute[]',
+  'world.villagers[].pos.x',
+  'world.villagers[].pos.y',
+  'world.villagers[].routineIndex',
+  'world.villagers[].routineLabel',
+  'world.villagers[].saluteUntil',
+  'world.villagers[].taskId',
+  'world.villagers[].visible',
+  'world.weather.intensity',
+  'world.weather.kind',
+  'world.weather.remainingMs',
+];
+
 /**
  * v1 冻结的 `world.tasks[]` 键集合（必须与 docs/save-v1.sample.json 逐键一致）。
  * 运行时字段（如 ledgerCompletedAt）不得落盘；字段漂移必须升版本，不能裸加。
@@ -168,10 +279,36 @@ export function fingerprintOfPaths(paths: readonly string[]): string {
   return fnv1a64Hex([...new Set(paths)].sort().join('\n'));
 }
 
+/**
+ * 样例里没走到、但运行中合法的 4 条嵌套路径（完整字符串见下方常量）。
+ *
+ * 原因：`docs/save-v1.sample.json` 里 `world.villagers[].path` 与
+ * `world.villagers[].pendingRoute` 都是空数组，`collectSavePaths` 只会记下
+ * `world.villagers[].path[]` 这一条数组路径，不会出现元素键；而小人一旦在走路
+ * （`mode=toWork/toAltar/sheltering`，或读档时带着待走路径），这两个数组就是
+ * 非空的 `{x,y}[]`，属于 v1 的合法现场。不补进允许集合，「正在走路」的存档
+ * 会被集合包含校验误判成字段漂移。
+ */
+export const SAVE_V1_OPTIONAL_PATHS: readonly string[] = [
+  'world.villagers[].path[].x',
+  'world.villagers[].path[].y',
+  'world.villagers[].pendingRoute[].x',
+  'world.villagers[].pendingRoute[].y',
+];
+
+/** 合法存档允许出现的路径全集 = 冻结样例 99 条 + 上面这些可选嵌套路径。 */
+export const SAVE_V1_ALLOWED_PATHS: readonly string[] = [
+  ...SAVE_V1_PATHS,
+  ...SAVE_V1_OPTIONAL_PATHS,
+];
+
+const SAVE_V1_PATH_SET = new Set(SAVE_V1_ALLOWED_PATHS);
+
 /** 对任意存档对象取指纹（跳过 meta.schemaFingerprint）。 */
 export function saveFingerprint(save: unknown): string {
   return fingerprintOfPaths(collectSavePaths(save));
 }
+
 
 /** 键集合必须与冻结样例逐键一致：多一个运行时字段就是字段漂移。 */
 function assertKeys(
@@ -186,7 +323,12 @@ function assertKeys(
   }
 }
 
-/** 校验 v1：形状 + 嵌套键集合 + 冻结指纹。指纹不符 = 字段漂移，按坏档处理。 */
+/**
+ * 校验 v1：显式形状/嵌套键集合校验 + 路径集合包含校验
+ * （实际路径 ⊆ 冻结 99 条 + 4 条可选；越界即拒，并在报错里指名越界路径）。
+ * 只防「新增路径」；删除/类型变化不在路径集校验范围，现由显式形状校验兜底，
+ * 缺口记 task-32（最小 required 集，不在 v1 内改），v2 再以正式 schema 承接。
+ */
 export function assertSaveV1(raw: unknown): asserts raw is WorldSaveV1 {
   if (!isObject(raw)) throw new Error('存档不是对象');
   if (raw.schemaVersion !== CURRENT_SCHEMA_VERSION) {
@@ -219,7 +361,12 @@ export function assertSaveV1(raw: unknown): asserts raw is WorldSaveV1 {
   }
   const meta = raw.meta;
   if (!isObject(meta)) throw new Error('存档缺 meta');
-  if (typeof meta.schemaFingerprint === 'string' && meta.schemaFingerprint !== SCHEMA_V1_FINGERPRINT) {
+  // meta.schemaFingerprint 是冻结产物的自证字段：缺失/不是字符串一律拒绝，避免
+  // 「删掉它就能绕过旧检查」；存在但与常量不等也拒绝（被改过或字段漂移）。
+  if (typeof meta.schemaFingerprint !== 'string') {
+    throw new Error('存档缺 meta.schemaFingerprint（v1 要求该字段存在）');
+  }
+  if (meta.schemaFingerprint !== SCHEMA_V1_FINGERPRINT) {
     throw new Error('存档指纹不符（字段变了但版本没升，或存档损坏）');
   }
   const settledIds = new Set<string>();
@@ -246,6 +393,16 @@ export function assertSaveV1(raw: unknown): asserts raw is WorldSaveV1 {
     if (task.status === 'done' && !settledIds.has(String(task.id))) {
       throw new Error(`done 任务 ${String(task.id)} 缺少 settled 记录`);
     }
+  }
+  // P2：路径集合包含校验——存档里出现的每条叶子路径都必须落在允许全集里。
+  // 语义边界：这里只防「新增路径」（顶层/world/meta/数组元素里多字段）；
+  // 字段删除（路径合法缩小）、类型变化（number↔string↔null、null↔{} 等）仍由
+  // 上面的显式形状校验 + 未来 v2 迁移兜底，不在本检查范围内。
+  const outside = collectSavePaths(raw).filter((path) => !SAVE_V1_PATH_SET.has(path));
+  if (outside.length > 0) {
+    throw new Error(
+      `存档字段漂移：出现 v1 允许集合之外的路径：${outside.join(', ')}（字段变了但版本没升）`,
+    );
   }
 }
 

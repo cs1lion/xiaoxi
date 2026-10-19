@@ -2,7 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { parseBlueprintTable } from '../src/world/blueprints.ts';
-import { ALTAR, buildWorld, buildWorldFromSave } from '../src/world/setup.ts';
+import { ALTAR, buildWorld, buildWorldFromSave, placeBlueprint } from '../src/world/setup.ts';
 import { Simulation } from '../src/world/simulation.ts';
 import { assertSaveV1, MIGRATIONS, SAVE_SETTLED_KEYS, SAVE_TASK_KEYS, type WorldSaveV1 } from '../src/world/save.ts';
 
@@ -19,6 +19,11 @@ function makeSim(wallClock: () => number = () => 1000): Simulation {
     altar: ALTAR,
     villagerName: '莞尔',
     wallClock,
+    spawnBuilding: (prefabId, instanceId) => {
+      const blueprint = blueprints.get(prefabId);
+      if (blueprint === undefined) return null;
+      return placeBlueprint(world.grid, blueprint, instanceId, ALTAR);
+    },
   });
 }
 
@@ -295,4 +300,49 @@ test('嵌套漂移防线：tasks[] 加字段 / done 缺 settled → assertSaveV1
   missingSettled.world.tasks[0].status = 'done';
   missingSettled.world.settled = [];
   assert.throws(() => assertSaveV1(missingSettled), /缺少 settled 记录/);
+});
+
+// P2：指纹重算不能与「空数组」冲突——还没发生过 tasks/settled 的正常存档必须继续通过。
+test('P2 契约：fresh toSave（空数组）与运行中 toSave 都通过 assertSaveV1', () => {
+  const fresh = makeSim();
+  fresh.update(16);
+  const save = fresh.toSave();
+  assert.equal(save.world.settled.length, 0);
+  assert.doesNotThrow(() => assertSaveV1(save), '空 tasks/settled 的正常存档不能判成坏档');
+
+  const running = makeSim();
+  running.enqueue({ kind: 'dispatch', taskKind: 'quick', summary: '顺手看一眼' });
+  running.update(16);
+  assert.doesNotThrow(() => assertSaveV1(running.toSave()));
+});
+
+test('P2 契约：小人走路中（villagers[].path 非空）的存档仍通过 assertSaveV1', () => {
+  const sim = makeSim();
+  sim.enqueue({ kind: 'dispatch', taskKind: 'code', summary: '写脚本' });
+  let guard = 0;
+  while (!sim.toSave().world.villagers.some((villager) => villager.path.length > 0)) {
+    sim.update(100);
+    if ((guard += 1) > 400) throw new Error('没进入走路态');
+  }
+  const save = sim.toSave();
+  assert.ok(save.world.villagers.some((villager) => villager.path.length > 0), '样例里没有的 path[].x/y 必须被允许');
+  assert.doesNotThrow(() => assertSaveV1(save));
+});
+
+test('P2 契约：满数据存档（settled / constructions / 队列非空）通过 assertSaveV1', () => {
+  const sim = makeSim();
+  sim.enqueue({ kind: 'dispatch', taskKind: 'quick', summary: '顺手看一眼' });
+  let guard = 0;
+  while (sim.snapshot().deliveries.mock < 1) {
+    sim.update(100);
+    if ((guard += 1) > 400) throw new Error('短活没结束');
+  }
+  // 再开一栋，制造非空 constructions（施工中存档）。
+  sim.enqueue({ kind: 'build', prefabId: 'workshop_plot', instanceId: 'workshop_plot#4' });
+  sim.update(100);
+  sim.update(100);
+  const save = sim.toSave();
+  assert.ok(save.world.settled.length > 0, '满数据档应有 settled');
+  assert.ok(save.world.constructions.length > 0, '满数据档应有 constructions');
+  assert.doesNotThrow(() => assertSaveV1(save));
 });

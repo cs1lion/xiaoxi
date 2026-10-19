@@ -111,6 +111,12 @@
         font-size: 12px;
       }
       #reply.bad { color: var(--warn); }
+      #save-io-reply {
+        min-height: 1.2em;
+        color: var(--dim);
+        font-size: 12px;
+      }
+      #save-io-reply.bad { color: var(--warn); }
       #paper {
         width: 720px;
         max-width: 100%;
@@ -248,6 +254,12 @@
         <button type="button" id="load-save">读档：刷新恢复</button>
         <button type="button" id="clear-save">清档：删除存档</button>
       </div>
+      <div class="row">
+        <button type="button" id="save-export">存档：导出 JSON</button>
+        <button type="button" id="save-import">存档：导入 JSON</button>
+        <input type="file" id="save-import-file" accept="application/json,.json" hidden />
+      </div>
+      <div id="save-io-reply" role="status" aria-live="polite"></div>
       <div id="reply" role="status" aria-live="polite"></div>
     </form>
 
