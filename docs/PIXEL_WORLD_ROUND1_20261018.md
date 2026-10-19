@@ -19,7 +19,7 @@
 
 纯逻辑层（不 import Phaser，可离线测）：
 
-- `types.ts`：世界数据模型。`VillagerMode` 六态、`WorkstationActivity` 四态、`OracleIntent` 三态，全部判别联合。
+- `types.ts`：世界数据模型。`VillagerMode` 六态（后续新增 `sheltering`，现为七态，见 `src/world/types.ts`）、`WorkstationActivity` 四态、`OracleIntent` 三态，全部判别联合。
 - `grid.ts`：分区、占用、留白、4 邻域 A*、门口可通行。
 - `blueprints.ts`：蓝图表在边界解析。id 不符、门口落在占地内、活与铺子对不上、每种活不是恰好一栋，全部拒绝开工。
 - `setup.ts`：世界规格（30×20、16px、6 分区、3 铺子）与落位。`assertWorldInvariants` 检查铺子数量、分区不重叠、门口不在祭坛、每栋都能从祭坛走到。

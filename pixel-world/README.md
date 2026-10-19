@@ -64,7 +64,7 @@ src/render/         只读 WorldSnapshot，画地形、建筑、小人、烟、�
 src/scenes/         唯一的 Phaser 场景：驱动 tick、转输入、转快照
 src/ui/             DOM 神谕面板与报纸。中文永远归 DOM，不画进 canvas
 src/audio/          哇啦哇啦拟音，Web Audio 现场合成，无素材、无 TTS
-test/               45 项纯逻辑断言
+test/               59 项纯逻辑用例（147 条断言）
 scripts/smoke.mjs   浏览器闭环回归
 ```
 

@@ -1,0 +1,96 @@
+# 决策留痕：2026-10-19 像素世界基线核验（第一轮）
+
+本轮由用户发起：「AI 原生像素个人助理世界」项目启动，第一阶段只做基线核验，不改代码。
+执行：Chief 总协调 + 5 名专项 Bot（架构、运行时 QA、代码审计、美术/演示、Agent 集成），
+每项核验只有一个主负责人；所有结论要求文件、运行结果或测试证据。
+
+## 一、本轮已核验的事实（不是决策，是可复现结论）
+
+1. 真实根目录 `D:\project\neurosama`；分支 `feat/pixel-world-oracle-world`；HEAD `9cd0c5a`；`pixel-world/` 工作区干净。
+2. Phaser 3.90 + TypeScript 5.9.3 + Vite 8.3.4 **已落地**：`pixel-world/package.json:15-22`、`main.ts:17-33`、`tsconfig.json`。
+3. 实测门禁：`npm run check` 通过；`npm test` 59/59；`npm run build` 通过（产物 1.25MB，gzip 337kB）；
+   浏览器冒烟沙盒 49/49、台账 10/10、显式离线 7/7。证据：`docs/RUNTIME_VERIFICATION.md`。
+4. 进度文档严重滞后：19 张任务卡实际 17 DONE + 2 PARTIAL，文档仍停在 Phase 1 IN_PROGRESS。证据：`docs/TASK_COMPLETION_MATRIX.md`。
+5. MVP 1.0 九项：4 DONE / 4 PARTIAL / 2 MISSING（多角色、JSON 存档）。证据：同上 §2。
+6. 台账**下行链**真实（REST 全量 + WS 增量 + 断线轮询），**上行链**仅 Mock（`Bridge` 未实例化）。证据：`docs/AGENT_INTEGRATION_STATUS.md`。
+7. 存在 P0 级问题：人工交付可绕过台账完成权（`simulation.ts:500-513`）；`/api/executive/adapters` 字段契约错位
+   （返回 `agent_id`、无 `strengths`，前端 `projection.ts:141-150` 解析失败 → Agent→铺子映射恒空）。
+8. `DEMO_SCRIPT.md`、`ART_SPEC.md`、`REPO_RECON.md` 此前均不存在；本轮已补 `REPO_RECON.md`，
+   另两份的真实状态与待补清单见 `docs/DEMO_ART_SPEC_TODO.md`。
+
+## 二、需要用户拍板的决策（本轮不擅自裁决）
+
+> 按 `README_CHIEF_START.md:21-31` 的优先级，「用户最新决定」最高。以下是按证据整理出的问题，
+> Chief/Architect 的推荐不等于决定。拍板后由 Chief 写入 `docs/ARCHITECTURE_GAPS.md` D 节并转 accepted。
+>
+> **用户已拍板（2026-10-19 12:57）**：D1、D2 采纳推荐项（见下，状态改为 accepted）；D3、D4 先逐条讨论；
+> D5/D6/D7 暂未定。同时**批准启动 S0（文档对账与工程护栏）**，S1 起暂缓。
+
+### D1 — 引擎与文档定性（**accepted · 2026-10-19 · 用户选 A**）
+- 现状：`PROJECT_BRIEF.md:10` 写「Phaser 3 + TS + Vite 已确认」；`docs/PIXEL_WORLD_ARCHITECTURE.md:45-51` 写「不引成熟引擎、v1 Canvas 2D」；代码是 Phaser。三份文档都没有记录「独立原型 + Phaser」的转向 ADR。
+- 选项：A（推荐）确认 Phaser 3 为样品 1.0 与近期正式栈，把两份 pixel 笔记标为「历史提案」，补 ADR；B 改回 Canvas 2D/Pixi（`src/world/` 可复用，重写 `src/render/`+`src/scenes/`，49 项冒烟需重跑）；C 暂不裁决（后续 Agent 继续在冲突里猜）。
+- 影响：决定渲染层改造是否发生、像素化 3D（E2）是否还有意义。
+- **裁决结果（A）**：Phaser 3.90 + TypeScript + Vite 为样品 1.0 与近期正式渲染栈；`PIXEL_WORLD_ARCHITECTURE.md`、`PIXEL_WORLD_RESEARCH.md` 标注为历史提案并保留原文；不启动引擎迁移。本记录即 ADR。
+
+### D2 — MVP 1.0 范围冻结（**accepted · 2026-10-19 · 用户选 A**）
+- 现状：BRIEF 的必须项缺 2 个硬项（多角色、存档）+ 1 个 UI（调试面板），却已实现多项「暂不包含」（自动铺路、长短分级、四态、拟音、信仰、真实台账）。
+- 选项：A（推荐）按 BRIEF 冻结，先补 2–3 小人、JSON 存档、调试面板；B 先做像素化 3D（E2，美术路线否决实验）；C 先做真实 Agent 双向集成（写回/验收）。
+- 影响：直接决定下一阶段的施工顺序与演示剧本的第三段是否可演。
+- **裁决结果（A）**：按 `PROJECT_BRIEF.md:22-32` 冻结样品 1.0 范围，先补 2–3 个小人、JSON 存档单槽、调试面板 UI；
+  像素化 3D（E2）、LLM 造物主生成、完整双向 Agent 集成列为 1.1，需另行批准。已实现的超范围项保留但不扩写。
+
+### D3 — 人工交付的语义（P0 诚信风险）（**讨论中 · 待用户拍板**）
+- 现状：`simulation.ts:500-513` 的 `completeManually` 不检查任务来源，可把台账单在本地标记完成并加神恩，违反 `README.md:85`「完成权在台账手里」；无测试覆盖。
+- 选项：A（推荐）人工交付只对沙盒单生效，台账单拒绝并提示「完成权在台账」；B 保留现状但 UI 明示「本地标记，不改台账」；C 移除人工交付入口。
+- 影响：「世界不撒谎」这条产品原则是否还成立；演示需不需要两段式。
+
+### D4 — 台账 Agent 能力映射的修法（涉及主产品服务端，需你批准才动）（**讨论中 · 待用户拍板**）
+- 现状：`GET /api/executive/adapters` 返回 `{agent_id, name, …}`，世界要 `{id, strengths}`（`projection.ts:141-150`）→ 真机 `agents` 恒空，7 Agent 归三类活退化为标题关键词。
+- 选项：A（推荐）新增只读端点 `GET /api/executive/roster`（`id/name/strengths`），世界改读它；B 在现有 adapters 响应里补 `id` 与 `strengths`；C 世界放弃能力映射，承认按标题猜。
+- 影响：A/B 需要改主产品服务端（属于「不得擅自修改」的范围，必须你批准）；C 不改码但产品承诺作废。
+
+### D5 — 世界内中文的处置（红线级）（**待定**）
+- 现状：`README.md:78-79`、`index.html` 声明「中文永远归 DOM」，但渲染层有 6 处 `scene.add.text` 画中文（`villager.ts:32-47`、`buildings.ts:75-80`、`decor.ts:101-108`、`SandboxScene.ts:155-162,345-350`）；截图中「路灯/神谕祭坛/角色名」叠字，400% 下不可读，390px 视口横向溢出。
+- 选项：A（推荐）迁到 DOM overlay（工作量中，兑现红线）；B 放宽红线，承认小字号中文进 canvas 并补可读性验收；C 只迁气泡（信息量最大），名字保留 canvas。
+- 影响：ART_SPEC 的可读性验收是否成立、3 秒可读性验收目标能否达成。
+
+### D6 — 尺寸/调色板/帧率口径（ART_SPEC 定稿前提）（**待定**）
+- 冲突：瓦片 16px（实现）vs 32px（`source/01:200`）；原生分辨率 480×320（实现/README）vs 480×300（架构笔记）vs `main.ts:25` 注释 480×396；调色板实现约 72 色 vs 预算 12–16 色；12fps 是「动画采样」还是「渲染限帧」未定义。
+- 选项：A（推荐）以实现为准：16px tile / 480×320 / 调色板硬上限 16（世界 16 + UI 8 双表） / 12fps 定义为动画采样、渲染跟随屏幕；B 按设计文档重排尺寸（需重画全部素材与蓝图）；C 放宽调色板到 24/32。
+- 影响：精灵规格、锚点、建筑尺寸、E2 实验、调色板校验器是否要做。
+
+### D7 — 工程护栏（低风险，建议一并拍板）（**待定 · 阻塞 S0-6**）
+- 选项：A（推荐）把 `pixel-world` 纳入 `scripts/run_gates.py` 与 CI（`tsc --noEmit` + 4 个测试文件 + smoke），`docs/TESTING.md` 写明本环境 `node --test` 的行为；B 只在 CI 加独立 job；C 维持人工 QA。
+- 影响：59 项断言是否成为回归护栏。
+
+## 三、Chief 按现有规则代行的临时判断（可被用户推翻）
+
+1. **Phaser 3 已由用户确认**（D1-A，2026-10-19）：按正式渲染栈对待，不启动引擎迁移。
+2. **本轮不改任何源码/配置/测试**；只新增核验文档，并修正启动包里的 `PROJECT_PROGRESS.md`（它自己声明「待 Chief 核验并更新」）。
+3. **文档中所有「已完成」不再直接采信**：本轮只承认有文件:行号或运行证据的状态；「未验证」保持未验证（如无 Key Mock 路径、服务端真实 WS 推送）。
+4. **不触碰个人 Agent 核心、记忆与自进化系统**：主产品 `server/assistant/*`、`server/memory/*` 的 35 个未提交改动只记录、不评价、不修改。
+5. **S0 已批准并执行中**（2026-10-19）：只改文档与一行注释；S0-6（纳入门禁）等 D7，S1 等 D3/D4。
+
+## 四、本轮产出（新增文件，未提交 Git）
+
+| 文件 | 作者 | 用途 |
+| --- | --- | --- |
+| `docs/REPO_RECON.md` | Chief | 仓库调查报告（结构/启动/测试/入口/未知项） |
+| `docs/RUNTIME_VERIFICATION.md` | QA Bot | 逐条命令与实测证据 |
+| `docs/TASK_COMPLETION_MATRIX.md` | 代码审计 Bot | 任务卡与 MVP 九项逐项判定 |
+| `docs/ARCHITECTURE_GAPS.md` | 架构 Bot | 决策清单/文档冲突/风险/待裁决项 |
+| `docs/DEMO_ART_SPEC_TODO.md` | 美术导演 Bot | DEMO_SCRIPT / ART_SPEC 待完善事项 |
+| `docs/AGENT_INTEGRATION_STATUS.md` | Agent 集成 Bot | 台账集成三分类与风险 |
+| `docs/DECISION_TRAIL_20261019.md` | Chief | 本文件 |
+| `docs/NEXT_PHASE_PLAN.md` | Chief | 下一阶段计划与验收标准 |
+| `pixel-agent-chief-starter/docs/PROJECT_PROGRESS.md` | Chief | 进度文档改写为「已核验版」 |
+
+## 五、Gate
+
+- 第一轮（基线核验）：**已完成**，报告见同批 6 份核验文档。
+- **S0（文档对账与护栏）：用户已批准，进行中**（2026-10-19）。S0-1~S0-5 开工；S0-6（纳入门禁）等 D7。
+- **S1（P0 诚信与集成修复）：部分完成（2026-10-19）**。参考包采纳项 task-7（WS 指数退避）、task-9（契约 fixture）、
+  task-8（`/ws` Origin 校验）三张卡已完成并经 QA 独立复验通过，证据见 `docs/QA_VERIFICATION_S1.md`；
+  task-8 服务器改动仅 `server/app.py` +24 行、只限 `/ws`，未触碰 assistant/memory/自进化。
+  S1 其余项（D3 人工交付、D4 契约、周期对账、真帧端到端）仍待 D3/D4 拍板。
+- 在 D3/D4 拍板前，不开始大规模编码；不重构 Agent 核心；不更换已确认的技术栈（D1 已定）。
