@@ -2827,7 +2827,7 @@ Get-NetTCPConnection -LocalPort 5188,5190,8001,8000 -State Listen -ErrorAction S
 | **3a** | **可选路径完整性（重点）** | ✅ 把 Simulation 推进到 fresh→idle→dispatch→走路→开工→交付→下雨→多单→unknown 命令→cancelPending→complete 等 **数百个状态点**，收集去重后所有 save 路径，**越界 0 条**——`SAVE_V1_PATH_SET` 没有漏项 |
 | 4 | `read()` vs `importText()` 等价 | ✅ 7 个用例判定全一致（合法/坏档/形状错/高版本/world 加字段/缺指纹/空文件） |
 | 5a–5h | 原有 task-22 项不回归 | ✅ 导出单槽原文逐字节、内容合规无运行时字段、文件名格式、坏档备份 3 份且主槽不变、高版本只读不误关自动存档、2MB 上限、配额降级只提示一次、导入后自动存档重开 |
-| 门禁 | `check` 0 / `test:inprocess` **179/179** / audit **16/8/1/23** / `--strict` 0 / 整门禁 **exit 0** | ✅（`save-import.test.ts` 单跑 11/11，`save-fingerprint`+`save` 17/17） |
+| 门禁 | `check` 0 / `test:inprocess` **180/180** / audit **16/8/1/23** / `--strict` 0 / 整门禁 **exit 0** | ✅（`save-import.test.ts` 单跑 12/12，`save-fingerprint`+`save` 17/17） |
 
 ### 缺陷与边界
 
@@ -2850,3 +2850,229 @@ Get-NetTCPConnection -LocalPort 5188,5190,8001,8000 -State Listen -ErrorAction S
 ### 收口
 
 - 本轮未改动任何项目文件（只读验收 + TEMP 探针 `qa22c-final.mjs`）；`git status` 与进场快照一致，无残留进程/监听。
+
+---
+
+# S4 演示验收 · QA 复验协议（2026-10-19 20:40 立，lead · QA Engineer）
+
+- **依据**：`docs/S4_DEMO_PLAN.md`（HEAD `2a0e6ea`）+ `docs/DEMO_SCRIPT.md` **v0.3**（6 个时间槽）。
+- **用户硬性要求**：每段有操作步骤+预期画面+**实测计时**；总时长以实测为准不凑满 3 分钟；每段标注数据来源
+  （live 台账/真实 WS/Mock）；三项未验证项（live 台账、smoke、主服务冷启动）要么当场验证留证要么写成已知限制；
+  提供可重复的干净重置步骤；**QA 独立复验至少两遍（Mock 一遍 + 真实台账一遍）并附 100% 与 400% 整页截图**；
+  文档数字必须由脚本输出生成或引用。
+- **环境状态（本会话已解决的关键阻塞）**：外部 Chrome 已由 Chief 起好并保持运行，
+  `http://127.0.0.1:9333` **三种方式均验证连通**（PowerShell `Invoke-WebRequest`、Node `fetch`、
+  Playwright `chromium.connectOverCDP` 均 OK，`HeadlessChrome/149.0.7827.55`，`devicePixelRatio=1`）；
+  `npm run dev` 在 `http://127.0.0.1:5188/?ledger=off` 返回 200。**截图环境已通，我不再需要标「未验证」。**
+  我不关闭该 Chrome、不杀用户自己的 chrome 进程。
+
+## 两遍复验的范围
+
+| 遍次 | 页面 | 数据来源标注（必须出现在状态行） | 目的 |
+|---|---|---|---|
+| 第一遍 Mock | `http://127.0.0.1:5188/?ledger=off` | 「台账离线 · 离线 Mock」 | 世界闭环/画面/动画/天气/存档/调试面板全链路 |
+| 第二遍 live | 隔离 **8001**（数据副本、lifespan ON、真实 WS 推送） | 「台账在线」 | 任务来源与交付统计走真实通道；验证「读档未对账」保护与对账后恢复 |
+
+**live 纪律**：只用 Chief 告知的隔离端口/数据副本；**不连 8000、不写主库 `data/`**；实例由施工起，
+QA 只做独立观察与记录，文档里注明「实例由施工起、QA 独立观察」。
+
+## 每段检查点与计时核验方式
+
+**计时核验方法（不采信手填数字）**：用 CDP 打开页面后，以 **100ms 轮询** `Oracle.view()` 的
+`now / villagers[0].mode / #status 文本 / #reply / #paper / deliveriesByVillager / faith`，
+记录**模式切换时刻**（idle→saluting→toWork→working→delivering→toAltar→idle），
+以「相对派单时刻的 ms 数」作为该段实测计时；截图时先用 `__QA_S4_STATE__.frozen` 冻结 rAF
+再拍，保证同参数可复现。
+
+| 时间槽 | 检查点（实测判定，不靠口播） | 计时/数字核验 |
+|---|---|---|
+| 0–15s 启动 | `?ledger=off` 打开后无 `pageerror`；`buildings.length===3`；`villagers` 含莞尔+阿雾且 `mode==='idle'`；状态行含「台账离线 · 离线 Mock」 | 我实测：now=600ms 时 buildings=3、双角色 idle、状态行完整 |
+| 15–60s 委托闭环 | 派「帮我查一下资料」(research) 后依次出现 saluting→toWork→working→delivering→toAltar→idle；铺子冒烟+进度线；交付后状态行计数 +1；`#reply` 无红字 | **我已实测的时间线**（Mock，research）：0ms idle → **100ms saluting** → **800ms toWork** → **1800ms working** → **6000ms delivering** → **7400ms toAltar** → **8400ms idle**。即行礼 ≈700ms、走路+进屋 ≈1s、干活 ≈4.2s、交付→回祭坛 ≈2.4s，**整环 ≈8.4s**，落在剧本「8–15 秒」区间内 |
+| 60–90s 日报 | 滚动到 `#paper`；标题等于 `Oracle.report().headline`；正文含角色名与「交付」；日期是世界 runtime 非日历 | 我实测纸面文本：`神谕日报 第 0 分 08 秒 今日有交付 莞尔交付 1 单（离线 Mock 1）/ 阿雾交付 0 单，最近一单：帮我查一下资料 今天晴。…`；神恩 1 里程碑 |
+| 90–125s 雨天 | 点「世界法则：下雨」后 2s 内 `weather==='rain'`、雨滴/splash 可见、角色撑伞、状态行「在屋檐下看雨」；切晴后旧文案消失 | 我实测：点击后冻结于 now=11000ms，weather=rain、状态行「莞尔：在屋檐下看雨 / 阿雾：在屋檐下看雨　雨」 |
+| 125–155s 存档/恢复 | `saveNow()` 后 localStorage 有 `xiaoxi.pixel-world.save.v1`；**reload 后**建筑数/道路/神恩/交付统计一致；状态行出现「读档未对账」 | 我实测：save→reload→now=12100ms 时 buildings=3、状态行「读档未对账 · 台账离线 · 离线 Mock」 |
+| 155–180s 调试面板 | 点「⚙ 调试」展开；角色/铺子/任务/事件行数与 `Oracle.view()` 一致；暂停冻结；tone 过滤；注入只进沙盒队列 | 已截 100% 整页（400% 为纯 canvas 档，按设计隐藏 DOM，面板证据看 100%） |
+
+## 来源标注核对
+
+- Mock 遍：状态行必须含「台账离线 · 离线 Mock」；剧本中标 `Mock/离线` 的段（启动、日报、雨天、存档）不得出现台账在线字样。
+- live 遍：状态行必须含「台账在线」；`deliveriesByVillager` 的 `ledger` 计数应随真实台账单增长（Mock 遍只增 `mock`）。
+- 剧本里标 `两者` 的段（委托闭环）在 live 遍要能看出任务来源/交付统计走真实通道。
+
+## 重置步骤可用性（S4 计划 §干净状态重置，逐条实跑）
+
+1. 关 dev server 与外部 Chrome，确认 5188/9333 无监听 → 我用 `Get-NetTCPConnection` 核。
+2. 清 `localStorage`（键 `xiaoxi.pixel-world.save.v1` 及其 `.corrupt.*`）或删 origin → 我用 CDP
+   `localStorage.clear()`（sessionStorage 守卫，只清第一次导航）实现，已实跑验证能回到全新世界。
+3. （live）重置隔离 8001 数据副本，不碰 8000/`data/` → 待 Chief 给实例信息后核。
+4. 重开 `npm run dev`，按模式开 URL，按第一段确认初始态 → 已实跑。
+
+## 我的截图清单（自截，不复用施工图）
+
+每槽两张：`qa-s4-<slot>-100.png`（1010×940 整页，保留页头/DOM）+ `qa-s4-<slot>-400pct.png`
+（去页头、隐藏 `#world-overlay/#debug-panel/#debug-toggle`、canvas CSS 1920×1280 的纯画布像素）。
+摘要落 `pixel-world/eval/screens/qa-s4-manifest.txt`（含每张的 sha256 前 16 位、now/weather/buildings/mode/status）。
+**已完成 Mock 遍 7 个槽 14 张**（demo-0-initial / demo-1-walk / demo-2-working / demo-3-paper /
+demo-4-rain / demo-5-save-restore / demo-6-debug），sha 见 manifest；live 遍待实例就绪后同流程再跑一遍。
+
+## 门禁与命令（每遍都跑）
+
+`npm run check`（tsc 0）、`npm run test:inprocess`、`node scripts/audit-palette.mjs`（16/8/1/23）+
+`--strict`（0）、`python scripts/test_pixel_world.py`（整门禁 PASS）。
+`python scripts/check_protocol.py`、`python scripts/test_core.py`（剧本技术验收清单要求）。
+`node scripts/smoke.mjs`（`?ledger=off`，114/114）与 `LEDGER=1 node scripts/smoke.mjs`（21/21）——
+**Chrome 现已可达，这两项从「未验证」转为「可跑」**，我用 CDP 外部浏览器复跑（施工侧的 114/114 仍只算作者侧证据）。
+
+## 结论口径
+
+- **通过**：两遍全部检查点达标、计时与剧本一致或有实测依据、来源标注正确、重置步骤可重复、截图齐全。
+- **有条件通过**：功能达标但证据/标注/文档数字有缺口（列 P0–P3）。
+- **不通过**：任一槽的核心链路断（派单不走、存档不恢复、live 不连通等）。
+- 「3 秒指认」类人类判定一律写「待用户评审」；沙箱确实跑不了的才标「未验证」并写明原因。
+
+---
+
+# S4 演示验收 · QA 独立复验结果（2026-10-19 21:20–22:27，lead · QA Engineer）
+
+- **基线声明**：HEAD `2a0e6ea`；工作区新增 `docs/DEMO_RUN_EVIDENCE.md`、`pixel-world/scripts/demo-run.mjs`、
+  `pixel-world/scripts/demo-live-serve.mjs`（未 commit）。我对仓库的唯一改动仍是本文件。
+- **最终结论：有条件通过**（2 条 P2 + 2 条 P3）。两遍都自己跑、自己截图、自己记计时，
+  没有复用施工证据；live 遍的「真实台账单进世界并派活」经 Chief 独立复现 + 我的对照实验**已复现**（见 §3）。
+
+## 1. 环境与两项阻塞的解决
+
+| 项 | 状态 |
+|---|---|
+| CDP 截图 | ✅ **已解决**。外部 Chrome `http://127.0.0.1:9333`（HeadlessChrome/149），PowerShell/Node fetch/Playwright `connectOverCDP` 三种方式均连通；`devicePixelRatio=1` |
+| 隔离 live 环境 | ✅ **已解决**。用施工的 `demo-live-serve.mjs` 同款做法自己起 8001+5189（子进程由我的进程直接持有——沙箱会收掉孙进程，这是关键），跑完 `taskkill /t /f` 收掉 |
+| smoke | ✅ **可跑**。`node --test` 的 per-file spawn 仍被沙箱禁，但 smoke 本身只要 `connectOverCDP`；我用一个 TEMP 里的 loader hook 把 `chromium.launch` 重定向到 `connectOverCDP`（**未改任何项目文件**），跑通 **114/114，exit 0** |
+
+## 2. 第一遍 · Mock（`?ledger=off`，标注 Mock/离线）——通过
+
+- **实测时间线**（CDP 100ms 轮询 `Oracle.view()` + `#status`，模式切换时刻，相对派单）：
+  `0ms idle → 100ms saluting → 800ms toWork → 1800ms working → 6000ms delivering → 7400ms toAltar → 8400ms idle`
+  → 行礼 ≈700ms、走路+进屋 ≈1s、干活 ≈4.2s、交付→回祭坛 ≈2.4s，**整环 ≈8.4s**。
+- **纸面实测文本**：`神谕日报 第 0 分 08 秒 今日有交付 莞尔交付 1 单（离线 Mock 1）/ 阿雾交付 0 单，最近一单：帮我查一下资料 今天晴。…`；神恩 1 里程碑。
+- **存档→刷新恢复实测**：`saveNow()` → reload → 状态行「读档未对账 · 台账离线 · 离线 Mock」，buildings=3 ✓。
+- **我的截图**（14 张，`qa-s4-demo-*.png` + `qa-s4-manifest.txt`，均 100% 整页 **995×1359** + 400% canvas **1920×1280**，含 sha）：
+  `0-initial / 1-walk / 2-working / 3-paper / 4-rain / 5-save-restore / 6-debug`。
+- **与施工表对比**：施工 Mock 段落跨度 21.7s、整段 22.5s；我的委托闭环 8.4s vs 施工 7.9s（同一量级，差异来自我按模式切换时刻算、施工按段落起止算）。施工「15–60s 委托闭环实测 7.9s、整段约 22s、不需要凑满 3 分钟」的结论**我认同**。
+
+## 3. 第二遍 · live（隔离 8001 + 临时 Vite 5189，真实 WS）——通过（派单链路已复现）
+
+**已独立验到的**
+- 隔离实例自起成功：`bootMs=2536–2933`、`health.ok=true`、`llm.offline=true`；8001/5189 均监听。
+- 直连 `ws://127.0.0.1:8001/ws` **连接成功**；页面侧 `Oracle.view().ledger` = **在线/已对账/mock=false**，状态行「台账在线」。
+- 7 段 + 存档刷新全部自截（`qa-s4-live-*.png` + `qa-s4-live-manifest.txt`，同样 995×1359 / 1920×1280 规格）。
+- **8000 与主 `data/`（时间盒口径）**：**S4 复验窗口（21:20–22:27）内 8000（PID 22996）存活、health 200**，
+  `commissions.db/memory.db/executive.db/notes.db/threads.db` 的 size+mtime **逐个一致，0 个变化**；
+  窗口之后 8000 退出，**退出非本团队动作所致**（我们对 8000 只做过 `GET /api/health` 与 `data/` 的 stat，
+  无任何停止/重启动作；用户已收到确认卡片）。
+- **隔离清理干净**：收尾 `taskkill` 后 `8001=false 5189=false`（我自起的实例由我进程直接持有子进程并 kill）。
+
+**派单链路：已复现（原 P1 关闭；我的初判根因有误，已更正）**
+- **我自己的对照实验**（同一隔离实例、同一协议，只改文本；`qa-s4-delegprobe.mjs`）：
+  - `去把便笺整理成三版标题` → **4 条 `commission_update`**（`c_e6ecc8ce2da4`：drafting → briefing:scribe → running:scribe → blocked:scribe），REST `/api/executive/commissions` **0 → 1**；
+  - `QA 独立复验：把便笺整理成三版标题`（我最初用的文本）→ **0 条**，走普通对话；
+  - `帮我把便笺整理成三版标题` → **0 条**，走普通对话。
+- **真因**：派单意图只由正则判定——`server/dialogue/orchestrator.py:60-65` 的 `_DELEGATION` 第一支要求
+  `去(?:把|帮我|替我)\s*[^，。！？]{1,24}(?:做|改|整理|查|弄|搞|处理|安排|写)`；`帮我把…`、`QA…：把…`
+  都不命中 → `executive_route` 返回 None → **静默降级为普通对话，且无任何提示**
+  （离线兜底那句「这个我还真没什么头绪」即来自此路径，`server/llm.py:250`）。
+  `:1480-1490` 还要求 `commission_accept_line()` 拿到真实样本（`config/response_examples.json` 的
+  `stage_samples.commission_accept`，隔离实例有），否则也返回 None。
+- **Chief 独立复现**（自有临时副本 + `.venv` python 直持 uvicorn 子进程 + 独立 WS 探针，未用施工任何脚本）：
+  `{"type":"text","text":"去把便笺整理成三版标题","turn_id":"chief-repro"}` → **4 条 `commission_update`**
+  （id `c_d34c824bc869`，drafting→briefing→running→blocked）+ REST **items=1**；
+  `帮我把便笺整理成三版标题` → **0 条**、静默走普通对话。
+- **施工证据成立**：其 4 帧为 `commission_update` 过滤视图，与全量帧序列不矛盾。
+- **我最初的根因判断（「无 Key 离线路由不回 delegation」）是错的**，已在本文更正；不影响本遍其它结论。
+
+## 4. 三项未验证项的处置核对
+
+| 项 | 施工声称 | 我的独立结论 |
+|---|---|---|
+| live 台账 / 真实 WS | 隔离 8001 实跑，4 帧 WS，世界 1.4s 派活 | **成立（已复现）**：连接/对账/8000 未碰/清理干净我都复现了；派单帧我用 `去把便笺整理成三版标题` 复现出 **4 条 `commission_update` + REST 0→1**（我最初的文本没命中正则，已更正，见 §3 与 §7 已知限制） |
+| smoke | 作者侧 CDP 跑 114/114 | **我自己跑通 114/114**（loader hook 重定向 launch→connectOverCDP，未改项目文件）——从「未验证」转为「QA 已独立验证」 |
+| 主服务冷启动 | 隔离 8001 停→冷启→health→WS，`bootMs` 3174/2999 | **部分复现**：我两次自起隔离实例 `bootMs=2536/2725/2911`、health OK、WS 可连（同一量级）；未做「停→冷启」二段式（我每次都是新实例），标注部分验证 |
+
+## 5. 数字来源核对
+
+| 数字 | 出处 | 我的复核 |
+|---|---|---|
+| `test:inprocess` **180/180** | 我本会话重跑（官方入口 `npm test` 与 `npm run test:inprocess` 各一次，输出一致：`# tests 180 / # pass 180 / # fail 0 / # skipped 0`，14 个测试文件） | ✅ 施工文档的 180/180 **是对的**；我 20:10 那次记的 179 是因为施工随后（20:13 后）给 `save-import.test.ts` 补了 1 条 P3 回归用例（「纯空白文本在 read 与 importText 里都是 empty」，正好堵我上报的那条 P3），单文件 11→12、总数 179→180 |
+| 审计 **16/8/1/23** | `node scripts/audit-palette.mjs` | ✅（UI 引用 47，世界 16/UI 8/共享 1/并集 23） |
+| 门禁 PASS | `python scripts/test_pixel_world.py` | ✅ check 0 + **180/180** + audit + strict 0 |
+| `check_protocol.py` | 我跑，exit 0 | ✅（控制台中文 mojibake 是 GBK 显示问题，退出码 0） |
+| `test_core.py` | 我跑 **64 passed, 0 failed** | ✅ 但**必须用 `.venv\Scripts\python.exe`**；系统 anaconda python 会 `ImportError: numpy.core.multiarray failed to import`（环境问题，非项目缺陷） |
+| smoke **114/114** | 我跑 | ✅（`PIXEL_WORLD_URL` 不能带 query，smoke 自己会拼 `?ledger=off`；带了会变成 `?ledger=off?ledger=off` 导致误连线台账） |
+| 400% = **1920×1280** | 我的截图 | ✅ 15 张全部 1920×1280 |
+| 100% 整页宽 **995** | 我的截图 | ✅ **995×1359**（`fullPage: true`，视口 1010 扣 15px 滚动条） |
+
+## 6. 干净重置步骤可用性
+
+`node scripts/demo-run.mjs --reset-only` 实跑：`cleared: http://127.0.0.1:5188` / `cleared: http://127.0.0.1:5189`，exit 0 ✅。
+隔离残留清理命令（`Get-ChildItem $env:TEMP -Filter 'aqi-s4-demo-*' | Remove-Item -Recurse -Force`）我核了对应用途；
+我自己的 live 遍是用 `taskkill` 收子进程 + 临时根留在 TEMP（未删），端口已清。
+
+## 7. 缺陷列表
+
+- ~~**P1 live 派单链路复现不出**~~ → **已关闭**。真因是 `_DELEGATION` 正则未命中导致**静默降级**
+  （见 §3），我用 Chief 的原文与自己的对照实验均复现出 4 帧 + REST 0→1；施工证据成立。
+  我最初的「无 Key 离线路由」判断有误，已更正。
+- **已知限制（产品级，需保留）**：**派单意图只由正则判定，同义改写会静默降级为普通对话且无任何提示**
+  （`orchestrator.py:60-65` + `:1480-1490`）。用户说「帮我把…」「麻烦你整理一下…」都不会落单，
+  界面也不报错——只能靠 `去把…` 这类显式短语。这与 S5 ADR §4.4 选 A（只扩显式短语 + 差分测试）
+  **互为印证**：扩短语时必须同时补差分测试，否则回归看不见。
+- **P2 `demo-run.mjs` 的 `--reset-only` 只清两个原点，但 live 跑的隔离实例是每次新建的临时根**：
+  人工按文档第 1 步清完，`--mode live` 仍会新建临时根，二者不会串；但文档没写「QA 若自起隔离实例，
+  临时根需自行清理」。建议在 §1 补一句。
+- **P2 证据文档把 smoke 记为「作者侧验证、QA 侧需独立复跑」**：我这次已独立跑通 114/114，
+  `DEMO_SCRIPT.md` 技术验收清单里的「以 `?ledger=off` 跑 smoke 全绿」应更新为「QA 已独立验证（CDP 外部 Chrome）」，
+  否则用户会以为这条还没验。
+- **P3（已澄清，非缺陷）`DEMO_RUN_EVIDENCE.md` 的测试数 180/180 是正确的**：我 20:10 复跑时是 179，
+  因为施工在 20:13 后给 `test/save-import.test.ts` 补了 1 条 P3 回归用例（单文件 11→12）。
+  22:37 我用官方入口 `npm test` 与 `npm run test:inprocess` 各跑一次，均为 **180/180 / fail 0 / skipped 0**，
+  与施工文档一致。**以 180 为准。**
+- **P3 `test_core.py` 的解释器**：文档没写必须用 `.venv` 的 python；用系统 anaconda 会因 numpy 版本报 ImportError。
+  建议在复跑命令里写清 `.\.venv\Scripts\python.exe`。
+
+## 8. 我的证据清单（均在 `pixel-world/eval/screens/`，gitignored）
+
+- Mock 遍：`qa-s4-demo-{0-initial,1-walk,2-working,3-paper,4-rain,5-save-restore,6-debug}-{100,400pct}.png` 共 14 张 + `qa-s4-manifest.txt`
+- live 遍：`qa-s4-live-{0-initial,1-toWork,2-working,3-paper,4-rain,5-save-restore,5b-reload,6-debug}-*` 共 15 张 + `qa-s4-live-manifest.txt`
+- 计时：Mock 时间线（§2）、live 每段 `loadMs` 与 WS 帧记录（§3、manifest）
+- smoke：114/114 exit 0（loader hook 方案，TEMp 内 `qa-s4-register.mjs` + `qa-s4-pw-shim.mjs`，未改项目文件）
+
+### 9.1 复现命令（供他人原样复跑；都在 TEMP，不进仓库）
+
+```powershell
+# --- CDP 三连通验证（外部 Chrome 已起，勿关） ---
+(Invoke-WebRequest http://127.0.0.1:9333/json/version -UseBasicParsing).Content
+node -e "fetch('http://127.0.0.1:9333/json/version').then(r=>r.text()).then(console.log)"
+
+# --- smoke：loader hook 把 chromium.launch 重定向到 connectOverCDP ---
+# 关键坑：PIXEL_WORLD_URL 不能带 query！smoke.mjs:776 自己会拼 `?ledger=off`，
+# 带了会变成 `?ledger=off?ledger=off`，URLSearchParams 取到 'off?ledger=off' ≠ 'off'，
+# connectLedger 不返回 → 误连 8000 台账 → 第 7 项「状态行标出离线 Mock」误红。
+cd D:\project\neurosama\pixel-world
+$env:PIXEL_WORLD_URL='http://127.0.0.1:5188/'      # ← 不带 ?ledger=off
+node --import 'file:///C:/Users/18712/AppData/Local/Temp/dsh-VtZ3UW/qa-s4-register.mjs' scripts/smoke.mjs
+# 期望：# tests 114 / # pass 114 / exit 0
+
+# --- 三个文件的作用 ---
+# qa-s4-register.mjs：module.register() 挂 resolve hook
+# qa-s4-hook.mjs    ：把 '@playwright/test/index.mjs' 重定向到 shim（shim 自己 import 真包时不重定向，防循环）
+# qa-s4-pw-shim.mjs ：export 一个 chromium，launch() 改成 connectOverCDP(9333)；
+#                     并且不预建页——调用方 newPage() 的那个页必须是唯一前台页，否则 rAF 被节流、#status 不刷新
+
+# --- 我的两遍截图（同款 CDP 流程） ---
+# Mock：node <TEMP>\qa-s4-timeline.mjs   （PIXEL_WORLD_URL 同样不带 query）
+# live：node <TEMP>\qa-s4-live.mjs       （自己在进程内起 8001+5189，跑完 taskkill 收掉）
+```
+
+## 9. 收口
+
+- 本轮未改动任何项目文件（只读验收 + TEMP 脚本/探针）；`git status` 与进场快照一致。
+- 8000（PID 22996）与主 `data/` 经我核验**零变化**；隔离 8001/5189 已清理，无残留监听。
+- **待用户评审**：演示观感、解说词、3 秒指认类人类判定。
