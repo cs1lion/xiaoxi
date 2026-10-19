@@ -419,7 +419,7 @@ export class SandboxScene extends Phaser.Scene {
         view = createVillager(this, 0, 0);
         this.villagerViews.set(villager.id, view);
       }
-      updateVillager(view, villager, 0, 0, ALTITUDE);
+      updateVillager(view, villager, snapshot.now, 0, 0, ALTITUDE);
     }
     this.weatherView.update(this.sim.weatherIntensity(), delta);
 

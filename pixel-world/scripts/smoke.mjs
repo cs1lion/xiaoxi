@@ -31,6 +31,20 @@ const page = await context.newPage();
 const errors = [];
 page.on('pageerror', (error) => errors.push(error.message));
 
+// 先清一次存档：上一次异常中断可能留下进行中的世界，会让“开局她在闲逛”误红。
+// 用 addInitScript 在页面脚本之前清，且只清第一次导航（sessionStorage 标记）——
+// 若改成“先 goto 再 clear”，第一份世界会在离开页面时把内存状态自动存档回来。
+await page.addInitScript(() => {
+  try {
+    if (sessionStorage.getItem('xiaoxi.smoke.cleared') === null) {
+      localStorage.clear();
+      sessionStorage.setItem('xiaoxi.smoke.cleared', '1');
+    }
+  } catch {
+    /* 隐私模式等场景忽略 */
+  }
+});
+
 const checks = [];
 const check = (ok, label) => {
   assert.ok(ok, label);
