@@ -27,6 +27,8 @@
 - 判读口径（Chief 2026-10-19 裁决）：**按 CSS px 判读**，name 10 / bubble 11 / status 12 均 ≥8px ✓；原生等效 3.5–7.5 属 DOM 层固有属性（D5-A），不按 canvas 像素判（`docs/ART_SLICE_REVIEW_CHECKLIST.md` §2.2 第 4 行已同步）
 
 ## 5. 结论
+> 范围声明：本文 live 部分仅为**画面证据**（400pct 像素统计 + 100% overlay 实测），不构成「live 台账单驱动世界」的结论；该链路另有独立验收，结论以 QA 的 S4 章节与 Chief 汇总为准（当前状态：待施工证据/可能降级为已知限制）。
+
 - **客观项：通过**——尺寸口径、四栋剪影高差、识别色分布、雨幕无色带与 α=0.28、主角亮部块 ≥2px 且两人不粘连、overlay 名字/气泡渲染与 canvas 咬合，全部达标
 - P3 信息项：① demo 世界 3 栋（workshop_plot 未放置）；② mock-0-initial 莞尔走路中被建筑遮挡（canvas 不可见，DOM 名字标签正常渲染）
 - **人类项（3 秒指认主角 / 三栋 / overlay 观感）：全部「待用户评审」**；位置稳定性引 QA task-27 实测 0.00–0.40px ≤1（`docs/QA_VERIFICATION_S1.md:35`）
