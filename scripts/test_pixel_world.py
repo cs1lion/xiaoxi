@@ -48,6 +48,10 @@ def main(argv: list[str]) -> int:
             print(f"{name}: {' '.join(cmd)} (cwd={WORLD})")
         return 0
 
+    if not npm():
+        print("FAIL npm not found in PATH（请先安装 Node.js / npm）")
+        return 1
+
     failures = 0
     for name, cmd in steps():
         print(f"==> {name}: {' '.join(cmd)}", flush=True)
