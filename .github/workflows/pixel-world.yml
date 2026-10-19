@@ -1,9 +1,13 @@
 # 像素世界门禁（D7-A）：仅在 pixel-world/ 变更时触发。
 #
-# 只跑零外部依赖层：tsc --noEmit + node --test（90+ 项纯逻辑测试）。
+# 只跑零外部依赖层：tsc --noEmit + node --test + 调色板审计报告。
 # 具体命令统一由 scripts/test_pixel_world.py 决定，CI 与本地共用一套实现，
 # 避免两处命令各自漂移。浏览器冒烟（Playwright + dev server）不在这里跑：
 # 需要 GPU/浏览器/本地服务，放本地或单独手跑 `node pixel-world/scripts/smoke.mjs`。
+#
+# 分工（D7-A）：本地默认 strict（`python scripts/test_pixel_world.py`，配色超预算即失败）；
+# CI 走 `--report-only`，审计只打印报告、不改变退出码——配色预算不该挡住别人的功能
+# 改动，但报告要进日志留档。
 name: Pixel World Guard
 
 on:
@@ -20,7 +24,7 @@ on:
 
 jobs:
   guard:
-    name: 像素世界门禁（types + logic tests）
+    name: 像素世界门禁（types + logic tests + palette report）
     runs-on: ubuntu-latest
     steps:
       - name: Checkout repository
@@ -43,4 +47,4 @@ jobs:
           python-version: "3.12"
 
       - name: Run pixel-world gate
-        run: python scripts/test_pixel_world.py
+        run: python scripts/test_pixel_world.py --report-only
