@@ -1,5 +1,6 @@
 # ART_SPEC.md — 像素世界视觉规范 V0.2
 
+> 状态：**已定稿**（用户 2026-10-19 选 A 批准，S3-4 收口产物）。
 > 作者：Pixel Art Director（teammate `art-director`）
 > 日期：2026-10-19 · 基线 HEAD `0af8c27`（task-22，docs `0af8c27` / 代码 `f07712b`）· 任务 S3-4 收口产物
 > 结构：按 `pixel-agent-chief-starter/docs/ART_SPEC_TEMPLATE.md` 四节；结合 `docs/DEMO_ART_SPEC_TODO.md` B1–B12，其中 D1–D4 冲突已由用户裁决解决，本文按**现状**写，不照抄旧结论。
