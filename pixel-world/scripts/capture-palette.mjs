@@ -21,6 +21,11 @@
  * 用法与前置见 pixel-world/docs/E2E_PALETTE.md。
  * 环境变量：CDP_URL / PIXEL_WORLD_URL / PALETTE_SEED。
  * 产物：eval/screens/palette-{sunny,rain,night}-{100,canvas,native-480x320,400pct}.png
+ *
+ * 三种模式：
+ *   （默认）        晴/雨/夜调色板三态
+ *   --anim          帧动画证据（idle/walk 各两帧 + manifest）
+ *   --scenario slice 切片评审：晴/雨/夜同构图，先扩建第 4 栋 workshop，每态 5 档尺寸
  */
 import { chromium } from '../../node_modules/@playwright/test/index.mjs';
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
@@ -182,7 +187,7 @@ const ANIM_FRAME_MS = 1000 / ANIM_FPS;
 const ANIM_CROP = { halfW: 26, halfH: 34, width: 52, height: 40 };
 const WALK_MODES = new Set(['toWork', 'toAltar', 'sheltering']);
 
-function animInitScript({ seed }) {
+function animInitScript({ seed, pendingClicks }) {
   try {
     localStorage.clear();
   } catch {
@@ -196,11 +201,24 @@ function animInitScript({ seed }) {
   };
   const state = { frames: 0, frozen: false };
   window.__ANIM_STATE__ = state;
+  const clicks = (pendingClicks ?? []).map((item) => ({ ...item, done: false }));
+  window.__PENDING_CLICKS__ = clicks;
   const realRaf = window.requestAnimationFrame.bind(window);
   window.requestAnimationFrame = (cb) => {
     if (state.frozen) return 0;
     return realRaf((t) => {
       state.frames += 1;
+      // 按 simulation 时间在页面内点击：从 Node 侧轮询再点会差一个模拟步，
+      // 雨天相位就对不上了（复跑 sha 不一致）。
+      const view = globalThis.Oracle?.view?.();
+      if (view !== undefined && view !== null) {
+        for (const click of clicks) {
+          if (!click.done && view.now >= click.atNow) {
+            document.querySelector(click.selector)?.click();
+            click.done = true;
+          }
+        }
+      }
       cb(t);
     });
   };
@@ -372,6 +390,141 @@ async function runAnim(context) {
   return results;
 }
 
+/* ---------------------------------------------------------------- 切片评审（task-30 / E-16） */
+/* 晴/雨/夜同构图：先扩建第 4 栋 workshop，再等 sim 时间到固定 target 冻结 rAF，
+ * 逐个改 canvas 的 CSS 尺寸截 5 档（100 全页 / 200% / canvas / 原生 / 400%）。
+ * 建筑数、天气、相机固定都在截图前硬断言，不满足就直接非 0 退出并打印快照。 */
+
+const SLICE = { buildAt: 500, rainAt: 800, targetNow: 6000 };
+
+async function openSliceWorld(context, { rain = false } = {}) {
+  const page = await context.newPage();
+  await page.setViewportSize({ width: 1010, height: 1400 });
+  // 扩建与下雨都按 sim 时间在页面 rAF 内点击，避免 Node 轮询带来的一个模拟步误差。
+  const pendingClicks = [{ selector: '[data-build="workshop_plot"]', atNow: SLICE.buildAt }];
+  if (rain) pendingClicks.push({ selector: '#rain', atNow: SLICE.rainAt });
+  await page.addInitScript(animInitScript, { seed: SEED, pendingClicks });
+  await page.goto(PAGE_URL, { waitUntil: 'load' });
+  await page.waitForFunction(() => window.Oracle !== undefined, null, { timeout: TIMEOUT });
+  return page;
+}
+
+function readSliceState(page) {
+  return page.evaluate(() => {
+    const view = window.Oracle.view();
+    const canvas = document.querySelector('canvas');
+    const rect = canvas === null ? null : canvas.getBoundingClientRect();
+    return {
+      now: view.now,
+      weather: view.weather,
+      buildingCount: view.buildings.length,
+      instanceIds: view.buildings.map((item) => item.instanceId),
+      canvasBox:
+        rect === null
+          ? null
+          : { x: rect.x, y: rect.y, width: rect.width, height: rect.height },
+      scroll: { x: window.scrollX, y: window.scrollY },
+      frames: window.__ANIM_STATE__.frames,
+    };
+  });
+}
+
+async function shootSlice(context, name, { rain = false, night = false }) {
+  const page = await openSliceWorld(context, { rain });
+  await page.waitForFunction((t) => window.Oracle.view().now >= t, SLICE.targetNow, {
+    timeout: TIMEOUT,
+    polling: 16,
+  });
+  await page.evaluate(() => {
+    window.__ANIM_STATE__.frozen = true;
+  });
+  await page.waitForTimeout(150);
+
+  const info = await readSliceState(page);
+  const problems = [];
+  if (info.buildingCount !== 4) problems.push(`建筑数 ${info.buildingCount} != 4`);
+  if (!info.instanceIds.some((id) => id.startsWith('workshop_plot'))) {
+    problems.push(`没有 workshop_plot：${info.instanceIds.join(',')}`);
+  }
+  if (rain && info.weather !== 'rain') problems.push(`雨态 weather=${info.weather}`);
+  if (!rain && info.weather === 'rain') problems.push('晴/夜态却是 rain');
+  if (info.canvasBox === null || Math.round(info.canvasBox.width) !== 960 || Math.round(info.canvasBox.height) !== 640) {
+    problems.push(`canvas 不是 960×640：${JSON.stringify(info.canvasBox)}`);
+  }
+  if (info.scroll.x !== 0 || info.scroll.y !== 0) {
+    problems.push(`页面滚动偏移：${JSON.stringify(info.scroll)}`);
+  }
+  if (problems.length > 0) {
+    console.error(`[${name}] 断言失败：${problems.join('；')}`);
+    console.error(JSON.stringify(info, null, 2));
+    await page.close();
+    throw new Error(`slice ${name} 断言失败`);
+  }
+
+  if (night) {
+    await page.evaluate(() => {
+      const canvas = document.querySelector('canvas');
+      // 1.0 没有昼夜系统：整体压暗只是只读试验，不是产品态。
+      if (canvas !== null) canvas.style.filter = 'brightness(0.55)';
+    });
+    await page.waitForTimeout(120);
+  }
+
+  const hashes = {};
+  // 100%：带页头的整页（尺寸随视口）。先拍它，因为后面要挪布局。
+  // 这一档保留 overlay/DOM，用户要看的就是“窗口里实际长这样”。
+  hashes['100'] = await save(`${OUT}/${name}-100.png`, await page.screenshot());
+
+  // canvas / 200% / 原生 / 400% 这四档只要画布像素，必须把压在画布上的 DOM 藏掉：
+  // 元素截图是“整个页面渲染后裁到元素包围盒”，overlay 名字/气泡、调试面板会一起被截进来，
+  // 逐像素比对就会出现非 0 差异。
+  // 用 visibility:hidden 而不是 display:none——不参与布局，canvas 位置/尺寸不会变。
+  // 另外去掉页头/内边距并左对齐，让 canvas 的 boundingBox 落在整数像素上；
+  // 否则元素截图会多出 1px（960×641 / 480×321），原生帧就不是精确 480×320。
+  await page.addStyleTag({
+    content:
+      'header{display:none!important}body{padding:0!important;align-items:flex-start!important;gap:0!important}' +
+      '#world-overlay,#debug-panel,#debug-toggle{visibility:hidden!important}',
+  });
+  await page.waitForTimeout(100);
+  const canvas = page.locator('canvas');
+  const box = await canvas.boundingBox();
+  if (
+    box === null ||
+    Math.round(box.width) !== 960 ||
+    Math.round(box.height) !== 640 ||
+    !Number.isInteger(box.x) ||
+    !Number.isInteger(box.y)
+  ) {
+    console.error(`[${name}] canvas 元素不是整数像素 960×640：${JSON.stringify(box)}`);
+    await page.close();
+    throw new Error(`slice ${name} 元素尺寸不对`);
+  }
+  const canvasBox = { x: box.x, y: box.y, width: box.width, height: box.height };
+
+  // 隐藏 overlay 后复核：取一次画布区域，确认没有 DOM 叠在上面（后续差异=0 靠这个前提）。
+  hashes.canvas = await save(`${OUT}/${name}-canvas.png`, await canvas.screenshot());
+  await page.addStyleTag({ content: 'canvas{width:960px!important;height:640px!important}' });
+  await page.waitForTimeout(100);
+  hashes['200pct'] = await save(`${OUT}/${name}-200pct.png`, await canvas.screenshot());
+  await page.addStyleTag({ content: 'canvas{width:480px!important;height:320px!important}' });
+  await page.waitForTimeout(100);
+  hashes['native-480x320'] = await save(`${OUT}/${name}-native-480x320.png`, await canvas.screenshot());
+  await page.addStyleTag({ content: 'canvas{width:1920px!important;height:1280px!important}' });
+  await page.waitForTimeout(100);
+  hashes['400pct'] = await save(`${OUT}/${name}-400pct.png`, await canvas.screenshot());
+  await page.close();
+  return { name, rain, night, targetNow: SLICE.targetNow, ...info, canvasBox, hashes };
+}
+
+async function runSlice(context) {
+  return [
+    await shootSlice(context, 'slice-sunny', {}),
+    await shootSlice(context, 'slice-rain', { rain: true }),
+    await shootSlice(context, 'slice-night', { night: true }),
+  ];
+}
+
 await mkdir(OUT, { recursive: true });
 const browser = await chromium.connectOverCDP(CDP_URL);
 const context = browser.contexts()[0];
@@ -385,6 +538,49 @@ const warm = await context.newPage();
 await warm.goto(PAGE_URL, { waitUntil: 'load' });
 await warm.waitForFunction(() => window.Oracle !== undefined, null, { timeout: TIMEOUT }).catch(() => {});
 await warm.close();
+
+const scenarioIndex = process.argv.indexOf('--scenario');
+const scenario = scenarioIndex >= 0 ? process.argv[scenarioIndex + 1] : null;
+if (scenario === 'slice') {
+  const captures = await runSlice(context);
+  await browser.close();
+  const lines = [
+    `# 切片评审 manifest（task-30 / E-16；种子 ${SEED}；页面 ${PAGE_URL}）`,
+    `# 冻结：sim now ≥ ${SLICE.targetNow} 后停 rAF；扩建点击 ${SLICE.buildAt}ms，下雨点击 ${SLICE.rainAt}ms`,
+    '# 相机：main.ts 固定 Scale.NONE + zoom 2 → canvas 960×640；页面 scroll 必须为 0',
+    '# night = filter(brightness 0.55)：1.0 无昼夜，只读试验，不是产品态',
+    '# DOM：100 档保留页头/overlay（给人看窗口实际效果）；其余四档 hide #world-overlay/#debug-panel/#debug-toggle（visibility:hidden，不重排）',
+    '# 200pct 与 canvas 等价：canvas=960×640=native×2（Scale.NONE + zoom 2）',
+    '# state\train\tnight\ttargetNow\tactualNow\tweather\tbuildingCount\tinstanceIds\tcanvasBox\tscroll\t100\tcanvas\t200pct\tnative-480x320\t400pct',
+  ];
+  for (const capture of captures) {
+    lines.push(
+      [
+        capture.name,
+        capture.rain ? 'rain' : 'dry',
+        capture.night ? 'filter(brightness 0.55)' : 'none',
+        capture.targetNow,
+        capture.now,
+        capture.weather,
+        capture.buildingCount,
+        capture.instanceIds.join(','),
+        capture.canvasBox === null
+          ? 'null'
+          : `${Math.round(capture.canvasBox.width)}x${Math.round(capture.canvasBox.height)}`,
+        `${capture.scroll.x},${capture.scroll.y}`,
+        capture.hashes['100'],
+        capture.hashes.canvas,
+        capture.hashes['200pct'],
+        capture.hashes['native-480x320'],
+        capture.hashes['400pct'],
+      ].join('\t'),
+    );
+  }
+  await writeFile(`${OUT}/slice-manifest.txt`, `${lines.join('\n')}\n`);
+  for (const line of lines) console.log(line);
+  console.log(`产物：${OUT}/slice-{sunny,rain,night}-{100,200pct,canvas,native-480x320,400pct}.png`);
+  process.exit(0);
+}
 
 const animMode = process.argv.includes('--anim');
 if (animMode) {
