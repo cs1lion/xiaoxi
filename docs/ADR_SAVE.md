@@ -43,6 +43,8 @@
 
 **不存**：`WorldGrid` 单元格（按 `buildings` 顺序 replay 重建，`grid.ts:105-121`、`setup.ts:53-73,76-114`）；`events` 与日报（派生，`report.ts:17-85`）；`queue/lastResults`；快照派生值（`workstations.elapsedMs/progress`、`umbrella`、`ConstructionSnapshot.displayName`，`simulation.ts:246-299`）；`deliveries`/`deliveriesByVillager` 计数（由 `settled` 重建）；`ledger` 链接态（读档置 `false/null/true/[]`）。
 
+**1.3 补记（2026-10-19，task-22；只澄清语义，不改 §1 冻结字段）**：`SCHEMA_V1_FINGERPRINT` 是**样例** 99 条路径集的冻结指纹，仅用于锁样例与单测；加载校验不以它为比较对象，而是校验「存档实际路径 ⊆ 允许全集（冻结 99 条 + 已声明 4 条可选路径，完整清单见 `save.ts` 的 `SAVE_V1_OPTIONAL_PATHS`：`world.villagers[].path[].x/y`、`world.villagers[].pendingRoute[].x/y`）」，**只检测新增路径**，不等价于值相等或存在性相等；字段删除与类型变化不在路径集校验范围，现由显式形状校验兜底，缺口记 task-32（最小 required 集，不在 v1 内改），v2 再以正式 schema 承接。`SAVE_V1_PATH_SET` 由冻结路径集 + 可选集派生；任何运行时派生的基准值不得冒充冻结常量。
+
 ### 2. 对账 + 去重 + 分账（用户点名 ①–③）
 
 **2.1 已结算任务 ID 持久化去重（`settled` 只属于存档文件）**：运行时 `WorldSnapshot` **没有** `settled`；task-18 在 `Simulation` 内新增**私有结算日志**（如 `settledLog`，由 `recordDelivery(villagerId, source)`（`simulation.ts:1075-1082`）交付时 append），它不是快照字段、渲染不读。`toSave()` 由该日志生成 `settled`（id 全局唯一，`tN` 与 `c_*` 不冲突）；`fromSave()` 由 `settled` 重建 `deliveryTally` 与私有日志，从而重建快照的 `deliveries`/`deliveriesByVillager`（不单独持久化计数）。写档不变量：`settled` id 唯一；`tasks` 中 `status=done` 的 id 必须在 `settled`（否则按坏档处理）。交付入口先查 `settled`：命中→只收尾、不计数、不重复写；未命中→正常交付并 append。与台账 `finished`：已 settled 的 finished id **不重新交付/不计数**；未 settled 且当前活动→交付一次并 append；`complete===true` 且缺席→丢弃、**不复活**。

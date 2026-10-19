@@ -2689,3 +2689,164 @@ Get-NetTCPConnection -LocalPort 5188,5190,8001,8000 -State Listen -ErrorAction S
 ### 收口
 
 - 本轮未改动任何项目文件（只读验收 + TEMP 脚本）；`git status` 与进场快照一致，无残留进程/监听。
+
+---
+
+## task-22（存档手动导出/导入）独立复验（2026-10-19 19:43–19:55，lead · QA Engineer）
+
+- **基线声明**：HEAD `de579e5 docs(pixel-world): S3-4 用户切片评审通过，1.0 保持 16 色`。工作区
+  `pixel-world/` = **3 M + 1 ??**：`index.html` +12/−0、`src/main.ts` +101/−1、`src/ui/save-store.ts` +108/−0、
+  `test/save-import.test.ts` 新增 209 行——与 Chief 预期一致。
+  **`src/world/save.ts` 与 `docs/save-v1.sample.json` 相对 HEAD 零 diff**（指纹常量 `f53a0736d782d657` 未动）；
+  `server/**` 的 8 个 M 是主产品既有改动，本卡未碰。
+- **最终结论：有条件通过**（1 条 P2 + 1 条 P3）。导出/导入主链路、坏档/高版本/上限/配额/自动存档
+  全部实测正确；P2 是「字段漂移防线在 world/meta/顶层有缺口」，task-22 让它首次可被用户输入触达。
+
+### 通过项（全部本会话自跑；探针独立于施工方测试）
+
+| # | 验收项 | 实测结果 |
+|---|---|---|
+| 1a | 导出=单槽原文 | `readRawText()` 直接返回 `getItem(SAVE_STORAGE_KEY)`，**与写入文本逐字节相同**（我拿 `JSON.stringify(save)` 对照），没有二次序列化 |
+| 1b | 导出内容合规 | 通过 `assertSaveV1`；`meta.schemaFingerprint` = 常量；`collectSavePaths(导出)` 的每条路径都落在冻结样例路径集合内 |
+| 1c | 无运行时字段 | `world.tasks[]` 键集合恰为 `SAVE_TASK_KEYS`；无 `ledgerCompletedAt` |
+| 1d | 文件名 | `exportFileName` → `xiaoxi-pixel-world-save-YYYYMMDD-HHmmss.json`（`20261019-200507` 精确匹配 + `Date.now()` 正则匹配） |
+| 1e | 写槽失败降级 | `main.ts` 导出流程：先 `oracle.saveNow()`，再 `readRawText()`；`text===null` → 明说读不到；`result.ok===false` → 「当前世界写不进存档（…）；已导出最近一次成功存档」；`downloadText` 整体包 try/catch → 「导出失败：浏览器拒绝创建下载。」 |
+| 2a | 导入合法 v1 | 导入冻结样例 → 写槽 → `read()` 成功 → `buildWorldFromSave` 重建，建筑数一致 |
+| 2b | 导入不改内容 | v1 下 `migrateSave` 是恒等（`while (1 < 1)` 不进循环），导入后槽内 JSON 与源文件 `deepEqual` |
+| 2c | 导出→导入闭环 | 自己刚导出的档再导入，读回一致 |
+| 3a | 坏档 | 非 JSON → `reason=corrupt`、message 含「备份」、备份 1 份、**主槽不变** |
+| 3b | 形状不对 | `{schemaVersion:1,world:{}}` → 同样按坏档备份（累计 2 份） |
+| 3c | 备份上限 | 连续 5 次坏档 → 只保留 **3** 份（`BACKUP_LIMIT=3`） |
+| 3d | 高版本 | `schemaVersion:99` → `reason=version`、message 含 `v99`、**不写槽、不备份** |
+| 4a | 2MB 上限 | `IMPORT_MAX_BYTES = 2*1024*1024`；超 1 字节 → `reason=too-large`、不解析、不备份、不写槽 |
+| 4b | 边界不误拒 | 上限内的合法样例正常导入 |
+| 4c | 配额降级 | `failSet` → `reason=storage`、`isAutoSaveEnabled()===false`、**只提示一次**（`存储已满`） |
+| 4d | 导入后重开自动存档 | 先 `disableAutoSave()` 再导入 → 成功后 `autoSave` 回 `true` |
+| 4e/4f | 空文件 / 高版本不误关自动存档 | 空 → `reason=empty`；高版本被拒**不会**把自动存档关掉（与 `read()` 的高版本路径不同，符合「导入被拒不该影响现有档」的预期） |
+| 5 | 门禁 | `npm run test:inprocess` **170/170**（161 + 9 新增）；`save-import.test.ts` 单跑 **9/9**；`npm run check` **exit 0**；audit **16/8/1/23**、`--strict` **exit 0**；整门禁 **exit 0** |
+
+### 测试断言逐条核（9 条，是否真断言）
+
+9 条全部是**真断言**，无空转：① 导出过 `assertSaveV1` + 路径子集 + tasks 键集合 + 无 `ledgerCompletedAt`；
+② 两次导出除 `savedAtWallClock` 外 `deepEqual`（先删该字段再比）；③ 文件名正则（固定时间戳精确匹配 + `Date.now()` 通配）；
+④ 合法导入可读回且能 `buildWorldFromSave`；⑤ 坏档 `reason=corrupt` + message 含「备份」+ 备份数 1→2 + 主槽为 null；
+⑥ 高版本 `reason=version` + message 含 `v99` + 不写槽 + 0 备份；⑦ 超 2MB `reason=too-large` + 0 备份 + 主槽 null；
+⑧ 配额 `reason=storage` + 自动存档关 + **恰好 1 条** warning；⑨ `disableAutoSave` 后导入成功则自动存档重开。
+我还补了 3 个施工方没写的反向对照：**tasks[0]/settled[0] 加字段会被拒**、**改 `meta.schemaFingerprint` 值会被拒**、
+**备份只留 3 份**——都按预期红。
+
+### 代码审查（Chief 第 6 点）
+
+- **`importText` 是 `read()` 校验链的平行复制，不是共享 helper**（P3-1）。两步顺序一致（形状 → 版本分流 →
+  `migrateSave` → `assertSaveV1` → 写槽），调用的原语也一致（`migrateSave`/`assertSaveV1`/`backupCorrupt`/
+  `pruneOldestBackup`），但 JSON.parse+形状检查+版本判断那一段是**手抄的第二份**。当前语义完全相同
+  （我逐条比对过行为），但 `read()` 以后加一步迁移或改形状规则，`importText` 不会跟着变。
+  建议把「文本 → 校验后的 RawSave」抽成私有 `parseSaveText(text)`，两条路都走它。
+- **`disableAutoSave()` 时机正确**：`main.ts` 在 `importText` 成功返回后先 `disableAutoSave()`，
+  `saySaveIo(...)` 提示，`input.value=''`，再 `setTimeout(reload, 400)`。放在 reload **之前**，
+  pagehide 不会用旧世界把刚导入的档覆盖掉（`SandboxScene.ts:141-144` 确有 `pagehide → saveStore.write`）。
+- **失败分支都有用户可见提示**：下载异常、读不到存档、写槽失败降级、文件读不了（`reader.onerror`）、
+  超大文件、导入各类 `reason` 全部经 `saySaveIo(ok, message)` 写到 `#save-io-reply`（`role=status aria-live=polite`，
+  失败加 `.bad` 类变警示色）。
+- **`?ledger=off` 分支已核**：`SandboxScene.connectLedger()` 在 `ledger=off` 时直接 return，不建 LedgerClient、
+  不下发 `sync`；状态行走 `读档未对账 · 离线`（L524-525）。导入后 reload 走的就是这条既有启动路径。
+
+### 缺陷列表
+
+- **P2-1 字段漂移防线在 `world`/`meta`/顶层有缺口，导入可以放进漂移档**。
+  `assertSaveV1`（`save.ts:190-249`）只做三件事：形状、`tasks[]`/`settled[]` 的**元素**键集合
+  （`assertKeys`）、以及**比对存档里存的 `meta.schemaFingerprint` 字符串**——它**从不重算指纹**。
+  实测探针（对冻结样例施加漂移）：
+
+  | 漂移方式 | `assertSaveV1` | `importText` | 重算指纹 |
+  |---|---|---|---|
+  | `world` 加一个字段 | **收** | **收** | 已变 |
+  | `meta` 加一个字段 | **收** | **收** | 已变 |
+  | 顶层加一个字段 | **收** | **收** | 已变 |
+  | `tasks[0]` 加字段 | 拒 | 拒 | 已变 |
+  | `settled[0]` 加字段 | 拒 | 拒 | 已变 |
+  | 改 `meta.schemaFingerprint` 的值 | 拒 | 拒 | 未变 |
+
+  也就是说：**重算指纹本来能抓住全部 6 种漂移（`save-fingerprint.test.ts` 自己就断言了「加字段必须改变指纹」），
+  但运行期从没拿它和常量比过**。修一行即可：
+  `assertSaveV1` 里加 `if (saveFingerprint(raw) !== SCHEMA_V1_FINGERPRINT) throw …`
+  （`collectSavePaths` 故意跳过 `meta.schemaFingerprint`，所以存的值不影响重算，不会自噬）。
+  **新旧判定**：`read()` 启动路径同样放过（我实测：把带 `world.unexpectedField` 的档塞进主槽，`read()` 收），
+  所以这是**既有缺口、不是 task-22 引入**；但 task-22 开了手动导入这个用户输入口，让它第一次能被外部文件触达，
+  因此按 P2 记。影响：漂移档会被写进单槽并在下次启动被接受，模块文档承诺的「多一个字段就是字段漂移，
+  按坏档处理」在 world/meta/顶层不成立。
+- **P3-1 `importText` 与 `read()` 的校验链是两份**（见上「代码审查」），有漂移风险，建议抽共享 helper。
+
+### 未验证
+
+- **真实台账在线时「导入后对账三分支」**：本次只在 `?ledger=off` 下验证（连不上/离线/未对账三条里的后两条），
+  **在线对账分支未验**——它复用启动路径，但我起不了 8000 台账服务（本沙箱未跑主服务），按 Chief 说明标注。
+- **smoke 114/114**：Chromium 本沙箱起不来（累计 7 次尝试全失败），施工用 CDP 跑的 114/114 属作者侧证据，**不计入通过**。
+- **浏览器里的真实点击流**（导出按钮触发下载、文件选择框、reload 重建）我无法驱动，只做了代码审查 + 存储层探针。
+
+### 收口
+
+- 本轮未改动任何项目文件（只读验收 + TEMP 探针）；`git status` 与进场快照一致，无残留进程/监听。
+
+---
+
+## task-22 P2 最终版（集合包含校验）复验（2026-10-19 20:00–20:10，lead · QA Engineer）
+
+- **基线声明**：HEAD `de579e5`；工作区 `pixel-world/` = 6 M + 1 ??（`index.html` +12、`main.ts` +101/−1、
+  `save-store.ts` +143/−28、`save.ts` +158/−2、`save-fingerprint.test.ts` +94、`save.test.ts` +51/−1、
+  新增 `test/save-import.test.ts`）。**`docs/save-v1.sample.json` 与 `SCHEMA_V1_FINGERPRINT=f53a0736d782d657`
+  相对 HEAD 零 diff**；`SAVE_V1_ALLOWED_FINGERPRINT` / `0fcb…` / `schemaFingerprintOf` **已不存在**（grep 0 命中）。
+- **最终结论：通过**（1 条 P3）。集合包含校验 + `meta.schemaFingerprint` 必填 + `parseSaveText` 单一校验链
+  三项都按最终口径落实，合法档全过、新增路径全拒且指名，可选路径无漏项。
+
+### 实现核对（新方案）
+
+- `SAVE_V1_PATH_SET = new Set(SAVE_V1_ALLOWED_PATHS)`，`SAVE_V1_ALLOWED_PATHS = SAVE_V1_PATHS(99) + SAVE_V1_OPTIONAL_PATHS(4)`，
+  实测 **103 条无重复**；4 条可选 = `world.villagers[].path[].x/y` + `world.villagers[].pendingRoute[].x/y`。
+- `assertSaveV1` 末尾：`collectSavePaths(raw).filter(p => !SAVE_V1_PATH_SET.has(p))`，非空即
+  `throw new Error('存档字段漂移：出现 v1 允许集合之外的路径：' + outside.join(', ') + …)`——**报错指名越界路径**。
+- `meta.schemaFingerprint`：**缺失或非字符串一律拒**（新增），值与常量不等也拒（原逻辑保留）。
+- **P3 已修**：校验链抽成模块级纯函数 `parseSaveText(text)`（`save-store.ts:81`），
+  `read()`（L162）与 `importText()`（L244）**都走它**，不再有平行实现。
+
+### 复验结果（全部本会话自跑；探针独立于施工方测试）
+
+| # | 项 | 结果 |
+|---|---|---|
+| 0a | 冻结 99 条与样例实际路径一致 | ✅ `deepEqual` 通过 |
+| 0b | 样例自身指纹仍等于常量 | ✅ `f53a0736d782d657` |
+| 1a | 冻结样例 | ✅ 过 |
+| 1b | fresh（tasks/settled/constructions/pending 全空） | ✅ 过 |
+| 1c | 走路中（`villagers[].path` 非空，命中可选路径） | ✅ 过，且确认 `path[].x/y` 真实出现 |
+| 1d | `pendingRoute` 非空 | ✅ 过 |
+| 1e | 满数据自构造（所有数组非空 + path/pendingRoute 填满） | ✅ 过 |
+| 1f | 上述合法档能 `importText` 写槽 + `read` 读回 + `buildWorldFromSave` 重建 | ✅ |
+| 2 | **新增路径逐层全拒** | ✅ **21 层全过**：顶层 / `world` / `meta` / `villagers[]` / `villagers[].pos` / `villagers[].path[]` 元素 / `villagers[].pendingRoute[]` 元素 / `buildings[]` / `buildings[].palette` / `buildings[].origin` / `tasks[]` / `settled[]` / `props[]` / `props[].at` / `roads[]` / `pending[]` / `constructions[]` / `faith` / `weather` / `activities` 值 / `activities[].activity`——每条都验证了「拒绝 + 报错指名该路径 + 不写主槽」 |
+| 2g/2h | `meta.schemaFingerprint` 缺失 / 非字符串（数字、null、{}、undefined） | ✅ 全拒 |
+| 2z | 反向对照：原样样例必须过 | ✅ |
+| **3a** | **可选路径完整性（重点）** | ✅ 把 Simulation 推进到 fresh→idle→dispatch→走路→开工→交付→下雨→多单→unknown 命令→cancelPending→complete 等 **数百个状态点**，收集去重后所有 save 路径，**越界 0 条**——`SAVE_V1_PATH_SET` 没有漏项 |
+| 4 | `read()` vs `importText()` 等价 | ✅ 7 个用例判定全一致（合法/坏档/形状错/高版本/world 加字段/缺指纹/空文件） |
+| 5a–5h | 原有 task-22 项不回归 | ✅ 导出单槽原文逐字节、内容合规无运行时字段、文件名格式、坏档备份 3 份且主槽不变、高版本只读不误关自动存档、2MB 上限、配额降级只提示一次、导入后自动存档重开 |
+| 门禁 | `check` 0 / `test:inprocess` **179/179** / audit **16/8/1/23** / `--strict` 0 / 整门禁 **exit 0** | ✅（`save-import.test.ts` 单跑 11/11，`save-fingerprint`+`save` 17/17） |
+
+### 缺陷与边界
+
+- **P3（唯一遗留）`read()` 与 `importText()` 对「纯空白文本」的 reason 标签不一致**：
+  `read()` 把 `'   '` 交给 `JSON.parse` 失败 → `reason='corrupt'`；`importText()` 先 `trim()` 判空 →
+  `reason='empty'`。**两条路判定相同（都拒，ok=false），只是诊断标签不同**，用户侧文案也都说「导入失败」。
+  建议二选一：`parseSaveText` 里也加 `text.trim().length===0 → empty`，或 `importText` 去掉这个前置判断。
+  不影响放行。
+- **已知边界（按最终口径，不算不合格，建议另开卡 task-32）**：集合包含校验**只防新增路径**，
+  删除/类型变化仍主要靠既有的显式形状校验 + `assertKeys` 兜底。实测边界样本：
+  - 删除 `world.faith` → **拒**（形状校验兜住）
+  - `world.now` 改成字符串 → **拒**（形状校验兜住）
+  - `world.weather = null` → **拒**（形状校验兜住）
+  - `world.weather = {}` → **过**（未被拦）
+  - `world.villagers = [{}]` → **过**（未被拦）
+  - 删 `tasks[0].summary` → **拒**（`assertKeys` 兜住）
+- **未验证**：真实台账在线时的「导入后对账三分支」（只复用启动路径，本沙箱起不了 8000）；
+  smoke 114/114（Chromium 沙箱起不来，施工的 CDP 结果属作者侧证据）。
+
+### 收口
+
+- 本轮未改动任何项目文件（只读验收 + TEMP 探针 `qa22c-final.mjs`）；`git status` 与进场快照一致，无残留进程/监听。
