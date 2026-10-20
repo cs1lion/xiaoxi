@@ -12,18 +12,25 @@
  * `stone: 0x3a3f3b` 改写成 `stone: 0x3e433f`，其余一律不动。
  * 磁盘上的源码文件零改动，是一次性的运行时替换。
  *
- * 用法（Windows PowerShell）
- * --------------------------
- *   $env:PALETTE_OVERRIDE = "stone:#3e433f"
- *   node node_modules/vite/bin/vite.js --config vite.palette.mjs
+ * 用法：不要直接跑这个配置文件，用配套的两个脚本
+ * ------------------------------------------------
+ * 起服务和截图必须分开两个进程——ego 的嵌入式 Node 运行时里跑 Vite 的
+ * createServer 会直接断开（NodeRuntime disconnected, exit 1）。所以：
  *
+ *   1) 普通 node 起服务：  node scripts/palette-serve.mjs
+ *   2) ego 里截图+断言：   ego-browser nodejs -e "await import('file:///.../scripts/palette-capture.mjs')"
+ *
+ * 覆盖串经 PALETTE_OVERRIDE 传给 serve，capture 用同一个串做断言。
  * 多个覆盖用逗号分隔：`"stone:#3e433f,grass:#2d3b2e"`。
- * 端口 5189，刻意避开常规 harness 的 5188，两组可以同时开着做对照。
+ *
+ * 端口：基线 5189 / 覆盖 5190，刻意避开常规 harness 的 5188，可以和它同时开着。
+ * 直接跑 `vite --config vite.palette.mjs` 也能用（只起覆盖这一个服务，端口取 PALETTE_PORT）。
  */
 
 import { readFileSync } from 'node:fs';
 
-const PORT = 5189;
+/** 单独跑时监听这个端口；可用 PALETTE_PORT 覆盖（palette-serve.mjs 会并行起两个）。 */
+const PORT = Number(process.env.PALETTE_PORT ?? 5189);
 
 /** 解析 `token:#rrggbb[,...]`。格式不合规就立刻抛，不吃沉默的错误。 */
 export function parseOverrides(raw) {
