@@ -664,6 +664,16 @@ function handleAqiAction(cmd, block) {
     if (input) { input.value = text; el("sendBtn")?.click(); }
     return;
   }
+  if (verb === "choice") {
+    // 协议 §23.3：点同一张卡的第 <index> 个胶囊，等价于直接点那颗胶囊。
+    // 越界、坏 index、没有 options 一律忽略，不抛错。
+    const index = Number.parseInt(payload, 10);
+    const options = Array.isArray(block?.options) ? block.options : [];
+    if (!Number.isInteger(index) || index < 0 || index >= options.length) return;
+    const cmd = options[index]?.cmd;
+    if (typeof cmd === "string" && cmd) handleAqiAction(cmd, block);
+    return;
+  }
   if (verb === "dispatch") {
     if (ws.readyState !== WebSocket.OPEN) {
       subtitle.textContent = "连接暂不可用，这单没收工；稍后再点。";

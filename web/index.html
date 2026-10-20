@@ -3,18 +3,26 @@
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
-<meta name="theme-color" content="#141c2e" />
+<meta name="theme-color" content="#f2eada" />
 <title>阿栖 · 留一点时间给自己</title>
-<style>html{background:#141c2e;color-scheme:dark}</style>
+<style>html{background:#f2eada;color-scheme:light}</style>
+<link rel="stylesheet" href="/static/fonts/fonts.css" />
 <link rel="stylesheet" href="/static/style.css" />
 <link rel="stylesheet" href="/static/avatar/dialogue-review.css" />
 <link rel="stylesheet" href="/static/workspace.css" />
 <link rel="stylesheet" href="/static/writing.css" />
 <link rel="stylesheet" href="/static/voice/interaction-state.css" />
-<link rel="stylesheet" href="/static/experience.css" />
-<link rel="stylesheet" href="/static/companion.css" />
-<link rel="stylesheet" href="/static/note-proposals.css" />
-<link rel="stylesheet" href="/static/almanac.css" />
+  <link rel="stylesheet" href="/static/experience.css" />
+  <link rel="stylesheet" href="/static/companion.css" />
+  <link rel="stylesheet" href="/static/note-proposals.css" />
+  <!-- stage-fx.js 会往 .stage 里插一张 id=stageFx 的 canvas。少了这张表，canvas 没有
+       `position:absolute;inset:0;pointer-events:none`，就成了一张流内的默认尺寸画布：
+       它占掉 .stage 的整个高度（把 topbar 推到 y=1000），并盖在卡片上吃掉点击。
+       2026-10-18：本文件新增了 stage-fx.js 的脚本引用，但漏了这条 link。
+       注：这段注释不要写成尖括号标签形式——测试夹具用正则剥脚本标签，会把注释里的
+       标签名当成真标签起点，连带删掉后面的 body。 -->
+  <link rel="stylesheet" href="/static/stage-fx.css" />
+  <link rel="stylesheet" href="/static/almanac.css" />
 <script type="importmap">
 {"imports":{"three":"/static/vendor/three/three.module.js","three/addons/":"/static/vendor/three/addons/","@pixiv/three-vrm":"/static/vendor/three-vrm/three-vrm.module.js","/static/avatar/params.js":"/static/avatar/params.js?v=20261013-neutral-1"}}
 </script>
@@ -251,6 +259,7 @@
   </div>
 </aside>
 <script type="module" src="/static/app.js"></script>
+<script type="module" src="/static/stage-fx.js"></script>
 <script type="module" src="/static/ui.js"></script>
 <script type="module" src="/static/workspace.js"></script>
 <script type="module" src="/static/executive.js"></script>

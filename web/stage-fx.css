@@ -1,16 +1,147 @@
-/* Midnight Living Stage · 状态光场（配合 stage-fx.js 的粒子画布）
- * 状态全部来自 #avatarStage[data-interaction]（app.js 真实写入），
- * 用 .stage:has(...) 调光场强度；reduced-motion 时画布不启动，这里的光场即最终效果。
+/* 舞台氛围：图版窗内的空气层 + 全舞台浮尘（配合 stage-fx.js）
  *
- * 2026-10-17 视觉轮：舞台同时服务两种页面构图——旧版暖纸上的独立头像，
- * 和新版 almanac 的暗色"图版窗"。光晕因此只加光、不铺底：
- * 左上暖、右侧冷、脚下暖池，四周收到透明，不会在纸上画出矩形卡片。 */
+ * 状态源只有一处：#avatarStage[data-interaction]（app.js 每帧写入）。
+ * 光场、光柱、粒子的强弱都从它派生，不新增任何业务状态。
+ *
+ * 2026-10-18 视觉轮：页面换成暖纸手帐，人物住在一扇点亮的暗窗里。这里的
+ * 每一层都只加光、不铺底——四周收到透明，不能在纸上画出矩形色块。
+ * 图版内部是唯一的深色区域，光效集中在那儿；纸面只留极淡的浮尘。
+ */
 
 #stageFx { position:absolute; inset:0; z-index:0; pointer-events:none; }
 
+/* ---------- 图版窗内的空气层 ---------- */
+/* 先给暗窗定调：冷中性底 + 暖光池。原来是偏棕的一整片，人物和背景同温，
+ * 分不开；换成冷底之后暖侧光才咬得住皮肤，边缘光也才看得出来。 */
+.plate-inner::before {
+  background:
+    radial-gradient(ellipse 40% 27% at 50% 18%, rgba(255, 198, 132, .34), transparent 68%),
+    radial-gradient(ellipse 76% 44% at 50% 102%, rgba(150, 96, 54, .2), transparent 72%),
+    linear-gradient(176deg, #141416, #0d0d10 56%, #09090b);
+}
+
+.plate-atmos {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  pointer-events: none;
+  overflow: hidden;
+  isolation: isolate;
+  --pa-warm: 1;
+  --pa-cool: 0;
+  --pa-o: 1;
+}
+.plate-atmos > span { position: absolute; display: block; }
+
+/* 两道光柱：左上暖、右侧冷，缓慢摆动。这是"光从窗外来"的唯一来源。 */
+.pa-shaft {
+  top: -34%;
+  left: 2%;
+  width: 36%;
+  height: 172%;
+  background: linear-gradient(186deg, rgba(255, 218, 164, .36), rgba(255, 200, 136, .1) 44%, transparent 72%);
+  filter: blur(15px);
+  mix-blend-mode: screen;
+  transform-origin: 50% 0;
+  /* 光柱只跟总开关（--pa-o）走，不跟暖度走：状态一变就整块提亮的话，
+   * 黑位一抬，人物的浮尘就被吃掉了（listening 时实测尘埃直接看不见）。 */
+  opacity: calc(.52 * var(--pa-o));
+  animation: pa-sway-a 23s ease-in-out infinite alternate;
+}
+.pa-shaft-b {
+  left: auto;
+  right: -4%;
+  width: 30%;
+  height: 156%;
+  background: linear-gradient(178deg, rgba(186, 212, 255, .22), rgba(186, 212, 255, .06) 48%, transparent 74%);
+  animation: pa-sway-b 31s ease-in-out infinite alternate;
+  opacity: calc((.3 + .45 * var(--pa-cool)) * var(--pa-o));
+}
+@keyframes pa-sway-a {
+  from { transform: rotate(12deg) translate3d(-2%, 0, 0); }
+  to   { transform: rotate(17deg) translate3d(3%, 0, 0); }
+}
+@keyframes pa-sway-b {
+  from { transform: rotate(-13deg) translate3d(2%, 1%, 0); }
+  to   { transform: rotate(-9deg) translate3d(-3%, 0, 0); }
+}
+
+/* 脚下光池：暖光落到地面，人物才有"站在光里"的重量。 */
+.pa-pool {
+  left: 50%;
+  bottom: -10%;
+  width: 128%;
+  height: 48%;
+  transform: translateX(-50%);
+  background: radial-gradient(ellipse at 50% 100%, rgba(255, 196, 124, calc(.26 * var(--pa-warm))), transparent 62%);
+  filter: blur(12px);
+  mix-blend-mode: screen;
+  animation: pa-breathe 9.5s ease-in-out infinite;
+}
+@keyframes pa-breathe {
+  0%, 100% { opacity: .72; transform: translateX(-50%) scale(.985); }
+  50%      { opacity: 1;   transform: translateX(-50%) scale(1.02); }
+}
+
+/* 慢扫描：一条极淡的横向光带从上往下走，20 秒一轮。读成"这扇窗是活的"。 */
+.pa-scan {
+  left: -6%;
+  right: -6%;
+  height: 26%;
+  top: -30%;
+  background: linear-gradient(180deg, transparent, rgba(255, 226, 178, .1) 62%, transparent);
+  mix-blend-mode: screen;
+  animation: pa-scan 19s cubic-bezier(.4, 0, .6, 1) infinite;
+}
+@keyframes pa-scan {
+  0%   { transform: translateY(0); opacity: 0; }
+  10%  { opacity: .9; }
+  62%  { opacity: .55; }
+  100% { transform: translateY(500%); opacity: 0; }
+}
+
+/* 暗窗里的颗粒：把数字感的纯净画面拉回"被拍下来的"质地。 */
+.pa-grain {
+  inset: 0;
+  opacity: .42;
+  mix-blend-mode: overlay;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='160'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.86' numOctaves='3' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)' opacity='.5'/%3E%3C/svg%3E");
+}
+
+/* 卡片送达：一次径向闪光。原来画在舞台 canvas 上的星屑被图版挡住了，
+ * 这里换成图版内部的一次曝光，落点在人物胸腔高度。 */
+.plate-atmos.is-burst::after {
+  content: "";
+  position: absolute;
+  left: 50%;
+  top: 44%;
+  width: 8%;
+  height: 8%;
+  transform: translate(-50%, -50%);
+  border-radius: 50%;
+  background: radial-gradient(circle, rgba(255, 216, 156, .62), rgba(255, 196, 124, .18) 46%, transparent 72%);
+  mix-blend-mode: screen;
+  animation: pa-burst .86s cubic-bezier(.16, 1, .3, 1) both;
+  pointer-events: none;
+}
+@keyframes pa-burst {
+  0%   { transform: translate(-50%, -50%) scale(.25); opacity: 0; }
+  16%  { opacity: .95; }
+  100% { transform: translate(-50%, -50%) scale(9.5); opacity: 0; }
+}
+
+/* 状态分档：倾听转暖、思考转冷、离开时整体收光。只改强度，不做颜色跳变。 */
+.stage:has(#avatarStage[data-interaction="listening"]) .plate-atmos { --pa-warm: 1.45; }
+.stage:has(#avatarStage[data-interaction="speaking"])  .plate-atmos { --pa-warm: 1.2; }
+.stage:has(#avatarStage[data-interaction="thinking"])  .plate-atmos,
+.stage:has(#avatarStage[data-interaction="preparing"]) .plate-atmos { --pa-cool: 1; --pa-warm: .7; }
+.stage:has(#avatarStage[data-interaction="yielding"])  .plate-atmos,
+.stage:has(#avatarStage[data-interaction="unavailable"]) .plate-atmos { --pa-o: .5; }
+
+/* ---------- 立绘本体：窗光与落地影 ---------- */
 .avatar-stage { isolation: isolate; }
 
-/* 窗光：左上暖主光、右侧冷反弹光、脚下暖池。全部收在透明里。 */
+/* 窗光：左上暖主光、右侧冷反弹光。全部收在透明里，不会在纸上画出矩形。 */
 .avatar-stage::after {
   content: "";
   position: absolute;
@@ -18,10 +149,10 @@
   z-index: -2;
   pointer-events: none;
   background:
-    radial-gradient(ellipse 42% 40% at 20% 16%, #ffe0b42e, transparent 72%),
-    radial-gradient(ellipse 38% 56% at 86% 44%, #a9c9e83d, transparent 74%),
-    radial-gradient(ellipse 56% 24% at 50% 100%, #e0bd8a26, transparent 72%);
-  filter: blur(10px);
+    radial-gradient(ellipse 40% 38% at 19% 14%, #ffe0b426, transparent 72%),
+    radial-gradient(ellipse 34% 52% at 88% 46%, #a9c9e82e, transparent 74%),
+    radial-gradient(ellipse 58% 22% at 50% 100%, #e0bd8a20, transparent 72%);
+  filter: blur(12px);
   opacity: var(--halo-o, 1);
   transition: opacity .6s var(--ease, ease);
 }
@@ -46,7 +177,9 @@
 /* Canvas 的 alpha 轮廓落一层软投影：旧版暖纸上人物会"站"进纸面；
  * 暗图版里几乎不可见，不干扰窗光。对比度只提 4%，把烤进贴图的嘴线略微压出来。 */
 .avatar-stage canvas {
-  filter: contrast(1.04) saturate(1.03) drop-shadow(0 14px 18px #3c43302b);
+  /* 调色：MToon 的材质本身偏粉白，暗窗里会显得发灰。对比 +11% 把肩线、
+   * 发丝和衣褶压回来，饱和度 +6% 抵掉冷背景吸走的肤色。 */
+  filter: contrast(1.11) saturate(1.06) brightness(.985) drop-shadow(0 14px 18px #0b0a0828);
 }
 
 /* 立绘身后的环境光场：强度按状态分档，默认安静 */
@@ -78,4 +211,13 @@
   .avatar-stage::after { inset: -6% -10% -4%; filter: blur(7px); }
   .avatar-stage::before { width: 70%; height: 18px; filter: blur(3px); }
   .avatar-stage canvas { filter: contrast(1.03) saturate(1.02) drop-shadow(0 8px 10px #3c433026); }
+  .pa-shaft { filter: blur(9px); opacity: calc(.36 * var(--pa-o)); }
+  .pa-grain { opacity: .3; }
+}
+
+/* 减少动态效果：光层留在最后的位置上，不逐帧动 */
+@media (prefers-reduced-motion: reduce) {
+  .pa-shaft, .pa-shaft-b, .pa-pool, .pa-scan { animation: none !important; }
+  .pa-scan { opacity: 0 !important; }
+  #stageFx { display: none; }
 }

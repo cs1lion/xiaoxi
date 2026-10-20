@@ -29,4 +29,21 @@ class TestTaste(unittest.TestCase):
             self.assertEqual(client.post('/api/voice-taste',json={'text':'x','style':'natural'},headers={'Origin':'https://other.example'}).status_code,403)
             self.assertEqual(client.post('/api/voice-taste',json={'text':'x','style':'natural'}).status_code,403)
             self.assertEqual(len(engine.calls),4)
+
+    def test_reported_format_matches_the_bytes(self):
+        """The audition page builds a Blob from `format`, so it must name the
+        container the engine really returned. Trimming re-encodes to WAV."""
+        from server.config import settings
+        engine=Fake();engine.calls=[];app=FastAPI();app.include_router(create_taste_router(engine))
+        saved=settings.tts_trim_silence
+        try:
+            with TestClient(app) as client:
+                settings.tts_trim_silence=True
+                self.assertEqual(client.post('/api/voice-taste',json={'text':'一句话','style':'natural'},
+                    headers={'Origin':'http://testserver'}).json()['format'],'wav')
+                settings.tts_trim_silence=False
+                self.assertEqual(client.post('/api/voice-taste',json={'text':'一句话','style':'natural'},
+                    headers={'Origin':'http://testserver'}).json()['format'],settings.tts_format)
+        finally:
+            settings.tts_trim_silence=saved
 if __name__=='__main__':unittest.main(verbosity=2)

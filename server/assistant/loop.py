@@ -545,6 +545,26 @@ REFLECT_MAX_CHILDREN = 2
 MAX_DELTA_FEEDBACK = 2000
 
 
+def _fork_bounds(cfg: dict[str, Any]) -> tuple[int, int]:
+    """`self_evolution.seed_fork_min/max` → 反思校验的数量闸门（§14 强制裂变）。
+
+    配置坏了就退回协议常量，不猜一个"更好"的数。这里显式判类型而不是沿用文件里
+    常见的 `or` 写法：`seed_fork_min: 0` 是个（不合理的）配置，被 `or 1` 悄悄改成
+    1 会让人以为配置生效了——那正是这一轮在清的那类静默。
+
+    键名必须是字面量 `cfg.get('seed_fork_min')`：scripts/audit_config_keys.py 只认
+    字面量，动态键在它眼里等于"没人读"，这两个配置会重新沉回去。
+    """
+    def _int(value: Any, fallback: int) -> int:
+        return value if isinstance(value, int) and not isinstance(value, bool) else fallback
+
+    low = _int(cfg.get('seed_fork_min'), REFLECT_MIN_CHILDREN)
+    high = _int(cfg.get('seed_fork_max'), REFLECT_MAX_CHILDREN)
+    if low < 0 or high < low:
+        return REFLECT_MIN_CHILDREN, REFLECT_MAX_CHILDREN
+    return low, high
+
+
 def _plan_is_trivial(plan) -> bool:
     """一步且不带任何验收/执行器/依赖信息的计划，等于没有计划。
 
@@ -585,7 +605,9 @@ def _is_hollow(text: str) -> bool:
     return any(pattern in stripped for pattern in REFLECT_HOLLOW_PATTERNS)
 
 
-def validate_reflection_payload(payload: Any, material: list[dict[str, Any]] | None = None
+def validate_reflection_payload(payload: Any, material: list[dict[str, Any]] | None = None,
+                                *, min_children: int | None = None,
+                                max_children: int | None = None
                                 ) -> tuple[dict[str, Any] | None, str | None]:
     """Gate a reflection payload (§14.2/§14.3): (normalized, None) or (None, reason).
 
@@ -624,7 +646,13 @@ def validate_reflection_payload(payload: Any, material: list[dict[str, Any]] | N
         if not any(ref in available for ref in source_refs):
             return None, "source_refs_untraceable"
     children = payload.get("child_seeds")
-    if not isinstance(children, list) or not (REFLECT_MIN_CHILDREN <= len(children) <= REFLECT_MAX_CHILDREN):
+    # 数量闸门由 memory.yaml 的 self_evolution.seed_fork_min/max 控制（§14 强制裂变）。
+    # 默认仍取模块常量，所以直接调用本函数的既有测试与调用方行为不变。
+    low = REFLECT_MIN_CHILDREN if min_children is None else int(min_children)
+    high = REFLECT_MAX_CHILDREN if max_children is None else int(max_children)
+    if low > high:
+        low, high = REFLECT_MIN_CHILDREN, REFLECT_MAX_CHILDREN
+    if not isinstance(children, list) or not (low <= len(children) <= high):
         return None, "child_seeds_count"
     norm_children: list[dict[str, Any]] = []
     for child in children:
@@ -905,6 +933,7 @@ class SelfEvolutionCycle:
 
         max_calls = max(1, int(cfg.get('max_model_calls_per_cycle', 2) or 2))
         max_retries = int(cfg.get('max_retries', 2) or 0)
+        fork_min, fork_max = _fork_bounds(cfg)
         provider = self.provider or llm
         normalized: dict[str, Any] | None = None
         raw_payload: Any = None
@@ -923,7 +952,8 @@ class SelfEvolutionCycle:
                 trace['error'] = f'{type(exc).__name__}: {exc}'
                 last_reason = 'model_call_failed'
                 continue
-            normalized, reason = validate_reflection_payload(raw_payload, material)
+            normalized, reason = validate_reflection_payload(
+                raw_payload, material, min_children=fork_min, max_children=fork_max)
             if normalized is not None:
                 last_reason = 'ok'
                 break

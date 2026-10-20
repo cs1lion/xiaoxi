@@ -70,18 +70,29 @@ def world_matrix(node):
 
 
 nodes = doc["nodes"]
-worlds = [np.eye(4)] * len(nodes)
+parents = {}
+for i, node in enumerate(nodes):
+    for child in node.get("children", []):
+        parents[child] = i
+
+# 世界矩阵必须**递归**求：glTF 不保证父节点下标小于子节点，按下标顺序
+# 单趟累乘会在父节点尚未计算时读到单位矩阵，算出来的逆绑定矩阵整块是错的。
+# 上一版就是这样把 8 个发束关节的 IBM 写成了垃圾值，头发被拉成头顶的
+# 八根竖条（2026-10-18 修复）。
+worlds = {}
+
+
+def node_world(index):
+    if index not in worlds:
+        local = world_matrix(nodes[index])
+        parent = parents.get(index)
+        worlds[index] = (node_world(parent) @ local) if parent is not None else local
+    return worlds[index]
+
+
 for i in range(len(nodes)):
-    node = nodes[i]
-    parent_index = None
-    for j in range(len(nodes)):
-        if i != j and i in nodes[j].get("children", []):
-            parent_index = j
-            break
-    if parent_index is not None:
-        worlds[i] = worlds[parent_index] @ world_matrix(node)
-    else:
-        worlds[i] = world_matrix(node)
+    node_world(i)
+worlds = [worlds[i] for i in range(len(nodes))]
 
 skin = doc["skins"][4]
 head_index = skin["joints"].index(45)
@@ -126,11 +137,21 @@ for node_index, node in enumerate(nodes):
     modified.append({"node_index": node_index, "primitive": prim, "new_joints": new_joints, "new_weights": new_weights, "hair_bone": hair_bone})
 
 # Extend skin joints and inverse bind matrices.
+#
+# glTF 的 MAT4 按列主序存储。之前把 numpy 行主序的矩阵直接按 16 个 float 写出，
+# 等于把每个 IBM 转置了：绑定姿势下 boneWorld @ IBM 不再是单位阵，发束被
+# 骨骼的平移整块推离头顶。这里统一在**行主序（数学惯例）**里算，只在写盘前
+# 转置一次；老矩阵先转回来再拼，读入-写出的往返字节不变。
 new_joints = skin["joints"] + sorted(hair_bone_nodes)
-old_inverse = read_accessor(skin["inverseBindMatrices"]).reshape(-1, 4, 4)
-new_inverse = np.concatenate([old_inverse, np.array([np.linalg.inv(worlds[joint]) for joint in sorted(hair_bone_nodes)])], axis=0)
+old_inverse = read_accessor(skin["inverseBindMatrices"]).reshape(-1, 4, 4).transpose(0, 2, 1)
+head_bind = old_inverse[head_index]
+assert np.allclose(head_bind, np.linalg.inv(worlds[45]), atol=2e-3), (
+    "IBM 约定漂移：现有关节的逆绑定矩阵与新算的世界矩阵不一致，"
+    "说明节点世界矩阵或列主序约定其中之一错了，先查清再写盘。")
+new_inverse = np.concatenate(
+    [old_inverse, np.array([np.linalg.inv(worlds[joint]) for joint in sorted(hair_bone_nodes)])], axis=0)
 skin["joints"] = new_joints
-skin["inverseBindMatrices"] = accessor(new_inverse.reshape(-1, 16), "MAT4")
+skin["inverseBindMatrices"] = accessor(new_inverse.transpose(0, 2, 1).reshape(-1, 16), "MAT4")
 
 # Rewrite hair mesh attributes with updated joint indices.
 for item in modified:

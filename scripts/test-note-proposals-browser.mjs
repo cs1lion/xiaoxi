@@ -3,10 +3,14 @@ import { readFile, mkdir } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
 
 // Every asset and API is intercepted. No live DB, model, audio, microphone or socket.
-const files = ['style.css', 'workspace.css', 'writing.css', 'experience.css', 'voice/interaction-state.css', 'companion.css', 'avatar/dialogue-review.css', 'note-proposals.css',
+// almanac.css 是首页的视觉层（2026-10-18 起由 index.html 直接引用），夹具要跟着带上，
+// 否则这条测试会把一个正常的样式请求判成"外部请求"。
+const files = ['style.css', 'almanac.css', 'workspace.css', 'writing.css', 'experience.css', 'voice/interaction-state.css', 'companion.css', 'avatar/dialogue-review.css', 'note-proposals.css',
   'assistant.js', 'task-card.js', 'interaction-preferences.js', 'companion.js', 'note-proposals.js', 'ui.js', 'chat-scroll.js', 'context-usage.js'];
 const assets = new Map(await Promise.all(files.map(async file => [`/static/${file}`, await readFile(fileURLToPath(new URL(`../web/${file}`, import.meta.url)), 'utf8')])));
+// 字体表剥掉：夹具离线，@font-face 会去要上百个 woff2 分片（这条测试只验行为）。
 const html = (await readFile(fileURLToPath(new URL('../web/index.html', import.meta.url)), 'utf8'))
+  .replace(/<link[^>]*\/static\/fonts\/[^>]*>/g, '')
   .replace(/<script\b[^>]*>[\s\S]*?<\/script>/g, '')
   .replace('<div id="assistantMount">', '<iframe id="fixtureEditor" title="测试中的未保存笔记" src="/fixture-editor.html"></iframe><div id="assistantMount">')
   .replace('</body>', `<script type="module">import {bootAssistant,showAssistantResult} from '/static/assistant.js';

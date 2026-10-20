@@ -418,20 +418,31 @@ class Orchestrator:
             return "", ""
         circadian = ""
         mood = ""
+        # 两段配置同属 memory.yaml 的 self_evolution 段（协议 §15.2 原文就是
+        # `self_evolution.circadian.timezone`）。只取一次 cfg：这两个嵌套段此前
+        # 不在 SELF_EVOLUTION_DEFAULTS 里，被访问器的白名单整段丢掉，于是
+        # `mood.enabled: false` 关不掉、`timezone` 改了也没用。
         try:
             from ..memory.evolution import self_evolution_cfg
+            cfg = self_evolution_cfg()
+        except Exception:
+            cfg = {}
+        try:
             from ..persona import circadian_context
-            zone = (self_evolution_cfg().get("circadian") or {}).get("timezone")
+            zone = ((cfg.get("circadian") or {}).get("timezone")
+                    if isinstance(cfg.get("circadian"), dict) else None)
             circadian = circadian_context(str(zone or "Asia/Shanghai"))
         except Exception:
             circadian = ""
-        try:
-            from ..memory.diary import decay_mood
-            from ..persona import mood_narrative
-            record = decay_mood(manager.store)
-            mood = mood_narrative(record if isinstance(record, dict) else None)
-        except Exception:
-            mood = ""
+        mood_cfg = cfg.get("mood") if isinstance(cfg.get("mood"), dict) else {}
+        if mood_cfg.get("enabled", True):
+            try:
+                from ..memory.diary import decay_mood
+                from ..persona import mood_narrative
+                record = decay_mood(manager.store)
+                mood = mood_narrative(record if isinstance(record, dict) else None)
+            except Exception:
+                mood = ""
         return circadian, mood
 
     def _render_turn_context(self, data: dict[str, Any]) -> list[dict[str, str]]:

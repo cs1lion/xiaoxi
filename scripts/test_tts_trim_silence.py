@@ -110,5 +110,48 @@ class TrimWavSilenceTests(unittest.TestCase):
             self.assertGreater(handle.getnframes(), 0)
 
 
+class CacheKeyTests(unittest.TestCase):
+    """The synthesis cache must not hand back the other wire format's bytes.
+
+    Trimming re-encodes to WAV while the untrimmed path keeps the configured
+    format, so the format is part of the cache identity. Before this was in the
+    key, flipping tts_trim_silence on a warm cache returned MP3 bytes for a WAV
+    request (or the reverse), which the frontend still decoded but which made
+    the toggle a no-op.
+    """
+
+    def setUp(self):
+        from server.config import settings
+        self.settings = settings
+        self.saved = self.settings.tts_trim_silence
+
+    def tearDown(self):
+        self.settings.tts_trim_silence = self.saved
+
+    def _key(self):
+        from server.speech.tts import TTSEngine
+        return TTSEngine()._cache_key("同一句话", {"voice": "v", "instruction": "i"})
+
+    def test_trim_toggle_changes_the_key(self):
+        self.settings.tts_trim_silence = True
+        trimmed = self._key()
+        self.settings.tts_trim_silence = False
+        untrimmed = self._key()
+        self.assertNotEqual(trimmed, untrimmed,
+                            "trim on/off must not share a cache entry")
+
+    def test_key_is_stable_for_the_same_settings(self):
+        self.settings.tts_trim_silence = True
+        self.assertEqual(self._key(), self._key(), "same settings must hit the same entry")
+
+    def test_different_text_or_profile_changes_the_key(self):
+        from server.speech.tts import TTSEngine
+        self.settings.tts_trim_silence = True
+        engine = TTSEngine()
+        base = engine._cache_key("一句话", {"voice": "v"})
+        self.assertNotEqual(base, engine._cache_key("另一句话", {"voice": "v"}))
+        self.assertNotEqual(base, engine._cache_key("一句话", {"voice": "other"}))
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

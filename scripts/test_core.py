@@ -259,6 +259,58 @@ def test_circadian_and_mood_reach_the_prompt() -> None:
     off_circadian, off_mood = orch._circadian_and_mood(enabled=False)
     check("记忆关闭时两段都为空", off_circadian == "" and off_mood == "",
           f"{off_circadian!r} {off_mood!r}")
+
+    # 配置真的读得到。2026-10-18 实测：`self_evolution_cfg()` 只放行
+    # SELF_EVOLUTION_DEFAULTS 里有的键，而 circadian / mood 两段没登记，
+    # 于是 memory.yaml 里怎么写都读不到，回落值恰好等于配置值 → 零症状。
+    # 这里把它钉死：改配置必须改变行为，否则就是又一个死键。
+    from server.memory import evolution as evolution_mod
+    original_memory_cfg = evolution_mod.memory_cfg
+    try:
+        evolution_mod.memory_cfg = lambda: {'self_evolution': {
+            'circadian': {'timezone': 'America/New_York'},
+            'mood': {'enabled': False},
+            'seed_fork_min': 2, 'seed_fork_max': 2,
+        }}
+        cfg = evolution_mod.self_evolution_cfg()
+        check("circadian 段能读到 yaml 里的时区",
+              cfg.get('circadian', {}).get('timezone') == 'America/New_York',
+              repr(cfg.get('circadian')))
+        check("mood 段只配 enabled 时保留默认 TTL（嵌套深合并）",
+              cfg.get('mood', {}).get('default_ttl_minutes') == 30, repr(cfg.get('mood')))
+        check("seed_fork 段能读到",
+              (cfg.get('seed_fork_min'), cfg.get('seed_fork_max')) == (2, 2),
+              repr((cfg.get('seed_fork_min'), cfg.get('seed_fork_max'))))
+
+        store.save_mood(narrative="关掉之后不该出现的心境", reason="测试", state="active",
+                        expires_at=time.time() + 3600)
+        _zone, gated = orch._circadian_and_mood(enabled=True)
+        check("mood.enabled=false 真的关掉心境注入", gated == "", repr(gated))
+
+        from server.assistant.loop import _fork_bounds
+        check("seed_fork 配置驱动数量闸门",
+              _fork_bounds({'seed_fork_min': 2, 'seed_fork_max': 3}) == (2, 3))
+        check("坏掉的 seed_fork（min>max）退回协议常量",
+              _fork_bounds({'seed_fork_min': 3, 'seed_fork_max': 1}) == (1, 2))
+        check("缺省 seed_fork 时用协议常量", _fork_bounds({}) == (1, 2))
+
+        # 接线存在性：_reflect 必须把数量闸门传进校验。行为级验证要 mock 整个
+        # 反思循环（模型调用 + 种子选取 + 材料装配），成本高于收益；这里用 AST
+        # 钉住那一行，防止有人把参数改回默认值——那样 _fork_bounds 再对也没用。
+        import ast as ast_mod
+        import inspect
+        import textwrap
+        from server.assistant import loop as loop_mod
+        func = ast_mod.parse(textwrap.dedent(
+            inspect.getsource(loop_mod.SelfEvolutionCycle._reflect)))
+        passed = {kw.arg for call in ast_mod.walk(func)
+                  if isinstance(call, ast_mod.Call)
+                  and getattr(call.func, "id", None) == "validate_reflection_payload"
+                  for kw in call.keywords}
+        check("_reflect 把 seed_fork 闸门真的传进校验",
+              {"min_children", "max_children"} <= passed, sorted(passed))
+    finally:
+        evolution_mod.memory_cfg = original_memory_cfg
     store.delete_all()
 
 
