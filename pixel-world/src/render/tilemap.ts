@@ -7,8 +7,10 @@
 
 import Phaser from 'phaser';
 import type { WorldGrid } from '../world/grid.ts';
+import type { TerrainId } from '../world/types.ts';
 import { TILE_PX } from '../world/setup.ts';
 import { TERRAIN_COLORS, TERRAIN_SPECK, WORLD } from '../world/palette-data.ts';
+import { drawTileEdge, type EdgeNeighbors } from './terrain-edges.ts';
 
 const DRESSING = ['tuft', 'pebble', 'flower', 'bare'] as const;
 type Dressing = (typeof DRESSING)[number];
@@ -29,6 +31,7 @@ export function drawTerrain(
       g.fillStyle(TERRAIN_COLORS[cell.terrain], 1);
       g.fillRect(px, py, TILE_PX, TILE_PX);
       drawTexture(g, px, py, x, y, cell.terrain);
+      drawTileEdge(g, cell.terrain, neighborsOf(grid, x, y), px, py);
     }
   }
   drawDressing(scene, grid, originX, originY);
@@ -36,6 +39,22 @@ export function drawTerrain(
   // “表格纸”，也会让建筑/道路的边线失去对比。需要时用 ?debug-grid=1 打开。
   const params = new URLSearchParams(window.location.search);
   if (params.get('debug-grid') === '1') drawGridLines(g, grid, originX, originY);
+}
+
+/** 取一格周围 8 邻格的材质，供地形拼接边判定（越界记 null，世界边界不画边）。 */
+function neighborsOf(grid: WorldGrid, x: number, y: number): EdgeNeighbors {
+  const terrainAt = (dx: number, dy: number): TerrainId | null =>
+    grid.at({ x: x + dx, y: y + dy })?.terrain ?? null;
+  return {
+    north: terrainAt(0, -1),
+    northEast: terrainAt(1, -1),
+    east: terrainAt(1, 0),
+    southEast: terrainAt(1, 1),
+    south: terrainAt(0, 1),
+    southWest: terrainAt(-1, 1),
+    west: terrainAt(-1, 0),
+    northWest: terrainAt(-1, -1),
+  };
 }
 
 /** 2×2 像素簇纹理：每格 2–3 个 2×2 实心小簇，位置由格坐标哈希稳定决定。
