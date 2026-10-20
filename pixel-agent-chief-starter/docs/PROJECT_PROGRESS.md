@@ -72,6 +72,8 @@
 - [x] S3-4 垂直切片评审：证据通过 QA 技术验收（`capture-palette --scenario slice`，15 张 + manifest，三态严格同源 0 不匹配）；**用户已判定「四栋能分清、雨天可读」**；1.0 保持世界 16 色 + UI 8 色，夜景 16 色并团留 1.1（18 色 ADR）。**ART_SPEC v0.2 已定稿；DEMO_SCRIPT v0.2 获批进 S4，验收后定稿 v1.0**。
 - [ ] **S4 演示验收**（计划 `docs/S4_DEMO_PLAN.md`）：逐段实测计时 + 来源标注 + 三项未验证处置（live 台账隔离 8001 / smoke CDP / 隔离冷启动）+ 干净重置；QA 独立两遍（Mock + live），100%/400% 整页截图；用户亲自验收后定稿 DEMO_SCRIPT v1.0。
 - [ ] **S2-2b 存档手动导出/导入**（task-22，已提交 `f07712b`/`0af8c27`；QA 通过，边界见 task-32）。
+- [ ] **task-32：存档字段级校验 + 变异测试**（2026-10-20 立项：不改 schemaVersion、样例/指纹零改动且样例仍可读；每路径类型+范围/枚举；删除/错类型/置空三变异不得崩且走坏档备份；读写导入共用校验器；不静默补默认值；更新 ADR_SAVE §1.3）。
+- [ ] **S5 真实 Agent 双向集成**：**被阻塞**（用户 2026-10-20 裁定：`server/assistant/executive.py` 的 durable 改动由用户本人处理、团队不得触碰；该文件收口前 S5 不得开工）。解除条件：用户确认 durable 线已提交 + C1 门重贴 `git status` + G2 五处编辑清单复核。
 - [ ] **task-32：存档最小 required 集**（补删除/类型变化防线：`weather={}`、`villagers=[{}]` 目前能过；不在 v1 内改，v2 以正式 schema 承接）。
 - [ ] 定稿并批准 `DEMO_SCRIPT.md` v0.1 与 `ART_SPEC.md` v0.1（用 `docs/DEMO_ART_SPEC_TODO.md` 的清单）。
 - [ ] 3 分钟演示跑通 + QA 独立复验 + 用户验收后，才进入 Agent 正式双向集成。
