@@ -30,13 +30,27 @@ export function createDecorView(scene: Phaser.Scene, originX: number, originY: n
     scaffolds,
     redrawRoads(cells) {
       roads.clear();
+      const at = new Set(cells.map((cell) => cell.x + ',' + cell.y));
+      const isRoad = (x: number, y: number): boolean => at.has(x + ',' + y);
       for (const cell of cells) {
         const px = originX + cell.x * TILE_PX;
         const py = originY + cell.y * TILE_PX;
-        roads.fillStyle(WORLD.stone, 0.85);
-        roads.fillRect(px + 2, py + 2, TILE_PX - 4, TILE_PX - 4);
-        roads.fillStyle(WORLD.plaza, 0.55);
-        roads.fillRect(px + 3, py + 3, TILE_PX - 6, 2);
+        // §1.4：小径由「内缩矩形」改三段 —— 1px soil 描边 + plaza 面 + 上缘 1px trim 高光。
+        // 描边按「这一侧有没有相邻的径」逐边判定：相邻那一侧不描边，多格小径才会连成一条
+        // 路，而不是一串各自带框的方块。
+        roads.fillStyle(WORLD.plaza, 1);
+        roads.fillRect(px + 1, py + 1, TILE_PX - 2, TILE_PX - 2);
+        roads.fillStyle(WORLD.soil, 0.85);
+        if (!isRoad(cell.x, cell.y - 1)) roads.fillRect(px + 1, py + 1, TILE_PX - 2, 1);
+        if (!isRoad(cell.x, cell.y + 1)) roads.fillRect(px + 1, py + TILE_PX - 2, TILE_PX - 2, 1);
+        if (!isRoad(cell.x - 1, cell.y)) roads.fillRect(px + 1, py + 1, 1, TILE_PX - 2);
+        if (!isRoad(cell.x + 1, cell.y)) roads.fillRect(px + TILE_PX - 2, py + 1, 1, TILE_PX - 2);
+        // 上缘高光：光从左上打，受光面在顶边。用 trim 让路面「亮起来」，与草地分开。
+        roads.fillStyle(WORLD.trim, 0.55);
+        if (!isRoad(cell.x, cell.y - 1)) roads.fillRect(px + 2, py + 2, TILE_PX - 4, 1);
+        // 石材板缝：路面内部 8px 一道，只用 stone，读成「铺过的路」而不是一块毡。
+        roads.fillStyle(WORLD.stone, 0.6);
+        roads.fillRect(px + 1, py + TILE_PX / 2, TILE_PX - 2, 1);
       }
     },
     syncProps(list) {
