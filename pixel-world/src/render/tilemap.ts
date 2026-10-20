@@ -32,7 +32,10 @@ export function drawTerrain(
     }
   }
   drawDressing(scene, grid, originX, originY);
-  drawGridLines(g, grid, originX, originY);
+  // 网格线只是排查落位用的辅助层，默认不画：铺满全屏的细线会把地形纹理与轮廓压成
+  // “表格纸”，也会让建筑/道路的边线失去对比。需要时用 ?debug-grid=1 打开。
+  const params = new URLSearchParams(window.location.search);
+  if (params.get('debug-grid') === '1') drawGridLines(g, grid, originX, originY);
 }
 
 /** 2×2 像素簇纹理：每格 2–3 个 2×2 实心小簇，位置由格坐标哈希稳定决定。
@@ -95,6 +98,7 @@ function drawDressing(
   }
 }
 
+/** 调试用的网格线：只在 ?debug-grid=1 时由 drawTerrain 调用，不参与正式画面。 */
 function drawGridLines(
   g: Phaser.GameObjects.Graphics,
   grid: WorldGrid,
