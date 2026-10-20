@@ -156,7 +156,19 @@ teardown: port8001=false port5189=false
 4. **计时比剧本短**：Mock 全段约 21s、live 段落 16.9s；v0.3 剧本应按实测更新，不凑满 3 分钟。
 5. **截图口径**：100% 是整页（含页头/DOM，给人看窗口实际效果）；400% 是隐藏 DOM 后的 canvas，只用于画布像素检查。
 6. **Chrome 生命周期**：所有脚本只关自己开的页面；共享的 headless CDP Chrome 未被关闭。
-7. **派单意图只由 `_DELEGATION` 正则判定，同义改写会静默降级**：`server/dialogue/orchestrator.py:60-65` 第一支要求「去(把|帮我|替你)…」开头，命中才走 `kind=delegation` 建单（`server/app.py:727-729`）。换成「帮我把…」等不以「去」开头的说法时，`executive_route` 返回 None，整轮**静默降级**为普通对话——不建单、无任何提示，只听到一句离线 mock 回复（`server/llm.py:250`）。该链路**不依赖 LLM Key**（`delegate()` 只读写台账，`server/assistant/executive.py:166-212`）。佐证：Chief 2026-10-19 23:00 独立复现（自建临时副本 + 自写 WS 探针，未用本文脚本）同 payload 得 id `c_d34c824bc869` 4 帧 + REST items=1，反例「帮我把…」0 帧；QA 三文本对照另得 id `c_e6ecc8ce2da4`。演示/复跑时派单文本必须用 `去把便笺整理成三版标题` 原文。
+7. **派单意图由正则/关键词判定，同义改写只在 live 路静默降级（双路径必须分开说）**：
+   ① **Mock 路**（`?ledger=off`）：世界有**自己的关键词路由器**，`pixel-world/src/world/oracle.ts:23-27`
+   的 `TASK_RULES` 里 `writing` 规则含「便笺」「整理」，所以「帮我把便笺整理成三版标题」被**世界本地
+   接住** → 建 Mock 单 → 正常交付，**看不到这个弱点**。用户实跑确认：Mock 路该句成功交付（2026-10-20）。
+   ② **live 路**（隔离 8001）：由 server 的 `_DELEGATION` 正则判定（`server/dialogue/orchestrator.py:60-65`，
+   第一支要求「去(把|帮我|替你)…」开头），命中才走 `kind=delegation` 建单（`server/app.py:727-729`）。
+   换成「帮我把…」等不以「去」开头的说法时，`executive_route` 返回 None，整轮**静默降级**为普通对话
+   ——不建单、无任何提示，只听到一句离线 mock 回复（`server/llm.py:250`）；此时 live 路世界**根本
+   收不到这句话**，所以画面上什么都看不到。该链路**不依赖 LLM Key**（`delegate()` 只读写台账，
+   `server/assistant/executive.py:166-212`）。
+   佐证：Chief 2026-10-19 23:00 独立复现 live 路同 payload 得 id `c_d34c824bc869` 4 帧 + REST items=1，
+   反例「帮我把…」0 帧；QA 三文本对照另得 id `c_e6ecc8ce2da4`。**演示这个弱点必须用 live 路；
+   Mock 演示派单请用 `去把便笺整理成三版标题` 原文。**
 
 ## 8. 复跑命令汇总
 

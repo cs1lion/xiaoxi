@@ -1,8 +1,8 @@
-# DEMO_SCRIPT.md v0.4 — 三分钟演示剧本（S4 证据版）
+# DEMO_SCRIPT.md v1.0 — 三分钟演示剧本（定稿）
 
-> 版本：v0.4  
-> 日期：2026-10-19  
-> 状态：S4 实跑证据已出（`docs/DEMO_RUN_EVIDENCE.md`）；待 QA 通过后用户验收，定稿 v1.0  
+> 版本：v1.0  
+> 日期：2026-10-20  
+> 状态：用户 2026-10-20 验收通过，定稿 v1.0（S4 收口）  
 > 依据：`pixel-agent-chief-starter/docs/DEMO_SCRIPT_TEMPLATE.md` 的 6 个时间槽；实现状态以 `pixel-agent-chief-starter/docs/PROJECT_PROGRESS.md` 及当前 `pixel-world/src` 为准（`docs/DEMO_ART_SPEC_TODO.md` 中“缺失”部分已随 S2/S3 落地，详见下文）。  
 > 数据来源标注规则：`Mock/离线` = `?ledger=off` 或纯本地仿真；`live 台账/真实 WS` = 接隔离 8001 实例，真实 WebSocket 推送；`两者` = 世界逻辑与画面不依赖台账，但台账连通时任务来源/交付统计走真实通道。  
 > 数字来源纪律：正文所有数字（测试数、调色板数、尺寸、时长等）均标注来源命令或文档路径，不手填估算。计时数字来自 `pixel-world/eval/screens/demo-run-{mock,live}.jsonl`，由脚本生成。  
@@ -149,6 +149,7 @@
 - [ ] **0–15s** 状态行可复述出至少：莞尔状态、天气、台账状态、神恩点数。
 - [ ] **15–60s** Mock 跑：输入「帮我查一下资料」后 **7.9s** 内完成「行礼 → 进铺 → 铺子运转 → 交付 → 回祭坛」，且 `#reply` 无红字。（来源：`demo-run-mock.jsonl` seg1 2805→10670ms）
 - [ ] **15–60s** live 跑：输入神谕后 **2.9s** 内看到 `台账在线`、角色赶往铺子、状态行出现 `blocked_question`；**不验收「交付完成」**（隔离 8001 无 Key，任务为 `blocked`）。（来源：`demo-run-live.jsonl` seg1 10687→13571ms）
+  - **live 派单文本用 `去把便笺整理成三版标题` 原文**；同义改写（如「帮我把…」）会静默不建单，属已知限制（见「已知限制」表最后一行），不代表故障。
 - [ ] **60–90s** 滚动到纸面可见；标题与 `window.Oracle.report().headline` 一致；正文可见「莞尔」「阿雾」或「交付」「神恩」。
 - [ ] **90–125s** 点击「下雨」后 2 秒内画面出现雨幕；角色撑伞；状态行显示「雨」。
 - [ ] **125–155s** 点击「存档：写入单槽」后 localStorage 出现 `xiaoxi.pixel-world.save.v1`；刷新后建筑数、道路数、神恩里程碑、交付统计恢复；状态行出现「读档未对账」。
@@ -288,19 +289,20 @@
 
 ## 已知限制
 
-> 以下状态已根据 `docs/DEMO_RUN_EVIDENCE.md` §6/§7 更新为「已当场验证 / 未验证」；待 QA 独立复验后定稿。
+> 以下状态已根据 `docs/DEMO_RUN_EVIDENCE.md` §6/§7 更新，并经 QA 独立复验通过（v1.0 定稿）。
 
 | 限制项 | 当前状态 | 证据位置 | 说明 |
 |---|---|---|---|
 | **live 台账（隔离 8001）** | ✅ **已当场验证** | `docs/DEMO_RUN_EVIDENCE.md` §3.1–3.2；`pixel-world/eval/screens/demo-run-live.jsonl`；`pixel-world/eval/screens/demo-live-*.png` | 隔离 8001 实跑第二遍，真实 WS 推送，`ledger=on` 截图已落盘。 |
-| **smoke 需真实浏览器** | ✅ **作者侧已验证 / QA 侧未验证** | `docs/DEMO_RUN_EVIDENCE.md` §4；`scripts/smoke.mjs`（CDP 连接外部 Chrome）；smoke 输出 **114/114**，exit 0 | 沙箱禁止 Chromium 自启，作者侧用共享 CDP 跑官方脚本；QA 需在可 launch 环境独立复跑官方入口。 |
+| **smoke 需真实浏览器** | ✅ **QA 已独立验证 114/114** | `docs/DEMO_RUN_EVIDENCE.md` §4；`scripts/smoke.mjs`（CDP 连接外部 Chrome）；smoke 输出 **114/114**，exit 0 | 作者侧沙箱禁止 Chromium 自启，用 loader hook 换成 `connectOverCDP` 连外部 Chrome 跑官方脚本（未改项目文件）；**QA 已在自己环境独立复跑 114/114**。 |
 | **主服务冷启动（隔离实例）** | ✅ **已当场验证** | `docs/DEMO_RUN_EVIDENCE.md` §3.3；隔离 8001 冷启动日志 | 首次 `bootMs=3174`；停实例后冷启 `bootMs=2999`；health 200、`Application startup complete`、WS 可连。**8000 未重启、未写入**（§3.4）。 |
 | **live 服务无 Key 导致 blocked** | ✅ **已当场验证** | `docs/DEMO_RUN_EVIDENCE.md` §3.2、§7.1 | 隔离 8001 无 Key（`health.llm.offline=true`）；真实 WS 帧 `drafting→briefing→running→blocked`（id `c_a0efde6024e7`）；世界展示 `blocked_question`，不代答。**对 8000 实机演示需单独批准**（会写主台账）。 |
 | **计时比剧本短** | ✅ **已当场验证** | `docs/DEMO_RUN_EVIDENCE.md` §2/§3；`pixel-world/eval/screens/demo-run-{mock,live}.jsonl` | Mock 整段墙钟 **22.5s**（段落跨度 21.7s）；live 段落跨度 **16.9s**、墙钟 **41.5s**（含两次冷启动）。不凑满 3 分钟。 |
+| **派单意图只由正则判定，同义改写静默降级（仅 live 路）** | ✅ **已定稿（双路径已区分）** | `pixel-world/src/world/oracle.ts:23-27`（Mock 路）；`server/dialogue/orchestrator.py:60-65`（live 路）；`docs/DEMO_RUN_EVIDENCE.md` §7.7 | **两条路径不同，不能混为一谈。** ① **Mock 路**（`?ledger=off`）：世界自己的关键词路由器 `TASK_RULES` 里 `writing` 规则含「便笺」「整理」（`oracle.ts:23-27`），所以「帮我把便笺整理成三版标题」被**世界本地接住** → 建 Mock 单 → 正常交付（用户 2026-10-20 实跑确认）。② **live 路**（隔离 8001）：由 server 的 `_DELEGATION` 正则判定（`orchestrator.py:60-65`，第一支要求「去(把\|帮我\|替我)…」开头），「帮我把…」**不命中** → 不建单、无任何提示（静默降级）；live 路世界根本收不到这句话，自然什么都看不到。**要演示这个弱点必须走 live 路，Mock 路看不到。** |
 
 **说明**：
 - 除上表外，其余段落（Mock 跑、存档、调试面板、12fps、DOM overlay）均已通过 `test:inprocess` 180/180 与 smoke 逻辑断言覆盖。
-- `docs/DEMO_RUN_EVIDENCE.md` 未回来前，以上「已当场验证」标记均为 S4 初稿状态；QA 独立复验后由 Chief 统一更新。
+- 证据文档已回并已复验：QA 独立复验通过（smoke 114/114、P1 关闭），详见 `docs/DEMO_RUN_EVIDENCE.md`；本剧本据此定稿 v1.0。
 
 ---
 
