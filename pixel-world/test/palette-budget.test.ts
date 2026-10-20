@@ -64,7 +64,7 @@ const PROPOSED_WORLD: Record<string, string> = {
   soil: '#1b211c',
   grass: '#2d3b2e',
   grassLit: '#334234',
-  stone: '#3a3f3b',
+  stone: '#3e433f', // 2026-10-20 明度重排方案 A（用户批准）：原 #3a3f3b
   plaza: '#4a4f42',
   farm: '#3b3423',
   timber: '#8a5a44',
