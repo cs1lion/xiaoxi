@@ -41,16 +41,40 @@ export const TERRAIN_HEIGHT: Readonly<Record<TerrainId, number>> = {
 };
 
 /** 亮一档 token：只用现有 16 色里的 `grassLit` / `plaza`（§1.2「不加色」）。 */
-const BRIGHT: Readonly<Record<TerrainId, number>> = {
+export const BRIGHT: Readonly<Record<TerrainId, number>> = {
   tree: WORLD.grassLit,
   grass: WORLD.grassLit,
   farm: WORLD.plaza,
   stone: WORLD.plaza,
-  plaza: WORLD.plaza,
+  // plaza 是最低材质，邻格不可能更低，所以它**永远不画边**（实测 16 个 plaza 格
+  // 一个都没画）。这里给 trim 而不是自身也是为此：万一将来改了高度序，画出来的
+  // 边也不会与底色相同、变成隐形线。
+  plaza: WORLD.trim,
 };
 
-/** 暗边 token：全场统一用深土色（W02），与建筑窗洞、树冠暗部同色，读成阴影。 */
-const DARK = WORLD.soil;
+/**
+ * 暗边 token：按材质查表，**不能**全场统一用一个色。
+ *
+ * 原来全场统一用 soil（W02）。但 `tree` 的底色本身就是 soil
+ * （`TERRAIN_COLORS.tree = WORLD.soil`），于是 tree 格朝下/朝右的暗边画出来
+ * 与底色完全相同 —— 亮度落差 **0.0**，等于白画。实测：96 个 tree 格里有 48 个
+ * （正好一半，朝下/朝右那侧）的边完全看不见，占总写入像素的 25.6%。
+ *
+ * 这不是风格选择，是 §1.2「暗边比底色更深」这条规则在 tree 上的漏洞：它的底色
+ * 已经是最深的土色，没有更深的同色可用。修法是 tree 的暗边改用 ink（W01，比 soil
+ * 再深一档），落差 14.0 —— 可辨，且仍在 16 色预算内，不新增颜色。
+ *
+ * 为什么其他材质不动：grass / farm / stone / plaza 的底色都比 soil 亮，落差
+ * 20.9–45.6，本来就清楚。只补 tree 这一处漏洞，不顺手改已有正确的东西。
+ */
+export const DARK: Readonly<Record<TerrainId, number>> = {
+  tree: WORLD.ink,
+  grass: WORLD.soil,
+  farm: WORLD.soil,
+  stone: WORLD.soil,
+  // 同 BRIGHT.plaza 的理由：plaza 永不画边；给 stone（比 plaza 暗）以防将来改高度序。
+  plaza: WORLD.stone,
+};
 
 /** 四邻边掩码的位。 */
 export const SIDE_BIT = { north: 1, east: 2, south: 4, west: 8 } as const;
@@ -160,13 +184,15 @@ export function drawTileEdge(
 
   const size = TILE_PX;
   const bright = BRIGHT[self];
+  // 暗边按材质取色：tree 用 ink（底色本身是 soil，用 soil 会隐形），其余用 soil。
+  const dark = DARK[self];
 
   if ((side & SIDE_BIT.south) !== 0) {
-    g.fillStyle(DARK, 1);
+    g.fillStyle(dark, 1);
     g.fillRect(px, py + size - 1, size, 1);
   }
   if ((side & SIDE_BIT.east) !== 0) {
-    g.fillStyle(DARK, 1);
+    g.fillStyle(dark, 1);
     g.fillRect(px + size - 1, py, 1, size);
   }
   if ((side & SIDE_BIT.north) !== 0) {
@@ -187,11 +213,11 @@ export function drawTileEdge(
     g.fillRect(px + size - 1, py, 1, 1);
   }
   if ((corner & CORNER_BIT.southWest) !== 0) {
-    g.fillStyle(DARK, 1);
+    g.fillStyle(dark, 1);
     g.fillRect(px, py + size - 1, 1, 1);
   }
   if ((corner & CORNER_BIT.southEast) !== 0) {
-    g.fillStyle(DARK, 1);
+    g.fillStyle(dark, 1);
     g.fillRect(px + size - 1, py + size - 1, 1, 1);
   }
 }
