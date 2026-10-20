@@ -54,8 +54,15 @@ function safeLabel(text) {
 
 /** 判断 PNG 是否「全白/全黑」这类空白图。
  *
- * 为什么需要：canvas.toDataURL() 在窗口未正常合成时会静默返回全黑图，
+ * 为什么需要：canvas.toDataURL() **在某些时序下**会静默返回全黑图——
  * 不抛错、字节数也正常。只看 length 判不出来，必须解到像素。
+ *
+ * 注意：这不是「toDataURL 不可用」。同一个 API 在别的时序下能拿到真实内容：
+ * UIUX 的 round-12 图就是 toDataURL 拍的，480×320、blackPct 0.00%、68 种颜色。
+ * 最可能的原因是 Phaser 的 WebGL 默认 preserveDrawingBuffer=false，
+ * 在 rAF 回调之外读时 drawing buffer 已被清空 → 全黑；紧跟渲染读则正常。
+ * 所以结论是「需要守卫」，不是「这条路走不通」。
+ *
  * 这里不做通用 PNG 解码（避免引依赖），只按 zlib 解压后统计 IDAT 里
  * 是否存在两个不同的字节值——真正的游戏画面必然有丰富变化，
  * 全黑/全白图的解压数据几乎全是同一个值。
@@ -216,17 +223,23 @@ async function capture(page, label, url, overrides, expectOverride, settleMs) {
   });
   writeFileSync(`${SHOT_DIR}/${file}`, Buffer.from(shot.data, 'base64'));
 
-  // native 回读有一个已知陷阱：canvas.toDataURL() 在窗口未正常合成时
-  // 会返回一张**全黑**图，而且它不会报错——字节数甚至可能是正常的。
-  // 实测：ego 窗口最小化或 DPR≠1 的某些状态下，toDataURL 出来是 100% #000000，
-  // 而同一时刻 CDP 截图是正常的。所以必须校验非空，否则下游用它算像素统计
-  // 会得到「100% 落在 band 0」这种假数据（本项目已踩过一次）。
+  // native 回读有一个已知陷阱：canvas.toDataURL() **在某些时序下**会返回一张
+  // **全黑**图，而且它不会报错——字节数甚至可能是正常的。
+  //
+  // 实测：本工具跑时拿到 100% #000000，而同一时刻 CDP 截图完全正常；
+  // 同一份代码在 UIUX 那次（round-12）却拿到了真实内容（blackPct 0.00%、68 色）。
+  // 差异指向读取时序而非 API 能力：Phaser 的 WebGL 默认 preserveDrawingBuffer=false，
+  // 在 rAF 回调之外读，drawing buffer 可能已被清空。
+  //
+  // 结论：**不是 toDataURL 不可用，是它需要守卫**。所以这里不删这条路，
+  // 而是校验非空——否则下游拿它算像素统计会得到「100% 落在 band 0」这种
+  // 假数据，且全程不报错（本项目已踩过一次）。
   const nativeFile = `palette-verify-${label}-native.png`;
   const base64 = String(measured.dataUrl).replace(/^data:image\/png;base64,/, "");
   const nativeBuf = Buffer.from(base64, "base64");
   const nativeBlank = isLikelyBlank(nativeBuf);
   if (nativeBlank) {
-    console.warn(`  原生：跳过（toDataURL 返回空白图，窗口未正常合成时会发生；以 CSS 截图为准）`);
+    console.warn(`  原生：跳过（toDataURL 本次返回空白图，属读取时序问题；以 CSS 截图为准，下次可重试）`);
   } else {
     writeFileSync(`${SHOT_DIR}/${nativeFile}`, nativeBuf);
   }
