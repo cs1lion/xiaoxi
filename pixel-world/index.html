@@ -37,7 +37,14 @@
         position: relative;
         line-height: 0;
         border: 1px solid var(--line);
-        box-shadow: 0 0 0 1px var(--base), 0 18px 40px rgba(12, 15, 13, 0.5);
+        /* §1.7 硬投影：原 0 18px 40px 是大半径高斯模糊，是整张图里唯一不像素的地方——
+           像素语言里没有「柔和渐隐」，投影必须是硬边块，不留模糊过渡。
+           两层阶梯（4px 深 + 8px 浅）模拟「离地一点」的厚度，两层都还是实心块。
+           颜色一律从 --base（UI 8 色之 U7）派生，不写新的 rgb 字面量：
+           audit-palette 会把 CSS 字面量逐个计入 UI 层色数，写死 rgba() 等于隐式加色。 */
+        box-shadow:
+          4px 4px 0 0 color-mix(in srgb, var(--base) 55%, transparent),
+          8px 8px 0 0 color-mix(in srgb, var(--base) 22%, transparent);
       }
       #app canvas { display: block; image-rendering: pixelated; }
       /* 动态中文 DOM overlay（D5-A）：按 canvas 实际位置换算，不遮输入/纸面。 */
@@ -64,6 +71,36 @@
         color: var(--paper-ink);
         background: var(--ink);
         white-space: nowrap;
+        /* §1.7：加 1px 硬描边，让它从「HTML 盒子」读成「像素气泡」。
+           描边用 --line（UI 8 色之一），与纸面/面板的边线同一套语言。 */
+        border: 1px solid var(--line);
+      }
+      /* 像素尾巴：用 ::after + border 画实心小三角，朝下指着角色。
+         全部用 CSS 变量（--ink / --line），不引入任何新的色值字面量。
+         border 宽度必须是偶数，转角才不会出半像素。 */
+      .overlay-bubble::after {
+        content: "";
+        position: absolute;
+        left: 50%;
+        bottom: -5px;
+        margin-left: -3px;
+        width: 0;
+        height: 0;
+        border-left: 3px solid transparent;
+        border-right: 3px solid transparent;
+        border-top: 4px solid var(--line);
+      }
+      .overlay-bubble::before {
+        content: "";
+        position: absolute;
+        left: 50%;
+        bottom: -3px;
+        margin-left: -2px;
+        width: 0;
+        height: 0;
+        border-left: 2px solid transparent;
+        border-right: 2px solid transparent;
+        border-top: 3px solid var(--ink);
       }
       .oracle {
         width: 720px;
@@ -166,7 +203,10 @@
         padding: 10px;
         background: var(--panel);
         border: 1px solid var(--line);
-        box-shadow: 0 12px 30px rgba(12, 15, 13, 0.55);
+        /* §1.7 同上：30px 模糊 → 硬投影两层阶梯，颜色同样从 --base 派生。 */
+        box-shadow:
+          3px 3px 0 0 color-mix(in srgb, var(--base) 55%, transparent),
+          6px 6px 0 0 color-mix(in srgb, var(--base) 22%, transparent);
         font-size: 11px;
         line-height: 1.5;
         overflow-wrap: anywhere;
