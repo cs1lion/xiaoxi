@@ -553,6 +553,9 @@ class CommissionStore:
                 self._db.execute('''CREATE TABLE IF NOT EXISTS commission_events (
                     id INTEGER PRIMARY KEY AUTOINCREMENT, commission_id TEXT NOT NULL,
                     kind TEXT NOT NULL, payload TEXT NOT NULL, created_at REAL NOT NULL)''')
+                self._db.execute('''CREATE TABLE IF NOT EXISTS commission_requests (
+                    request_id TEXT PRIMARY KEY, commission_id TEXT NOT NULL,
+                    arguments TEXT NOT NULL, created_at REAL NOT NULL)''')
                 columns = {row['name'] for row in self._db.execute('PRAGMA table_info(commissions)')}
                 if 'blocked_kind' not in columns:
                     self._db.execute("ALTER TABLE commissions ADD COLUMN blocked_kind TEXT NOT NULL DEFAULT ''")
@@ -614,18 +617,35 @@ class CommissionStore:
         return value
 
     # ---------- 写入 ----------
-    def create(self, title, brief='', thread_id='', agent_id=''):
+    def create(self, title, brief='', thread_id='', agent_id='', *, request_id=None):
         title = self._string(title, 'title', self.MAX_TITLE)
         brief = self._string(brief, 'brief', self.MAX_BRIEF)
         thread_id = self._string(thread_id, 'thread_id', 100)
         agent_id = self._string(agent_id, 'agent_id', 100)
+        if request_id is not None:
+            request_id = self._string(request_id, 'request_id', 200)
+            if not request_id:
+                raise ValueError('request_id must be nonempty')
+        arguments = json.dumps({'title': title, 'brief': brief, 'thread_id': thread_id,
+                                'agent_id': agent_id}, ensure_ascii=False, sort_keys=True)
         commission_id, now = 'c_' + uuid.uuid4().hex[:12], time.time()
         with self._transaction():
+            if request_id is not None:
+                previous = self._db.execute(
+                    'SELECT commission_id, arguments FROM commission_requests WHERE request_id=?',
+                    (request_id,)).fetchone()
+                if previous is not None:
+                    if previous['arguments'] != arguments:
+                        raise ValueError('request_id already used with different arguments')
+                    return self._row(previous['commission_id'])
             self._db.execute('''INSERT INTO commissions
                 (id, thread_id, title, brief, agent_id, status, step_idx, retry_count,
                  blocked_question, delivery, audit, packet, rubric_ids, created_at, updated_at, closed_at)
                 VALUES (?,?,?,?,?, 'drafting', 0, 0, '', '{}', '{}', '{}', '[]', ?, ?, NULL)''',
                 (commission_id, thread_id, title, brief, agent_id, now, now))
+            if request_id is not None:
+                self._db.execute('INSERT INTO commission_requests VALUES (?,?,?,?)',
+                                 (request_id, commission_id, arguments, now))
             self._event(commission_id, 'opened', {'title': title, 'brief': brief[:200]}, now)
             return self._row(commission_id)
 
@@ -707,6 +727,19 @@ class CommissionStore:
     def get(self, commission_id):
         with self._transaction():
             return self._row(commission_id)
+
+    def request_commission(self, request_id):
+        """Return the commission bound to an idempotency key, or None."""
+        if request_id is None:
+            return None
+        request_id = self._string(request_id, 'request_id', 200)
+        if not request_id:
+            return None
+        with self._transaction():
+            row = self._db.execute(
+                'SELECT commission_id FROM commission_requests WHERE request_id=?',
+                (request_id,)).fetchone()
+            return self._row(row['commission_id']) if row is not None else None
 
     def list_commissions(self, status=None, limit=50):
         clause, params = '', []

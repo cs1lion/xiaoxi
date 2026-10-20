@@ -159,8 +159,12 @@ class ExecutiveService:
                                     preference_provider=preference_reader, query=query)
 
     # ---------- 慢环入口 ----------
-    def open(self, title: str, brief: str = "", thread_id: str = "") -> dict[str, Any]:
-        return self.dispatcher.open(title, brief, thread_id)
+    def open(self, title: str, brief: str = "", thread_id: str = "", *,
+             request_id: str | None = None) -> dict[str, Any]:
+        return self.dispatcher.open(title, brief, thread_id, request_id=request_id)
+
+    def request_commission(self, request_id: str | None) -> dict[str, Any] | None:
+        return self.dispatcher.commissions.request_commission(request_id)
 
     def dispatch(self, commission_id: str, *, intent: str = "") -> dict[str, Any]:
         commission, packet = self.dispatcher.dispatch(commission_id, intent=intent)
@@ -170,7 +174,8 @@ class ExecutiveService:
         return self.dispatcher.start(commission_id)
 
     def begin_commission(self, title: str, brief: str = "", thread_id: str = "",
-                         *, intent: str = "", acceptance: Any = None) -> dict[str, Any]:
+                         *, intent: str = "", acceptance: Any = None,
+                         request_id: str | None = None) -> dict[str, Any]:
         """Open -> dispatch -> start, without waiting for the worker.
 
         The world bridge calls this from a tool handler; waiting for a real
@@ -179,7 +184,14 @@ class ExecutiveService:
         row, and the shadow starts exactly once for this path and delegate().
         """
         title = (title or "").strip()[:80] or "未命名督办"
-        commission = self.dispatcher.open(title, brief or "", thread_id)
+        commission = self.dispatcher.open(title, brief or "", thread_id,
+                                          request_id=request_id)
+        if commission["status"] != "drafting":
+            # A replayed request_id returns the existing row; never dispatch or
+            # drive a commission that is already in flight or terminal.
+            return {"commission_id": commission["id"], "status": commission["status"],
+                    "agent_id": commission["agent_id"],
+                    "agent_name": self._agent_name(commission["agent_id"])}
         try:
             self.dispatcher.dispatch(commission["id"], intent=intent or brief or "",
                                      acceptance=acceptance)

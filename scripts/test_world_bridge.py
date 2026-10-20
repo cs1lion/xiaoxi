@@ -179,7 +179,8 @@ def test_world_tools() -> None:
     begun: list[tuple[str, str]] = []
     counter = 0
 
-    def fake_begin(title, brief="", thread_id="", *, intent="", acceptance=None):
+    def fake_begin(title, brief="", thread_id="", *, intent="", acceptance=None,
+                   request_id=None):
         nonlocal counter
         counter += 1
         commission_id = f"c_world{counter}"
@@ -197,7 +198,28 @@ def test_world_tools() -> None:
         check("两个世界工具已注册",
               {"world.dispatch", "world.status"} <= set(tools), str(sorted(tools)))
         check("world.dispatch 是 mutation", tools["world.dispatch"].mutation is True)
+        check("world.dispatch 接服务端幂等键",
+              tools["world.dispatch"].idempotency_key == "request_id")
         check("world.status 只读", tools["world.status"].mutation is False)
+
+        # The ledger itself must dedupe before a worker is ever dispatched.
+        from server.interaction.threads import CommissionStore
+        ledger = CommissionStore(":memory:")
+        try:
+            first = ledger.create("幂等世界单", "同一件事", request_id="op-world-1")
+            replay = ledger.create("幂等世界单", "同一件事", request_id="op-world-1")
+            check("台账 request_id 返回同一单", first["id"] == replay["id"],
+                  f"{first['id']} / {replay['id']}")
+            check("台账可按 request_id 反查",
+                  ledger.request_commission("op-world-1")["id"] == first["id"])
+            try:
+                ledger.create("另一件事", "", request_id="op-world-1")
+            except ValueError as exc:
+                check("同一 request_id 换参数被拒", "different arguments" in str(exc), str(exc))
+            else:
+                check("同一 request_id 换参数被拒", False)
+        finally:
+            ledger.close()
 
         async def dispatch_scenario():
             only_title = service._world_dispatch("只有标题")

@@ -254,8 +254,9 @@ class Dispatcher:
         return adapter_types()
 
     # ---------- 阶段推进 ----------
-    def open(self, title: str, brief: str = "", thread_id: str = "") -> dict[str, Any]:
-        return self.commissions.create(title, brief, thread_id)
+    def open(self, title: str, brief: str = "", thread_id: str = "", *,
+             request_id: str | None = None) -> dict[str, Any]:
+        return self.commissions.create(title, brief, thread_id, request_id=request_id)
 
     def dispatch(self, commission_id: str, *, intent: str = "",
                  acceptance: Any = None, agent_id: str | None = None) -> tuple[dict[str, Any], BriefingPacket]:

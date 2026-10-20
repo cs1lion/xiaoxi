@@ -105,7 +105,8 @@ class AssistantService:
                  '只在老板明确提到像素世界/世界里/小镇/pixel world 时使用；普通派遣仍走既有路径。'
                  '向像素世界派一单活：经督办台账下行；世界页面在线时能看到这单开工，'
                  '在线状态不可确认；title 为一句话任务，brief 为老板原话；凭据类内容不要写进 brief',
-                 {'title': str, 'brief': str}, ('title',), self._world_dispatch, True),
+                 {'title': str, 'brief': str}, ('title',), self._world_dispatch, True,
+                 idempotency_key='request_id'),
             Tool('world.status', '只读查询像素世界对应督办的状态与回执，不修改、不重跑',
                  {'commission_id': str}, ('commission_id',), self._world_status),
         ]
@@ -274,7 +275,7 @@ class AssistantService:
 
     # ---------- 像素世界接入（S5） ----------
 
-    def _world_dispatch(self, title, brief=""):
+    def _world_dispatch(self, title, brief="", request_id=None):
         """Open a ledger commission and drive it in the background.
 
         The tool turn only waits for open -> dispatch -> start (milliseconds).
@@ -283,12 +284,20 @@ class AssistantService:
         """
         title = str(title or "").strip()
         brief = str(brief or "").strip()
+        existing = self.executive.request_commission(request_id) if request_id else None
+        if existing is not None and existing["status"] != "drafting":
+            return {"id": existing["id"], "commission_id": existing["id"],
+                    "status": existing["status"],
+                    "agent_name": self.executive.agent_name(existing.get("agent_id", "")),
+                    "world_visible": "unknown"}
         active = sum(1 for task in self._world_tasks if not task.done())
-        if active >= WORLD_DRIVE_CONCURRENCY:
+        # A drafting replay is a crashed open->dispatch window, not a new load;
+        # let begin_commission finish it even if the two drive slots are busy.
+        if existing is None and active >= WORLD_DRIVE_CONCURRENCY:
             return {"status": "busy", "commission_id": "", "agent_name": "",
                     "world_visible": "unknown", "retryable": True,
                     "message": "世界正在收尾两单，这单先不派，等一会儿再试。"}
-        begun = self.executive.begin_commission(title, brief)
+        begun = self.executive.begin_commission(title, brief, request_id=request_id)
         if begun["status"] == "running":
             task = asyncio.create_task(self._drive_world_commission(begun["commission_id"]))
             self._world_tasks.add(task)

@@ -34,8 +34,8 @@ SQLite 事务里，`operation_id = run_id + action_seq`：
   幂等投影到共同事项；服务启动时也会补投，事项已删除/冲突则记 dead letter。
 - `task.create/update` 与 `reminder.create/cancel/snooze` 通过服务端注入的
   `request_id=operation_id` 使用现有幂等表；模型看不到这个参数。
-- `world.dispatch` 的底层台账没有 request_id 幂等键，只能依靠 outbox 的
-  unknown 标记阻止自动续跑；跨进程重试仍可能再建一单，不能声称已完全幂等。
+- `world.dispatch` 通过 `CommissionStore.create(..., request_id=operation_id)`
+  在同一台账事务里去重；重放返回原单，且在并发满之前就短路，不会重复 drive。
 
 回归：`scripts/test_operation_outbox.py` 覆盖正常投影、二次投影、启动补投、
 handler 成功前崩溃、unknown 阻断 resume，以及三类 store mutation 的重放。
