@@ -45,6 +45,18 @@
 
 **1.3 补记（2026-10-19，task-22；只澄清语义，不改 §1 冻结字段）**：`SCHEMA_V1_FINGERPRINT` 是**样例** 99 条路径集的冻结指纹，仅用于锁样例与单测；加载校验不以它为比较对象，而是校验「存档实际路径 ⊆ 允许全集（冻结 99 条 + 已声明 4 条可选路径，完整清单见 `save.ts` 的 `SAVE_V1_OPTIONAL_PATHS`：`world.villagers[].path[].x/y`、`world.villagers[].pendingRoute[].x/y`）」，**只检测新增路径**，不等价于值相等或存在性相等；字段删除与类型变化不在路径集校验范围，现由显式形状校验兜底，缺口记 task-32（最小 required 集，不在 v1 内改），v2 再以正式 schema 承接。`SAVE_V1_PATH_SET` 由冻结路径集 + 可选集派生；任何运行时派生的基准值不得冒充冻结常量。
 
+**1.3 补记（2026-10-20，task-32 完成；两级校验分工，task-32 由此关闭）**：v1 加载校验现在是**两级串联**，`pixel-world/src/world/save.ts` 的 `assertSaveV1` 是唯一入口，`parseSaveText` → `validateSaveV1` 被 `read()` 与 `importText()` 共用（不存第二套平行校验）：
+
+| 级 | 函数 | 防什么 | 判据 |
+|---|---|---|---|
+| 第一级 **字段级类型/范围/存在性** | `validateSaveV1` | **删字段、换错类型、值越界** | 每个叶子字段都声明「类型 + 范围/枚举」，并枚举 `VILLAGER_MODES` / `TASK_STATUSES` / `TASK_KINDS` / `TASK_SOURCES` / `FACINGS` / `ZONES` / `PROP_KINDS` / `WORK_ACCENTS` / `SILHOUETTES` / `WEATHER_KINDS` / `ACTIVITY_KINDS` / `WORKSHOP_TASKS`；缺失即拒（`requireKey`），**绝不静默补默认值** |
+| 第二级 **嵌套键集合冻结** | `assertKeys` | 数组元素裸加字段 | `world.tasks[]` = `SAVE_TASK_KEYS`、`world.settled[]` = `SAVE_SETTLED_KEYS`，逐键一致 |
+| 第三级 **路径集合包含** | `collectSavePaths ⊆ SAVE_V1_PATH_SET` | **只防新增字段** | 越界即拒并**指名越界路径**（P2，task-22 定稿） |
+
+关键分工：**第三级只看「路径集合有没有变大」，删字段会让集合合法缩小、路径集合本身拦不住**——所以「删字段/类型变化」这一半必须由第一级逐字段兜住，这正是 §1.3 上一段留下的缺口。两级的边界与依据：字段删除后 `collectSavePaths` 的输出仍是允许集合的子集（例如删掉 `world.weather.intensity` 只剩 `kind`/`remainingMs`，全部合法），故必须另设存在性校验；反过来第一级不关心「多出来的键」，那由第二/第三级负责。允许为 `null` 的字段（`taskId`/`bubble`/`routineLabel`/`pendingBuildingId`/`boundTask`/`buildingId`/`completedAt`/`blockedQuestion`/`workerId`/`weather.remainingMs`）按 `types.ts` 的联合类型放行 null，但**缺键照样拒**。`villagers[].path[]` / `pendingRoute[]` 是合法可选数组：**为空数组合法**，元素存在时必须完整 `{x,y}`。
+
+变异测试证据：`pixel-world/test/save-validate.test.ts` 参数化生成「每条冻结路径 × 删除/错类型/置空」，并断言坏档走「先备份再提示、主槽不变」且加载器不抛未捕获异常；同时锁「样例 / fresh 空数组 / 走路中 / 满数据」四种合法档全部通过。**不改 `schemaVersion`、不改 `SCHEMA_V1_FINGERPRINT`、不改 `docs/save-v1.sample.json`、不动 99+4 路径集**——task-32 因此关闭，v2 再以正式 schema 承接更完整的跨版本语义。
+
 ### 2. 对账 + 去重 + 分账（用户点名 ①–③）
 
 **2.1 已结算任务 ID 持久化去重（`settled` 只属于存档文件）**：运行时 `WorldSnapshot` **没有** `settled`；task-18 在 `Simulation` 内新增**私有结算日志**（如 `settledLog`，由 `recordDelivery(villagerId, source)`（`simulation.ts:1075-1082`）交付时 append），它不是快照字段、渲染不读。`toSave()` 由该日志生成 `settled`（id 全局唯一，`tN` 与 `c_*` 不冲突）；`fromSave()` 由 `settled` 重建 `deliveryTally` 与私有日志，从而重建快照的 `deliveries`/`deliveriesByVillager`（不单独持久化计数）。写档不变量：`settled` id 唯一；`tasks` 中 `status=done` 的 id 必须在 `settled`（否则按坏档处理）。交付入口先查 `settled`：命中→只收尾、不计数、不重复写；未命中→正常交付并 append。与台账 `finished`：已 settled 的 finished id **不重新交付/不计数**；未 settled 且当前活动→交付一次并 append；`complete===true` 且缺席→丢弃、**不复活**。

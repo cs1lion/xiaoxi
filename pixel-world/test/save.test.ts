@@ -294,12 +294,22 @@ test('嵌套漂移防线：tasks[] 加字段 / done 缺 settled → assertSaveV1
   assertSaveV1(withExtraKey);
 
   // done 必须能在 settled 找到：伪造一个「完成了但没结算」的任务。
+  // task-32 后有两层都会拦：字段级校验先发现「done 却没有 completedAt」，
+  // 补上完成时间后仍会被「done ⊆ settled」拦下——两层都要断言，避免只测到一层。
   const missingSettled = JSON.parse(JSON.stringify(save)) as MutableSave & {
     world: { settled: unknown[] };
   };
   missingSettled.world.tasks[0].status = 'done';
   missingSettled.world.settled = [];
-  assert.throws(() => assertSaveV1(missingSettled), /缺少 settled 记录/);
+  assert.throws(() => assertSaveV1(missingSettled), /done 任务必须有完成时间/);
+
+  const doneWithoutSettled = JSON.parse(JSON.stringify(save)) as MutableSave & {
+    world: { settled: unknown[]; tasks: Record<string, unknown>[] };
+  };
+  doneWithoutSettled.world.tasks[0].status = 'done';
+  doneWithoutSettled.world.tasks[0].completedAt = 5000;
+  doneWithoutSettled.world.settled = [];
+  assert.throws(() => assertSaveV1(doneWithoutSettled), /缺少 settled 记录/);
 });
 
 // P2：指纹重算不能与「空数组」冲突——还没发生过 tasks/settled 的正常存档必须继续通过。
