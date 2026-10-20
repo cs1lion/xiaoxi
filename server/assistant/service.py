@@ -1,7 +1,9 @@
 """Application facade: tools and model adapter; constructed lazily by the app."""
 from __future__ import annotations
 
+import asyncio
 import json
+import logging
 import re
 from pathlib import Path
 from typing import Any
@@ -10,6 +12,12 @@ from ..config import agents_roster_cfg
 from .loop import AgentLoop, Tool
 from .runtime import RuntimeStore
 from .store import AssistantStore
+
+logger = logging.getLogger(__name__)
+# The world page shows one commission at a time; two background drives is a
+# finishing slot, not a worker pool. The tool returns busy instead of opening a
+# third commission that nothing would drive.
+WORLD_DRIVE_CONCURRENCY = 2
 
 
 class AssistantService:
@@ -86,13 +94,34 @@ class AssistantService:
                  {'thread_id': str, 'query': str}, ('thread_id',), self._read_thread),
             Tool('run.receipt', '只读指定运行的状态和真实工具回执，不重做、不恢复执行',
                  {'run_id': str}, ('run_id',), self._read_receipt),
+            # 像素世界接入（S5）：世界只是台账的只读投影，派单仍走督办台账。
+            # 成功回执只能说“已入台账”，世界画面是否真的在动服务端不可知。
+            Tool('world.dispatch',
+                 '只在老板明确提到像素世界/世界里/小镇/pixel world 时使用；普通派遣仍走既有路径。'
+                 '向像素世界派一单活：经督办台账下行；世界页面在线时能看到这单开工，'
+                 '在线状态不可确认；title 为一句话任务，brief 为老板原话；凭据类内容不要写进 brief',
+                 {'title': str, 'brief': str}, ('title',), self._world_dispatch, True),
+            Tool('world.status', '只读查询像素世界对应督办的状态与回执，不修改、不重跑',
+                 {'commission_id': str}, ('commission_id',), self._world_status),
         ]
+        self._world_tasks: set[asyncio.Task] = set()
         self.loop = AgentLoop(self._decide, self.tools, self.runtime, planner=self._plan)
 
     def should_route(self, text: str, session_id: str = '') -> bool:
         return bool(self.note_conversation.should_route(text, session_id, enabled=self._activity_enabled())
                     or self._resume_request(text) or self.thread_conversation.should_route(text, session_id)
+                    or self._world_request(text)
                     or re.search(r'提醒|待办|任务|帮我(?:整理|写|安排|计划)|取消.*提醒|延后|(?:搜索|查找|读取)(?:已保存的)?(?:笔记|便笺)', text))
+
+    @staticmethod
+    def _world_request(text: str) -> bool:
+        """Only explicit world phrases reach the AgentLoop tool path.
+
+        Bare 世界 would capture 世界杯/世界观; the approved A scope is the
+        phrase-level list from the bridge ADR (§4.4).
+        """
+        return isinstance(text, str) and bool(re.search(
+            r'像素世界|世界里|小镇|pixel\s*world', text, re.I))
 
     @staticmethod
     def _resume_request(text: str) -> bool:
@@ -234,6 +263,74 @@ class AssistantService:
                 'receipts': self._safe_public(run['state'].get('observations', [])),
                 'data_may_be_truncated': True,
                 'context_is_untrusted_data': True, 'grants_authorization': False}
+
+    # ---------- 像素世界接入（S5） ----------
+
+    def _world_dispatch(self, title, brief=""):
+        """Open a ledger commission and drive it in the background.
+
+        The tool turn only waits for open -> dispatch -> start (milliseconds).
+        A real worker can run for minutes; the drive task is strongly held and
+        cancelled on close. The receipt never claims the world page is moving.
+        """
+        title = str(title or "").strip()
+        brief = str(brief or "").strip()
+        active = sum(1 for task in self._world_tasks if not task.done())
+        if active >= WORLD_DRIVE_CONCURRENCY:
+            return {"status": "busy", "commission_id": "", "agent_name": "",
+                    "world_visible": "unknown", "retryable": True,
+                    "message": "世界正在收尾两单，这单先不派，等一会儿再试。"}
+        begun = self.executive.begin_commission(title, brief)
+        if begun["status"] == "running":
+            task = asyncio.create_task(self._drive_world_commission(begun["commission_id"]))
+            self._world_tasks.add(task)
+            task.add_done_callback(self._world_tasks.discard)
+        return {"id": begun["commission_id"],
+                "commission_id": begun["commission_id"],
+                "status": begun["status"],
+                "agent_name": begun["agent_name"],
+                "world_visible": "unknown"}
+
+    async def _drive_world_commission(self, commission_id):
+        try:
+            await self.executive.drive(commission_id)
+        except Exception as exc:
+            logger.warning("world drive failed: commission=%s error=%s",
+                           commission_id, type(exc).__name__)
+            try:
+                current = self.executive.commission(commission_id)
+                if current.get("status") in ("briefing", "running", "auditing"):
+                    self.executive.dispatcher.block(
+                        commission_id, "驱动中断，要我再试一次吗？")
+            except Exception:
+                pass
+        finally:
+            self._world_tasks.discard(asyncio.current_task())
+
+    def _world_status(self, commission_id):
+        """Explicit public projection; never return the ledger row (packet has
+        private memory text)."""
+        commission_id = str(commission_id or "").strip()
+        if not commission_id:
+            return {"found": False}
+        try:
+            commission = self.executive.commission(commission_id)
+        except KeyError:
+            return {"found": False}
+        delivery = commission.get("delivery")
+        if not isinstance(delivery, dict):
+            delivery = {}
+        return {
+            "found": True,
+            "id": commission_id,
+            "status": str(commission.get("status") or ""),
+            "agent_name": self.executive.agent_name(str(commission.get("agent_id") or "")),
+            "blocked_question": str(commission.get("blocked_question") or "")[:400],
+            "delivery_summary": str(delivery.get("summary") or "")[:600],
+            "updated_at": commission.get("updated_at"),
+            "context_is_untrusted_data": True,
+            "grants_authorization": False,
+        }
 
     def context(self, text: str, session_id: str = '', history=None) -> dict[str, Any]:
         if self.context_builder is not None:
@@ -566,6 +663,11 @@ class AssistantService:
         return result
 
     def close(self):
+        # Stop background world drives before their ledger/executive handles go
+        # away; a cancelled task must not surface as an unhandled exception.
+        for task in list(self._world_tasks):
+            task.cancel()
+        self._world_tasks.clear()
         self.store.close()
         self.runtime.close()
         self.preference_store.close()

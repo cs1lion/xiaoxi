@@ -142,6 +142,12 @@ GATES: dict[str, dict[str, object]] = {
         "cmd": [str(PY), "scripts/test_durable_authorization_ui.py"],
         "skip_regex": r"^\s*SKIP",
     },
+    # S5 像素世界服务端桥：begin/delegate、world.dispatch/status、路由差分、
+    # 后台任务并发/取消。世界端真帧 e2e 另属 QA 门禁。
+    "world_bridge": {
+        "cmd": [str(PY), "scripts/test_world_bridge.py"],
+        "skip_regex": r"^\s*SKIP",
+    },
     "durable_supervisor": {
         "cmd": [str(PY), "scripts/test_durable_supervisor.py"],
         "skip_regex": r"^\s*SKIP",
@@ -310,7 +316,7 @@ ALWAYS_REQUIRED = ("protocol", "core", "evals", "npm", "executive_v3", "adapter_
                    "durable_profiles", "durable_orchestrator_tools", "durable_orchestrator_api",
                    "durable_orchestrator_run", "durable_block_kind", "durable_c3_api",
                    "durable_clarification_cap", "durable_mcp", "durable_mcp_live",
-                   "durable_authorization_ui", "gateway_env")
+                   "durable_authorization_ui", "world_bridge", "gateway_env")
 
 
 def run_gate(name: str, spec: dict) -> dict:

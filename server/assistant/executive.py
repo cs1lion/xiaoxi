@@ -169,42 +169,66 @@ class ExecutiveService:
     def start(self, commission_id: str) -> dict[str, Any]:
         return self.dispatcher.start(commission_id)
 
-    async def delegate(self, text: str, *, thread_id: str = "",
-                       acceptance: Any = None) -> dict[str, Any]:
-        """后台接单：open -> dispatch -> start -> 驱动执行体跑完。
+    def begin_commission(self, title: str, brief: str = "", thread_id: str = "",
+                         *, intent: str = "", acceptance: Any = None) -> dict[str, Any]:
+        """Open -> dispatch -> start, without waiting for the worker.
 
-        执行所有权在这里：正常委派由服务端自己驱动到终态，调用方不需要
-        （也不能）只派不跑。任何一步失败都只在台账里留痕，不向外抛——
-        语音轮次早就说完"接单了"，不该被慢环拖住，更不该被它带崩。
-
-        初审打回后自动重做，但重做次数与 Evaluator.MAX_RETRY 同一个上限：
-        每次重做前把上一轮的 scolding 写回密件（Worker 下一轮 prepare_context
-        就能看到），状态转出 running（ready_to_report / blocked / done）或
-        重做次数用尽就停。循环还额外有 retries 计数兜底，即使台账没有正常
-        累计重试次数也不会无限转。
+        The world bridge calls this from a tool handler; waiting for a real
+        worker there would blow the AgentLoop turn budget. Every failure is
+        settled in the ledger (briefing -> blocked) so the caller always gets a
+        row, and the shadow starts exactly once for this path and delegate().
         """
-        title = (text or "").strip()[:80] or "未命名督办"
-        commission = self.dispatcher.open(title, text or "", thread_id)
+        title = (title or "").strip()[:80] or "未命名督办"
+        commission = self.dispatcher.open(title, brief or "", thread_id)
         try:
-            self.dispatcher.dispatch(commission["id"], intent=text or "", acceptance=acceptance)
-            self.dispatcher.start(commission["id"])
-            commission = await self.drive(commission["id"])
+            self.dispatcher.dispatch(commission["id"], intent=intent or brief or "",
+                                     acceptance=acceptance)
+            commission = self.dispatcher.start(commission["id"])
         except LookupError:
             # 选不出将：先承认进了组密件阶段，再带一句请示转 BLOCKED。
             # 只用协议 §19 里写明的迁移，不为了顺手新开一条边。
             self.ledger.transition(commission["id"], "briefing")
             commission = self.dispatcher.block(commission["id"], NO_WORKER_QUESTION)
-        except Exception as exc:  # A broken dispatch must never break the voice turn.
-            current = self.ledger.get(commission["id"])
-            if current["status"] == "drafting":
-                current = self.ledger.transition(commission["id"], "briefing")
-            if current["status"] in ("briefing", "running", "auditing"):
-                self.ledger.transition(commission["id"], "blocked",
-                                       blocked_question=f"派单没组成：{type(exc).__name__}。要我再试一次吗？")
-            commission = self.ledger.get(commission["id"])
+        except Exception as exc:
+            commission = self._block_begin_failure(commission["id"], exc)
         self._start_shadow(commission)
         return {"commission_id": commission["id"], "status": commission["status"],
-                "agent_id": commission["agent_id"], "agent_name": self._agent_name(commission["agent_id"])}
+                "agent_id": commission["agent_id"],
+                "agent_name": self._agent_name(commission["agent_id"])}
+
+    def _block_begin_failure(self, commission_id: str, exc: Exception) -> dict[str, Any]:
+        current = self.ledger.get(commission_id)
+        if current["status"] == "drafting":
+            current = self.ledger.transition(commission_id, "briefing")
+        if current["status"] in ("briefing", "running", "auditing"):
+            self.ledger.transition(commission_id, "blocked",
+                                   blocked_question=f"派单没组成：{type(exc).__name__}。要我再试一次吗？")
+        return self.ledger.get(commission_id)
+
+    async def delegate(self, text: str, *, thread_id: str = "",
+                       acceptance: Any = None) -> dict[str, Any]:
+        """后台接单：begin_commission -> drive 到终态。
+
+        执行所有权在这里：正常委派由服务端自己驱动到终态，调用方不需要
+        （也不能）只派不跑。任何一步失败都只在台账里留痕，不向外抛——
+        语音轮次早就说完"接单了"，不该被慢环拖住，更不该被它带崩。
+
+        初审打回后自动重做，但重做次数与 Evaluator.MAX_RETRY 同一个上限；
+        循环在 drive() 里，delegate 只负责组合，返回形状保持不变。
+        """
+        begun = self.begin_commission(text or "", text or "", thread_id,
+                                      intent=text or "", acceptance=acceptance)
+        if begun["status"] != "running":
+            return begun
+        try:
+            commission = await self.drive(begun["commission_id"])
+        except Exception as exc:
+            # drive() swallows adapter failures; this only covers a fault in the
+            # retry loop itself. Keep delegate's old guarantee: never throw.
+            commission = self._block_begin_failure(begun["commission_id"], exc)
+        return {"commission_id": commission["id"], "status": commission["status"],
+                "agent_id": commission["agent_id"],
+                "agent_name": self._agent_name(commission["agent_id"])}
 
     def _start_shadow(self, commission: dict[str, Any]) -> None:
         if self.shadow is None:
@@ -250,6 +274,10 @@ class ExecutiveService:
             await self._drive(commission["id"])
             commission = self.ledger.get(commission["id"])
         return commission
+
+    def agent_name(self, agent_id: str) -> str:
+        """Public name lookup for receipts; never exposes the roster entry."""
+        return self._agent_name(agent_id)
 
     def _agent_name(self, agent_id: str) -> str:
         for worker in roster_agents(self.evaluator.roster):

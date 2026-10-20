@@ -143,3 +143,11 @@ python scripts/check_protocol.py
 - 工具写操作必须在沙箱内；`workspace_root` 留空意味着不允许写文件。
 - MCP server 的 command/env 是本地代码执行面，接入前审查来源。
 - 不要把 host token、LLM key 或确认单放进模型可见的 prompt。
+
+## 10. 像素世界（S5）
+
+- 世界只是台账的只读投影，不是第二个台账；不新增 WS 事件或 REST 字段。
+- 服务端工具：`world.dispatch(title, brief)`（mutation，过确认门）与 `world.status(commission_id)`（只读）。
+- 派单仍走 `begin_commission → 台账 → commission_update`；世界不能调用 `/accept`、`/submit`，也不能自己标完成。
+- 工具只在老板明确提到“像素世界/世界里/小镇/pixel world”时使用；普通派遣仍走既有快派路径。
+- 详细 DTO、已知限制和验收矩阵见 `docs/PIXEL_WORLD_S5_CONTRACT.md`。

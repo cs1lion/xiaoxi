@@ -83,6 +83,7 @@ node scripts\test-ui-nav-browser.mjs                             # 领航浏览�
 .\.venv\Scripts\python.exe scripts\test_durable_c3_api.py         # C3：review/propose 只读、宿主授权 commit、L1 阻断、reject 判例、工作台入口
 .\.venv\Scripts\python.exe scripts\test_durable_clarification_cap.py # 脚本化 BlockingAdapter：adapter→blocked_kind→第 4 次澄清 429
 .\.venv\Scripts\python.exe scripts\test_durable_authorization_ui.py  # C4 工作台授权：共享状态/确认单/按调用放行/提议提交/同源拒绝/503 降级
+.\.venv\Scripts\python.exe scripts\test_world_bridge.py        # S5 世界桥：begin/delegate、world 工具、路由差分、后台并发/取消
 .\.venv\Scripts\python.exe scripts\probe_c3_live.py --runs 1      # 真实模型 live 探针：临时库，不碰 data/；会产生 API 费用
 .\.venv\Scripts\python.exe scripts\probe_dsh_workspace.py --tasks 3 --keep # 本地 DSH 新工作区 3 个简单任务；会产生 API 费用
 cd agent-runtime; node --env-file=..\.env --experimental-strip-types probe-compaction-real.ts # 真实模型压缩样本（32k/8k 生产档，临时库）；会产生 API 费用
