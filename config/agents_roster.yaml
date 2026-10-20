@@ -182,6 +182,51 @@ adapter_types:
   - cli_subproc   # 拉一个 CLI Agent 子进程，行协议见 PROTOCOL §22
   - http_api      # POST 给远端 Agent，支持 JSON 与 SSE 两种响应
   - mcp           # 经 Model Context Protocol 桥接一个 MCP Server
+  - durable       # 交给本机 agent-runtime sidecar（pi-durable），崩溃可续跑
+
+# ---------- 慢环执行内核（agent-runtime sidecar） ----------
+# YAML 默认关闭；运行时用 `.env` 的 XIAOXI_DURABLE_ENABLED=1 点亮。测试会反复
+# 启动 app，默认开启等于每条用例都拉一次 Node sidecar。开了之后 run.py 会先拉起
+# sidecar（它独占 SQLite 与 Harness），再把端点与令牌绑到 adapter: durable 的
+# 条目上；起不来不阻断主服务，派单会转 BLOCKED 并明说执行内核不可用。
+durable:
+  enabled: false
+  directory: data/durable          # sidecar 的 SQLite 与日志落在哪
+  node: node                       # 缺省用 PATH 里的 node
+  startup_timeout: 15              # 等 sidecar 打印就绪的秒数
+  auto_restart: true
+  patrol_seconds: 60               # 探活间隔；sidecar 死了自动重起
+  shadow: false                    # 只把委托镜像成 JSONL，不真的派给 durable
+  shadow_log: data/durable-shadow.jsonl
+  # durable 的 Worker 只能写这一个根目录下的每单独立子树（与 cli_subproc 的
+  # AQI_WORKSPACE_ROOT 同一个根）。留空则不允许写文件，只交文字成果。
+  workspace_root: data/commissions
+  # 模型窗口与答案预算。compaction 的 reserve/keep/background 由 sidecar 按
+  # 这两个值推导并断言 contextWindow - reserve > keep；需要覆盖再写下面三项。
+  context_window: 32768
+  max_tokens: 8000
+  # reserve_tokens: 9024
+  # keep_recent_tokens: 11872
+  # background_tokens: 4096
+  # 产品技能的专用目录（Agent Skills 布局：每个技能一个含 SKILL.md 的目录）。
+  # 不要指向 .agents/skills——那是开发工具的技能，会漏进生产 Worker 的 prompt。
+  skills_dir: config/skills
+  # MCP server 配置。默认空文件 = 不连任何 server；工具会按
+  # mcp__<server>__<tool> 注册，有副作用的工具自动走确认链。
+  mcp_config: config/mcp.json
+  # 需要老板确认后才放行的工具（逗号分隔）。MCP 的写工具会自动加入；这里只列
+  # 额外的内置工具。run_worker 会按模型给的命令行拉起本地执行体，默认拦住；
+  # write_file 留在沙箱里，不拦（否则每个文件任务都要老板点一次）。
+  approval_tools: "run_worker"
+  # 把指定 Worker 的 adapter 直接切成 durable，不改 YAML；运行时可用
+  # XIAOXI_DURABLE_SWITCH_AGENTS=scribe 覆盖。durable 现在有 Skills、MCP、
+  # compaction、read_file/write_file，但没有真机 CLI 的 Bash/Grep：代码类 Worker
+  # 仍建议保留 cli_subproc，文档/整理类先切。
+  switch_agents: [scribe]
+  # C2 编排者 lease：默认 dry_run，人工确认后再切 auto。首期只允许 scribe；
+  # 1 并发、3 单/小时、cost_tier<=medium、TTL 30 分钟。high 档/shell Worker
+  # 不进入 C2 派单池，仍走现有 UI/人工路径。
+  # lease_mode: dry_run
 
 # ---------- 初审种子铁律 ----------
 # 三条起步铁律：一条审美（L2），两条客观（L1）。

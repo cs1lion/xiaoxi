@@ -59,8 +59,8 @@ node scripts\test-ui-nav-browser.mjs                             # 领航浏览�
 > 然后 `.\.venv\Scripts\python.exe scripts\run.py --port 8000`），否则 `StaticFiles` 缓存的目录
 > 列表会让新增的前端文件（如 `web/ui_nav.js`）持续 404，浏览器回归会假失败。
 
-`check_protocol.py` 在 V3 起多管两类：**服务端自用路由**（`/internal/telemetry_proxy`）与
-**ui_nav 领航取值域**（协议§二十四，前后端取值不漂移）。
+`check_protocol.py` 在 V3 起多管两类：**服务端自用路由**（`/internal/telemetry_proxy`
+与 `/internal/durable/*` 只读宿主接口）与 **ui_nav 领航取值域**（协议§二十四，前后端取值不漂移）。
 前端不引用前者，所以第五类检查看不见；改了路径会让 Worker 的调用静默 404，
 因此显式列在 `INTERNAL_ROUTES` 里，契约一改静态检查直接报警。
 
@@ -70,22 +70,56 @@ node scripts\test-ui-nav-browser.mjs                             # 领航浏览�
 
 ```bash
 .\.venv\Scripts\python.exe scripts\test_restart_recovery.py   # briefing/running/auditing 收口 + drafting 重派 + 停车场不占槽
-.\.venv\Scripts\python.exe scripts\test_durable_adapter.py    # durable 适配器：假 sidecar 验密件/事件映射/内核不可用降级
+.\.venv\Scripts\python.exe scripts\test_durable_adapter.py    # durable 适配器：假 sidecar 验密件/事件映射/内核不可用降级/重启对账
 .\.venv\Scripts\python.exe scripts\test_durable_supervisor.py # sidecar 监督：起得来/探得活/收得干净（需本机 node，缺则 SKIP）
+.\.venv\Scripts\python.exe scripts\test_durable_app_wiring.py # app 接线：环境变量启用、switch_agents、端点提供者、写盘根（需 node，缺则 SKIP）
+.\.venv\Scripts\python.exe scripts\test_durable_reconcile.py   # 周期对账：完成采纳/丢失或失败转 blocked/仍跑不误杀/不自动 done
+.\.venv\Scripts\python.exe scripts\test_durable_soak.py        # 短时 chaos：多单硬杀 sidecar，重启后恰好一次进度/artifact
+.\.venv\Scripts\python.exe scripts\soak_durable.py --duration-hours 24 --concurrency 3 --interval 5 --kill-every 1800 # 24h soak，单独挂机跑；JSON 报告落 tmp/
+.\.venv\Scripts\python.exe scripts\test_storage_archive.py     # 存储：在线快照/锁存在拒绝轮转/离线 --yes 轮转
+.\.venv\Scripts\python.exe scripts\storage_doctor.py           # 只读报告 durable 活库/归档/备份体积（不打开活库）
+.\.venv\Scripts\python.exe scripts\test_durable_read_api.py   # C1 只读宿主接口：鉴权/记忆分档/便笺/事项/Worker 目录
+.\.venv\Scripts\python.exe scripts\test_durable_orchestrator_api.py # C2/C2.1：lease/dry-run/确认号/幂等/越权/blocked_kind/重启孤儿
+.\.venv\Scripts\python.exe scripts\test_durable_c3_api.py         # C3：review/propose 只读、宿主授权 commit、L1 阻断、reject 判例、工作台入口
+.\.venv\Scripts\python.exe scripts\test_durable_clarification_cap.py # 脚本化 BlockingAdapter：adapter→blocked_kind→第 4 次澄清 429
+.\.venv\Scripts\python.exe scripts\test_durable_authorization_ui.py  # C4 工作台授权：共享状态/确认单/按调用放行/提议提交/同源拒绝/503 降级
+.\.venv\Scripts\python.exe scripts\probe_c3_live.py --runs 1      # 真实模型 live 探针：临时库，不碰 data/；会产生 API 费用
+.\.venv\Scripts\python.exe scripts\probe_dsh_workspace.py --tasks 3 --keep # 本地 DSH 新工作区 3 个简单任务；会产生 API 费用
+cd agent-runtime; node --env-file=..\.env --experimental-strip-types probe-compaction-real.ts # 真实模型压缩样本（32k/8k 生产档，临时库）；会产生 API 费用
+.\.venv\Scripts\python.exe scripts\doctor_integration.py      # 接入体检：adapter/executable/args/workspace/MCP/skills，不联网
+.\.venv\Scripts\python.exe -B scripts\test_gateway_env.py     # 网关上游默认落在 .env，不默认依赖 15721
 ```
 
-## 慢环执行内核（agent-runtime，Phase 0/1）
+以上四条已在 `run_gates.py` 里，`python scripts/run_gates.py` 会一并跑并区分"真跑过"与"跳过"。
+
+## 慢环执行内核（agent-runtime，Phase 0–2 + 能力层）
 
 ```bash
 cd agent-runtime
 npm install --ignore-scripts
 node --experimental-strip-types selftest.ts                   # 硬崩溃后续跑 + 重复投递幂等
-node --experimental-strip-types test-model-run.ts             # 模型驱动：artifact + usage + 密件落在 instructions
+node --experimental-strip-types test-compaction.ts            # 压缩阈值：窗口/保留区/切点一致性
+node --experimental-strip-types test-compaction-live.ts       # 真实多轮触发自动 pi.compaction + 摘要请求
+node --experimental-strip-types test-skills.ts                # Skills：渐进披露、read_skill、路径逃逸
+node --experimental-strip-types test-read-file.ts             # read_file：工作目录内回读、逃逸拒绝
+node --experimental-strip-types test-list-files.ts            # list_files：有界目录列举
+node --experimental-strip-types test-host-tools.ts            # C1 只读工具：记忆/便笺/事项/Worker + token
+node --experimental-strip-types test-profiles.ts              # Worker / Orchestrator 工具面隔离
+node --experimental-strip-types test-orchestrator-tools.ts    # C2 工具：lease 来自 RunMeta、模型不能造额度
+node --experimental-strip-types test-orchestrator-run.ts      # Orchestrator 端到端：模型调 dispatch_task → 最终回答
+node --experimental-strip-types test-block-kind.ts            # block_and_ask 的 clarification/approval 结构字段
+node --experimental-strip-types test-mcp.ts                   # MCP：工具包装、readOnly 重放、审批登记
+node --experimental-strip-types test-mcp-live.ts              # 真实 stdio MCP fixture：握手/tools/list/tools/call
+node --experimental-strip-types test-model-run.ts             # 模型驱动：artifact + usage + 密件/记忆/验收落在 instructions
 node --experimental-strip-types test-nudge.ts                 # 只答散文不交差时，催一次能救回来
 node --experimental-strip-types test-write-file.ts            # write_file：目录内放行、逃逸全拒、模型驱动真写出文件
 node --experimental-strip-types test-handin.ts                # 交差时 ref 规范化：双反斜杠还原、没写过的文件拒收
-node --experimental-strip-types test-approval-chain.ts        # 审批全链：拦下→登记→按单放行→不跨单泄漏
+node --experimental-strip-types test-approval-chain.ts        # 审批全链：拦下→登记→按调用放行→不跨单泄漏
+node --experimental-strip-types test-approval-per-call.ts     # 审批绑定参数哈希、一次性消费、同工具不同参数仍需批准
 node --experimental-strip-types test-tier-model.ts            # cost_tier → 模型映射（含 conversation 上真选中）
+node --experimental-strip-types test-takeover.ts              # 接管本地执行体：密件/事件/重做幂等/stderr 诊断
+node --experimental-strip-types test-takeover-recovery.ts     # 接管中硬崩溃：重开不重复拉起执行体
+node --experimental-strip-types test-revive.ts                 # 真硬杀后重开：锁的重试预算必须长于过期窗口
 node --experimental-strip-types test-background.ts            # 后台任务：每步 checkpoint、不挡空闲等待
 node --experimental-strip-types test-approval.ts              # 审批门：未批准阻断且对模型可见，批准后放行
 node --experimental-strip-types test-live-tools.ts            # 真实端点是否透传 tools（无 LLM_API_KEY 则 SKIP）
@@ -93,6 +127,10 @@ node --experimental-strip-types test-openai-tools.ts          # 自定义 OpenAI
 node --experimental-strip-types reference/24-child-tasks.ts   # 官方示例：failFast / abort 级联 / 重启续跑
 ```
 
+> durable 的 SQLite 会随 transcript 一直增长（库本身不删 entry）。季度/按月做冷归档：
+> `.\.venv\Scripts\python.exe scripts\archive_durable.py`（在线备份到
+> `data/durable/archive/`，不动活库）；只有显式加 `--prune-days N` 才会删除旧档。
+>
 > `XIAOXI_MAX_TOKENS`（默认 8000）是慢环的 completion 预算，**不要**用 `.env` 的
 > `LLM_MAX_TOKENS`（那是快环短回复的 400）：推理型模型会把 1200 全烧在 reasoning 上，
 > 返回 `finish_reason:"length"`、正文空、无工具调用，整单以"执行体没交差"失败，
@@ -243,6 +281,10 @@ node scripts\test-voice-browser.mjs                                      # 语�
 
 # 多 Worker 同题套件（先 --dry-run 看计划）
 .\.venv\Scripts\python.exe scripts\probe_live_workers.py --workers claude,workbuddy,dsh --cases note --repeat 1
+
+# durable 接管本地 Agent：派单 → 持续监督 → 验收 → 中断恢复（四段全跑）
+.\.venv\Scripts\python.exe scripts\probe_takeover_production.py
+.\.venv\Scripts\python.exe scripts\probe_takeover_production.py --dry-run
 ```
 
 DSH 在本机默认沙箱拒绝写工作目录；花名册/profile 必须显式设

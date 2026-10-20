@@ -11,6 +11,7 @@
 from __future__ import annotations
 
 import argparse
+import os
 import socket
 import subprocess
 import sys
@@ -49,6 +50,29 @@ def port_open(host: str, port: int) -> bool:
         return False
 
 
+def gateway_env() -> dict[str, str]:
+    """网关子进程的环境。
+
+    默认上游是 15721（CC Switch），那是另一个产品在本机另起的进程，本项目不
+    负责启动它。它没起来时网关仍会"健康"，但每一次 Worker 调用都 502
+    upstream unavailable——实测 DSH 接管就是这样失败的。这里让网关的上游默认
+    落在 .env 的 LLM_BASE_URL：同一个 StepFun 出口，少一个外部依赖。想回到
+    CC Switch，显式设 AQI_GATEWAY_UPSTREAM 即可（此处不覆盖已有值）。
+    """
+    from server.config import settings as _settings
+
+    env = dict(os.environ)
+    if _settings.llm_base_url:
+        env.setdefault("AQI_GATEWAY_UPSTREAM", _settings.llm_base_url)
+        # 只在真有 key 时注入：塞一个空串会让网关发出 `Authorization: Bearer `，
+        # 上游回 401，看起来像"凭据错了"而不是"没配凭据"。
+        if _settings.llm_api_key:
+            env.setdefault("AQI_GATEWAY_KEY", _settings.llm_api_key)
+    if _settings.llm_model:
+        env.setdefault("AQI_GATEWAY_MODEL", _settings.llm_model)
+    return env
+
+
 def start_gateway() -> subprocess.Popen | None:
     if gateway_health():
         print(f"  网关已在运行：http://{GATEWAY_HOST}:{GATEWAY_PORT}")
@@ -68,7 +92,7 @@ def start_gateway() -> subprocess.Popen | None:
         "--port", str(GATEWAY_PORT),
         "--log-level", "warning",
     ]
-    process = subprocess.Popen(cmd, cwd=str(ROOT))
+    process = subprocess.Popen(cmd, cwd=str(ROOT), env=gateway_env())
     for _ in range(50):
         if gateway_health():
             print(f"  网关已启动：http://{GATEWAY_HOST}:{GATEWAY_PORT}")

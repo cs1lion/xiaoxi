@@ -81,6 +81,7 @@ export function mountExecutive() {
   const root = el("drawerViewOps");
   const list = el("opsCommissions");
   const pending = el("opsPending");
+  const authBox = el("opsAuthorizations");
   const telemetryBox = el("opsTelemetry");
   const rubricBox = el("opsRubrics");
   if (!root || !list || !telemetryBox || !rubricBox) return null;
@@ -104,6 +105,161 @@ export function mountExecutive() {
 
   function agentName(item) {
     return item.agent_id ? `${item.agent_id}` : "还没选将";
+  }
+
+  function minutesLeft(expiresAt) {
+    const ms = Number(expiresAt) * 1000 - Date.now();
+    if (!Number.isFinite(ms)) return "";
+    return ms > 0 ? `${Math.max(1, Math.round(ms / 60000))} 分钟内有效` : "已过期";
+  }
+
+  function authCard(kind, title, body, actions) {
+    const card = node("article", "ops-auth-card");
+    card.dataset.kind = kind;
+    card.append(node("p", "ops-auth-kind", title));
+    if (body) card.append(node("p", "ops-auth-body", body));
+    const row = node("div", "ops-actions");
+    row.append(...actions);
+    card.append(row);
+    return card;
+  }
+
+  function renderAuthorizations(confirmations, approvals, proposals) {
+    if (!authBox) return;
+    authBox.replaceChildren();
+    const total = confirmations.length + approvals.length + proposals.length;
+    authBox.hidden = total === 0;
+    if (!total) return;
+    authBox.append(node("h4", "ops-heading", "等你拍板"));
+
+    for (const item of confirmations) {
+      const approve = node("button", "primary", "批准派单");
+      const reject = node("button", "ghost", "不派");
+      approve.type = "button";
+      reject.type = "button";
+      const decide = async (approved, button) => {
+        approve.disabled = reject.disabled = true;
+        try {
+          await post(
+            `/api/executive/durable/confirmations/${encodeURIComponent(item.confirmation_id)}`,
+            { approved },
+          );
+        } catch (_) {
+          approve.disabled = reject.disabled = false;
+          return;
+        }
+        refresh();
+      };
+      approve.addEventListener("click", () => decide(true, approve));
+      reject.addEventListener("click", () => decide(false, reject));
+      authBox.append(authCard(
+        "confirmation",
+        `派单待批 · ${item.agent_id || "Worker"} · ${minutesLeft(item.expires_at)}`,
+        `${item.title}：${String(item.brief || "").slice(0, 500)}`,
+        [approve, reject],
+      ));
+    }
+
+    for (const item of approvals) {
+      const allow = node("button", "primary", "放行并继续");
+      allow.type = "button";
+      allow.addEventListener("click", async () => {
+        allow.disabled = true;
+        try {
+          await post("/api/executive/durable/approvals", {
+            commission_id: item.commission_id,
+            tool: item.tool,
+            action_hash: item.action_hash,
+            approved: true,
+          });
+        } catch (_) {
+          allow.disabled = false;
+          return;
+        }
+        refresh();
+      });
+      authBox.append(authCard(
+        "approval",
+        `工具放行 · ${item.tool}`,
+        `${item.title || item.commission_id} · 只放行这一次调用（${String(item.action_hash || "").slice(0, 10)}）`,
+        [allow],
+      ));
+    }
+
+    for (const item of proposals) {
+      const accept = node("button", "primary", "授权验收");
+      accept.type = "button";
+      accept.disabled = item.can_accept !== true;
+      accept.addEventListener("click", async () => {
+        accept.disabled = true;
+        try {
+          await post(`/api/executive/durable/proposals/${encodeURIComponent(item.proposal_id)}/commit`, {
+            action: "accept",
+          });
+        } catch (_) {
+          accept.disabled = false;
+          return;
+        }
+        refresh();
+      });
+      const field = node("input", "ops-ask-input");
+      field.type = "text";
+      field.placeholder = "打回理由（至少 4 个字，会进判例库）";
+      field.setAttribute("aria-label", "打回理由");
+      const reject = node("button", "ghost", "授权打回");
+      reject.type = "button";
+      reject.addEventListener("click", async () => {
+        reject.disabled = true;
+        try {
+          await post(`/api/executive/durable/proposals/${encodeURIComponent(item.proposal_id)}/commit`, {
+            action: "reject",
+            feedback: field.value,
+          });
+        } catch (_) {
+          reject.disabled = false;
+          return;
+        }
+        refresh();
+      });
+      const what = item.action === "accept" ? "验收" : "打回";
+      const why = item.action === "reject" && item.suggested_feedback
+        ? `它建议的理由：${item.suggested_feedback}` : "";
+      const verify = item.artifact_recheck_failed
+        ? "有文件成果已不存在，不能验收"
+        : item.artifacts_verified
+          ? "全部复验通过"
+          : `有 ${item.artifact_unverified_count || 0} 项未复验（note/相对路径）`;
+      authBox.append(authCard(
+        "proposal",
+        `它建议${what} · ${item.title || item.commission_id}`,
+        `成果复验：${verify}${item.can_accept ? "" : " · 有拦截项，不能验收"}` +
+          `${why ? ` · ${why}` : ""}`,
+        [accept, field, reject],
+      ));
+    }
+  }
+
+  function reviewBox(review) {
+    const box = node("div", "ops-review");
+    const checks = review.artifact_checks || [];
+    const verified = review.artifacts_verified
+      ? "全部复验通过"
+      : `${review.artifact_unverified_count || 0} 项未复验/不存在`;
+    box.append(node("p", "ops-review-head",
+      `复核：${review.recommendation === "accept" ? "建议验收" : "建议打回"} · 成果 ${verified}`));
+    if (review.artifact_recheck_failed) {
+      box.append(node("p", "ops-finding", "有文件成果在初审后消失了，不能验收。"));
+    }
+    for (const check of checks) {
+      const state = check.exists === true ? "在" : check.exists === false ? "已不存在" : "未复验";
+      box.append(node("li", "ops-review-item",
+        `${check.kind || "成果"} · ${check.ref || "（无 ref）"} · ${state}`));
+    }
+    for (const blocker of review.blockers || []) {
+      box.append(node("li", "ops-finding", `[${blocker.layer}] ${blocker.detail}`));
+    }
+    if (review.reason) box.append(node("p", "ops-scolding", review.reason));
+    return box;
   }
 
   function deliveryCard(item, quiet) {
@@ -130,6 +286,29 @@ export function mountExecutive() {
       artifacts.hidden = !artifacts.hidden;
       preview.setAttribute("aria-expanded", String(!artifacts.hidden));
     });
+    const reviewPane = node("div", "ops-review-pane");
+    reviewPane.hidden = true;
+    const loadReview = async () => {
+      reviewPane.replaceChildren();
+      try {
+        const data = await fetch(
+          `/api/executive/commissions/${encodeURIComponent(item.id)}/review`,
+        ).then(readJson);
+        reviewPane.append(reviewBox(data));
+      } catch (_) {
+        reviewPane.append(node("p", "ops-hint", "这单已经不在待验收状态。"));
+      }
+      reviewPane.hidden = false;
+    };
+    const review = node("button", "ghost", "验收详情");
+    review.type = "button";
+    review.addEventListener("click", async () => {
+      if (!reviewPane.hidden) {
+        reviewPane.hidden = true;
+        return;
+      }
+      await loadReview();
+    });
     const rework = node("button", "ghost", "语音返修");
     rework.type = "button";
     rework.addEventListener("click", () => {
@@ -149,12 +328,15 @@ export function mountExecutive() {
         await post(`/api/executive/commissions/${encodeURIComponent(item.id)}/accept`, {});
       } catch (_) {
         done.disabled = false;
+        // A 409 here is the review gate, not a network error: show the boss
+        // exactly which artifact or blocker stopped acceptance.
+        await loadReview();
         return;
       }
       refresh();
     });
-    actions.append(preview, rework, done);
-    box.append(artifacts, actions);
+    actions.append(preview, review, rework, done);
+    box.append(artifacts, reviewPane, actions);
     return box;
   }
 
@@ -315,15 +497,25 @@ export function mountExecutive() {
     }
   }
 
+  const emptyItems = () => ({ items: [] });
+
   async function refresh() {
     const revision = ++state.revision;
     try {
-      const [commissions, telemetry, rubrics] = await Promise.all([
-        fetch("/api/executive/commissions?limit=20").then(readJson),
-        fetch("/api/executive/telemetry").then(readJson),
-        fetch("/api/executive/rubrics").then(readJson),
-      ]);
+      // durable 未启用时三条授权接口是 503；降级为空，不影响老台账。
+      const [commissions, telemetry, rubrics, confirmations, approvals, proposals] =
+        await Promise.all([
+          fetch("/api/executive/commissions?limit=20").then(readJson),
+          fetch("/api/executive/telemetry").then(readJson),
+          fetch("/api/executive/rubrics").then(readJson),
+          fetch("/api/executive/durable/confirmations").then(readJson).catch(emptyItems),
+          fetch("/api/executive/durable/approvals").then(readJson).catch(emptyItems),
+          fetch("/api/executive/durable/proposals").then(readJson).catch(emptyItems),
+        ]);
       if (revision !== state.revision) return;
+      renderAuthorizations(
+        confirmations.items || [], approvals.items || [], proposals.items || [],
+      );
       renderCommissions(commissions.items || []);
       renderTelemetry(telemetry, "");
       renderRubrics(rubrics.items || []);

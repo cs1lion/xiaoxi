@@ -202,8 +202,143 @@ def test_bind_durable() -> None:
     service.close()
 
 
+def test_switch_agent_inherits_workspace_root() -> None:
+    """switch_agents 把 cli_subproc 切成 durable 时，写盘根不能丢。
+
+    cli_subproc 的写盘根在 env.AQI_WORKSPACE_ROOT；durable 适配器只认顶层
+    workspace_root。不继承这一项，sidecar 的 write_file 会拒绝一切写入——
+    切换后能跑、能交文字，但拿不到真实文件成果。
+    """
+    print("[durable adapter: switch_agents keeps the workspace root]")
+    base = load_roster()
+    base["agents"] = [{
+        "id": "dsh", "name": "真机 DSH", "adapter": "cli_subproc",
+        "strengths": ["整理"], "weaknesses": [], "cost_tier": "medium",
+        "max_concurrent": 1, "eval_commands": ["required_fields"],
+        "env": {"AQI_WORKSPACE_ROOT": "data/commissions"},
+    }]
+    service = ExecutiveService(Path(tempfile.mkdtemp(prefix="durable-switch-")), roster=base)
+    bound = service.bind_durable({"endpoint": "http://127.0.0.1:9", "token": "t"},
+                                 apply_to=["dsh"])
+    entry = service.evaluator.roster["agents"][0]
+    check("switch_agents 点名后被绑定", bound == 1, str(bound))
+    check("adapter 切成 durable", entry.get("adapter") == "durable", str(entry.get("adapter")))
+    check("写盘根从 AQI_WORKSPACE_ROOT 继承", entry.get("workspace_root") == "data/commissions",
+          str(entry.get("workspace_root")))
+    service.close()
+
+
+def test_reload_keeps_runtime_binding() -> None:
+    """热重载整份替换花名册时，运行时注入的端点不能丢。
+
+    YAML 里没有 endpoint/token；reload 后若整份替换，durable 单会在下一次派单
+    时变成「没配 endpoint」。用 loader 返回一份没有端点的同构花名册来复现。
+    """
+    print("[durable adapter: hot reload keeps the binding]")
+    startup = load_roster()
+    startup["agents"] = [{key: value for key, value in WORKER.items()
+                          if key not in ("endpoint", "token")}]
+    fresh = load_roster()
+    fresh["agents"] = [{key: value for key, value in WORKER.items()
+                        if key not in ("endpoint", "token")}]
+    service = ExecutiveService(Path(tempfile.mkdtemp(prefix="durable-reload-")),
+                               roster=startup, roster_loader=lambda: fresh)
+    service.bind_durable({"endpoint": "http://127.0.0.1:9", "token": "t"})
+    changed = service.reload_roster()
+    entry = service.evaluator.roster["agents"][0]
+    check("热重载确实换了花名册", changed, str(changed))
+    check("端点没有被 YAML 覆盖掉", entry.get("endpoint") == "http://127.0.0.1:9", str(entry))
+    check("令牌还在", entry.get("token") == "t", str(entry))
+    service.close()
+
+
+def test_lookup_reads_run_without_creating() -> None:
+    print("[durable adapter: lookup]")
+    FakeSidecar.events = list(GOOD_EVENTS)
+    FakeSidecar.runs = []
+    server, endpoint = serve()
+    try:
+        from server.assistant.adapters import create_adapter
+        adapter = create_adapter("durable", {**WORKER, "endpoint": endpoint})
+        found = adapter.lookup("c_missing")
+        check("内核里没有这一单时返回 None", found is None, str(found))
+        check("lookup 不建单", FakeSidecar.runs == [], str(FakeSidecar.runs))
+    finally:
+        server.shutdown()
+
+
+def test_recovery_adopts_finished_durable_run() -> None:
+    """重启时内核已经干完的单，采纳成果，不判"重跑吧"。
+
+    这是对账唯一的合法动作：只采纳内核已终态的成果，永不替内核把没跑完的单
+    判成功，也不自动 done。
+    """
+    print("[durable adapter: restart reconciliation]")
+
+    class FinishedSidecar(FakeSidecar):
+        seen_attempts: list[str] = []
+
+        def do_GET(self) -> None:
+            if self.path.startswith("/v1/lookup"):
+                from urllib.parse import parse_qs, urlparse
+                attempt = (parse_qs(urlparse(self.path).query).get("attempt") or [""])[0]
+                FinishedSidecar.seen_attempts.append(attempt)
+                # 只认 @1：这一单重做过一次，内核里没有 @0 的任务。
+                # 查询若不带 attempt（默认 0），这里就如实返回"查不到"，
+                # 对账会退化成 BLOCKED——正是要防的那个回归。
+                if attempt == "1":
+                    self._json({"found": True, "task_id": 7, "conversation_id": "conv-1"})
+                else:
+                    self._json({"found": False})
+                return
+            if self.path.startswith("/v1/runs/7"):
+                self._json({"status": "terminal",
+                            "outcome": {"status": "completed", "result": {"artifact": {
+                                "summary": "内核干完的三版标题",
+                                "intercepted": "没有需要老板拍板的事",
+                                "artifacts": [{"kind": "note", "ref": "note:n_1"}],
+                                "wired": True}}}})
+                return
+            self._json({"error": "not_found"}, 404)
+
+    httpd = ThreadingHTTPServer(("127.0.0.1", 0), FinishedSidecar)
+    threading.Thread(target=httpd.serve_forever, daemon=True).start()
+    endpoint = f"http://127.0.0.1:{httpd.server_address[1]}"
+    try:
+        service = build(endpoint)
+        commission = service.open("理三版标题", "把七月选题理成三版标题")
+        service.dispatch(commission["id"], intent="整理标题")
+        service.start(commission["id"])
+        # 模拟"这一单重做过一次"：台账 retry_count 必须变成 1，内核里对应的
+        # 幂等键也随之变成 @1。进程死在半路，台账停在 running。
+        service.ledger.transition(commission["id"], "blocked",
+                                  blocked_question="上一版没过初审，重做一次")
+        service.ledger.transition(commission["id"], "running",
+                                  blocked_question="", retry_delta=1)
+        check("测试前提：这一单是第 1 次重做", service.commission(commission["id"])["retry_count"] == 1,
+              str(service.commission(commission["id"]).get("retry_count")))
+        from server.assistant.adapters import create_adapter
+        adapter = create_adapter("durable", {**WORKER, "endpoint": endpoint})
+        recovered = service.recover_interrupted(durable_lookup=adapter.lookup)
+        item = service.commission(commission["id"])
+        check("对账查询带上了 attempt", FinishedSidecar.seen_attempts == ["1"],
+              str(FinishedSidecar.seen_attempts))
+        check("已跑完的单被采纳而不是打回重跑", commission["id"] in recovered["adopted"],
+              str(recovered))
+        check("成果进了台账", item["status"] == "ready_to_report", str(item["status"]))
+        check("交付摘要来自内核", (item.get("delivery") or {}).get("summary") == "内核干完的三版标题",
+              str(item.get("delivery")))
+        service.close()
+    finally:
+        httpd.shutdown()
+
+
 def main() -> int:
     test_bind_durable()
+    test_switch_agent_inherits_workspace_root()
+    test_reload_keeps_runtime_binding()
+    test_lookup_reads_run_without_creating()
+    test_recovery_adopts_finished_durable_run()
     test_happy_path()
     test_sidecar_unavailable()
     test_missing_endpoint()

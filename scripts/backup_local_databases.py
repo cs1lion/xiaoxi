@@ -13,8 +13,8 @@ for pattern in ('*.db', 'durable/*.sqlite'):
         relative = str(path.relative_to(source)).replace('\\', '/')
         target = destination / path.relative_to(source)
         target.parent.mkdir(parents=True, exist_ok=True)
-        with sqlite3.connect(path.as_uri() + '?mode=ro', uri=True) as original:
-            with sqlite3.connect(target) as snapshot:
+        with sqlite3.connect(path.as_uri() + '?mode=ro', uri=True, timeout=10) as original:
+            with sqlite3.connect(target, timeout=10) as snapshot:
                 original.backup(snapshot)
                 result = snapshot.execute('PRAGMA integrity_check').fetchone()[0]
                 if result != 'ok':

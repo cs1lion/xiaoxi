@@ -31,7 +31,8 @@ class DurableSupervisor:
     def __init__(self, *, directory: str | Path, node: str = "node",
                  entry: str | Path | None = None, token: str | None = None,
                  startup_timeout: float = 15.0, max_restarts: int = 3,
-                 window_seconds: float = 600.0, auto_restart: bool = False):
+                 window_seconds: float = 600.0, auto_restart: bool = False,
+                 extra_env: dict[str, str] | None = None):
         self.directory = Path(directory)
         self.node = node
         self.entry = Path(entry) if entry is not None else DEFAULT_ENTRY
@@ -40,6 +41,9 @@ class DurableSupervisor:
         self.max_restarts = int(max_restarts)
         self.window_seconds = float(window_seconds)
         self.auto_restart = auto_restart
+        # 随 sidecar 进程一起给的环境变量（审批白名单、遥测代理等）。子进程在
+        # 启动时读它们，所以只能在 _spawn 里注入，不能事后改。
+        self.extra_env = {str(k): str(v) for k, v in (extra_env or {}).items() if str(v)}
 
         self.endpoint: str | None = None
         self.available = False
@@ -65,6 +69,11 @@ class DurableSupervisor:
         env = dict(os.environ)
         env["XIAOXI_RUNTIME_DIR"] = str(self.directory)
         env["XIAOXI_RUNTIME_TOKEN"] = self.token
+        env.update(self.extra_env)
+        # `XIAOXI_APPROVED_TOOLS` 是测试用的"全局预批准"开关：它绕过所有审批，
+        # 且按进程生效。生产的放行必须按单走 /v1/approvals，不能继承宿主 shell
+        # 里残留的这个变量，否则一整个 sidecar 的所有单都不再需要确认。
+        env.pop("XIAOXI_APPROVED_TOOLS", None)
         try:
             process = await asyncio.create_subprocess_exec(
                 self.node, "--experimental-strip-types", str(self.entry),
@@ -248,3 +257,18 @@ class DurableSupervisor:
         if not self.available or self.endpoint is None:
             raise AdapterError(f"执行内核不可用（{self.reason}）")
         return {"endpoint": self.endpoint, "token": self.token}
+
+    def current_endpoint(self) -> str | None:
+        """内核现在的地址。硬杀重起后端口会变，所以不要缓存调用方的结果。
+
+        返回 None 表示内核此刻不可用；调用方据此决定抛错，而不是拿旧地址去连。
+        进程已退出但 `_watch` 还没跑完 `_spawn` 时，`endpoint` 仍是上一次的端口
+        ——那一小段窗口里返回旧地址，适配器只会得到 `ConnectError`，看上去像
+        "内核拉起来了但连不上"。先看进程是否活着，比看缓存更可信。
+        """
+        if not self.available or self.endpoint is None:
+            return None
+        process = self._process
+        if process is None or process.returncode is not None:
+            return None
+        return self.endpoint

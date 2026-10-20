@@ -160,7 +160,8 @@ def roster_agents(roster: dict[str, Any]) -> list[dict[str, Any]]:
 
 
 def select_agent(roster: dict[str, Any], text: str,
-                 load: dict[str, int] | None = None) -> tuple[dict[str, Any] | None, list[dict[str, Any]]]:
+                 load: dict[str, int] | None = None,
+                 force_id: str | None = None) -> tuple[dict[str, Any] | None, list[dict[str, Any]]]:
     """Score every roster worker; return (best, ranked). Best is None when all are full."""
     load = load or {}
     selection = roster.get("selection") or {}
@@ -188,6 +189,16 @@ def select_agent(roster: dict[str, Any], text: str,
                        "score": score, "hits": hits, "concurrent": concurrent, "cap": cap,
                        "available": concurrent < cap})
     ranked.sort(key=lambda item: item["score"], reverse=True)
+    if force_id is not None:
+        # A lease may pin the worker (C2 only opens scribe). Pinning still
+        # respects enabled and capacity; it never bypasses the roster.
+        row = next((item for item in ranked if item["agent_id"] == force_id), None)
+        if row is None or not row["available"]:
+            return None, ranked
+        for worker in entries:
+            if isinstance(worker, dict) and worker.get("id") == force_id:
+                return worker, ranked
+        return None, ranked
     available = [item for item in ranked if item["available"]]
     if not available:
         return None, ranked
@@ -247,14 +258,14 @@ class Dispatcher:
         return self.commissions.create(title, brief, thread_id)
 
     def dispatch(self, commission_id: str, *, intent: str = "",
-                 acceptance: Any = None) -> tuple[dict[str, Any], BriefingPacket]:
+                 acceptance: Any = None, agent_id: str | None = None) -> tuple[dict[str, Any], BriefingPacket]:
         """DRAFTING -> BRIEFING: pack memory, pick a worker, store the packet."""
         commission = self.commissions.get(commission_id)
         if commission["status"] != "drafting":
             raise ValueError("commission_not_drafting")
         text = f"{commission['title']} {commission['brief']} {intent}".strip()
         load = in_flight_load(self.commissions.open_commissions())
-        agent, ranked = select_agent(self.roster, text, load)
+        agent, ranked = select_agent(self.roster, text, load, force_id=agent_id)
         if agent is None:
             raise LookupError("no_worker_available")
         memory = self._memory(text)
@@ -352,15 +363,22 @@ class Dispatcher:
         signatures: list[str] = []
         artifact: dict[str, Any] | None = None
         failure: str | None = None
+        failure_kind: str | None = None
+        # 这是第几次做这一单。适配器要用它区分"重投同一次"与"初审打回后重做"：
+        # durable 的幂等键如果只有 commission_id，重做会拿回上一版已终态的任务，
+        # 执行体根本不会被再拉起，旧成果被原样再交一次。只传给适配器，不写进
+        # 台账里的密件（协议 §19 的形状不变）。
+        attempt = int(commission.get("retry_count") or 0)
+        worker_packet = {**packet, "attempt": attempt}
         try:
-            context = await adapter.prepare_context(commission_id, packet)
+            context = await adapter.prepare_context(commission_id, worker_packet)
         except Exception as exc:
             return {"commission": self.block(
                 commission_id, f"执行体没起来：{type(exc).__name__}。要我再试一次吗？"),
                 "verdict": None, "failure": f"prepare_failed:{type(exc).__name__}"}
         try:
             async for event in adapter.execute({"context": context, "commission_id": commission_id,
-                                                "packet": packet}):
+                                                "packet": worker_packet}):
                 if not isinstance(event, dict):
                     continue
                 kind = str(event.get("type") or "")
@@ -381,6 +399,8 @@ class Dispatcher:
                     artifact = event.get("artifact")
                 elif kind == "error":
                     failure = str(event.get("text") or "执行体报错")[:240]
+                    candidate = event.get("blocked_kind")
+                    failure_kind = candidate if candidate in ("clarification", "approval") else None
                     break
         except Exception as exc:
             failure = f"{type(exc).__name__}: {exc}"[:240]
@@ -390,7 +410,8 @@ class Dispatcher:
         if artifact is None:
             reason = failure or "它跑完了但没交差"
             return {"commission": self.block(
-                commission_id, f"{reason}。要我再催一次，还是这单算了？"),
+                commission_id, f"{reason}。要我再催一次，还是这单算了？",
+                kind=failure_kind or "clarification"),
                 "verdict": None, "failure": failure or "no_artifact"}
         if failure:
             # artifact 之后又报错：这一版没有收尾。"交了又炸了"和"交差了"不是
@@ -475,9 +496,18 @@ class Dispatcher:
         except Exception:
             return
 
-    def block(self, commission_id: str, question: str) -> dict[str, Any]:
-        """RUNNING/BRIEFING -> BLOCKED. 琐事代答，大事请示，由 trivia_answer 决定。"""
-        return self.commissions.transition(commission_id, "blocked", blocked_question=question)
+    def block(self, commission_id: str, question: str,
+              kind: str = "clarification") -> dict[str, Any]:
+        """RUNNING/BRIEFING -> BLOCKED. 琐事代答，大事请示，由 trivia_answer 决定。
+
+        `kind` is structured, not inferred from the question text: a clarification
+        may be answered by the C2 orchestrator; an approval must go through the
+        confirmation card and CAS.
+        """
+        if kind not in ("clarification", "approval"):
+            kind = "clarification"
+        return self.commissions.transition(commission_id, "blocked",
+                                           blocked_question=question, blocked_kind=kind)
 
     def trivia_answer(self, question: str) -> str | None:
         """An answer grounded in the roster's trivia policy, or None when there is none."""
@@ -498,7 +528,13 @@ class Dispatcher:
         return None
 
     def answer(self, commission_id: str, answer: str) -> tuple[dict[str, Any], str, bool]:
-        """BLOCKED -> RUNNING. Returns (commission, reply, auto_answered)."""
+        """BLOCKED -> RUNNING. Returns (commission, reply, auto_answered).
+
+        `retry_delta=1` 是给 durable 执行体用的：它按 attempt 幂等（见
+        `_run_adapter`），attempt 不变就会拿回内核里同一个已终态的任务，
+        执行体不再被拉起。请示获答是一次新的开工，不是重投，所以计数要动。
+        对 manual / cli_subproc 没有影响——它们的 attempt 只用于遥测与打回。
+        """
         commission = self.commissions.get(commission_id)
         if commission["status"] != "blocked":
             raise ValueError("commission_not_blocked")
@@ -508,7 +544,8 @@ class Dispatcher:
             if reply is None:
                 raise ValueError("blocked_question_needs_an_answer")
             auto = True
-        updated = self.commissions.transition(commission_id, "running", blocked_question="")
+        updated = self.commissions.transition(commission_id, "running", blocked_question="",
+                                              retry_delta=1)
         return updated, reply, auto
 
     # ---------- 交差与初审 ----------

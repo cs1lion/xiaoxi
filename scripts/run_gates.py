@@ -40,6 +40,15 @@ def npm_cmd() -> list[str]:
             return [found]
     return ["npm"]
 
+
+def node_cmd() -> list[str]:
+    """同 npm_cmd：解析出真实可执行文件，缺 node 时给出明确失败而不是 127。"""
+    for candidate in ("node.exe", "node"):
+        found = shutil.which(candidate)
+        if found:
+            return [found]
+    return ["node"]
+
 # name -> (command, 判定"真的断言过"的附加条件)
 # skip_regex 命中输出即视为"这轮没验"，而不是通过。
 GATES: dict[str, dict[str, object]] = {
@@ -49,6 +58,14 @@ GATES: dict[str, dict[str, object]] = {
     },
     "core": {
         "cmd": [str(PY), "scripts/test_core.py"],
+        "skip_regex": r"^\s*SKIP",
+    },
+    # 配置键审计：把"yaml 配了但访问器白名单没收 → 静默失效"做成门禁。
+    # 它是"防死配置"的元检查——写进仓库却不跑，等于又一次死接线。
+    # 2026-10-18 第一次接进来自曝 4 个死键（circadian / mood / seed_fork_min/max），
+    # 其中前两个正是当天声称"已接上线"的 §15 配置。
+    "config_keys": {
+        "cmd": [str(PY), "scripts/audit_config_keys.py"],
         "skip_regex": r"^\s*SKIP",
     },
     "evals": {
@@ -111,6 +128,145 @@ GATES: dict[str, dict[str, object]] = {
         "cmd": [str(PY), "scripts/test_config_hot.py"],
         "skip_regex": r"^\s*SKIP",
     },
+    # 慢环执行内核：适配器契约、进程监督、以及 agent-runtime 自己的接管测试。
+    # 此前这三条只写在 docs/TESTING.md 里，没有进 run_gates——本轮改 durable
+    # 时发现"文档说跑过、报告里根本没有这一行"。缺 node 时 supervisor 会打
+    # SKIP，run_gates 会把跳过判失败，这是有意的：接管测试没跑就不算绿。
+    "durable_adapter": {
+        "cmd": [str(PY), "scripts/test_durable_adapter.py"],
+        "skip_regex": r"^\s*SKIP",
+    },
+    # 工作台授权面：共享 DurableState、老板确认单、按调用放行、C3 提议提交。
+    # 这条不需要浏览器；它验的是"浏览器点一下"之后台账与 sidecar 的真实变化。
+    "durable_authorization_ui": {
+        "cmd": [str(PY), "scripts/test_durable_authorization_ui.py"],
+        "skip_regex": r"^\s*SKIP",
+    },
+    "durable_supervisor": {
+        "cmd": [str(PY), "scripts/test_durable_supervisor.py"],
+        "skip_regex": r"^\s*SKIP",
+    },
+    "durable_takeover": {
+        "cmd": [*node_cmd(), "--experimental-strip-types", "test-takeover.ts"],
+        "cwd": "agent-runtime",
+        "skip_regex": r"^\s*SKIP",
+    },
+    "durable_recovery": {
+        "cmd": [*node_cmd(), "--experimental-strip-types", "test-takeover-recovery.ts"],
+        "cwd": "agent-runtime",
+        "skip_regex": r"^\s*SKIP",
+    },
+    "durable_revive": {
+        "cmd": [*node_cmd(), "--experimental-strip-types", "test-revive.ts"],
+        "cwd": "agent-runtime",
+        "skip_regex": r"^\s*SKIP",
+    },
+    "durable_app_wiring": {
+        "cmd": [str(PY), "scripts/test_durable_app_wiring.py"],
+        "skip_regex": r"^\s*SKIP",
+    },
+    "durable_reconcile": {
+        "cmd": [str(PY), "scripts/test_durable_reconcile.py"],
+        "skip_regex": r"^\s*SKIP",
+    },
+    "durable_soak": {
+        "cmd": [str(PY), "scripts/test_durable_soak.py"],
+        "skip_regex": r"^\s*SKIP",
+    },
+    "durable_storage": {
+        "cmd": [str(PY), "scripts/test_storage_archive.py"],
+        "skip_regex": r"^\s*SKIP",
+    },
+    "durable_approval_per_call": {
+        "cmd": [*node_cmd(), "--experimental-strip-types", "test-approval-per-call.ts"],
+        "cwd": "agent-runtime",
+        "skip_regex": r"^\s*SKIP",
+    },
+    "durable_approval_chain": {
+        "cmd": [*node_cmd(), "--experimental-strip-types", "test-approval-chain.ts"],
+        "cwd": "agent-runtime",
+        "skip_regex": r"^\s*SKIP",
+    },
+    "durable_compaction": {
+        "cmd": [*node_cmd(), "--experimental-strip-types", "test-compaction.ts"],
+        "cwd": "agent-runtime",
+        "skip_regex": r"^\s*SKIP",
+    },
+    "durable_compaction_live": {
+        "cmd": [*node_cmd(), "--experimental-strip-types", "test-compaction-live.ts"],
+        "cwd": "agent-runtime",
+        "skip_regex": r"^\s*SKIP",
+    },
+    "durable_skills": {
+        "cmd": [*node_cmd(), "--experimental-strip-types", "test-skills.ts"],
+        "cwd": "agent-runtime",
+        "skip_regex": r"^\s*SKIP",
+    },
+    "durable_read_file": {
+        "cmd": [*node_cmd(), "--experimental-strip-types", "test-read-file.ts"],
+        "cwd": "agent-runtime",
+        "skip_regex": r"^\s*SKIP",
+    },
+    "durable_list_files": {
+        "cmd": [*node_cmd(), "--experimental-strip-types", "test-list-files.ts"],
+        "cwd": "agent-runtime",
+        "skip_regex": r"^\s*SKIP",
+    },
+    "durable_host_tools": {
+        "cmd": [*node_cmd(), "--experimental-strip-types", "test-host-tools.ts"],
+        "cwd": "agent-runtime",
+        "skip_regex": r"^\s*SKIP",
+    },
+    "durable_read_api": {
+        "cmd": [str(PY), "scripts/test_durable_read_api.py"],
+        "skip_regex": r"^\s*SKIP",
+    },
+    "durable_profiles": {
+        "cmd": [*node_cmd(), "--experimental-strip-types", "test-profiles.ts"],
+        "cwd": "agent-runtime",
+        "skip_regex": r"^\s*SKIP",
+    },
+    "durable_orchestrator_tools": {
+        "cmd": [*node_cmd(), "--experimental-strip-types", "test-orchestrator-tools.ts"],
+        "cwd": "agent-runtime",
+        "skip_regex": r"^\s*SKIP",
+    },
+    "durable_orchestrator_api": {
+        "cmd": [str(PY), "scripts/test_durable_orchestrator_api.py"],
+        "skip_regex": r"^\s*SKIP",
+    },
+    "durable_orchestrator_run": {
+        "cmd": [*node_cmd(), "--experimental-strip-types", "test-orchestrator-run.ts"],
+        "cwd": "agent-runtime",
+        "skip_regex": r"^\s*SKIP",
+    },
+    "durable_block_kind": {
+        "cmd": [*node_cmd(), "--experimental-strip-types", "test-block-kind.ts"],
+        "cwd": "agent-runtime",
+        "skip_regex": r"^\s*SKIP",
+    },
+    "durable_c3_api": {
+        "cmd": [str(PY), "scripts/test_durable_c3_api.py"],
+        "skip_regex": r"^\s*SKIP",
+    },
+    "durable_clarification_cap": {
+        "cmd": [str(PY), "scripts/test_durable_clarification_cap.py"],
+        "skip_regex": r"^\s*SKIP",
+    },
+    "durable_mcp": {
+        "cmd": [*node_cmd(), "--experimental-strip-types", "test-mcp.ts"],
+        "cwd": "agent-runtime",
+        "skip_regex": r"^\s*SKIP",
+    },
+    "durable_mcp_live": {
+        "cmd": [*node_cmd(), "--experimental-strip-types", "test-mcp-live.ts"],
+        "cwd": "agent-runtime",
+        "skip_regex": r"^\s*SKIP",
+    },
+    "gateway_env": {
+        "cmd": [str(PY), "-B", "scripts/test_gateway_env.py"],
+        "skip_regex": r"^\s*SKIP",
+    },
     "evolution_quality_report": {
         # 评测报告不是回归门禁，但它在 Windows GBK 控制台崩过一次；
         # 收进来是为了让"报告跑得完"本身成为一条断言。
@@ -144,13 +300,24 @@ GATES: dict[str, dict[str, object]] = {
 ALWAYS_REQUIRED = ("protocol", "core", "evals", "npm", "executive_v3", "adapter_ext",
                    "codex_shim", "claude_shim", "gateway", "task_planning", "cross_day",
                    "thread_conversation", "self_evolution", "agent_loop", "llm_client",
-                   "self_evolution_send", "config_hot", "evolution_quality_report")
+                   "self_evolution_send", "config_hot", "evolution_quality_report",
+                   "durable_adapter", "durable_supervisor", "durable_takeover",
+                   "durable_recovery", "durable_revive", "durable_app_wiring",
+                   "durable_reconcile", "durable_soak", "durable_storage", "durable_compaction",
+                   "durable_compaction_live", "durable_approval_per_call",
+                   "durable_approval_chain", "durable_skills", "durable_read_file",
+                   "durable_list_files", "durable_host_tools", "durable_read_api",
+                   "durable_profiles", "durable_orchestrator_tools", "durable_orchestrator_api",
+                   "durable_orchestrator_run", "durable_block_kind", "durable_c3_api",
+                   "durable_clarification_cap", "durable_mcp", "durable_mcp_live",
+                   "durable_authorization_ui", "gateway_env")
 
 
 def run_gate(name: str, spec: dict) -> dict:
     started = time.time()
     try:
-        proc = subprocess.run(spec["cmd"], cwd=str(ROOT), capture_output=True, text=True,
+        cwd = ROOT / str(spec["cwd"]) if spec.get("cwd") else ROOT
+        proc = subprocess.run(spec["cmd"], cwd=str(cwd), capture_output=True, text=True,
                               encoding="utf-8", errors="replace", timeout=900)
         code = proc.returncode
         output = (proc.stdout or "") + (proc.stderr or "")

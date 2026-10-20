@@ -545,6 +545,7 @@ class CommissionStore:
                     agent_id TEXT NOT NULL DEFAULT '', status TEXT NOT NULL,
                     step_idx INTEGER NOT NULL DEFAULT 0, retry_count INTEGER NOT NULL DEFAULT 0,
                     blocked_question TEXT NOT NULL DEFAULT '',
+                    blocked_kind TEXT NOT NULL DEFAULT '',
                     delivery TEXT NOT NULL DEFAULT '{}', audit TEXT NOT NULL DEFAULT '{}',
                     packet TEXT NOT NULL DEFAULT '{}',
                     rubric_ids TEXT NOT NULL DEFAULT '[]',
@@ -552,6 +553,9 @@ class CommissionStore:
                 self._db.execute('''CREATE TABLE IF NOT EXISTS commission_events (
                     id INTEGER PRIMARY KEY AUTOINCREMENT, commission_id TEXT NOT NULL,
                     kind TEXT NOT NULL, payload TEXT NOT NULL, created_at REAL NOT NULL)''')
+                columns = {row['name'] for row in self._db.execute('PRAGMA table_info(commissions)')}
+                if 'blocked_kind' not in columns:
+                    self._db.execute("ALTER TABLE commissions ADD COLUMN blocked_kind TEXT NOT NULL DEFAULT ''")
                 self._db.execute('CREATE INDEX IF NOT EXISTS commission_status ON commissions(status, updated_at)')
                 self._db.execute('CREATE INDEX IF NOT EXISTS commission_events_id ON commission_events(commission_id, id)')
         except BaseException:
@@ -630,7 +634,8 @@ class CommissionStore:
         if not isinstance(status, str) or status not in self.STATUSES:
             raise ValueError('invalid commission status')
         allowed_changes = {'agent_id', 'step_idx', 'retry_delta', 'blocked_question',
-                           'delivery', 'audit', 'rubric_ids', 'packet', 'title', 'brief'}
+                           'blocked_kind', 'delivery', 'audit', 'rubric_ids', 'packet',
+                           'title', 'brief'}
         if set(changes) - allowed_changes:
             raise ValueError('unknown commission changes')
         with self._transaction():
@@ -656,6 +661,16 @@ class CommissionStore:
                     raise ValueError('blocked requires a question')
                 updates['blocked_question'] = question
                 payload['question'] = question
+                if status == 'blocked':
+                    kind = changes.get('blocked_kind', row['blocked_kind'] or 'clarification')
+                    if kind not in ('clarification', 'approval'):
+                        raise ValueError('blocked_kind must be clarification or approval')
+                    updates['blocked_kind'] = kind
+                    payload['blocked_kind'] = kind
+                else:
+                    updates['blocked_kind'] = ''
+            elif 'blocked_kind' in changes:
+                raise ValueError('blocked_kind only applies to blocked')
             for key in ('delivery', 'audit', 'rubric_ids', 'packet'):
                 if key in changes:
                     value = changes[key]

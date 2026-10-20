@@ -53,5 +53,6 @@ tmp/
 *.bak
 evals/results/
 
-# 外部 Agent 运行时参考实现（自带 node_modules，97MB），只作对照，不进版本库
-agent-runtime/
+# 慢环执行内核（2026-10-17 批准由 agent-runtime/ 归属，见 PI_DURABLE_MIGRATION.md）：
+# 源码与测试进版本库，只排掉自带的 node_modules（约 97MB）。
+agent-runtime/node_modules/
