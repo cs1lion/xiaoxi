@@ -285,7 +285,12 @@ class Dispatcher:
             rubrics=rubrics,
             acceptance=_clean_acceptance(acceptance),
             budget={"max_steps": int(dispatch_cfg.get("max_steps", 4) or 4),
-                    "max_prompt_tokens": int(dispatch_cfg.get("max_prompt_tokens", 12000) or 12000),
+                    # 单次调用是质量闸；整单累计只做成本告警，不能拿重试次数当上下文膨胀。
+                    "max_prompt_tokens_per_call": int(
+                        dispatch_cfg.get("max_prompt_tokens_per_call")
+                        or dispatch_cfg.get("max_prompt_tokens") or 12000),
+                    "max_total_prompt_tokens": int(
+                        dispatch_cfg.get("max_total_prompt_tokens") or 0),
                     "max_retry": self.evaluator.MAX_RETRY,
                     "eval_commands": [str(item) for item in (agent.get("eval_commands") or [])]},
             spin_guard=dict((dispatch_cfg.get("spin_guard") or {"max_identical": 3})),

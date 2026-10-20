@@ -247,6 +247,11 @@ export function mountExecutive() {
       : `${review.artifact_unverified_count || 0} 项未复验/不存在`;
     box.append(node("p", "ops-review-head",
       `复核：${review.recommendation === "accept" ? "建议验收" : "建议打回"} · 成果 ${verified}`));
+    const usage = review.evidence?.audit?.usage;
+    if (usage?.total_budget_exceeded) {
+      box.append(node("p", "ops-alert",
+        `整单 Prompt Tokens ${usage.prompt_tokens} 超出成本告警线 ${usage.max_total_prompt_tokens}（只作成本提示，不影响验收）`));
+    }
     if (review.artifact_recheck_failed) {
       box.append(node("p", "ops-finding", "有文件成果在初审后消失了，不能验收。"));
     }
