@@ -8,6 +8,7 @@
 from __future__ import annotations
 
 import json
+import re
 import time
 from datetime import datetime, timedelta
 from typing import TYPE_CHECKING, Any
@@ -27,6 +28,27 @@ VERBATIM_QUOTE_LIMIT = 20         # 超过 20 字的用户原话逐字引用即"
 MAX_DIARY_DRIFTS = 3              # 单篇日记最多派生的偏置数（宁缺毋滥）
 MAX_DIARY_SPARKS = 2              # 单篇日记最多诞生的火花数
 MAX_SPARK_TEXT_CHARS = 120        # 内部约束：与主动开口字数上限一致
+
+
+def _mood_tokens(text: str) -> set[str]:
+    """CJK bigrams plus latin words; a cheap, deterministic overlap proxy."""
+    value = str(text or '').lower()
+    tokens: set[str] = set()
+    for run in re.findall(r'[\u4e00-\u9fff]+', value):
+        if len(run) == 1:
+            tokens.add(run)
+        else:
+            tokens.update(run[index:index + 2] for index in range(len(run) - 1))
+    tokens.update(re.findall(r'[a-z0-9_]{2,}', value))
+    return tokens
+
+
+def mood_overlap(left: Any, right: Any) -> float:
+    """Jaccard overlap in [0,1]; empty either side means "nothing to compare"."""
+    first, second = _mood_tokens(str(left or '')), _mood_tokens(str(right or ''))
+    if not first or not second:
+        return 0.0
+    return len(first & second) / len(first | second)
 
 
 def _resolve_store(store: MemoryStore | None) -> MemoryStore:
@@ -346,6 +368,7 @@ def decay_mood(store: MemoryStore, *, now: float | None = None,
 
 __all__ = [
     "MAX_TURN_DRIFTS", "active_drifts", "decay_mood", "diary_notice_payload",
-    "local_date", "spend_spark", "surface_next_spark", "surfaced_sparks", "synthesize_diary",
-    "validate_diary_payload", "validate_drift_proposal", "validate_spark_proposal",
+    "local_date", "mood_overlap", "spend_spark", "surface_next_spark", "surfaced_sparks",
+    "synthesize_diary", "validate_diary_payload", "validate_drift_proposal",
+    "validate_spark_proposal",
 ]

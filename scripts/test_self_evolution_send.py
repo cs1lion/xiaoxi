@@ -191,9 +191,9 @@ def test_bare_change_is_translated() -> None:
 
 def test_undocumented_event_is_not_sent() -> None:
     print("[undocumented]")
-    # V2 思想引擎的 curiosity_reflection：协议没登记，不许自造事件发出去
+    # 未登记 type 不许自造事件发出去；curiosity 现在只进 trace，不再是 event。
     outcome = {"status": "ok", "events": [
-        {"type": "curiosity_reflection", "quiet": True,
+        {"type": "internal_reflection", "quiet": True,
          "change": {"kind": "child_seed", "topic": "T", "summary": "S"}}], "trace": {}}
     sent = asyncio.run(run_case(outcome))
     check("协议外的 type 不发", sent == [], f"sent={sent}")

@@ -57,11 +57,10 @@ class EventShapeTest(unittest.TestCase):
         self.assertEqual(e["bubble"]["text"], "这行是不是能更干净点……")
         self.assertEqual(e["source_refs"], ["seed:s1"])
 
-    def test_proactive_carries_source_refs(self):
-        e = A.build_proactive(text="我昨晚把那个问题重顺了一遍", reason="idle_90s",
-                              source_refs=["reflection:r1", "seed:s1"], now=1.0)
-        self.assertEqual(e["type"], "proactive")
-        self.assertEqual(e["source_refs"], ["reflection:r1", "seed:s1"])
+    def test_proactive_is_a_turn_source_not_an_event_builder(self):
+        # §16.2：90s 之后由有声 mumble 接管，900s 才走 proactive_turn。
+        # 不存在独立的 {type:"proactive"} 事件构造器。
+        self.assertFalse(hasattr(A, "build_proactive"))
 
 
 class ChooseContentTest(unittest.TestCase):

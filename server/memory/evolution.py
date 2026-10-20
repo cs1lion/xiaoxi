@@ -50,7 +50,7 @@ SELF_EVOLUTION_DEFAULTS: dict[str, Any] = {
     # 键没登记，于是 `circadian.timezone` 与 `mood.*` 在 memory.yaml 里怎么写都读不
     # 到，回落值又恰好等于配置值（Asia/Shanghai / 30 分钟），所以零症状。
     "circadian": {"timezone": "Asia/Shanghai"},
-    "mood": {"enabled": True, "default_ttl_minutes": 30},
+    "mood": {"enabled": True, "default_ttl_minutes": 30, "overwrite_overlap_max": 0.30},
 }
 
 OPENING_SYSTEM = """你是角色本人，现在用户没说话，你想主动开口说一句。

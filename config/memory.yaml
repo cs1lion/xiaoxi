@@ -163,6 +163,7 @@ self_evolution:
   mood:
     enabled: true            # 心境惯性状态机（PROTOCOL.md §15）
     default_ttl_minutes: 30  # 心境余温默认有效期；只作控制阀门，表达仍靠自然语言叙事
+    overwrite_overlap_max: 0.30  # 有 active mood 时，反思发现与旧叙事词汇重叠低于此值才覆盖
   circadian:
     timezone: "Asia/Shanghai"  # 真实时间用配置时区；不得把服务器时区直接当用户时区
 

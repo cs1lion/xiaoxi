@@ -938,7 +938,7 @@ class SelfEvolutionCycle:
                        notes_provider: Any, threads_provider: Any) -> dict[str, Any]:
         from ..llm import _loose_json, llm
         from ..memory import seeds as seed_mod
-        from ..memory.diary import local_date
+        from ..memory.diary import local_date, mood_overlap
         from ..memory.evolution import (load_self_state, plan_state_changes, save_self_state,
                                         self_evolution_cfg, self_evolution_payload)
 
@@ -1061,9 +1061,45 @@ class SelfEvolutionCycle:
         new_state['cycles_today'] = (1 if state.get('cycles_on') != today
                                      else int(state.get('cycles_today') or 0) + 1)
         save_self_state(self.store, new_state)
-        events.append({'type': 'curiosity_reflection', 'quiet': True,
-                       'change': {'kind': 'child_seed', 'topic': refl['title'], 'summary': refl['discovery'][:120],
-                                  'child_seed_ids': child_ids, 'reflection_id': reflection_id,
-                                  'source_refs': refl['source_refs']}})
+
+        # Mood is the one narrative state that had no writer. Only a successful
+        # idle reflection may write it; a low-novelty discovery must not erase
+        # the carry-over just because the cycle ran again.
+        mood_cfg = cfg.get('mood') if isinstance(cfg.get('mood'), dict) else {}
+        trace['mood_written'] = False
+        if not mood_cfg.get('enabled', True):
+            trace['mood_skipped'] = 'disabled'
+        else:
+            try:
+                current = self.store.get_mood() or {}
+                current_text = str(current.get('narrative') or '').strip()
+                narrative = str(refl.get('narrative') or '').strip()[:240]
+                overlap = (mood_overlap(refl.get('discovery') or narrative, current_text)
+                           if current_text else 0.0)
+                limit = float(mood_cfg.get('overwrite_overlap_max', 0.30) or 0.30)
+                trace['mood_overlap'] = round(overlap, 3)
+                if narrative and (not current_text or overlap < limit):
+                    ttl = float(mood_cfg.get('default_ttl_minutes', 30) or 30)
+                    self.store.save_mood(
+                        narrative=narrative, reason=f'idle_reflection:{reflection_id}',
+                        source_refs=refl.get('source_refs') or [],
+                        influence_note='来自一次安静反思，只作余温',
+                        related_summary=str(refl.get('discovery') or '')[:120],
+                        state='active', expires_at=now + max(ttl, 1.0) * 60)
+                    trace['mood_written'] = True
+                elif current_text:
+                    trace['mood_skipped'] = 'low_novelty'
+                else:
+                    trace['mood_skipped'] = 'empty_narrative'
+            except Exception as exc:  # a mood write must never fail the reflection
+                trace['mood_error'] = f'{type(exc).__name__}: {exc}'
+                trace['mood_skipped'] = 'error'
+
+        # This used to be a fully shaped `curiosity_reflection` event that app.py
+        # silently dropped because §10 has no such event. It is internal trace
+        # data now; the star map still gets the child nodes.
+        trace['curiosity_reflection'] = {
+            'child_seed_ids': child_ids, 'reflection_id': reflection_id,
+            'source_refs': refl['source_refs']}
         trace.update(reflection_id=reflection_id, status_changes=status_changes)
         return {'status': 'ok', 'events': events, 'trace': trace}

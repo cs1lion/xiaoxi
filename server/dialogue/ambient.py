@@ -142,32 +142,6 @@ def build_mumble(*, text: str, reason: str, voice: bool = False, bubble: Any = N
     return event
 
 
-def build_proactive(*, text: str, reason: str, source_refs: list[str] | None = None,
-                    now: float | None = None, event_id: str | None = None,
-                    dedupe_key: str | None = None) -> dict[str, Any]:
-    """构造协议 §16.1 的 `proactive` 事件对象。
-
-    **当前没有任何调用方，这是有意的。** 协议 §16.2 的梯度 3 有两种落地：
-
-    - 连接级 `ambient_event`：在 `proactive` 阈值之后**继续产出有声 mumble**
-      （见 orchestrator 的 `tier = "mumble"` 改写），不发 `proactive` 事件；
-    - 完整主动轮次：由 `proactive_turn` / `self_topic_turn` 的 900s 门直接
-      走 `turn_started(source="proactive"|"self_topic")`，同样不发这个事件。
-
-    所以协议里"梯度 3 `proactive`（默认空闲 90s）"描述的是一个**轮次来源**，
-    不是一个独立 WS 事件——`{type:"proactive"}` 这条线协议没有真正用上。
-    函数保留是因为 `test_ambient_tiers` 钉着它的形状；哪天决定补这条事件，
-    形状已经定好了。
-
-    改这里之前先读协议 §16.2 的"梯度 3 由陪伴通道接管"一段：90s 之后不再静音
-    是已经解决的问题，不要为了"让这个函数被调用"而重新引入静音断层。
-    """
-    now = time.time() if now is None else float(now)
-    return {"type": "proactive", "event_id": event_id or new_event_id("proactive"), "text": text,
-            "trigger_reason": reason, "triggered_at": now, "source_refs": list(source_refs or []),
-            "dedupe_key": dedupe_key or new_event_id("proactive"), "interactive": True}
-
-
 def choose_content(*, discovery: Any = None, mood: Any = None, spark: Any = None,
                    child_seed: Any = None) -> tuple[str | None, list[str]]:
     """Real content only (§16.2): (text, source_refs) or (None, []).
@@ -188,5 +162,4 @@ def choose_content(*, discovery: Any = None, mood: Any = None, spark: Any = None
 
 
 __all__ = ["AMBIENT_DEFAULTS", "SUPERVISOR_ACTIONS", "TIERS", "ambient_cfg", "backoff_threshold",
-           "build_micro_act",
-           "build_mumble", "build_proactive", "choose_content", "new_event_id", "select_tier"]
+           "build_micro_act", "build_mumble", "choose_content", "new_event_id", "select_tier"]
