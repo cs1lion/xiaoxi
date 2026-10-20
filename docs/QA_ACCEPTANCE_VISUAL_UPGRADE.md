@@ -759,3 +759,73 @@ front            = 1000 + 144 + 32 = 1176
 批准对 8010 实机跑——用户的决策）。
 
 ---
+
+---
+
+## 20. S5 世界端真帧 e2e 独立复验（2026-10-20 晚，QA 读证据文件独立判定）
+
+**证据来源**：`pixel-world/eval/screens/` 下 `s5-e2e-evidence.json`（round-04 主链路：
+600 帧世界快照时间线 + WS 帧 + 台账 REST before/after）、`s5-e2e-evidence-fg.json`
+（round-05 负例 F + 杀重启 G）、`s5-e2e-r3/r4/r5.out.txt`、`s5-e2e-env.json`、
+`s5-walking.png` / `s5-working.png`。**QA 逐条读证据独立判定，不采信 Chief 总结。**
+
+**环境独立核实**：8001 活着且 health `offline=false`（真实 step-3.7-flash）；
+页面 `?ledger=on`；隔离临时根 + 5189 代理（8000/8010 未碰）。
+
+### 20.1 逐条判定
+
+| 断言 | 判定 | QA 独立证据 |
+|---|---|---|
+| A 批准后世界快照出现该单 | **通过** | 时间线 t+28.1s 首现任务（status=assigned），final.tasks[0]：id=c_e6f7400b6e8f、source=**ledger**、kind=code、buildingId=code_forge#1、workerId=v1；ledger.connected=true / mock=**false** / reconciled=true——走的是真台账路不是 Mock 路 |
+| B 角色位置收敛到工位 | **通过（附缺陷 D-1）** | round-03：villagers[0] 走 toWork→working（sawWork=true，walking/working 两张截图在案）；round-04：该单派给 v1 而驱动只采样 villagers[0]（采样口径所限），间接证据为 code_forge#1 转 operating 且带该 taskId。**但 round-04 暴露出 D-1（见 20.2）** |
+| C 恰好一台铺子运转且种类匹配 | **通过** | 时间线铺子状态迁移：t+29.6s code_forge#1 idle→operating（taskId=c_e6f7400b6e8f），star_archive#1 与 ink_house#1 全程 idle；boundTask=code 与任务 kind=code 匹配 |
+| blocked 可见 | **通过** | final.tasks[0].blockedQuestion 与台账 blocked_question **逐字一致**（simulation.ts:414-425 的透传设计）；世界 task.status=in_progress 是世界自己的状态机口径，问题本身已可见——满足 §17「blocked 可见」 |
+| D 完成/交付 | **未达成（根因在世界之外，已验证）** | 台账 status=blocked、deliveries.ledger=0。根因独立核实：**127.0.0.1:15722（网关）OPEN、127.0.0.1:15721（上游）ECONNREFUSED**——网关健康但上游关闭，claude worker 因此 exit 1、单落 blocked。属用户主产品线，非像素世界缺陷 |
+| E world.status | 未跑 | 需模型再选一次 world.status，可另起轮 |
+| F 负例 | **通过** | r5 输出：「提醒我明天下午三点开会」选中 **reminder.create** 而非 world.dispatch；zeroChange=true（worldTasks 1→1、台账 1→1、mode idle→idle、pos (10,7) 不变、workstations 不变） |
+| G 杀/重启重连 | **通过** | r5 输出：杀 8001 后 offlineSeen=true（connected=false 且世界照常过日子不崩）；同临时根重启后 reconnected=true、任务 id 前后均为 c_e6f7400b6e8f、台账仍 1 条、noDuplicate=true |
+| H 并发 | 未跑 | — |
+
+### 20.2 缺陷 D-1（P2）：reconcile 撤单不恢复干活角色的可见性
+
+**现象**（e2e round-04 实测）：villagers[0] 全程 600 帧（314s）停在 (10,7)（code_forge
+占地内）、mode=idle、**visible=false**、bubble=null、routine 标签在跑但位置零变化。
+
+**根因（代码级确认）**：读档恢复了一个「在屋内干活」的角色（mode=working、
+visible=false、pos=工位）；首次 sync 走 reconcile，该单在完整快照里缺席（轮次间 DB
+被重置）→ `simulation.ts:1439-1440` 直接调 `removeTask` → `removeTask`（1482-1489）
+只重置 mode/taskId/path，**不恢复 `visible`、不把角色移出建筑**。同一「单没了」场景
+的 live-sync 路径走 `abandonActiveTask`（546-564），那条**有** `visible = true` 和气泡——
+**两条路径对同一语义处理不一致，reconcile 这条漏了可见性恢复**。角色随后既不可见
+（不渲染）又动不了（起点在不可走格内，寻路失败），且该状态入档跨会话持久（只有清档
+能恢复）。
+
+**触发条件（正常使用可达，非仅 e2e）**：页面关闭时角色在屋内干活 + 关闭期间该单从
+台账消失（用户撤单 / 台账库更换）→ 重开读档 + 首次 sync 对账 → 卡死。
+
+**预期**：按撤单语义恢复 `visible = true` 并把角色移出建筑（对齐 abandonActiveTask
+的做法）。**实际**：mode=idle 但 visible=false、pos 留在屋内。
+
+**等级 P2**（局部功能缺陷）：角色永久消失且状态持久，但主链路（派单→干活→交付）
+不受影响（round-03 完整走通），触发条件窄。修复建议：reconcile 的缺席分支改走
+abandonActiveTask 语义，或 removeTask 内对 working 态角色补 `visible = true` + 移到
+门口。建议施工补一条「读档恢复干活角色 + 对账撤单」的回归测试。
+
+### 20.3 两处口径判定（Chief 提请）
+
+1. **round-04 sawWork=false**：B 应以全部角色为准。判定：**B 成立**——round-03 有直接
+证据（villagers[0] 走 toWork→working + 截图），round-04 有间接证据（铺子带该单
+operating）；采样只取 villagers[0] 是**测试工具的口径限制**（P3，建议驱动改采样
+全部角色），不是世界缺陷。
+2. **task.status=in_progress vs 台账 blocked**：判定**满足「blocked 可见」**——世界
+透传展示 blockedQuestion（逐字一致），status 是世界自己的状态机字段，§17 要的是
+「blocked 可见」而非「status 字面等于 blocked」。
+
+### 20.4 e2e 总结论
+
+**有条件通过**：A/B/C/F/G 与 blocked 可见全部独立验通过；D 未达成但根因在世界之外
+（网关上游 15721 拒绝连接，已独立端口实测）；E/H 未跑。**附带产出 1 条 P2 缺陷
+（D-1，reconcile 撤单不恢复可见性）+ 1 条 P3 工具建议（驱动采样全部角色）**。
+已知限制：world_visible=unknown 的洞已由 A/B/C 补上；本轮有真实 API 费用。
+
+---
