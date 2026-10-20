@@ -5,6 +5,7 @@ import base64
 import json
 import os
 import secrets
+import subprocess
 import time
 import uuid
 from pathlib import Path
@@ -35,8 +36,21 @@ ensure_dirs()
 
 app = FastAPI(title="聊天角色系统", version="0.1.0")
 
+
+def _build_commit() -> str:
+    try:
+        result = subprocess.run(
+            ["git", "rev-parse", "--short", "HEAD"], cwd=str(ROOT),
+            capture_output=True, text=True, timeout=2, check=True)
+        return result.stdout.strip() or "unknown"
+    except Exception:
+        return "unknown"
+
+
+BUILD = {"version": app.version, "commit": _build_commit()}
+
 from .assistant.service import AssistantService
-from .assistant.api import create_router, scheduler
+from .assistant.api import create_router, scheduler, scheduler_snapshot
 
 assistant = AssistantService(ROOT / "data", llm, manager)
 orchestrator.context_broker = assistant.context_broker
@@ -218,10 +232,23 @@ async def transcript(session_id: str, limit: int = 100) -> Any:
     return {"items": store.recent_messages(session_id, limit=limit)}
 
 
+def _scheduler_done(task: asyncio.Task) -> None:
+    if task.cancelled():
+        return
+    try:
+        exc = task.exception()
+    except asyncio.CancelledError:
+        return
+    if exc is not None:
+        print(f"[scheduler] stopped unexpectedly: {type(exc).__name__}: {exc}")
+
+
 @app.get("/api/health")
 async def health() -> Any:
+    scheduler_state = scheduler_snapshot()
     return {
         "ok": True,
+        "build": BUILD,
         "llm": {
             "provider": llm.provider,
             "model": llm.model,
@@ -230,6 +257,8 @@ async def health() -> Any:
         },
         "tts": {"engine": settings.tts_engine, "model": settings.tts_model, "voice": settings.tts_voice},
         "asr": {"engine": settings.asr_engine, "model": settings.asr_model_id if settings.asr_engine == "stepaudio" else settings.asr_model},
+        "scheduler": scheduler_state,
+        "degraded": bool(scheduler_state["degraded"]),
         "memories": store.count(),
         "proactivity": orchestrator.state["proactivity_enabled"],
     }
@@ -1402,6 +1431,7 @@ async def startup() -> None:
     # 否则它们会一直占着 worker 的并发槽，新单直接没人接。
     recovered = executive.recover_interrupted(durable_lookup=_durable_lookup)
     _scheduler_task = asyncio.create_task(scheduler(assistant))
+    _scheduler_task.add_done_callback(_scheduler_done)
     for commission_id in recovered["resumed"]:
         task = asyncio.create_task(executive.resume(commission_id))
         _startup_tasks.add(task)

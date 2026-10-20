@@ -60,6 +60,10 @@ GATES: dict[str, dict[str, object]] = {
         "cmd": [str(PY), "scripts/test_core.py"],
         "skip_regex": r"^\s*SKIP",
     },
+    "scheduler_health": {
+        "cmd": [str(PY), "scripts/test_scheduler_health.py"],
+        "skip_regex": r"^\s*SKIP",
+    },
     # 配置键审计：把"yaml 配了但访问器白名单没收 → 静默失效"做成门禁。
     # 它是"防死配置"的元检查——写进仓库却不跑，等于又一次死接线。
     # 2026-10-18 第一次接进来自曝 4 个死键（circadian / mood / seed_fork_min/max），
@@ -303,7 +307,7 @@ GATES: dict[str, dict[str, object]] = {
 }
 
 # 这些门禁的本体是纯逻辑单测，不需要本地服务，永远必须真跑。
-ALWAYS_REQUIRED = ("protocol", "core", "evals", "npm", "executive_v3", "adapter_ext",
+ALWAYS_REQUIRED = ("protocol", "core", "scheduler_health", "evals", "npm", "executive_v3", "adapter_ext",
                    "codex_shim", "claude_shim", "gateway", "task_planning", "cross_day",
                    "thread_conversation", "self_evolution", "agent_loop", "llm_client",
                    "self_evolution_send", "config_hot", "evolution_quality_report",
