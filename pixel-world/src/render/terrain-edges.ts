@@ -43,7 +43,8 @@ export const TERRAIN_HEIGHT: Readonly<Record<TerrainId, number>> = {
 /** 亮一档 token：只用现有 16 色里的 `grassLit` / `plaza`（§1.2「不加色」）。 */
 export const BRIGHT: Readonly<Record<TerrainId, number>> = {
   tree: WORLD.grassLit,
-  grass: WORLD.grassLit,
+  // grass 亮边用 plaza（ΔL* 9.5）；原 grassLit 对 grass 只有 3.0，18 条边不可见。
+  grass: WORLD.plaza,
   farm: WORLD.plaza,
   stone: WORLD.plaza,
   // plaza 是最低材质，邻格不可能更低，所以它**永远不画边**（实测 16 个 plaza 格

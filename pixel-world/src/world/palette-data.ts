@@ -62,7 +62,10 @@ export const TERRAIN_COLORS = {
  * 用基色 + 有序抖动就能表达，还省掉 5 个源色（ART_PALETTE_AUDIT §5.1）。
  */
 export const TERRAIN_SPECK = {
-  grass: WORLD.grassLit,
+  // grass 用 soil 而不是 grassLit：grassLit 对 grass 的 ΔL* 只有 3.0（不可见），
+  // 而 grass 占画布 37.15% —— 这是「一片同亮度」的第一来源。soil 对 grass 是 11.3，
+  // 且两者同色相族（hue 148.5 vs 145.1），读成「草的暗部」而不是脏点。
+  grass: WORLD.soil,
   stone: WORLD.plaza,
   plaza: WORLD.stone,
   farm: WORLD.soil,

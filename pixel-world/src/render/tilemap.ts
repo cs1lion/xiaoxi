@@ -103,7 +103,10 @@ function drawSlabSeams(
   x: number,
   y: number,
 ): void {
-  g.fillStyle(WORLD.soil, 0.25);
+  // 缝线必须**实心**：soil α0.25 叠在 stone 上合成 #323833，对底色 ΔL* 只有 3.3，
+  // 与 P0-1 删掉的通铺网格线（#29352a，ΔL* 2.5）是同一个手法，画了等于没画。
+  // 实心 soil 的 ΔL* 是 14.1，与已证明可读的角色墨线（18.1）同量级。
+  g.fillStyle(WORLD.soil, 1);
   const slab = TILE_PX / 2; // 16px 格 → 8px 石板，一格 2×2 块
   // 横缝：格内 y = 8 处通栏（y=0 那条由地形拼接边/上一格负责，不重复画）
   g.fillRect(px, py + slab - 1, TILE_PX, 1);
@@ -111,12 +114,9 @@ function drawSlabSeams(
   const offset = (x + y) % 2 === 0 ? 0 : slab;
   g.fillRect(px + ((offset + slab - 1) % TILE_PX), py, 1, slab - 1);
   g.fillRect(px + ((offset + slab * 2 - 1) % TILE_PX), py + slab, 1, slab);
-  // 广场比石路更「磨亮」：多一道极淡的板材亮面，只用 stone token，加到 16 色内。
-  if (terrain === 'plaza') {
-    g.fillStyle(TERRAIN_SPECK.plaza, 0.35);
-    g.fillRect(px + 1, py + 1, slab - 2, 1);
-    g.fillRect(px + slab + 1, py + slab + 1, slab - 2, 1);
-  }
+  // 广场板面高光已删除：原实现是 stone α0.35 叠在 plaza 上，合成 #444940，
+  // 对底色 ΔL* 只有 2.5 —— 同样不可见。删掉比留一条看不见的线好。
+  void terrain;
 }
 
 /** 草地：1–2 个 2×2 簇（原为 2–3），位置由格坐标哈希稳定决定。
@@ -190,7 +190,8 @@ function drawDressing(
       }
 
       if (kind === 'tuft') {
-        g.fillStyle(WORLD.grassLit, 0.9);
+        // 草簇用实心 soil（ΔL* 11.3）；原 grassLit α0.9 合成 #324133，对草地只有 2.6，不可见。
+        g.fillStyle(WORLD.soil, 1);
         // 贴边时草簇朝外竖，指向邻格方向，强化边界线。
         g.fillRect(jx, jy, 1, 3);
         g.fillRect(jx + 2, jy + 1, 1, 2);
