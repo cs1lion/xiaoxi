@@ -29,6 +29,16 @@ class RuntimeStore:
         CREATE TABLE IF NOT EXISTS agent_input_waits (
             session_id TEXT PRIMARY KEY, run_id TEXT NOT NULL UNIQUE,
             expires_at REAL NOT NULL);
+        CREATE TABLE IF NOT EXISTS agent_outbox (
+            operation_id TEXT PRIMARY KEY, run_id TEXT NOT NULL,
+            action_seq INTEGER NOT NULL, tool TEXT NOT NULL, action_hash TEXT NOT NULL,
+            observation_index INTEGER, thread_id TEXT NOT NULL DEFAULT '',
+            status TEXT NOT NULL, receipt TEXT NOT NULL DEFAULT '',
+            created_at REAL NOT NULL, updated_at REAL NOT NULL,
+            delivered_at REAL, last_error TEXT NOT NULL DEFAULT '');
+        CREATE INDEX IF NOT EXISTS outbox_pending
+            ON agent_outbox(delivered_at, status, created_at);
+        CREATE INDEX IF NOT EXISTS outbox_run ON agent_outbox(run_id, action_seq);
         ''')
 
     def create(self, state: dict[str, Any]) -> str:
@@ -151,6 +161,83 @@ class RuntimeStore:
             self.db.execute('INSERT INTO agent_events (run_id,kind,payload,created_at) VALUES (?,?,?,?)',
                             (run_id, kind, json.dumps(payload, ensure_ascii=False), self.clock()))
 
+    @staticmethod
+    def operation_id(run_id: str, action_seq: int) -> str:
+        return f'{run_id}:{int(action_seq)}'
+
+    def begin_operation(self, run_id: str, action_seq: int, tool: str, action_hash: str,
+                        state: dict[str, Any]) -> str:
+        """Persist the intent before a side effect, in the checkpoint database."""
+        operation_id = self.operation_id(run_id, action_seq)
+        now = self.clock()
+        with self.lock, self.db:
+            self.db.execute('BEGIN IMMEDIATE')
+            self.db.execute('UPDATE agent_runs SET status=?, checkpoint=?, updated_at=? WHERE id=?',
+                            ('running', json.dumps(state, ensure_ascii=False), now, run_id))
+            self.db.execute('''INSERT OR IGNORE INTO agent_outbox
+                (operation_id, run_id, action_seq, tool, action_hash, status,
+                 created_at, updated_at) VALUES (?,?,?,?,?, 'started', ?,?)''',
+                (operation_id, run_id, int(action_seq), tool, action_hash, now, now))
+            self.db.execute('INSERT INTO agent_events (run_id,kind,payload,created_at) VALUES (?,?,?,?)',
+                            (run_id, 'tool_started',
+                             json.dumps({'tool': tool, 'operation_id': operation_id,
+                                         'action_seq': int(action_seq)}, ensure_ascii=False), now))
+        return operation_id
+
+    def finish_operation(self, run_id: str, operation_id: str, status: str,
+                         receipt: dict[str, Any], state: dict[str, Any], *,
+                         observation_index: int, thread_id: str = '') -> None:
+        """Save receipt plus checkpoint atomically; projection may retry later."""
+        now = self.clock()
+        with self.lock, self.db:
+            self.db.execute('BEGIN IMMEDIATE')
+            cursor = self.db.execute('''UPDATE agent_outbox
+                SET status=?, receipt=?, observation_index=?, thread_id=?, updated_at=?
+                WHERE operation_id=? AND status='started' ''',
+                (status, json.dumps(receipt, ensure_ascii=False), int(observation_index),
+                 thread_id[:200], now, operation_id))
+            if cursor.rowcount != 1:
+                raise ValueError('operation_not_started')
+            self.db.execute('UPDATE agent_runs SET status=?, checkpoint=?, updated_at=? WHERE id=?',
+                            ('running', json.dumps(state, ensure_ascii=False), now, run_id))
+            self.db.execute('INSERT INTO agent_events (run_id,kind,payload,created_at) VALUES (?,?,?,?)',
+                            (run_id, 'tool_finished',
+                             json.dumps(receipt, ensure_ascii=False), now))
+
+    def operation(self, operation_id: str) -> dict[str, Any] | None:
+        with self.lock:
+            row = self.db.execute('SELECT * FROM agent_outbox WHERE operation_id=?',
+                                  (operation_id,)).fetchone()
+        return dict(row) if row is not None else None
+
+    def pending_operations(self, *, run_id: str | None = None,
+                           limit: int = 200) -> list[dict[str, Any]]:
+        clauses = ["status IN ('succeeded','failed')", 'delivered_at IS NULL']
+        params: list[Any] = []
+        if run_id:
+            clauses.append('run_id=?')
+            params.append(run_id)
+        params.append(max(1, min(int(limit), 1000)))
+        with self.lock:
+            rows = self.db.execute(
+                f"SELECT * FROM agent_outbox WHERE {' AND '.join(clauses)} "
+                "ORDER BY created_at, action_seq LIMIT ?", params).fetchall()
+        return [dict(row) for row in rows]
+
+    def unknown_operations(self, run_id: str) -> list[dict[str, Any]]:
+        with self.lock:
+            rows = self.db.execute(
+                "SELECT * FROM agent_outbox WHERE run_id=? AND status='unknown' "
+                "ORDER BY action_seq", (run_id,)).fetchall()
+        return [dict(row) for row in rows]
+
+    def mark_delivered(self, operation_id: str, error: str = '') -> bool:
+        with self.lock, self.db:
+            cursor = self.db.execute('''UPDATE agent_outbox SET delivered_at=?, last_error=?
+                WHERE operation_id=? AND delivered_at IS NULL''',
+                (self.clock(), str(error)[:300], operation_id))
+            return cursor.rowcount == 1
+
     def events(self, run_id: str) -> list[dict[str, Any]]:
         with self.lock:
             rows = self.db.execute('SELECT * FROM agent_events WHERE run_id=? ORDER BY id', (run_id,)).fetchall()
@@ -183,10 +270,30 @@ class RuntimeStore:
             return row['run_id']
 
     def recover_interrupted(self) -> int:
-        """Do not replay running mutations after a process crash."""
+        """Do not replay running mutations after a process crash.
+
+        Operations that started but never produced a receipt are marked
+        ``unknown`` and surfaced as an event. They are not guessed to be
+        successful, and no worker is re-run automatically.
+        """
+        now = self.clock()
         with self.lock, self.db:
+            started = self.db.execute(
+                "SELECT operation_id, run_id, tool, action_seq FROM agent_outbox "
+                "WHERE status='started'").fetchall()
+            for row in started:
+                self.db.execute('''UPDATE agent_outbox SET status='unknown', updated_at=?,
+                    last_error='interrupted_before_receipt' WHERE operation_id=?''',
+                    (now, row['operation_id']))
+                self.db.execute('INSERT INTO agent_events (run_id,kind,payload,created_at) '
+                                'VALUES (?,?,?,?)',
+                                (row['run_id'], 'operation_unknown',
+                                 json.dumps({'operation_id': row['operation_id'],
+                                             'tool': row['tool'],
+                                             'action_seq': row['action_seq']},
+                                            ensure_ascii=False), now))
             cursor = self.db.execute("UPDATE agent_runs SET status='interrupted', updated_at=? WHERE status='running'",
-                                     (self.clock(),))
+                                     (now,))
             self.db.execute('''DELETE FROM agent_input_waits WHERE run_id IN
                 (SELECT id FROM agent_runs WHERE status='interrupted')''')
             return cursor.rowcount

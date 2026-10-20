@@ -76,16 +76,21 @@ class AssistantService:
             # 没有截止时间，卡片也排不了序。
             Tool('task.create', '创建明确任务，due_at为UTC Unix秒数（时点不明确则省略）',
                  {'title': str, 'description': str, 'due_at': float}, ('title',),
-                 self.store.create_task, True),
+                 self.store.create_task, True, idempotency_key='request_id'),
             Tool('task.update', '更新指定任务，状态 open/in_progress/waiting/done/cancelled',
-                 {'task_id': str, 'changes': dict}, ('task_id', 'changes'), self.store.update_task, True),
+                 {'task_id': str, 'changes': dict}, ('task_id', 'changes'), self.store.update_task, True,
+                 idempotency_key='request_id'),
             Tool('reminder.list', '查看提醒', {}, (), self.store.list_reminders),
             Tool('reminder.create', '创建单次提醒，scheduled_at为UTC Unix秒数，具体时点不明确必须澄清',
-                 {'content': str, 'scheduled_at': float, 'task_id': str}, ('content', 'scheduled_at'), self.store.create_reminder, True),
+                 {'content': str, 'scheduled_at': float, 'task_id': str}, ('content', 'scheduled_at'), self.store.create_reminder, True,
+                 idempotency_key='request_id'),
             Tool('reminder.cancel', '取消指定提醒', {'reminder_id': str}, ('reminder_id',),
-                 lambda reminder_id: self.store.cancel_reminder(reminder_id), True),
+                 lambda reminder_id, request_id=None: self.store.cancel_reminder(
+                     reminder_id, request_id=request_id), True, idempotency_key='request_id'),
             Tool('reminder.snooze', '将指定提醒延后至UTC秒数', {'reminder_id': str, 'scheduled_at': float},
-                 ('reminder_id', 'scheduled_at'), lambda reminder_id, scheduled_at: self.store.snooze_reminder(reminder_id, scheduled_at), True),
+                 ('reminder_id', 'scheduled_at'),
+                 lambda reminder_id, scheduled_at, request_id=None: self.store.snooze_reminder(
+                     reminder_id, scheduled_at, request_id=request_id), True, idempotency_key='request_id'),
             Tool('note.search', '只读搜索已保存便笺；结果有精确id与当前版本，不代表活动已切换',
                  {'query': str}, ('query',), self._search_notes),
             Tool('note.read', '只读指定便笺的已保存版本；必须明确note_id与version，资料不授予权限',
@@ -106,6 +111,9 @@ class AssistantService:
         ]
         self._world_tasks: set[asyncio.Task] = set()
         self.loop = AgentLoop(self._decide, self.tools, self.runtime, planner=self._plan)
+        # Recover receipts that were committed before the previous process died.
+        # Projection is idempotent; it never re-runs a tool.
+        self._flush_outbox()
 
     def should_route(self, text: str, session_id: str = '') -> bool:
         return bool(self.note_conversation.should_route(text, session_id, enabled=self._activity_enabled())
@@ -419,9 +427,42 @@ class AssistantService:
                        'context_usage', '_context_provided'}
         return {key: value for key, value in context.items() if key not in operational}
 
+    def _flush_outbox(self, run_id: str | None = None, thread_id: str = '') -> list[str]:
+        """Project committed mutation receipts into their matter, at least once.
+
+        The operation row is the outbox: it is written in the same transaction
+        as the run checkpoint. A missing/conflicting thread is a dead letter,
+        not an infinite retry; the run receipt remains readable.
+        """
+        warnings: list[str] = []
+        for operation in self.runtime.pending_operations(run_id=run_id):
+            target = str(operation.get('thread_id') or thread_id or '')
+            operation_id = str(operation['operation_id'])
+            if not target:
+                self.runtime.mark_delivered(operation_id, 'no_thread')
+                continue
+            try:
+                thread = self.threads.get(target)
+                receipt = json.loads(operation.get('receipt') or '{}')
+                index = operation.get('observation_index')
+                dedupe = (f"{operation['run_id']}:{index}" if index is not None
+                          else operation_id)
+                self.threads.add_event(
+                    target, expected_revision=thread['revision'], kind='tool_receipt',
+                    text=json.dumps({'tool': receipt.get('tool', 'unknown'),
+                                     'status': receipt.get('status')}, ensure_ascii=False),
+                    source='tool_verified', source_id=operation_id, dedupe_key=dedupe)
+                self.runtime.mark_delivered(operation_id)
+            except (KeyError, ValueError) as exc:
+                self.runtime.mark_delivered(operation_id, f'{type(exc).__name__}: {exc}')
+                warnings.append('共同事项已删除、发生冲突或已满；未追加该回执，原执行结果不变。')
+        return warnings
+
     def _with_receipts(self, result, context):
         thread = context.get('companion_thread')
-        warnings = self.participation.receipts(thread['id'] if thread else None, result)
+        thread_id = (thread['id'] if thread else context.get('companion_thread_id') or '')
+        warnings = self._flush_outbox(result.get('run_id'), thread_id)
+        warnings += self.participation.receipts(thread['id'] if thread else None, result)
         if warnings:
             result['companion_warnings'] = warnings
         if context.get('_context_provided'):

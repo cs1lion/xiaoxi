@@ -25,6 +25,9 @@ class Tool:
     required: tuple[str, ...]
     handler: Callable[..., Any]
     mutation: bool = False
+    # Keyword accepted by the handler for an idempotency key. It is injected
+    # server-side, never exposed in the model-facing schema.
+    idempotency_key: str | None = None
 
     def validate(self, arguments: Any) -> dict[str, Any]:
         if not isinstance(arguments, dict) or set(arguments) - set(self.parameters):
@@ -106,7 +109,7 @@ class AgentLoop:
         plan, plan_reason = await self._build_plan(safe_text, context or {})
         state = {'user_text': safe_text, 'context': context or {}, 'observations': [],
                  'steps': 0, 'step_limit': self.max_steps, 'tool_count': 0,
-                 'pending_action': None, 'input_rounds': 0,
+                 'action_seq': 0, 'pending_action': None, 'input_rounds': 0,
                  'latest_user_text': safe_text,
                  'input_history': [{'role': 'user', 'content': safe_text}],
                  'completed_actions': {}, 'plan': plan, 'plan_reason': plan_reason}
@@ -158,10 +161,13 @@ class AgentLoop:
         与 `resume` 的区别：这里没有待确认动作，只是重新进入推进循环。
         恢复的安全性由 `_execute` 的"先落检查点再产生副作用"和
         `completed_actions` 去重共同保证——已成功的 mutation 不会被重放。
+        没有拿到回执的 mutation 只标记 unknown，必须人工核对后才能继续。
         """
         run = self.runtime.get(run_id)
         if run['status'] in ('completed', 'cancelled', 'waiting_confirmation', 'waiting_input'):
             raise ValueError(f'run_not_resumable:{run["status"]}')
+        if self.runtime.unknown_operations(run_id):
+            raise ValueError('run_has_unknown_operation')
         state = run['state']
         if context is not None:
             state['context'] = context
@@ -486,21 +492,54 @@ class AgentLoop:
         tool = self.tools[action['tool']]
         arguments = tool.validate(action['arguments'])
         state['tool_count'] += 1
-        self.runtime.event(run_id, 'tool_started', {'tool': tool.name})
-        # This checkpoint deliberately precedes side effects; a crash is not replayed.
-        self.runtime.save(run_id, 'running', state)
+        operation_id = None
+        if tool.mutation:
+            state['action_seq'] = int(state.get('action_seq') or 0) + 1
+            operation_id = self.runtime.operation_id(run_id, state['action_seq'])
+            previous = self.runtime.operation(operation_id)
+            if previous is not None and previous.get('status') == 'succeeded':
+                receipt = json.loads(previous.get('receipt') or '{}')
+                if receipt and receipt not in state['observations']:
+                    state['observations'].append(receipt)
+                state.setdefault('completed_actions', {})[
+                    self.action_hash(action)] = len(state['observations']) - 1
+                self.runtime.save(run_id, 'running', state)
+                self._raise_if_cancelling()
+                return
+            context = state.get('context') or {}
+            thread = context.get('companion_thread') if isinstance(context, dict) else None
+            thread_id = (context.get('companion_thread_id') if isinstance(context, dict) else '') \
+                or (thread.get('id') if isinstance(thread, dict) else '') or ''
+            self.runtime.begin_operation(run_id, state['action_seq'], tool.name,
+                                         self.action_hash(action), state)
+            handler_args = dict(arguments)
+            if tool.idempotency_key and tool.idempotency_key not in handler_args:
+                handler_args[tool.idempotency_key] = operation_id
+        else:
+            thread_id = ''
+            handler_args = dict(arguments)
+            self.runtime.event(run_id, 'tool_started', {'tool': tool.name})
+            # Reads still checkpoint before the call; mutations use the outbox
+            # transaction above, which persists the same checkpoint plus intent.
+            self.runtime.save(run_id, 'running', state)
         try:
-            value = tool.handler(**arguments)
+            value = tool.handler(**handler_args)
             if hasattr(value, '__await__'):
                 value = await value
             receipt = {'tool': tool.name, 'status': 'succeeded', 'data': value}
         except (ValueError, KeyError) as exc:
             receipt = {'tool': tool.name, 'status': 'failed', 'error_code': str(exc)[:160]}
         state['observations'].append(receipt)
+        observation_index = len(state['observations']) - 1
         if tool.mutation and receipt['status'] == 'succeeded':
-            state.setdefault('completed_actions', {})[self.action_hash(action)] = len(state['observations']) - 1
-        self.runtime.event(run_id, 'tool_finished', receipt)
-        self.runtime.save(run_id, 'running', state)
+            state.setdefault('completed_actions', {})[self.action_hash(action)] = observation_index
+        if tool.mutation:
+            self.runtime.finish_operation(
+                run_id, operation_id, receipt['status'], receipt, state,
+                observation_index=observation_index, thread_id=thread_id)
+        else:
+            self.runtime.event(run_id, 'tool_finished', receipt)
+            self.runtime.save(run_id, 'running', state)
         # Preserve a handler's successful side effect and receipt before stopping.
         self._raise_if_cancelling()
 

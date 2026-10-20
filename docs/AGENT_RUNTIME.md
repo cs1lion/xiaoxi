@@ -20,6 +20,26 @@
 - [api.py](../server/assistant/api.py)：任务、提醒、偏好、收件箱、run与确认接口；写接口Origin检查；服务生命周期每2秒扫描到期提醒，不调用模型。
 - [assistant.js](../web/assistant.js)：任务/提醒面板，精确参数确认、回执展示、收件箱每5秒同步和ACK。首版没有主动语音播报，不假装网页关闭后可通知。
 
+## 写动作 outbox（2026-10-20）
+
+`runtime.py` 的 `agent_outbox` 把“操作意图、真实回执、checkpoint”放在同一个
+SQLite 事务里，`operation_id = run_id + action_seq`：
+
+- `begin_operation()` 在副作用前写 `started`；`finish_operation()` 在工具返回后
+  原子写入 `succeeded/failed`、receipt、run checkpoint 和 `tool_finished`。
+- 启动时 `recover_interrupted()` 把仍然 `started` 的操作标为 `unknown`，并追加
+  `operation_unknown` 事件；**不猜测成功，也不自动重放**。`resume_plan()` 遇到
+  unknown 直接拒绝，必须人工核对。
+- `AssistantService._flush_outbox()` 把已提交的回执按 `run_id:observation_index`
+  幂等投影到共同事项；服务启动时也会补投，事项已删除/冲突则记 dead letter。
+- `task.create/update` 与 `reminder.create/cancel/snooze` 通过服务端注入的
+  `request_id=operation_id` 使用现有幂等表；模型看不到这个参数。
+- `world.dispatch` 的底层台账没有 request_id 幂等键，只能依靠 outbox 的
+  unknown 标记阻止自动续跑；跨进程重试仍可能再建一单，不能声称已完全幂等。
+
+回归：`scripts/test_operation_outbox.py` 覆盖正常投影、二次投影、启动补投、
+handler 成功前崩溃、unknown 阻断 resume，以及三类 store mutation 的重放。
+
 ## 数据与记忆原则
 
 长期记忆是真实来源明确的信息；任务系统保存执行真相；临时支持模式只是当前互动偏好；授权只由真实确认产生。四者不互相替代。
