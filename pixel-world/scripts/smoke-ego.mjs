@@ -274,6 +274,19 @@ let page;
 try {
   page = task.page('p1');
 
+  // 先把窗口拉回最大化。ego 的窗口被最小化时，page.screenshot() 会整轮中断在
+  // `Cannot capture a screenshot while the window is minimized`；而窗口是否最小化
+  // 不受脚本控制（用户切窗口、系统锁屏都会导致）。这一步把环境恢复到可截图状态，
+  // 失败不致命：真拿不到窗口就当没发生，让后续截图自己报错。
+  try {
+    const win = await page.cdp('Browser.getWindowForTarget', {});
+    if (win !== null && typeof win.windowId === 'number') {
+      await page.cdp('Browser.setWindowBounds', { windowId: win.windowId, bounds: { windowState: 'maximized' } });
+    }
+  } catch {
+    /* 窗口操作不可用时继续，不因为环境限制让整轮 smoke 直接失败 */
+  }
+
   // 第一步：不先加载任何页面，直接用 CDP 清原点存储，再 goto。
   //
   // 为什么不能先 `goto(URL_BASE)` 再清：那一步会先把旧世界加载起来，
@@ -764,10 +777,22 @@ try {
   await waitFor('S-L468 短活自己结束', (s) => s.villager.mode === 'idle');
 
   // L471-479：下雨 / 躲雨 / 放晴
+  // S-L474 不能拿「天气刚变」那个快照直接断言：umbrella 是
+  // `weather === 'rain' && mode !== 'working'`（simulation.ts:906），天气一变立刻为真；
+  // 而 mode 切到 'sheltering' 依赖 scatterToShelter()（simulation.ts:582）在同一拍把
+  // 空闲角色改主意。两条断言的稳定时机不同，挤在同一个快照上就会偶发假失败
+  // （实测挂过一次、重跑即过）。改成等状态成立，而不是等天气成立。
   await page.click('#rain');
   const raining = await waitFor('S-L472 神谕让世界下雨了', (s) => s.weather === 'rain');
   await expect('S-L473 下雨时她撑起伞', raining.villager.umbrella === true);
-  await expect('S-L474 户外的她当场跑去躲雨', raining.villager.mode === 'sheltering');
+  const sheltering = await waitFor('S-L474 户外的她当场跑去躲雨', (s) => s.villager.mode === 'sheltering');
+  // 超时时补一条现场：区分「竞态没等到」和「她真的没去躲雨」。
+  if (sheltering.villager.mode !== 'sheltering') {
+    failed.push({
+      label: 'S-L474 失败现场',
+      error: `mode=${sheltering.villager.mode} weather=${sheltering.weather} umbrella=${sheltering.villager.umbrella} routine=${sheltering.villager.routine}`,
+    });
+  }
   await pause(500);
   await shot('smoke-ego-04-rain.png');
   await waitFor('S-L477 跑到屋檐下停住', (s) => s.villager.mode === 'idle');
