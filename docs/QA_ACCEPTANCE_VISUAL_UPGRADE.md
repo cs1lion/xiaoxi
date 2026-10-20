@@ -829,3 +829,66 @@ operating）；采样只取 villagers[0] 是**测试工具的口径限制**（P3
 已知限制：world_visible=unknown 的洞已由 A/B/C 补上；本轮有真实 API 费用。
 
 ---
+
+---
+
+## 21. S5 e2e 补跑 E/H 独立判定（2026-10-20 晚，round-06）
+
+**证据**：`s5-e2e-evidence-eh.json` + `s5-e2e-r6.out.txt`（QA 逐字段独立核对，
+不采信 Chief 判定）。
+
+### 21.1 E（world.status）：**通过**
+
+- 查询句「像素世界里的 c_e6f7400b6e8f 现在什么情况？」→ 模型选中 `world.status`
+  （selectedWorldStatus=true）
+- **回执与合同 §2.2 逐字段一致**：found=true / id=c_e6f7400b6e8f / status=blocked /
+  agent_name=真机 Claude / blocked_question（与台账逐字一致）/ delivery_summary="" /
+  updated_at=1792508340.4977021 / context_is_untrusted_data=true /
+  grants_authorization=false——合同示例的九个字段全中，无多余字段
+- **noPacketLeak 独立复核**：QA 自己 grep 证据原文——`packet` 0 次、`memory_block`
+  0 次、`memory` 0 次（合同要求「不返回整行、不含 packet.memory_block」）
+- **小缺口（P3）**：合同还要求「查无此单返回 `{found:false}` 不抛 KeyError」——
+  found=false 分支本轮未跑（目标单存在）。该分支由服务端单测覆盖，e2e 未 exercised，
+  记为已知小缺口，不影响 E 的通过判定。
+
+### 21.2 H（并发 busy）：**环境阻塞未验**
+
+**现象**：三路并行 WS 同时派单（各自独立连接、各自过确认门），三单全部 succeeded
+（status=running、agent=笔录官），busyCount=0，台账 1→4 条。
+
+**根因（QA 代码级独立确认，与 Chief 判断一致）**：
+- `service.py:286-288`：`active = sum(1 for task in self._world_tasks if not task.done())`；
+  `if active >= WORLD_DRIVE_CONCURRENCY(2): return busy`——**busy 判定数的是「未完成的
+  drive 异步任务数」，不是单数**
+- `agents_roster.yaml`：scribe 的 `adapter: manual`（注释明说「只接单、组密件，没有
+  执行体」）→ drive 无事可做立即返回
+- 唯一有执行体的真机 Claude 是 cli_subproc，但网关上游 15721 关闭（QA 端口实测
+  ECONNREFUSED）→ worker 立刻失败 → drive 也立即结束
+- 故每次判定时 `active` 都是 0，并发窗口打不开——**busy 路径一次都没触发**
+
+**QA 台账现状独立核实**（直连隔离 8001 REST）：4 条全 blocked——
+c_a3e490a89188 / c_82e1b24726aa / c_82323d258a8b（scribe）+ c_e6f7400b6e8f（claude），
+与 Chief 所述一致，全在隔离临时库，未碰 8010。
+
+**判定口径**：记**环境阻塞未验**，不记「有条件通过」——「有条件通过」意味着断言在某
+条件下被验过，而 busy 路径本轮**完全没被触发**（busyCount=0 是「没走到」，不是
+「走到且通过」）。诚实记录：busy 逻辑经代码读验正确（并发 2、数未完成 drive 任务），
+但 e2e 这层缺「真实在飞」的前提。附带弱正面证据：三路并发派单无损坏（id 唯一、
+台账 4 条无重复、无竞态错乱）。要真验 H 需把 15721 拉起来（一个能跑几分钟的
+worker）——与 D 同一根因。
+
+### 21.3 e2e 总状态更新
+
+| 断言 | 状态 |
+|---|---|
+| A/B/C/F/G + blocked 可见 | **通过**（§20） |
+| D 完成/交付 | 环境阻塞未验（根因在世界之外：15721 拒绝连接） |
+| E world.status | **通过**（§21.1；found=false 分支小缺口 P3） |
+| H 并发 busy | 环境阻塞未验（busy 路径未触发；根因同 D） |
+
+**e2e 总结论维持「有条件通过」**：主链路（派单→世界动→状态查询→负例→重连）
+全部独立验通过；D/H 两条卡在同一环境前提（网关上游 15721 关闭），非世界侧缺陷；
+已产出 1 条 P2（D-1 reconcile 可见性）+ 2 条 P3（驱动采样全部角色、E 的 found=false
+分支未跑）。
+
+---
