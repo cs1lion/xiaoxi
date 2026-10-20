@@ -2,6 +2,7 @@
 
 - **状态**：**服务端已落地**（2026-10-20）；世界端真帧 e2e 待 QA。本文是交接合同，不是新协议。
 - **服务端落地**：`server/assistant/executive.py`（`begin_commission` / 公开 `agent_name`，`delegate` 改用 begin+drive）、`server/assistant/service.py`（`world.dispatch` / `world.status`、世界短语路由、`_world_tasks`、并发 2、close 取消）。回归 `scripts/test_world_bridge.py` 71 项全绿。
+- **真实模型探测（2026-10-20，临时库）**：`scripts/probe_world_live.py` 12/12 通过——世界派单句真正选中 `world.dispatch` 并先停在确认门；批准前台账没有新单、批准后恰好一单；回执 `world_visible="unknown"`；状态句选中 `world.status` 并返回指定单；普通提醒请求没有误选世界工具。
 - **日期**：2026-10-20
 - **适用**：World Builder、Agent Integration、QA、Role 0
 - **上游**：`tmp/wt-pixel-world/docs/ADR_AGENT_BRIDGE.md`（范围批准版 v2.7）、`docs/PROTOCOL.md`、`docs/PIXEL_WORLD_S5_HANDOFF.md`（如有）
@@ -122,6 +123,7 @@
 | 路由差分 | 13 正例 `should_route` 改判 True；14 反例 before==after；快环五意图不变 | 同上 |
 | 后台纪律 | 强引用、并发 2、close 取消、异常落 blocked | 同上 |
 | 协议 | 零新事件/零新 REST 形状 | `python scripts/check_protocol.py` |
+| 真实模型 | 派单/状态句选中对应工具；确认门前不落单；普通请求不误选 | `scripts/probe_world_live.py`（手动，产生 API 费用） |
 | 世界端 | `tsc --noEmit` + 世界测试 + smoke | `pixel_world` 门禁（S0-6，待接入根 `run_gates.py`） |
 | 真帧 e2e | `?ledger=on`：派单可见 → blocked 可见 → 完成/撤单 → 重连 | 录屏 + 日志 + 断言 |
 | 全量 | `test_core.py` + `npm test` + 根门禁 | `python scripts/run_gates.py` |
