@@ -23,6 +23,16 @@ export interface WorldOverlay {
   readonly dispose: () => void;
 }
 
+/** 从 stage 的计算样式取**真实**缩放（transform 矩阵的 x 缩放分量）。 */
+function readStageScale(stage: HTMLElement): number {
+  const transform = getComputedStyle(stage).transform;
+  if (transform === '' || transform === 'none') return 1;
+  const matched = /matrix\(([^)]+)\)/.exec(transform);
+  if (matched === null) return 1;
+  const scale = Number.parseFloat(matched[1].split(',')[0] ?? '');
+  return Number.isFinite(scale) && scale > 0 ? scale : 1;
+}
+
 export function createWorldOverlay(scene: Phaser.Scene, root: HTMLElement): WorldOverlay {
   const entries = new Map<string, OverlayEntry>();
   let lastSnapshot: WorldSnapshot | null = null;
@@ -65,7 +75,13 @@ export function createWorldOverlay(scene: Phaser.Scene, root: HTMLElement): Worl
     const canvasRect = canvas.getBoundingClientRect();
     const stage = root.parentElement ?? root;
     const stageRect = stage.getBoundingClientRect();
-    const rootScale = stage.offsetWidth > 0 ? stageRect.width / stage.offsetWidth : 1;
+    // 缩放必须取 transform 矩阵的真实值，**不能**用 stageRect.width / stage.offsetWidth 反推：
+    // offsetWidth 是整数取整值（实测 962），而 stageRect.width 是小数（961.7778），
+    // 两者相除得到 0.99977 这种假缩放，把 overlay 宽度写成 960.215px 而不是 960px。
+    // 亚像素偏差会随 stage 缩放放大（100% 0.215px → 200% 0.431px → 400% 0.861px），
+    // 到 400% 就超出 overlay 贴合 canvas 的 0.5px 容差（S-L544 实测 contained=false）。
+    // 矩阵在 stage 未被缩放时是 none，此时取 1，正好也是正确值。
+    const rootScale = readStageScale(stage);
     // overlay 与 canvas 完全同框：大小/位置每帧按真实 rect 同步，避免边框/缩放误差。
     root.style.left = `${(canvasRect.left - stageRect.left) / rootScale}px`;
     root.style.top = `${(canvasRect.top - stageRect.top) / rootScale}px`;
