@@ -968,3 +968,88 @@ worker）——与 D 同一根因。
 分支未跑）。
 
 ---
+
+---
+
+## 22. S5 e2e 网关补链后 D/H 重跑独立判定（2026-10-21 凌晨，round-07/08）
+
+**背景**：Chief 在隔离环境自建网关（15725 直指 StepFun），把隔离临时副本的
+`config/agents_roster.yaml` 的 `AQI_GATEWAY_URL` 从 15722 改到 15725，只改临时副本，
+主仓库与用户 15722 未动。QA 独立读证据判定。
+
+### 22.1 H（并发 busy）：**通过**（推翻「环境阻塞」判定）
+
+**证据**：`s5-e2e-evidence-h2.json` + `s5-e2e-r8b.out.txt`。QA 逐项独立核对：
+
+- 派单前台账 4 条，其中 **2 条 running**（c_f3fadee17928/claude、c_086bf315bade/dsh）
+  —— drive 真实在飞（网关通了，worker 真在跑）
+- 三路并行派单**全部被拒**：busyCount=3、okCount=0，回执逐字段匹配合同 §2.1 的 busy
+  规格（status=busy / commission_id="" / agent_name="" / world_visible="unknown" /
+  retryable=true / message「世界正在收尾两单，这单先不派，等一会儿再试。」）
+- **台账 4→4 未增长**——busy 不建单
+- 世界侧一致：code_forge#1:operating + ink_house#1:operating、v0:working + v1:working，
+  恰好两个活跃单
+
+**判定：通过**。busy 路径被真实触发 3 次且全部正确拒绝，并发限制（≥2 在飞即拒）
+按设计执行。小注：互补情形（一个 drive 结束后窗口重开）本轮未 exercised，核心断言
+已验。
+
+### 22.2 D（完成/交付）：**未达成（断言未满足），根因已移出基础设施**
+
+**证据**：`s5-e2e-evidence-d.json` + `s5-e2e-r7b.out.txt` + 隔离临时库
+`aqi-s5-e2e-8B1hgf/data/commissions/c_b385572769e1-*`（3 个 attempt 目录，对应
+retry=3）+ QA 直连 8001 拉取的完整单记录。
+
+**世界侧链路在真实 worker 下完整走通（新证据，QA 逐帧核）**：
+- t=20.3s 任务出现（status=assigned、source=ledger、kind=code），v1 转 saluting
+- t=30.4s v1 转 working，code_forge#1 转 operating（代码活匹配代码工坊）
+- 之后 408s 稳定：双角色 working、双工坊 operating
+
+**worker 真干了活**：最新 attempt 的 `out/count_py_lines.py`（9056B）+ `out/README.md`
+（2251B）+ 会话记录（jsonl 397KB）——不是空跑。
+
+**打回原因（QA 从完整单记录独立取证）**：
+- status=blocked、retry_count=3；blocked_question 与 audit.findings 逐字一致：
+  「[major] prompt_token_bloat：单次调用 Prompt Tokens **421413** 超出上限 **120000**」
+- audit.usage：calls=3、prompt_tokens=**1017073**、max_prompt_tokens_per_call=421413、
+  total_budget_exceeded=**true**——单次超 3.5 倍、总量超 2.5 倍
+- packet.rubrics 里 prompt_token_bloat 是该单的 major 级 l1 规则——**审计按预算规则
+  正确打回，是产品行为按设计工作**
+
+**判定口径**：记**「未达成（断言未满足）；根因 = 审计按 token 预算正确打回，属主产品
+线的上下文控制（提示词装配/裁剪），非像素世界缺陷」**。世界侧部分已完整验证
+（这本身是 D 的强证据：真实 worker 在飞时角色真的在干活）；交付腿要通需 worker 在
+120K/次预算内完成——与基础设施无关，是 worker 侧的事。
+
+### 22.3 隔离 roster 改 AQI_GATEWAY_URL：**认可为合法测试环境替换**
+
+判定依据：
+1. 与「DB_PATH 指向临时库」同一类——**环境端点替换**，只改隔离临时副本；
+2. 主仓库与用户 15722 零改动（Chief 自述 + QA 未发现任何主仓改动）；
+3. 世界侧断言不受影响：世界只消费台账 WS/REST 投影，网关替换改的是 drive 路径，
+   不改世界看到的东西；H 验的 busy 逻辑是同一份代码路径；
+4. e2e 的目的是世界端集成，不是用户网关链的健康——用户 15722→15721 当前上游关闭
+   是用户侧基础设施状态，用可用的隔离网关替换正好把世界端行为与用户 infra 问题解耦。
+
+**唯一要记的环境注记**：本轮 drive 路径走的是替换后的隔离网关（15725→StepFun），
+不是用户的 15722——证据里已自带 tempRoot 与 roster 改写记录，可复现。
+
+### 22.4 e2e 总状态（最终）
+
+| 断言 | 状态 |
+|---|---|
+| A/B/C 派单→世界动→铺子运转 | **通过** |
+| blocked 可见 | **通过** |
+| D 完成/交付 | **未达成**（断言未满足；根因=审计按 token 预算正确打回，主产品线） |
+| E world.status | **通过** |
+| F 负例 | **通过** |
+| G 杀/重启重连 | **通过** |
+| H 并发 busy | **通过**（网关补链后真实触发 3 次） |
+
+**e2e 总结论：有条件通过**——世界端集成七项全过；D 的交付腿卡在 worker token 预算
+（已验证根因、非世界侧缺陷）。已产出缺陷：1 条 P2（D-1 reconcile 撤单不恢复可见性）
++ 2 条 P3（驱动采样全部角色、E 的 found=false 分支未跑）。隔离台账现有 4 条
+（QA 直连 8001 核实：1 running retry=1 claude、1 blocked retry=0 dsh、1 blocked
+retry=3 claude、1 blocked retry=0 scribe），全在隔离临时库。
+
+---
