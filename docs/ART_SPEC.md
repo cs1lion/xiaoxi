@@ -58,9 +58,9 @@
 
 ## 2. 颜色与材质
 
-> 调色板单一来源：`src/world/palette-data.ts`（语义 token，零渲染依赖）。加色前先改 `ART_PALETTE_AUDIT.md`，`--strict` 会挡住（`palette-data.ts:5-7`）。
+> 调色板单一来源：`src/world/palette-data.ts`（语义 token，零渲染依赖）。加色前先改 `ART_PALETTE_AUDIT.md`，`--strict` 会挡住（`palette-data.ts` 文件头纪律）。
 
-### 2.1 世界 16 色（`WORLD`，`palette-data.ts:13-46`）
+### 2.1 世界 16 色（`WORLD`，`palette-data.ts`）
 
 | 编号 | token | 色值 | 用途 |
 |---|---|---|---|
@@ -81,7 +81,7 @@
 | W15 | `ember` | `#c06a3e` | 围巾 / 故障强调橙 |
 | W16 | `pale` | `#d8dad3` | 烟 / 纸片 / 雨滴 / 高光浅色 |
 
-亮度分布：暗部 10（W01–W07、W09、W13、W14）/ 中间调 2（W08、W15）/ 亮部 4（W10–W12、W16）（`palette-data.ts:9-10`）。**画面可读性取决于 4 个亮色 + 1px 轮廓，不取决于色数。**
+亮度分布：暗部 10（W01–W07、W09、W13、W14）/ 中间调 2（W08、W15）/ 亮部 4（W10–W12、W16）（`palette-data.ts` 文件头注释）。**画面可读性取决于 4 个亮色 + 1px 轮廓，不取决于色数。**
 
 ### 2.2 UI 8 色（`index.html` CSS 变量）
 
@@ -142,7 +142,7 @@
 
 ### 3.4 地面 speck（现状：稀疏 2×2 确定性簇）
 
-- **不再单开近色 speck**：`TERRAIN_SPECK` 取基色的相邻 1 档（草→`grassLit`、石→`plaza`、广场→`stone`、农田→`soil`、树→`grass`，`palette-data.ts:64-69`），省 5 个源色。
+- **不再单开近色 speck**：`TERRAIN_SPECK` 取基色的相邻 1 档（草→`grassLit`、石→`plaza`、广场→`stone`、农田→`soil`、树→`grass`，`palette-data.ts` `TERRAIN_SPECK`），省 5 个源色。
 - 绘制 = **每 tile 2–3 个 2×2 实心像素簇，位置由格坐标哈希确定性决定**（`tilemap.ts` `drawTexture`），**非随机、非满铺**（满铺 Bayer 实测像织物，已改稀疏成簇）。
 - 约束：簇形状统一 2×2；方向随材质（§2.3）；**不引入第 17/18 色**；密度偏差（满铺→稀疏）是受控偏差，需保留注释说明。
 - 已知问题：**祭坛遮挡**——角色名/祭坛符文在 400% 下叠字风险，静态文字已改图标（`SandboxScene.ts` `drawAltar` 祭坛符文），但角色 DOM overlay 名字压在祭坛区仍需用户评审（B9 残留项）。
@@ -185,7 +185,7 @@
 
 ### 4.4 加色红线
 
-- **不新增颜色**；任何加色（第 17/18 色）必须：截图证据 + ADR + 用户批准；`--strict` 会挡住未改预算的加色（`palette-data.ts:5-7`）。
+- **不新增颜色**；任何加色（第 17/18 色）必须：截图证据 + ADR + 用户批准；`--strict` 会挡住未改预算的加色（`palette-data.ts` 文件头纪律）。
 - 1.0 保持**世界 16 + UI 8**；夜景 16 色并团 → 记「16 色不支持有层次夜景，需 18 色」，留 1.1 裁决。
 
 ### 4.5 未决与风险（带入 1.1 / 需 ADR）
