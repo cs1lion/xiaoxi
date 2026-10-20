@@ -1053,3 +1053,60 @@ retry=3）+ QA 直连 8001 拉取的完整单记录。
 retry=3 claude、1 blocked retry=0 scribe），全在隔离临时库。
 
 ---
+
+---
+
+## 23. §20.2 根因更正：三条撤单/缺席路径 + D-1 关闭（2026-10-21）
+
+**本节更正 §20.2 的根因定位**（原文保留作历史，以本节为准）。Chief 在 b3bc7b8 上
+逐行追出三条路径，QA 在当前 HEAD `f4200e5` 上独立核实并补状态。
+
+### 23.1 三条路径全貌（QA 逐行核实）
+
+| # | 路径 | 触发条件 | 缺陷形态 | 状态 |
+|---|---|---|---|---|
+| 1 | live-sync 撤单 → `abandonActiveTask`（:436-437 → :546） | 会话内 sync，`ledgerReconciled=true` | 缺**位置**（`visible=true` 本来就有，:557） | **已修**（b8e40d2） |
+| 2 | reconcile 的 finished 分支 → `finishActiveTask` → `removeTask`（:1460-1463） | 读档后首次 sync，单在 finished 里 | **无缺陷**——`finishActiveTask` 先跑（:1140 挪到 door、:1143 恢复 visible），removeTask 的恢复是幂等的 | 安全（设计如此） |
+| 3 | reconcile 的「完整快照里缺席」分支 → `removeTask`（:1467） | 读档后首次 sync，单在完整快照里缺席 | 缺 **visible + 位置**（removeTask 两样都没做） | **已修**（f4200e5） |
+
+**路径 2 安全性（QA 独立核实）**：`finishActiveTask`（:1125-1151）在 :1140 把 pos 挪到
+`building.door`、:1143 置 `visible=true`，然后才 removeTask——先恢复再删，安全。
+
+**e2e round-04 走的是路径 3**（判定依据：600 帧 `visible=false`——`abandonActiveTask`
+必然置 true，它没跑过；读档后首次 sync 按 :404 必进 reconcile）。施工 f4200e5 的复现
+（toSave→fromSave 造「关页时在屋内干活」的档 + 首次 sync 缺席）独立印证了这条路径，
+并实测「首次对账后 visible 仍 false、12 秒位移 0」。
+
+**为什么 b8e40d2 的测试没覆盖路径 3**：新 Simulation 的 `ledgerReconciled` 默认 true
+（:191），sync 只在 `!ledgerReconciled` 时才进 reconcile（:404）——测试走的全是 live
+路径。这是测试覆盖缺口，f4200e5 补上了读档场景。
+
+### 23.2 触发条件更正
+
+§20.2 的触发链表述基本正确但可更准：**读档只是把角色放进「在屋内干活」这个前置
+状态；触发者是撤单/缺席本身**，至于是哪条路径处理取决于当时是否已对账。e2e 实例：
+读档（前置）+ 轮次间 DB 重置导致首次对账判缺席（触发）→ 路径 3。
+
+### 23.3 修复与独立复验（D-1 关闭）
+
+**修法**：b8e40d2 先在 `abandonActiveTask` 内补「不可走就挪 door」；f4200e5 把
+「恢复可见 + 移出建筑」抽成共用 `restoreOutOfBuilding(villager, building)`，两条路径
+都调，另加 `buildingOfId(taskId)` 在删单前记下挂靠的楼。落点选 `building.door`
+（assertWorldInvariants 强校验门口可通行）；本就可走（户外撤单）时不动。
+
+**QA 独立复验（当前 HEAD f4200e5）**：
+1. **门禁实跑**：check 0 / `test:inprocess` **221/221** / audit --strict 世界 16
+   （引用 110）UI 8（51）并集 23 越界 0 / 整门禁 **PASS**；
+2. **变异探针（QA 自己跑）**：停用 `restoreOutOfBuilding` 方法体 → **3 条全红**
+   （两条 live + 一条读档：对账判缺席恢复可见 / 恢复后能真正走动 / 读档+首次对账
+   判缺席）→ 还原 → **221/221 全绿**、文件与原始**逐字节一致**；
+3. 测试形态：3 条断言覆盖「恢复可见 + 位置在可走格 + 再跑 12 秒位移 > 0.5」，读档
+   场景用 toSave→fromSave 造前置态——不变量形式，不是锁常量。
+
+**时间线备注**：Chief 的三路径追查在 b3bc7b8 上完成（当时路径 3 未修、施工认领明早
+修）；f4200e5 于 01:10 落地把路径 3 也修了。**当前 HEAD 两条缺陷路径均已修复。**
+
+**D-1 判定：已关闭**（P2 → 两路径修复 + 3 条回归测试 + QA 变异探针 + 门禁全绿）。
+e2e 缺陷清单：P2 清零；剩 2 条 P3（驱动采样全部角色、E 的 found=false 分支未跑）。
+
+---
