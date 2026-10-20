@@ -1,19 +1,22 @@
 /** 地形层：把网格账本画成一张静态贴图，只在开局画一次。
  *
- * 世界的空间事实全在 WorldGrid 里；这里不判断能不能走，只照着画。
- * 地形纹理不用“随机撒点”：16 色下随机 1px 噪点会糊成雪花，
- * 改用 2×2 有序抖动（Bayer）把基色与相邻一档调色板色压出中间调。
+ * 世界的事实全在 WorldGrid 里；这里不判断能不能走，只照着画。
+ *
+ * 2026-10-20 视觉语法重做（16 色内，不加色）：
+ * - 先铺底色、再铺纹理、最后画拼接边。纹理可以跨格连续，不会被后画的底色盖住。
+ * - 草地不再每格撒 2×2 噪点：用 4×4 格的低频草甸掩码，只在部分区域长草簇/花。
+ * - 石/广场改成不规则板岩：每格 3–4 块，缝不必对齐 8px，避免读成砖墙。
+ * - 农田保留垄线，但加作物幼苗与少量麦穗；空地仍然是安静的土。
  */
 
 import Phaser from 'phaser';
 import type { WorldGrid } from '../world/grid.ts';
 import type { TerrainId } from '../world/types.ts';
 import { TILE_PX } from '../world/setup.ts';
-import { TERRAIN_COLORS, TERRAIN_SPECK, WORLD } from '../world/palette-data.ts';
+import { TERRAIN_COLORS, WORLD } from '../world/palette-data.ts';
 import { drawTileEdge, type EdgeNeighbors } from './terrain-edges.ts';
 
-const DRESSING = ['tuft', 'pebble', 'flower', 'bare'] as const;
-type Dressing = (typeof DRESSING)[number];
+type Terrain = keyof typeof TERRAIN_COLORS;
 
 export function drawTerrain(
   scene: Phaser.Scene,
@@ -22,19 +25,45 @@ export function drawTerrain(
   originY: number,
 ): void {
   const g = scene.add.graphics();
+
+  // pass 1：底色。先全部铺满，后面的纹理才不会被邻格底色覆盖。
   for (let y = 0; y < grid.height; y += 1) {
     for (let x = 0; x < grid.width; x += 1) {
       const cell = grid.at({ x, y });
       if (cell === undefined) continue;
-      const px = originX + x * TILE_PX;
-      const py = originY + y * TILE_PX;
       g.fillStyle(TERRAIN_COLORS[cell.terrain], 1);
-      g.fillRect(px, py, TILE_PX, TILE_PX);
-      drawTexture(g, px, py, x, y, cell.terrain);
-      drawTileEdge(g, cell.terrain, neighborsOf(grid, x, y), px, py);
+      g.fillRect(originX + x * TILE_PX, originY + y * TILE_PX, TILE_PX, TILE_PX);
     }
   }
+
+  // pass 2：材质内部结构。
+  for (let y = 0; y < grid.height; y += 1) {
+    for (let x = 0; x < grid.width; x += 1) {
+      const cell = grid.at({ x, y });
+      if (cell === undefined) continue;
+      drawTexture(g, originX + x * TILE_PX, originY + y * TILE_PX, x, y, cell.terrain);
+    }
+  }
+
+  // pass 3：材质拼接边（高度序由 terrain-edges 决定，边只画在高材质一侧）。
+  for (let y = 0; y < grid.height; y += 1) {
+    for (let x = 0; x < grid.width; x += 1) {
+      const cell = grid.at({ x, y });
+      if (cell === undefined) continue;
+      drawTileEdge(
+        g,
+        cell.terrain,
+        neighborsOf(grid, x, y),
+        originX + x * TILE_PX,
+        originY + y * TILE_PX,
+      );
+    }
+  }
+
+  drawPlantingBeds(scene, grid, originX, originY);
+  drawFarmFence(scene, grid, originX, originY);
   drawDressing(scene, grid, originX, originY);
+
   // 网格线只是排查落位用的辅助层，默认不画：铺满全屏的细线会把地形纹理与轮廓压成
   // “表格纸”，也会让建筑/道路的边线失去对比。需要时用 ?debug-grid=1 打开。
   const params = new URLSearchParams(window.location.search);
@@ -57,104 +86,381 @@ function neighborsOf(grid: WorldGrid, x: number, y: number): EdgeNeighbors {
   };
 }
 
-/** 单格材质内部结构（ART_STYLE_TARGET §1.4）：靠**内部结构**区分材质，不靠跨材质对比。
- *
- * 三种材质各有自己的结构语言，读法不同就不会互相混淆：
- *   农田    横向垄线（每 4px 一条 1px 深土），读成「犁过的地」
- *   石/广场 石板接缝（8px 一块，横缝通栏、竖缝错缝），读成「铺过的石板」
- *   草地    1–2 个 2×2 簇，且优先长在材质边界附近，读成「地界上的草」而不是满地噪点
- *
- * 为什么不能都用随机 2×2 簇：三种材质用同一种噪声语言，远看就只剩「一层纹理」，
- * 分不出哪块是田、哪块是石板。结构语言不同，16 色也够用。
- */
+/** 稳定的整数哈希：同坐标永远同结果，截图可复现。 */
+function hash2(x: number, y: number): number {
+  let h = Math.imul(x, 374761393) + Math.imul(y, 668265263);
+  h = Math.imul(h ^ (h >>> 13), 1274126177);
+  return (h ^ (h >>> 16)) >>> 0;
+}
+
+/** 矮灌木：阶梯轮廓 + 顶部受光，不画成齐整黑框。 */
+function drawBush(g: Phaser.GameObjects.Graphics, px: number, py: number): void {
+  g.fillStyle(WORLD.ink, 1);
+  g.fillRect(px + 4, py + 9, 9, 2);
+  g.fillRect(px + 5, py + 7, 7, 2);
+  g.fillRect(px + 3, py + 9, 1, 1);
+  g.fillStyle(WORLD.grass, 1);
+  g.fillRect(px + 5, py + 8, 7, 2);
+  g.fillRect(px + 6, py + 7, 5, 1);
+  g.fillStyle(WORLD.grassLit, 1);
+  g.fillRect(px + 5, py + 7, 4, 1);
+  g.fillStyle(WORLD.trim, 1);
+  g.fillRect(px + 6, py + 6, 1, 1);
+  g.fillRect(px + 10, py + 8, 1, 1);
+}
+
+/** 岩石：4–7px 的阶梯块，左上 plaza 受光，右下 ink 阴影。 */
+function drawRock(g: Phaser.GameObjects.Graphics, px: number, py: number): void {
+  g.fillStyle(WORLD.ink, 1);
+  g.fillRect(px + 4, py + 10, 7, 1);
+  g.fillRect(px + 5, py + 8, 5, 3);
+  g.fillRect(px + 9, py + 9, 1, 2);
+  g.fillStyle(WORLD.stone, 1);
+  g.fillRect(px + 5, py + 8, 5, 2);
+  g.fillRect(px + 4, py + 9, 1, 1);
+  g.fillStyle(WORLD.plaza, 1);
+  g.fillRect(px + 5, py + 8, 3, 1);
+}
+
+/** 单格材质内部结构：靠结构语言区分材质，不靠跨材质加色。 */
 function drawTexture(
   g: Phaser.GameObjects.Graphics,
   px: number,
   py: number,
   x: number,
   y: number,
-  terrain: keyof typeof TERRAIN_COLORS,
+  terrain: Terrain,
 ): void {
   if (terrain === 'farm') {
-    drawFarmRows(g, px, py);
+    drawFarmRows(g, px, py, x, y);
     return;
   }
   if (terrain === 'stone' || terrain === 'plaza') {
-    drawSlabSeams(g, px, py, terrain, x, y);
+    drawFlagstones(g, px, py, x, y, terrain);
     return;
   }
-  drawGrassClusters(g, px, py, x, y, terrain);
+  if (terrain === 'tree') {
+    drawCanopy(g, px, py, x, y);
+    return;
+  }
+  drawMeadow(g, px, py, x, y);
 }
 
-/** 农田：横向垄线。每 4px 一条 1px 深土，首条压在格内 y=2，避免与上格的边线叠成 2px。 */
-function drawFarmRows(g: Phaser.GameObjects.Graphics, px: number, py: number): void {
-  g.fillStyle(TERRAIN_SPECK.farm, 1);
-  for (let ry = 2; ry < TILE_PX; ry += 4) {
+/**
+ * 石/广场：每格 3–4 块不规则板岩。
+ *
+ * 旧实现是 8px 一块、横缝通栏 + 竖缝错缝，整条路读成砖墙。这里把石块尺寸打散到
+ * 5–10px，缝宽 1px，且缝在格内断开；石材的“铺装”读法来自石块轮廓，不是网格。
+ */
+function drawFlagstones(
+  g: Phaser.GameObjects.Graphics,
+  px: number,
+  py: number,
+  x: number,
+  y: number,
+  terrain: 'stone' | 'plaza',
+): void {
+  const face = terrain === 'stone' ? WORLD.stone : WORLD.plaza;
+  const seam = terrain === 'stone' ? WORLD.soil : WORLD.stone;
+  g.fillStyle(seam, 1);
+  g.fillRect(px, py, TILE_PX, TILE_PX);
+
+  const layouts: readonly (readonly [number, number, number, number])[][] = [
+    [
+      [0, 0, 7, 7],
+      [8, 0, 8, 6],
+      [0, 8, 5, 8],
+      [6, 8, 10, 8],
+    ],
+    [
+      [0, 0, 6, 9],
+      [7, 0, 9, 6],
+      [0, 10, 9, 6],
+      [10, 7, 6, 9],
+    ],
+    [
+      [0, 0, 8, 5],
+      [9, 0, 7, 9],
+      [0, 6, 8, 10],
+      [9, 10, 7, 6],
+    ],
+  ];
+  const h = hash2(x, y);
+  const stones = layouts[h % layouts.length] ?? layouts[0]!;
+
+  for (let i = 0; i < stones.length; i += 1) {
+    const stone = stones[i]!;
+    const [sx, sy, sw, sh] = stone;
+    g.fillStyle(face, 1);
+    g.fillRect(px + sx, py + sy, sw, sh);
+
+    // 光从左上打：石块上/左各 1px 受光。只有 stone 有更亮一档的 plaza 可用；
+    // plaza 自身已是最亮石材，不再加高光，避免出现白线。
+    if (terrain === 'stone') {
+      g.fillStyle(WORLD.plaza, 1);
+      g.fillRect(px + sx, py + sy, sw, 1);
+      g.fillRect(px + sx, py + sy, 1, sh);
+    }
+
+    // 缺角：每块石头最多一个 1px 缺口，读成磨损而不是图案。
+    if ((h + i * 11) % 3 === 0) {
+      g.fillStyle(seam, 1);
+      g.fillRect(px + sx + sw - 2, py + sy + 1, 1, 1);
+    }
+
+    // 苔：缝里长一点，不铺满。用 grass 而不是 grassLit，避免和石材亮度打架。
+    if ((h + i * 7) % 5 === 0) {
+      g.fillStyle(WORLD.grass, 1);
+      g.fillRect(px + sx + 1, py + sy + sh - 2, 2, 1);
+    }
+  }
+
+  // 石板裂纹：一条 3–5px 的折线，只在少数石格出现。
+  if (h % 4 === 0) {
+    const cx = px + 3 + (h % 8);
+    const cy = py + 2 + ((h >>> 8) % 9);
+    g.fillStyle(seam, 1);
+    g.fillRect(cx, cy, 1, 2);
+    g.fillRect(cx + 1, cy + 2, 1, 1);
+    g.fillRect(cx + 2, cy + 3, 1, 1);
+  }
+}
+
+/**
+ * 草地：低频草甸掩码。
+ *
+ * 4×4 格一块，约 40% 的块是“草甸”，其余是安静草地。草簇只长在草甸里；贴边草由
+ * drawDressing 负责。这样整片草地有呼吸，不会每格都像雪花屏。
+ */
+function drawMeadow(
+  g: Phaser.GameObjects.Graphics,
+  px: number,
+  py: number,
+  x: number,
+  y: number,
+): void {
+  const patch = hash2(x >> 2, y >> 2);
+  const h = hash2(x, y);
+  const dense = patch % 7 < 2;
+  const clusters = dense ? 1 + (h % 2) : h % 7 === 0 ? 1 : 0;
+
+  for (let i = 0; i < clusters; i += 1) {
+    const ch = hash2(x + i * 17, y + i * 31);
+    const cx = px + 2 + (ch % 12);
+    const cy = py + 3 + ((ch >>> 8) % 10);
+    g.fillStyle(WORLD.soil, 1);
+    g.fillRect(cx, cy, 1, 3);
+    g.fillRect(cx + 2, cy + 1, 1, 2);
+    g.fillRect(cx + 1, cy + 2, 2, 1);
+    if (ch % 3 === 0) {
+      g.fillStyle(WORLD.plaza, 1);
+      g.fillRect(cx + 2, cy, 1, 1);
+    }
+  }
+
+  // 花只在少数草甸块里成簇出现；trim 已经够亮，不再用 pale 抢窗光。
+  if (dense && patch % 29 === 0 && h % 5 === 0) {
+    const fx = px + 4 + (h % 6);
+    const fy = py + 4 + ((h >>> 5) % 6);
+    g.fillStyle(WORLD.soil, 1);
+    g.fillRect(fx, fy + 1, 1, 3);
+    g.fillRect(fx + 2, fy + 2, 1, 2);
+    g.fillStyle(WORLD.trim, 1);
+    g.fillRect(fx, fy, 1, 1);
+    g.fillRect(fx + 2, fy + 1, 1, 1);
+  }
+}
+
+/** 树冠/树篱地形：底土 + 大小不一的草团，不做重复的“脸”形。 */
+function drawCanopy(
+  g: Phaser.GameObjects.Graphics,
+  px: number,
+  py: number,
+  x: number,
+  y: number,
+): void {
+  g.fillStyle(WORLD.soil, 1);
+  g.fillRect(px, py, TILE_PX, TILE_PX);
+  for (let i = 0; i < 3; i += 1) {
+    const h = hash2(x * 3 + i, y * 5 + i);
+    const w = 4 + (h % 4);
+    const hh = 3 + ((h >>> 4) % 4);
+    const bx = px + 1 + ((h >>> 8) % (TILE_PX - w - 1));
+    const by = py + 2 + ((h >>> 16) % (TILE_PX - hh - 2));
+    g.fillStyle(WORLD.grass, 1);
+    g.fillRect(bx, by, w, hh);
+    g.fillStyle(WORLD.grassLit, 1);
+    g.fillRect(bx, by, Math.max(2, w - 2), 1);
+  }
+  // 树篱的暗缝：只在部分格出现，避免每格同形。
+  const h = hash2(x, y);
+  if (h % 3 === 0) {
+    g.fillStyle(WORLD.ink, 1);
+    g.fillRect(px + 2 + (h % 10), py + 3 + ((h >>> 8) % 9), 1, 2);
+  }
+}
+
+/** 农田：横向垄线 + 幼苗/麦穗。垄线仍是结构，但不再只有线。 */
+function drawFarmRows(
+  g: Phaser.GameObjects.Graphics,
+  px: number,
+  py: number,
+  x: number,
+  y: number,
+): void {
+  g.fillStyle(WORLD.soil, 1);
+  for (let ry = 3; ry < TILE_PX; ry += 4) {
     g.fillRect(px, py + ry, TILE_PX, 1);
   }
-}
 
-/** 石板接缝：8px 一块。横缝通栏，竖缝按行错开半块（错缝砌法），全部 1px 深土 α0.25。 */
-function drawSlabSeams(
-  g: Phaser.GameObjects.Graphics,
-  px: number,
-  py: number,
-  terrain: 'stone' | 'plaza',
-  x: number,
-  y: number,
-): void {
-  // 缝线必须**实心**：soil α0.25 叠在 stone 上合成 #323833，对底色 ΔL* 只有 3.3，
-  // 与 P0-1 删掉的通铺网格线（#29352a，ΔL* 2.5）是同一个手法，画了等于没画。
-  // 实心 soil 的 ΔL* 是 14.1，与已证明可读的角色墨线（18.1）同量级。
-  g.fillStyle(WORLD.soil, 1);
-  const slab = TILE_PX / 2; // 16px 格 → 8px 石板，一格 2×2 块
-  // 横缝：格内 y = 8 处通栏（y=0 那条由地形拼接边/上一格负责，不重复画）
-  g.fillRect(px, py + slab - 1, TILE_PX, 1);
-  // 竖缝：错缝。上排缝在 x=0，下排缝在 x=8；用格坐标奇偶决定哪一排是「整块」。
-  const offset = (x + y) % 2 === 0 ? 0 : slab;
-  g.fillRect(px + ((offset + slab - 1) % TILE_PX), py, 1, slab - 1);
-  g.fillRect(px + ((offset + slab * 2 - 1) % TILE_PX), py + slab, 1, slab);
-  // 广场板面高光已删除：原实现是 stone α0.35 叠在 plaza 上，合成 #444940，
-  // 对底色 ΔL* 只有 2.5 —— 同样不可见。删掉比留一条看不见的线好。
-  void terrain;
-}
+  const h = hash2(x, y);
+  for (const rowY of [3, 7, 11, 15] as const) {
+    for (let sx = 1; sx < TILE_PX; sx += 3) {
+      if ((hash2(x * 16 + sx, y * 16 + rowY) & 3) !== 0) continue;
+      g.fillStyle(WORLD.grass, 1);
+      g.fillRect(px + sx, py + rowY - 1, 1, 2);
+      g.fillStyle(WORLD.grassLit, 1);
+      g.fillRect(px + sx + 1, py + rowY, 1, 1);
+    }
+  }
 
-/** 草地：1–2 个 2×2 簇（原为 2–3），位置由格坐标哈希稳定决定。
- *
- * 簇数从 2–3 降到 1–2 是 §1.4 的要求：满地都是簇时，整片草地读成「脏噪点」；
- * 稀疏之后单簇才有意义。贴边的草由 drawDressing 单独负责。
- */
-function drawGrassClusters(
-  g: Phaser.GameObjects.Graphics,
-  px: number,
-  py: number,
-  x: number,
-  y: number,
-  terrain: keyof typeof TERRAIN_COLORS,
-): void {
-  const tone = TERRAIN_SPECK[terrain];
-  if (tone === TERRAIN_COLORS[terrain]) return;
-  const seed = Math.abs((x * 73856093) ^ (y * 19349663)) >>> 0;
-  const clusters = 1 + (seed % 2); // 每格 1–2 簇（§1.4）
-  g.fillStyle(tone, 1);
-  for (let i = 0; i < clusters; i += 1) {
-    const h = Math.imul(seed ^ ((i + 1) * 2654435761), 2246822519) >>> 0;
-    const cx = px + 1 + (h % (TILE_PX - 3));
-    const cy = py + 1 + ((h >>> 8) % (TILE_PX - 3));
-    g.fillRect(cx, cy, 2, 2);
+  // 少量成熟麦穗：每 3 格最多 1 个 1px 点，不用 amber。
+  if (h % 3 === 0) {
+    g.fillStyle(WORLD.trim, 1);
+    g.fillRect(px + 3 + (h % 10), py + 5 + ((h >>> 8) % 8), 1, 1);
   }
 }
 
-/** 草地上的草簇与石子。纯装饰，不参与碰撞。
+/**
+ * 种植带：把 4 格宽的石街视觉收成 2 格路径，两侧长草。
  *
- * §1.4：草簇**优先长在贴路边 2px 内**，而不是纯随机撒。
- * 理由：草地上原本满地随机草簇，等于给整块地面加噪声；把草挪到材质边界附近之后，
- * 边界「长出草」这件事本身就成了地形的分界线索，草地内部反而安静下来。
- * 判据：只要 4 邻里有任一个不是草地，这格就是「边界格」；边界格把装饰压在
- * 朝向那个邻格的一侧 2px 内。
+ * 网格里 street 仍是 stone、仍可走；这里只是在石面上铺低矮草带与石缘，属于
+ * 渲染层的构图处理——世界逻辑、碰撞、路径都不改。没有这层，30×20 的画面里
+ * 石带会占掉近一半屏幕，读成“停车场”而不是小镇。
  */
-function drawDressing(
+function drawPlantingBeds(
   scene: Phaser.Scene,
+  grid: WorldGrid,
+  originX: number,
+  originY: number,
+): void {
+  const g = scene.add.graphics();
+  const streetX = Math.floor(grid.width / 2) - 2;
+  const streetW = 4;
+  let plazaTop = grid.height;
+  let plazaBottom = -1;
+  for (let y = 0; y < grid.height; y += 1) {
+    for (let x = 0; x < grid.width; x += 1) {
+      if (grid.at({ x, y })?.terrain !== 'plaza') continue;
+      plazaTop = Math.min(plazaTop, y);
+      plazaBottom = Math.max(plazaBottom, y);
+    }
+  }
+  if (plazaBottom < 0) return;
+
+  type Rect = readonly [number, number, number, number];
+  const beds: Rect[] = [
+    // 竖向街道的两侧：留下 x = streetX+1 / streetX+2 两格作路面。
+    [streetX, 1, 1, plazaTop - 1],
+    [streetX + streetW - 1, 1, 1, plazaTop - 1],
+    [streetX, plazaBottom + 1, 1, grid.height - 2 - (plazaBottom + 1) + 1],
+    [streetX + streetW - 1, plazaBottom + 1, 1, grid.height - 2 - (plazaBottom + 1) + 1],
+    // 横向石带的下两行改成草带：保留 y = plazaBottom-1 / plazaBottom 作东西向路面。
+    [1, plazaBottom + 1, streetX - 1, 2],
+    [streetX + streetW, plazaBottom + 1, grid.width - 2 - (streetX + streetW) + 1, 2],
+  ];
+
+  for (const [rx, ry, rw, rh] of beds) {
+    for (let y = ry; y < ry + rh; y += 1) {
+      for (let x = rx; x < rx + rw; x += 1) {
+        if (grid.at({ x, y })?.terrain !== 'stone') continue;
+        const px = originX + x * TILE_PX;
+        const py = originY + y * TILE_PX;
+        const h = hash2(x + 71, y + 29);
+        g.fillStyle(WORLD.grass, 1);
+        g.fillRect(px, py, TILE_PX, TILE_PX);
+        // 石缘：只画在整块草带的外边界，内部草格之间不画线。
+        g.fillStyle(WORLD.stone, 1);
+        if (x === rx) g.fillRect(px, py, 1, TILE_PX);
+        if (x === rx + rw - 1) g.fillRect(px + TILE_PX - 1, py, 1, TILE_PX);
+        if (y === ry) g.fillRect(px, py, TILE_PX, 1);
+        if (y === ry + rh - 1) g.fillRect(px, py + TILE_PX - 1, TILE_PX, 1);
+
+        // 草带内部：草簇、花与矮灌木分层出现；每块只长少量，保持安静。
+        if (h % 3 === 0) {
+          const cx = px + 2 + (h % 11);
+          const cy = py + 3 + ((h >>> 8) % 9);
+          g.fillStyle(WORLD.soil, 1);
+          g.fillRect(cx, cy, 1, 3);
+          g.fillRect(cx + 2, cy + 1, 1, 2);
+        }
+        if (h % 5 === 0) {
+          const fx = px + 3 + (h % 9);
+          const fy = py + 4 + ((h >>> 6) % 7);
+          g.fillStyle(WORLD.soil, 1);
+          g.fillRect(fx, fy + 1, 1, 2);
+          g.fillRect(fx + 3, fy + 2, 1, 1);
+          g.fillStyle(WORLD.trim, 1);
+          g.fillRect(fx, fy, 1, 1);
+          g.fillRect(fx + 3, fy + 1, 1, 1);
+        }
+        // 矮灌木：只在大草带里偶尔出现，读成绿化而不是树。
+        if ((rw > 1 && h % 7 === 0) || (rw === 1 && h % 11 === 0)) {
+          drawBush(g, px, py);
+        }
+      }
+    }
+  }
+}
+
+/**
+ * 农庄边界：只沿世界最底/最右的农田边缘画矮篱，避免挡住从铺子出来的路。
+ * 再加少量干草垛，让大片农田有“收过一季”的读法。
+ */
+function drawFarmFence(
+  scene: Phaser.Scene,
+  grid: WorldGrid,
+  originX: number,
+  originY: number,
+): void {
+  const g = scene.add.graphics();
+  for (let y = 0; y < grid.height; y += 1) {
+    for (let x = 0; x < grid.width; x += 1) {
+      if (grid.at({ x, y })?.terrain !== 'farm') continue;
+      const px = originX + x * TILE_PX;
+      const py = originY + y * TILE_PX;
+      const h = hash2(x + 13, y + 41);
+      if (y === grid.height - 2) {
+        g.fillStyle(WORLD.timberDark, 1);
+        g.fillRect(px + 2, py + 12, 2, 4);
+        g.fillRect(px + 11, py + 12, 2, 4);
+        g.fillStyle(WORLD.trim, 1);
+        g.fillRect(px, py + 13, TILE_PX, 1);
+        g.fillRect(px, py + 15, TILE_PX, 1);
+      }
+      if (x === grid.width - 2) {
+        g.fillStyle(WORLD.timberDark, 1);
+        g.fillRect(px + 12, py + 2, 2, 4);
+        g.fillRect(px + 12, py + 11, 2, 4);
+        g.fillStyle(WORLD.trim, 1);
+        g.fillRect(px + 13, py, 1, TILE_PX);
+        g.fillRect(px + 15, py, 1, TILE_PX);
+      }
+      // 干草垛：每 97 格出现一次，1 个 5×3 小块。
+      if (h % 97 === 0) {
+        g.fillStyle(WORLD.ink, 1);
+        g.fillRect(px + 4, py + 5, 7, 5);
+        g.fillStyle(WORLD.trim, 1);
+        g.fillRect(px + 5, py + 6, 5, 3);
+        g.fillStyle(WORLD.ember, 1);
+        g.fillRect(px + 5, py + 7, 5, 1);
+      }
+    }
+  }
+}
+
+/** 草地/农田的贴边草与少量石子。纯装饰，不参与碰撞。 */
+function drawDressing(  scene: Phaser.Scene,
   grid: WorldGrid,
   originX: number,
   originY: number,
@@ -164,43 +470,33 @@ function drawDressing(
     for (let x = 0; x < grid.width; x += 1) {
       const cell = grid.at({ x, y });
       if (cell === undefined || cell.terrain !== 'grass') continue;
-      const hash = Math.abs((x * 2654435761) ^ (y * 40503));
-      const kind: Dressing = DRESSING[hash % DRESSING.length];
-      if (kind === 'bare') continue;
       const px = originX + x * TILE_PX;
       const py = originY + y * TILE_PX;
+      const h = hash2(x, y);
 
-      // 找第一个「非草地」的邻格方向；没有就是草地内部。
-      const inner = nearestNonGrassSide(grid, x, y);
-      let jx: number;
-      let jy: number;
-      if (inner === null) {
-        // 草地内部：落在格中央偏上一带，避开边线。
-        jx = px + 5 + (hash % 6);
-        jy = py + 5 + ((hash >> 3) % 6);
-      } else {
-        // 边界格：压到朝那一侧的 2px 带里，读成「地界上长的草」。
-        const inset = 1 + (hash % 2); // 1 或 2px
-        jx = px + 5 + (hash % 6);
-        jy = py + 6 + ((hash >> 3) % 4);
-        if (inner === 'west') jx = px + inset;
-        else if (inner === 'east') jx = px + TILE_PX - 2 - inset;
-        else if (inner === 'north') jy = py + inset;
-        else jy = py + TILE_PX - 2 - inset;
-      }
-
-      if (kind === 'tuft') {
-        // 草簇用实心 soil（ΔL* 11.3）；原 grassLit α0.9 合成 #324133，对草地只有 2.6，不可见。
+      const edge = nearestNonGrassSide(grid, x, y);
+      if (edge !== null && h % 7 < 3) {
+        const inset = 1 + (h % 2);
+        let jx = px + 4 + (h % 7);
+        let jy = py + 6 + ((h >>> 3) % 5);
+        if (edge === 'west') jx = px + inset;
+        else if (edge === 'east') jx = px + TILE_PX - 2 - inset;
+        else if (edge === 'north') jy = py + inset;
+        else jy = py + TILE_PX - 3 - inset;
         g.fillStyle(WORLD.soil, 1);
-        // 贴边时草簇朝外竖，指向邻格方向，强化边界线。
         g.fillRect(jx, jy, 1, 3);
         g.fillRect(jx + 2, jy + 1, 1, 2);
-      } else if (kind === 'pebble') {
+        continue;
+      }
+
+      // 草地内部：只偶尔留一颗石子或一丛灌木/岩石，给大片草地一点地标。
+      if (h % 53 === 0) {
+        drawRock(g, px, py);
+      } else if (h % 71 === 0) {
+        drawBush(g, px, py);
+      } else if (h % 37 === 0) {
         g.fillStyle(WORLD.plaza, 0.8);
-        g.fillRect(jx, jy, 2, 1);
-      } else {
-        g.fillStyle(WORLD.amber, 0.9);
-        g.fillRect(jx, jy, 1, 1);
+        g.fillRect(px + 4 + (h % 8), py + 5 + ((h >>> 8) % 6), 2, 1);
       }
     }
   }

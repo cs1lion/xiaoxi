@@ -185,25 +185,85 @@ export class SandboxScene extends Phaser.Scene {
     const altarPx = this.world.altar;
     const ax = originX + altarPx.x * TILE_PX;
     const ay = originY + altarPx.y * TILE_PX;
+    const cx = ax + TILE_PX / 2;
+
+    // 地面光池：先画、depth 压在所有人之下。用 1px 抖动环，不用大半径 alpha 圆。
+    const pool = this.add.graphics();
+    pool.setDepth(ALTITUDE + ay - 8);
+    pool.fillStyle(WORLD.amber, 0.06);
+    pool.fillRect(cx - 24, ay + 12, 48, 10);
+    pool.fillStyle(WORLD.amber, 0.1);
+    pool.fillRect(cx - 18, ay + 14, 36, 6);
+    pool.fillStyle(WORLD.amber, 0.14);
+    pool.fillRect(cx - 12, ay + 16, 24, 3);
+
+    // 石龛：26×26，比旧的 44×44 小一半；底座两级、四柱、小屋顶、蜡烛与供品。
+    // 视觉整体向右偏 8px：她站在祭坛点时不会正好挡住龛内的符文。
+    const sx = cx + 12;
     const altar = this.add.graphics();
+    // 底座第一步（最宽）
+    altar.fillStyle(WORLD.stone, 1);
+    altar.fillRect(sx - 14, ay + 18, 28, 5);
     altar.fillStyle(WORLD.plaza, 1);
-    altar.fillRect(ax - 6, ay - 6, 44, 44);
-    altar.lineStyle(1, WORLD.trim, 0.8);
-    altar.strokeRect(ax - 6, ay - 6, 44, 44);
+    altar.fillRect(sx - 14, ay + 18, 28, 1);
     altar.fillStyle(WORLD.soil, 1);
-    altar.fillRect(ax + 3, ay + 3, 26, 26);
-    altar.fillStyle(WORLD.amber, 0.9);
-    altar.fillRect(ax + 9, ay + 9, 14, 2);
-    altar.fillRect(ax + 15, ay + 13, 2, 8);
-    altar.setDepth(ALTITUDE + ay + 40);
-    // 祭坛的静态文字改符文图标（D5-A）：不再画「神谕祭坛」。
-    const rune = this.add.graphics();
-    rune.lineStyle(1, WORLD.amber, 0.9);
-    rune.strokeRect(ax + 9, ay - 14, 8, 8);
-    rune.fillStyle(WORLD.amber, 0.9);
-    rune.fillRect(ax + 12, ay - 12, 2, 4);
-    rune.fillRect(ax + 17, ay - 10, 2, 2);
-    rune.setDepth(ALTITUDE + ay + 41);
+    altar.fillRect(sx - 14, ay + 22, 28, 1);
+    // 底座第二步
+    altar.fillStyle(WORLD.plaza, 1);
+    altar.fillRect(sx - 10, ay + 14, 20, 5);
+    altar.fillStyle(WORLD.stone, 1);
+    altar.fillRect(sx - 10, ay + 18, 20, 1);
+    // 四柱：左右各两根，柱头用 trim。
+    for (const px of [sx - 12, sx + 9] as const) {
+      altar.fillStyle(WORLD.stone, 1);
+      altar.fillRect(px, ay + 2, 3, 13);
+      altar.fillStyle(WORLD.plaza, 1);
+      altar.fillRect(px, ay + 2, 1, 13);
+      altar.fillStyle(WORLD.trim, 1);
+      altar.fillRect(px - 1, ay + 1, 5, 1);
+    }
+    // 小屋顶：两坡 + 屋脊，压在柱子上。
+    altar.fillStyle(WORLD.timberDark, 1);
+    altar.fillRect(sx - 15, ay - 2, 30, 3);
+    altar.fillRect(sx - 12, ay - 5, 24, 3);
+    altar.fillStyle(WORLD.trim, 1);
+    altar.fillRect(sx - 13, ay - 5, 26, 1);
+    altar.fillStyle(WORLD.timberDark, 1);
+    altar.fillRect(sx - 1, ay - 8, 2, 4);
+    // 龛内暗部 + 符文
+    altar.fillStyle(WORLD.ink, 1);
+    altar.fillRect(sx - 7, ay + 3, 14, 12);
+    // 4 角星：竖/横 + 两条斜线，中央 pale 高光。不是“T”。
+    altar.fillStyle(WORLD.amber, 0.95);
+    altar.fillRect(sx - 1, ay + 5, 2, 8);
+    altar.fillRect(sx - 4, ay + 8, 8, 2);
+    for (let step = 0; step < 3; step += 1) {
+      altar.fillRect(sx - 3 + step, ay + 6 + step, 1, 1);
+      altar.fillRect(sx + 2 - step, ay + 6 + step, 1, 1);
+      altar.fillRect(sx - 3 + step, ay + 11 - step, 1, 1);
+      altar.fillRect(sx + 2 - step, ay + 11 - step, 1, 1);
+    }
+    altar.fillStyle(WORLD.pale, 1);
+    altar.fillRect(sx, ay + 8, 1, 1);
+    // 两支蜡烛：pale 烛身 + amber 火焰。
+    for (const px of [sx - 12, sx + 11] as const) {
+      altar.fillStyle(WORLD.pale, 1);
+      altar.fillRect(px, ay + 12, 1, 3);
+      altar.fillStyle(WORLD.amber, 1);
+      altar.fillRect(px, ay + 10, 1, 1);
+      altar.fillStyle(WORLD.ember, 1);
+      altar.fillRect(px, ay + 11, 1, 1);
+    }
+    // 供品：两块 trim/ember 小布包 + 苔。
+    altar.fillStyle(WORLD.trim, 1);
+    altar.fillRect(sx - 6, ay + 18, 3, 2);
+    altar.fillStyle(WORLD.ember, 1);
+    altar.fillRect(sx + 3, ay + 18, 3, 2);
+    altar.fillStyle(WORLD.grass, 1);
+    for (let i = 0; i < 6; i += 1) {
+      altar.fillRect(sx - 12 + i * 5, ay + 22, 2, 1);
+    }
+    altar.setDepth(ALTITUDE + ay + 24);
   }
 
   update(_time: number, delta: number): void {

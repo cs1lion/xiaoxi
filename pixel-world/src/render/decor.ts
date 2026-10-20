@@ -39,9 +39,8 @@ export function createDecorView(scene: Phaser.Scene, originX: number, originY: n
       for (const cell of cells) {
         const px = originX + cell.x * TILE_PX;
         const py = originY + cell.y * TILE_PX;
-        // §1.4：小径由「内缩矩形」改三段 —— 1px soil 描边 + plaza 面 + 上缘 1px trim 高光。
-        // 描边按「这一侧有没有相邻的径」逐边判定：相邻那一侧不描边，多格小径才会连成一条
-        // 路，而不是一串各自带框的方块。
+        // 小径：1px soil 软边 + plaza 面 + 不规则石板。描边按「这一侧有没有相邻的径」
+        // 逐边判定，多格小径才会连成一条路，而不是一串各自带框的方块。
         roads.fillStyle(WORLD.plaza, 1);
         roads.fillRect(px + 1, py + 1, TILE_PX - 2, TILE_PX - 2);
         roads.fillStyle(WORLD.soil, 0.85);
@@ -49,19 +48,30 @@ export function createDecorView(scene: Phaser.Scene, originX: number, originY: n
         if (!isRoad(cell.x, cell.y + 1)) roads.fillRect(px + 1, py + TILE_PX - 2, TILE_PX - 2, 1);
         if (!isRoad(cell.x - 1, cell.y)) roads.fillRect(px + 1, py + 1, 1, TILE_PX - 2);
         if (!isRoad(cell.x + 1, cell.y)) roads.fillRect(px + TILE_PX - 2, py + 1, 1, TILE_PX - 2);
-        // 上缘高光已删除：原实现是 trim α0.55 叠在 plaza 面上，合成 #908058，
-        // 对路面色 ΔL* 21.3 —— 比已证明可读的角色墨线（ink vs grass，18.1）还高 1.18 倍，
-        // 会读成一条白线而不是「石板受光」。
-        // 规格原本要求改成实心 plaza，但路面本身就是 plaza（实心 plaza 对 plaza ΔL*=0.0），
-        // 改过去等于把白线换成隐形线，两种都不对。16 色内没有「比 plaza 亮一档、又不刺眼」的
-        // 可用 token（stone 更暗，trim/amber/pale 都过亮），所以直接删掉这条线 —— 与
-        // 「广场板面高光已删除」同一处理：留一条看不见的线比没有更糟。
-        // 路面与地面的分界由下面那条实心 soil 描边承担（对 plaza ΔL* 20.8，强度已足够）。
-        // 石材板缝：路面内部 8px 一道，读成「铺过的路」而不是一块毡。
-        // 改实心：原 stone α0.6 叠在 plaza 上合成 #40453e，对路面色 ΔL* 只有 4.2（刚过不可见下限）；
-        // 实心 stone 是 6.7，落在可读区间。这是同一批 α 混合返工的最后一条。
-        roads.fillStyle(WORLD.stone, 1);
-        roads.fillRect(px + 1, py + TILE_PX / 2, TILE_PX - 2, 1);
+
+        // 路面不再是 8px 通栏板缝：3 块大小不一的板岩，缝用 stone（对 plaza ΔL* 11.35）。
+        // 每格 hash 稳定，同种子截图可复现；不跨格画，避免覆盖邻格。
+        const h = Math.imul(cell.x + 17, 374761393) + Math.imul(cell.y + 31, 668265263);
+        const seed = (h ^ (h >>> 13)) >>> 0;
+        const slabs: readonly (readonly [number, number, number, number])[] = [
+          [1, 1, 7, 6],
+          [9, 1, 6, 7],
+          [1, 9, 6, 6],
+          [8, 9, 7, 6],
+        ];
+        for (let i = 0; i < slabs.length; i += 1) {
+          if ((seed + i * 5) % 7 === 0) continue;
+          const [sx, sy, sw, sh] = slabs[i]!;
+          roads.fillStyle(WORLD.plaza, 1);
+          roads.fillRect(px + sx, py + sy, sw, sh);
+          roads.fillStyle(WORLD.stone, 1);
+          roads.fillRect(px + sx, py + sy + sh - 1, sw, 1);
+          roads.fillRect(px + sx + sw - 1, py + sy, 1, sh);
+          if ((seed + i) % 4 === 0) {
+            roads.fillStyle(WORLD.grass, 1);
+            roads.fillRect(px + sx + 1, py + sy + sh - 2, 2, 1);
+          }
+        }
       }
     },
     syncProps(list) {
@@ -119,31 +129,129 @@ function drawProp(
   const px = originX + (prop.at.x + 0.5) * TILE_PX;
   const py = propFootY(prop, originY);
   const g = scene.add.graphics();
+  const seed = propHash(prop.id);
   if (prop.kind === 'lamp') {
-    g.fillStyle(WORLD.ink, 1);
-    g.fillRect(-1, -12, 2, 12);
-    g.fillStyle(WORLD.amber, 0.95);
-    g.fillRect(-3, -16, 6, 4);
-    g.fillStyle(WORLD.amber, 0.18);
-    g.fillCircle(0, -14, 9);
+    drawLamp(g, seed);
   } else if (prop.kind === 'tree') {
-    g.fillStyle(WORLD.timberDark, 1);
-    g.fillRect(-1, -8, 2, 8);
-    g.fillStyle(WORLD.grass, 1);
-    g.fillCircle(0, -11, 6);
-    g.fillStyle(WORLD.grassLit, 1);
-    g.fillCircle(-2, -13, 4);
+    drawTree(g, seed);
   } else {
-    g.fillStyle(WORLD.ink, 1);
-    g.fillRect(-4, -16, 1, 16);
-    g.fillStyle(WORLD.ember, 0.95);
-    g.fillRect(-3, -15, 8, 6);
-    g.fillStyle(WORLD.trim, 0.8);
-    g.fillRect(-3, -15, 8, 1);
+    drawBanner(g, seed);
   }
   g.setPosition(px, py);
   // 与角色同口径的 Y-Sort：落点 y 越大（越靠下）越靠前，角色能走到树后面/前面。
   g.setDepth(propDepth(prop, originY, DECOR_ALTITUDE));
   // 摆件标签已随 D5-A 删除：图形自己说明是什么，中文不进 canvas。
   return g;
+}
+
+/** 稳定的道具哈希：同 id 永远同外观，截图可复现。 */
+function propHash(id: string): number {
+  let h = 2166136261;
+  for (let i = 0; i < id.length; i += 1) {
+    h ^= id.charCodeAt(i);
+    h = Math.imul(h, 16777619) >>> 0;
+  }
+  return h;
+}
+
+/** 路灯：柱 + 灯笼 + 1px 硬光池。不用 fillCircle，避免矢量圆和像素块混用。 */
+function drawLamp(g: Phaser.GameObjects.Graphics, seed: number): void {
+  // 接触阴影：两级实心块，读成“灯柱踩在地上”。
+  g.fillStyle(WORLD.ink, 0.24);
+  g.fillRect(-4, -1, 9, 2);
+  g.fillStyle(WORLD.ink, 0.16);
+  g.fillRect(-6, 1, 13, 1);
+
+  g.fillStyle(WORLD.ink, 1);
+  g.fillRect(-1, -14, 2, 14);
+  g.fillRect(-3, -1, 6, 1);
+  g.fillStyle(WORLD.timberDark, 1);
+  g.fillRect(0, -13, 1, 12);
+
+  // 灯笼：黑框 + 暗木芯 + amber 光；pale 高光在左上。
+  g.fillStyle(WORLD.ink, 1);
+  g.fillRect(-4, -21, 9, 8);
+  g.fillStyle(WORLD.timberDark, 1);
+  g.fillRect(-3, -20, 7, 6);
+  g.fillStyle(WORLD.amber, 0.95);
+  g.fillRect(-2, -19, 5, 4);
+  g.fillStyle(WORLD.pale, 1);
+  g.fillRect(-2, -19, 1, 1);
+  g.fillStyle(WORLD.trim, 1);
+  g.fillRect(-5, -22, 11, 1);
+  g.fillRect(-1, -23, 3, 1);
+
+  // 灯下光池：两层硬边矩形 + 抖动缺口，不用大 alpha 圆。
+  const flicker = seed % 3;
+  g.fillStyle(WORLD.amber, 0.1);
+  g.fillRect(-9, -2, 19, 4);
+  g.fillRect(-7, 2, 15, 2);
+  g.fillStyle(WORLD.amber, 0.16);
+  g.fillRect(-6, -1, 13, 2);
+  g.fillStyle(WORLD.amber, 0.22);
+  g.fillRect(-4 + flicker, -1, 8, 1);
+}
+
+/** 树：树干 + 3–5 个树冠团块 + 根部阴影。树冠用实心像素块，不用圆。 */
+function drawTree(g: Phaser.GameObjects.Graphics, seed: number): void {
+  const size = seed % 3; // 小 / 中 / 大
+  const trunkH = 8 + size * 2;
+  const cw = 13 + size * 3;
+  const ch = 11 + size * 2;
+
+  // 地面阴影：向右下错开的硬边块。
+  g.fillStyle(WORLD.ink, 0.2);
+  g.fillRect(-5, -1, 12, 2);
+  g.fillRect(-3, 1, 8, 1);
+
+  // 树干与根。
+  g.fillStyle(WORLD.ink, 1);
+  g.fillRect(-1, -trunkH, 3, trunkH);
+  g.fillStyle(WORLD.timberDark, 1);
+  g.fillRect(0, -trunkH + 1, 2, trunkH - 1);
+  g.fillStyle(WORLD.timber, 1);
+  g.fillRect(1, -trunkH + 2, 1, Math.max(2, trunkH - 3));
+  g.fillStyle(WORLD.ink, 1);
+  g.fillRect(-2, -1, 3, 1);
+  g.fillRect(1, -1, 3, 1);
+
+  // 树冠：先黑轮廓，再暗底，再两档亮部；团块错开，避免圆球感。
+  const top = -trunkH - ch;
+  g.fillStyle(WORLD.ink, 1);
+  g.fillRect(-Math.floor(cw / 2) - 1, top - 1, cw + 2, ch + 2);
+  g.fillRect(-Math.floor(cw / 2) + 2, top - 4, cw - 3, 4);
+  g.fillStyle(WORLD.soil, 1);
+  g.fillRect(-Math.floor(cw / 2), top, cw, ch);
+  g.fillStyle(WORLD.grass, 1);
+  g.fillRect(-Math.floor(cw / 2) + 1, top + 1, cw - 2, ch - 2);
+  g.fillStyle(WORLD.grassLit, 1);
+  g.fillRect(-Math.floor(cw / 2) + 2, top + 1, Math.floor(cw / 2), 2);
+  g.fillRect(-Math.floor(cw / 2) + 2, top + 3, 2, ch - 4);
+  g.fillRect(-Math.floor(cw / 2) + 2, top - 2, Math.floor(cw / 2), 2);
+
+  // 树冠孔隙：2–3 个 1×2 的土壤色缺口。
+  g.fillStyle(WORLD.soil, 1);
+  g.fillRect(-2 + (seed % 3), top + 4, 1, 2);
+  g.fillRect(3 - (seed % 2), top + 7, 2, 1);
+  if (size > 0) g.fillRect(-Math.floor(cw / 2) + 3, top + 8, 1, 2);
+}
+
+/** 旗帜：木杆 + 布面 + 顶部亮边；布面有一个像素缺口，读成被风吹起。 */
+function drawBanner(g: Phaser.GameObjects.Graphics, seed: number): void {
+  g.fillStyle(WORLD.ink, 0.2);
+  g.fillRect(-3, -1, 8, 2);
+  g.fillStyle(WORLD.ink, 1);
+  g.fillRect(-1, -19, 2, 19);
+  g.fillRect(-2, -1, 4, 1);
+  g.fillStyle(WORLD.timberDark, 1);
+  g.fillRect(0, -18, 1, 17);
+  g.fillStyle(WORLD.ink, 1);
+  g.fillRect(1, -18, 9, 8);
+  g.fillStyle(WORLD.ember, 1);
+  g.fillRect(2, -17, 7, 6);
+  g.fillStyle(WORLD.trim, 1);
+  g.fillRect(2, -17, 7, 1);
+  // 风吹缺口：固定在右侧，不逐帧抖动。
+  g.fillStyle(WORLD.soil, 1);
+  g.fillRect(8, -15 + (seed % 2), 1, 2);
 }

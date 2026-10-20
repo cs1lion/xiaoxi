@@ -25,7 +25,7 @@
     "accent": "pages",
     "silhouette": "tower",
     "boundTask": "research",
-    "palette": { "body": "timber", "roof": "grass", "trim": "pale", "window": "amber" }
+    "palette": { "body": "timber", "roof": "cloak", "trim": "pale", "window": "amber" }
   },
   "ink_house": {
     "id": "ink_house",
