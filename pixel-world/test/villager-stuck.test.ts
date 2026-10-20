@@ -2,20 +2,29 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { parseBlueprintTable } from '../src/world/blueprints.ts';
-import { ALTAR, buildWorld, placeBlueprint, type BuiltWorld } from '../src/world/setup.ts';
+import {
+  ALTAR,
+  buildWorld,
+  buildWorldFromSave,
+  placeBlueprint,
+  type BuiltWorld,
+} from '../src/world/setup.ts';
 import { Simulation } from '../src/world/simulation.ts';
 
-/** D-1 回归锁：读档后对账把「屋内正在干活的单」判成缺席时，角色不能卡死。
+/** D-1 回归锁：屋内正在干活的单被判「没了」时，角色不能卡死。
  *
- * 缺陷形态（QA 在 S5 e2e 发现）：
- *   角色 mode=working、visible=false、pos=工位（建筑内不可走格）。
- *   若该单在台账**完整快照**里缺席，reconcile 走 removeTask，
- *   而 removeTask 只重置 mode/taskId/path/... ，**没恢复 visible、也没移出建筑**。
- *   结果：不渲染（visible=false）+ 走不动（起点不可走，grid.path 返回空）。
- *   该状态还会入档，跨会话持久，只有清档能恢复。
+ * 缺陷形态（QA 在 S5 e2e 发现）：角色 mode=working、visible=false、pos=工位（占地内
+ * 不可走格）。该单从台账消失后，状态机把 mode 收回 idle，但：
+ *   - 读档对账路径（reconcile → removeTask）：visible 没恢复、位置没移出 →
+ *     不渲染 + 走不动，且入档跨会话持久，只有清档能恢复；
+ *   - live-sync 路径（abandonActiveTask）：visible 恢复了，但位置仍留在工位 →
+ *     看得见却钉在屋里不动。
+ * 两条路径都缺「位置移出建筑」，修法统一到 restoreOutOfBuilding()。
  *
- * 对照：同一「单没了」语义的 live-sync 路径走 abandonActiveTask，
- *   那条有 visible = true。两条路径对同一语义处理不一致，reconcile 这条漏了。
+ * 本文件覆盖三条路径：
+ *   ① live-sync 撤单（abandonActiveTask）
+ *   ② 读档 + 首次 sync 对账（reconcile → removeTask）  ← 任务卡要求的原始场景
+ *   ③ 两条路径修复后都能真正走动
  */
 
 const raw = JSON.parse(
@@ -103,4 +112,56 @@ test('D-1：恢复后角色能真正走动（寻路不再恒空）', () => {
   const afterPos = sim.snapshot().villager.pos;
   const moved = Math.hypot(afterPos.x - before.x, afterPos.y - before.y);
   assert.ok(moved > 0.5, `恢复后应该能走动，实际位移 ${moved.toFixed(2)}`);
+});
+/**
+ * 任务卡要求的原始场景：**读档 + 首次 sync 对账**。
+ *
+ * 为什么单独写一条：本文件前两条用的是新建 Simulation，此时 ledgerReconciled 默认 true
+ * （simulation.ts:191），sync 走 live 路径（:404 只在 !ledgerReconciled 时才进 reconcile）。
+ * 也就是说前两条测的是 abandonActiveTask，**没覆盖 reconcile**。
+ * 这里用 toSave → fromSave 造出「关页时他在屋内干活」的存档，再发首次 sync 走对账分支。
+ */
+test('D-1：读档 + 首次对账判缺席，角色必须恢复可见且不在建筑内', () => {
+  const { sim, grid } = makeSim();
+  dispatchAndWork(sim, 'c_load');
+
+  const working = sim.snapshot();
+  assert.equal(working.villager.mode, 'working', '前置：应在干活');
+  assert.equal(working.villager.visible, false, '前置：干活时不可见');
+
+  // 存档 → 读档（复现「关页时他在屋内干活」）
+  const save = sim.toSave();
+  assert.equal(save.world.villagers[0]?.mode, 'working', '存档里应保留干活态');
+
+  const rebuilt = buildWorldFromSave(save.world.buildings, blueprints);
+  const reloaded = Simulation.fromSave(save, {
+    grid: rebuilt.grid,
+    buildings: rebuilt.buildings,
+    altar: ALTAR,
+    villagerName: '莞尔',
+    spawnBuilding: (prefabId: string, instanceId: string) => {
+      const blueprint = blueprints.get(prefabId);
+      if (blueprint === undefined) return null;
+      return placeBlueprint(rebuilt.grid, blueprint, instanceId, ALTAR);
+    },
+  });
+
+  // 首次 sync：完整快照里这单缺席 → 走 reconcile
+  reloaded.enqueue({ kind: 'sync', tasks: [], finished: [], connected: true, complete: true });
+  reloaded.update(STEP);
+
+  const after = reloaded.snapshot();
+  assert.equal(after.villager.mode, 'idle', '状态机收回空闲');
+  assert.equal(after.villager.taskId, null, '手上不再挂单');
+  assert.equal(after.villager.visible, true, 'must 恢复可见，否则整轮不渲染');
+  const cell = { x: Math.round(after.villager.pos.x), y: Math.round(after.villager.pos.y) };
+  assert.ok(rebuilt.grid.isWalkable(cell), `位置必须在可走格，实际 (${cell.x},${cell.y}) 不可走`);
+
+  // 且真能走动
+  const beforePos = { ...after.villager.pos };
+  for (let i = 0; i < 120; i += 1) reloaded.update(STEP);
+  const finalPos = reloaded.snapshot().villager.pos;
+  const moved = Math.hypot(finalPos.x - beforePos.x, finalPos.y - beforePos.y);
+  assert.ok(moved > 0.5, `读档对账后应能走动，实际位移 ${moved.toFixed(2)}`);
+  void grid;
 });

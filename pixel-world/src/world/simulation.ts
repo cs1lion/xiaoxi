@@ -542,6 +542,33 @@ export class Simulation {
     );
   }
 
+  /**
+   * 让停手的角色回到「人能看见、也能走动」的状态（D-1）。
+   *
+   * 两件事缺一不可：
+   *   1. visible = true —— 干活时 visible=false（arriveAtWork），停手后不恢复就**不渲染**。
+   *   2. 位置移出建筑 —— 干活时 pos = building.workSpot，那是**占地内**的不可走格；
+   *      而 grid.path() 在起点不可走时直接返回空数组（grid.ts path()），
+   *      于是她永远迈不出第一步：人看得见，但钉在屋里不动。
+   *
+   * 两条「单没了」的路径都必须调它：live-sync 走 abandonActiveTask，
+   * 读档对账走 removeTask —— 后者原先只重置 mode/taskId/path，两条都没做，
+   * 角色会变成 idle + visible=false + 卡在工位，且该状态入档、跨会话持久。
+   *
+   * 落点选 building.door：assertWorldInvariants 强校验「门口不可通行」会直接拒绝开工，
+   * 所以 door 一定是占地之外的可走格，是这里唯一不需要再找空地的落点。
+   * 角色本来就在可走格（例如户外被撤单）时不动它，避免无谓位移。
+   */
+  private restoreOutOfBuilding(
+    villager: Villager,
+    building: PlacedBuilding | undefined,
+  ): void {
+    villager.visible = true;
+    if (building === undefined) return;
+    if (this.grid.isWalkable(this.cellOf(villager.pos))) return;
+    villager.pos = { x: building.door.x, y: building.door.y };
+  }
+
   /** 她手上的活被上游撤回：状态机收回 idle，铺子熄火。 */
   private abandonActiveTask(villager: Villager): void {
     const task = this.activeTaskOf(villager);
@@ -554,20 +581,7 @@ export class Simulation {
     }
     villager.mode = 'idle';
     villager.taskId = null;
-    villager.visible = true;
-    // 必须把人从工位挪出来（D-1）。
-    //
-    // 干活时 pos 被设成 building.workSpot —— 那是**建筑占地内**的格，不可走
-    // （arriveAtWork: villager.pos = workSpot）。只把 mode 收回 idle、恢复 visible
-    // 是不够的：她站在原地，而 grid.path 在起点不可走时直接返回空数组
-    // （grid.ts path(): !inBounds 或寻不到就走空），于是永远迈不出第一步 ——
-    // 人看得见了，但钉在屋里不动，且这个状态会入档跨会话持久。
-    //
-    // 挪到门口：door 保证在占地之外且可走（assertWorldInvariants 强校验
-    // 「门口不可通行」会直接拒绝开工），是这里唯一不需要再找空地的落点。
-    if (building !== undefined && !this.grid.isWalkable(this.cellOf(villager.pos))) {
-      villager.pos = { x: building.door.x, y: building.door.y };
-    }
+    this.restoreOutOfBuilding(villager, building);
     villager.path = [];
     villager.bubble = '这单被撤了。';
     villager.bubbleUntil = this.now + 1600;
@@ -1493,12 +1507,18 @@ export class Simulation {
   }
 
   private removeTask(taskId: string): void {
+    // 先记下这单挂在哪栋楼，删单后 task 没了、buildingOf 就查不到了；
+    // 角色若正在屋里干活，需要这栋楼来算「挪到哪个门口」。
+    const owningBuilding = this.buildingOfId(taskId);
     const index = this.tasks.findIndex((task) => task.id === taskId);
     if (index >= 0) this.tasks.splice(index, 1);
     for (const villager of this.villagers) {
       if (villager.taskId !== taskId) continue;
       villager.mode = 'idle';
       villager.taskId = null;
+      // 与 abandonActiveTask 共用同一套收尾：恢复可见 + 移出建筑。
+      // 少了这一步，读档对账撤单后角色会 idle + visible=false + 卡在工位（D-1）。
+      this.restoreOutOfBuilding(villager, owningBuilding);
       villager.path = [];
       villager.pendingRoute = [];
       villager.pendingBuilding = null;
@@ -1506,6 +1526,12 @@ export class Simulation {
       villager.nextRoutineAt = this.now + 1600;
     }
     this.idleWorkstationFor(taskId);
+  }
+
+  /** 按 taskId 找它挂靠的楼（删单前调用；删完 task 就查不到了）。 */
+  private buildingOfId(taskId: string): PlacedBuilding | undefined {
+    const task = this.tasks.find((item) => item.id === taskId);
+    return task === undefined ? undefined : this.buildingOf(task);
   }
 
   private cellOf(pos: Vec2): GridPoint {
