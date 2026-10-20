@@ -1,6 +1,6 @@
-# ADR：Agent ⇄ 像素世界最小桥接（范围已批准 · 实施待 S5 · v2.6）
+# ADR：Agent ⇄ 像素世界最小桥接（范围已批准 · 实施待 S5 · v2.7）
 
-- **状态**：**范围已批准，实施待 S5**（v2.6 · 用户 2026-10-19 批准：§4.4 选 A；G2 为范围预批准；7 条实施条件见 §7.1。v2.5→v2.6（2026-10-20 架构复审修订）：§4.4.1 A6 三重断言与"代表性抽样"、B2 改 stub handler + 反事实；§4.7 A 触发条件更正为"外部演示/自由输入再命中（附日期+ID）"、删淡化表述、C 并入 server-free 静态声明变体（`index.html:213`/`SandboxScene.ts:497`）、A 回归风险升档并注明干净让位做不到；语料 73/73 PASS）。首席架构审查官终审通过（2026-10-19）+ 2026-10-20 复审修订。**未实现、未承诺；S3/S4 收口前不动 `server/assistant/**`。**
+- **状态**：**范围已批准，实施待 S5**（v2.7 · 用户 2026-10-19 批准：§4.4 选 A；G2 为范围预批准；7 条实施条件见 §7.1。v2.6→v2.7（2026-10-20 用户实测补缺）：§4.4.1 增加"两条路径的区分"——"同义改写静默不建单"仅 live 路成立，Mock 路（`?ledger=off`）同义句被 `oracle.ts` 接走建成 Mock 单并交付（parseOracle 9/9 已跑 + 用户实测转报）；已知限制验收必须指定路径。历史：v2.5→v2.6 架构复审修订（A6 三重断言/代表性抽样/B2 stub handler/§4.7 触发条件更正与静态声明变体）。首席架构审查官终审通过（2026-10-19）+ 两轮复审修订。**未实现、未承诺；S3/S4 收口前不动 `server/assistant/**`。**
 - **日期**：2026-10-19 · **作者**：Agent 集成工程师 · **分派**：Chief（选 A）；**评审**：首席架构审查官三轮（两轮有条件通过 → 终审通过），P1 全闭、P2 并入、勘误 5 条已 patch
 - **核验基线**：分支 `feat/pixel-world-oracle-world`，HEAD `5214eb5`。本文只读核验 + 文档提案，**未改任何源码/配置/测试，未 commit**。工作区 task-28 调色板改动进行中，本文不触碰 `pixel-world/src` 与 `docs/ART_PALETTE_AUDIT.md`。
 - **上游文档**：`docs/AGENT_INTEGRATION_STATUS.md`（三分类核验）、`docs/PIXEL_WORLD_ROUND3_20261019.md`（台账接入）、`docs/NEXT_PHASE_PLAN.md`（S5 排期）、`docs/DECISION_TRAIL_20261019.md`（D2）。
@@ -154,13 +154,22 @@ async def _drive_world_commission(self, commission_id):
 
 #### 4.4.1 派单正则边界与验收语料（同义改写静默不建单 · 用户 2026-10-20 指派 A）
 
-**既存事实**：派单只由 `_DELEGATION`（`server/dialogue/orchestrator.py:60-65`）判定，第一支要求「`去(把|帮我|替我)…`」句式；不命中 → `executive_route` 返回 None（`server/app.py:697-739` 的 `if route is not None` 不成立）→ 继续走 `should_route`/普通对话 → **不建单、无任何提示**；离线模式最终以通用闲聊句收尾（`server/llm.py:247-255` 回复池，Chief 锚点 `:250` 在池内——"静默"的最终形态）。证据：S4 双重复现（Chief `c_d34c824bc869`、QA `c_e6ecc8ce2da4`；反例「帮我把…」0 帧）——**转报未验证**：工作区内全部 commissions.db 均查无这两个 ID（主库 `data/commissions.db` 239 行、最新写入 10-19 10:43，疑为隔离演示库已清理）；本轮自证见下述语料。
+**既存事实（仅 live 路成立，见下文"两条路径的区分"）**：派单只由 `_DELEGATION`（`server/dialogue/orchestrator.py:60-65`）判定，第一支要求「`去(把|帮我|替我)…`」句式；不命中 → `executive_route` 返回 None（`server/app.py:697-739` 的 `if route is not None` 不成立）→ 继续走 `should_route`/普通对话 → **不建单、无任何提示**；离线模式最终以通用闲聊句收尾（`server/llm.py:247-255` 回复池，Chief 锚点 `:250` 在池内——"静默"的最终形态）。证据：S4 双重复现（Chief `c_d34c824bc869`、QA `c_e6ecc8ce2da4`；反例「帮我把…」0 帧）——**转报未验证**：工作区内全部 commissions.db 均查无这两个 ID（主库 `data/commissions.db` 239 行、最新写入 10-19 10:43，疑为隔离演示库已清理）；本轮自证见下述语料。
 
 **验收语料（已运行验证 · `scripts/verify_world_routing_corpus.py` A5/A6 组 · 属 73/73 组成部分；进 S5 验收门，不进 1.0）**：
 - 建单组（`_DELEGATION` 命中 → `executive_route` 派单）：你去把便笺整理成三版标题 / 去把脚本写完 / 安排人把便笺做成三版 / 让她去把稿子改了
 - 静默组（不命中 → route=None → 不建单、无提示；**代表性抽样**，覆盖「帮我把…」「整理一下便笺」「你去把…」以外的常见同义说法，不穷尽）：帮我把便笺整理成三版标题 / 整理一下便笺 / 把这堆便笺弄成三版 / 辛苦你把便笺整理一下 / 麻烦整理下便笺 / 便笺整理成三版标题。**A6 三重断言**：不命中 `_DELEGATION` + 显式 `should_route` 不命中 + 无世界短语——三者俱全才配"静默落普通对话"标签（只验快环不命中会漏掉本应进 `should_route` 的句子）。
 
-**差分测试新增要求（C3 扩展）**：对每个静默组反例，必须断言「**不建单 + 有可见反馈**」，或明确记录为已知限制（当前=已知限制：无反馈，见 §4.7 方案 C）。
+**差分测试新增要求（C3 扩展）**：对每个静默组反例，必须断言「**不建单 + 有可见反馈**」，或明确记录为已知限制（当前=已知限制：无反馈，见 §4.7 方案 C）。**每条断言必须标注路径（live/mock），不得只写"不建单"**——理由见下。
+
+**两条路径的区分（用户实测发现 · 2026-10-20 · 本节最重要的一条）**：
+
+| 路径 | 同义句（如「帮我把便笺整理成三版标题」）的命运 | 证据 |
+|---|---|---|
+| **live 路**（`?ledger=on`，世界吃 server 台账） | server `_DELEGATION` 不命中 → 不建单、世界无输入——"同义改写静默不建单"**只在这条路成立** | 上引 A6 三重断言（不命中 `_DELEGATION` + `should_route` 不命中 + 无世界短语）；`orchestrator.py:60-65`、`app.py:697-739` |
+| **Mock 路**（`?ledger=off`，世界自己的关键词路由器） | 被 `parseOracle` 接走 → **建成 Mock 单并按沙盒计时器交付**——静默不建单在这条路**不成立** | `pixel-world/src/world/oracle.ts:23-27`（writing 规则含「便笺」「整理」）、`:33-54`（`parseOracle`）；用户实测建成并交付（Chief 转报，未附单号）；parseOracle 路由决策本轮已跑 **9/9 PASS**：6 条静默组全接走为 `dispatch/writing`、3 条对照日常句落 `unknown`（scratch `tmp/verify_mock_oracle.ts`，未入库；"建成并交付"为 simulation 行为，用户实测覆盖） |
+
+**因此：本已知限制的验收必须指定路径，否则 Mock 路的成功交付会被误读为限制不存在。** 落地要求：① 语料表每条标 `live`/`mock` 预期（本版 A6 属 live 断言；Mock 断言见上表右列）；② §4.7 方案 C 的"已知限制"表述只覆盖 live 路——Mock 路同义句照样建成 Mock 单，演示话术必须单独说明，避免"世界很灵"（Mock）与"live 路静默"两种观感对不上；③ Mock 路断言的永久归宿应是像素世界自己的测试套件（`pixel-world/test/`，现由 scratch 临时承担；纳入属于 World Builder 范围，S5 前不动 `pixel-world/**`）。
 
 ### 4.5 `begin_commission` / `drive_commission` 重构规格（`executive.py`，S5 实施；范围已批准）
 
