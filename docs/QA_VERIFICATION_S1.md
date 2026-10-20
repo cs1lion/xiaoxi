@@ -3076,3 +3076,63 @@ node --import 'file:///C:/Users/18712/AppData/Local/Temp/dsh-VtZ3UW/qa-s4-regist
 - 本轮未改动任何项目文件（只读验收 + TEMP 脚本/探针）；`git status` 与进场快照一致。
 - 8000（PID 22996）与主 `data/` 经我核验**零变化**；隔离 8001/5189 已清理，无残留监听。
 - **待用户评审**：演示观感、解说词、3 秒指认类人类判定。
+
+---
+
+## task-32（存档字段级校验 + 变异测试）独立复验（2026-10-20 09:37–09:55，lead · QA Engineer）
+
+- **基线声明**：HEAD `a449b06 docs: task-32 立项 + S5 标记被阻塞…`；工作区 `pixel-world/src/world/save.ts`
+  **+372/−53**、`test/save.test.ts` +11/−1、新增 `test/save-validate.test.ts`（483 行）、`docs/ADR_SAVE.md` §1.3 补记。
+  **`docs/save-v1.sample.json` 与 `SCHEMA_V1_FINGERPRINT` 相对 HEAD 零 diff**（`git diff --exit-code` 通过）；
+  `CURRENT_SCHEMA_VERSION` 仍为 1。我对仓库的唯一改动仍是本文件。
+- **最终结论：有条件通过**（1 条 P3 + 1 项未验证）。七项硬性要求里六项独立复验通过；
+  P3 是变异汇总的**分类口径差异**（施工把数组容器路径的 3 种变异全计「跳过」，我按实际寻址结果分成
+  「跳过 + 放行」），逐例总数与「不得放行真实字段变异」的实质结论一致，但**施工打印的汇总口径会让人误读**，
+  建议改正；**smoke 因用户新规（浏览器操作统一走 `ego-browser`，本机未装）改判未验证**。
+
+### 逐项复验结果（全部本会话自跑；探针独立于施工测试）
+
+| # | 要求 | 结果 |
+|---|---|---|
+| 1 | 不改 schemaVersion / 指纹 / 样例 / 99+4 路径集 | ✅ `CURRENT_SCHEMA_VERSION=1`、`SCHEMA_V1_FINGERPRINT='f53a0736d782d657'`、样例零 diff；`SAVE_V1_PATHS=99`、`SAVE_V1_OPTIONAL_PATHS=4`、`SAVE_V1_ALLOWED_PATHS=103`；样例自身指纹仍等于常量；样例实际路径 ⊆ 允许集（0 越界） |
+| 2 | 冻结样例五入口 | ✅ `validateSaveV1` / `assertSaveV1` / `parseSaveText` / `store.read()` / `store.importText()` **五个入口全部不抛/ok**（我各跑一遍，未采信施工断言） |
+| 3 | 字段级类型+范围/枚举、缺键拒、不补默认、可空 vs 缺键 | ✅ **22 类拒绝全过**：`world.now` 负数/非数字、`weather.kind` 非法枚举、`weather.intensity` 越界 1.5、`villagers[].mode`/`facing`、`tasks[].status`、`settled[].source`、`buildings[].zone`、`palette.roof` 负数、`faith.points` 负数、`nextTaskNumber<1`、`meta.savedReconciled` 非布尔、`constructions remaining>total`、`pos.x` 换对象、新增未知字段（第 3 层）；**缺键 4 例全拒**（删除 `weather.remainingMs`/`routineIndex`/`savedReconciled`、显式置 `undefined`——`requireKey` 用 `hasOwnProperty` + `undefined` 双判，`undefined` 确实算缺）；**11 条可空字段逐条双验**：置 `null` 放行、删键仍拒（两者没混） |
+| 4 | 变异汇总对数 | ⚠️ 总量与可空数对得上，**分类口径有差异**（见 P3） |
+| 5 | 单一校验器 | ✅ `parseSaveText → assertSaveV1 → validateSaveV1` 三层串联，`read()`(L164) 与 `importText()`(L247) 都走 `parseSaveText`；`save-store.ts` 里 `??` 只剩 `options.storage/wallClock/onWarning`、`parsed.version ?? 0` 文案、`saveNotices[0] ?? null`——**无一处字段兜底**；`save-store.ts` 自己不调 `validateSaveV1`（无第二套平行校验） |
+| 6 | ADR §1.3 | ✅ 写清三级分工（字段级 / 嵌套键集 / 路径 ⊆）、明确「删字段路径集合拦不住、必须第一级兜住」「可空字段放行 null 但缺键照样拒」「path[]/pendingRoute[] 为空数组合法、元素必须完整 {x,y}」，并标注 task-32 由此关闭、v2 再以正式 schema 承接 |
+| 7 | 门禁 + smoke | ✅ `npm run check` **exit 0**；`npm run test:inprocess` **190/190**；`save-validate` 单跑 **10/10**；audit **16/8/1/23**、`--strict` **exit 0**、整门禁 **exit 0** |
+
+> **用户新规（2026-10-20，团队记忆）**：所有需要浏览器的操作统一走 `ego-browser` skill，
+> **不再自行 launch Chromium、不再用 CDP/Playwright 自连**。本机尚未安装 ego lite（`ego-browser`
+> 不在 PATH，Windows 需用户从 https://lite.ego.app/ 安装并完成 onboarding）。
+> 因此本轮 **smoke 复跑改判「未验证」**：我先前（09:53）用 loader hook + connectOverCDP 跑出的
+> **114/114 exit 0** 按新规**不再作为验收证据**（方法已废止），保留在此仅作历史记录；
+> 装好 ego-browser 后由 Chief 通知，我先 `skill` 加载再重跑。
+
+### P3：变异汇总的分类口径不一致（建议施工改正，不影响实质结论）
+
+施工打印（`save-validate.test.ts` 汇总行）：
+- 主表 `99 × 3 = 297`：全拒 **253**、可空置空 **11**、跳过 **33**、放行 **0**
+- 元素内 `79 × 3 = 237`：全拒 **221**、可空 **10**、跳过 **6**、放行 **0**
+
+我用**自己的寻址原语**重数（同一样例、同一三种变异）：
+- 主表 `297`：拒 **264**、可空置空 **11**、跳过 **11**、放行 **11**
+- 元素内 `237`：拒 **223**、可空 **10**、跳过 **2**、放行 **2**
+
+**差异定位**：11 + 2 个「放行」全部是 **11 条数组容器路径**（`world.activities[]`、`buildings[]`、`constructions[]`、`pending[]`、`props[]`、`roads[]`、`settled[]`、`tasks[]`、`villagers[]`、`villagers[].path[]`、`villagers[].pendingRoute[]`）的**「置 null」**变异。我的原语把容器路径的末段当成可写键（写成 `arr[''] = null`），加出一个**空字符串键的非索引属性**——`JSON.stringify` 会丢掉它，真实读写链路到不了这个状态，所以被放行；施工的 `locate()` 对这类路径返回「寻不到」→ 整条计跳过。
+
+**结论**：三方总数一致（297/237）、可空数一致（11/10）、**没有任何真实字段变异被放行**；差异只是「容器路径的置 null」该记跳过还是记放行。但施工打印「放行 0」而按另一套寻址会得到 11+2，**口径不一致会让人误判**，建议在汇总里把这类单列（例如「容器路径不可寻址 × N」）或统一寻址原语。
+
+### 遗留与未验证
+
+- 无 P0/P1/P2。
+- **未验证：smoke 复跑**。原因：用户新规要求浏览器类操作统一走 `ego-browser` skill，禁止再自行
+  launch Chromium 或 CDP/Playwright 自连；本机尚未安装 ego lite（`ego-browser` 不在 PATH）。
+  我 09:53 那次 114/114 是用已废止的 loader hook 方法跑的，**不计入验收**。装好 ego-browser 后重跑。
+- **待用户评审**：字段级校验的报错文案对最终用户是否可读（我核了「指名路径 + 理由」的机器可读性，
+  如 `存档字段校验不通过：world.weather.intensity 必须在 0..1，实际 1.5`）。
+
+### 收口
+
+- 本轮未改动任何项目文件（只读验收 + TEMP 探针 `qa32-independent.mjs` / `qa32-tally.mjs`）；`git status` 与进场快照一致。
+- 自起的 dev 5188 已停；CDP Chrome 未关。
