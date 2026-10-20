@@ -65,7 +65,7 @@
   4. **草**：簇数从 2–3 降到 1–2（`tilemap.ts:138`），并把 `tuft` 优先放在**贴路边 2px 内**（`tilemap.ts:193-196`，方向判定 `nearestNonGrassSide` `:209`），让边界长草而不是满地噪点。
 - **【必须遵守】缝线一律实心、不用 alpha**（2026-10-20 补）：`soil` α0.25 叠在 `stone` 上合成 `#323833`，对底色 **dL\* 只有 3.3（luma 落差 7.3）**——与 P0-1 刚删掉的网格线是同一个手法，画了等于没画。改实心 `soil` 后 dL\* **14.1（luma 30.3）**，与已证明可读的角色墨线（dL\* 18.1）同量级。α0.5 也只有 dL\* 6.9，仍不达标。
 - **【必须遵守】不用 `trim` 做地面高光**：`trim` vs `plaza` dL\* **37.7**，是墨线基准的 2.1 倍，会读成白线；上缘高光改用 `plaza`（对 `soil` 描边 dL\* 20.8，对 `stone` 6.7）。
-- **【必须遵守】`grass` 的 speck 要换 token**：现状 `TERRAIN_SPECK.grass = grassLit`（`palette-data.ts:65`）对底色 dL\* **3.0 = 不可见**，而 grass 占画布 **37.15%**——这是「一片同亮度色块」的第一来源。建议改 `soil`（dL\* **11.3**、dE 12.8，且 soil 与 grass 同色相族 hue 148.5 vs 145.1，读起来是「草的暗部」而非脏点）。覆盖面积 3.1%–4.7%/tile → 全画布约 **1.5%**，是已删网格线面积（实测 **9.57%**）的 16%，且不成线，不会读回坐标纸。
+- **【必须遵守】`grass` 的 speck 要换 token**：现状 `TERRAIN_SPECK.grass = grassLit`（`palette-data.ts:65`）对底色 dL\* **3.0 = 不可见**，而 grass 占画布 **37.15%**——这是「一片同亮度色块」的第一来源。建议改 `soil`（dL\* **11.3**、dE 12.8，且 soil 与 grass 同色相族（OkLCH hue 148.5 vs 145.1；HSV 口径为 130.0 vs 124.3，QA 实测——两个色彩空间数值不可直接比较，但结论一致：同色相族），读起来是「草的暗部」而非脏点）。覆盖面积 3.1%–4.7%/tile → 全画布约 **1.5%**，是已删网格线面积（实测 **9.57%**）的 16%，且不成线，不会读回坐标纸。
 - **文件:行**：`tilemap.ts:70-87`（`drawTexture` 分派）、`:90-95`（`drawFarmRows`）、`:98-120`（`drawSlabSeams`）、`:127-147`（`drawGrassClusters`）、`:156-206`（`drawDressing`）、`:138`（簇数）、`:193-196`（`tuft`）；`decor.ts:31-55`（路径三段）；`palette-data.ts:64-70`（`TERRAIN_SPECK`）。
 - **不加色**：`soil / plaza / stone / grassLit / grass` 全在 16 色内。
 

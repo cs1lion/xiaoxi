@@ -364,6 +364,98 @@ trim α0.55 高光未改（ΔL* 21.31，本就可辨；保留原因是 16 色内
 白线」的替代色，待美术裁决），不影响地形边判定。
 
 **P0-4 结论**：**通过**——α 合成色四个声明数全部独立复算吻合，`#323833` 截图实测归零，
+`pctInWorld16` 98.06% 实测吻合。
+
+> **基线注记**：本节全部测量基于 HEAD `f84da49`。其后施工正在改 `decor.ts` 的小径 α
+> （工作区未提交），小径相关数值（trim 高光、板缝、描边的 ΔL* 与像素占比）会随之变化；
+> 重测小径相关项时须以新 HEAD 为准，本节数字仅对 `f84da49` 成立。
+`pctInWorld16` 98.06% 实测吻合。
 `pctInWorld16` 98.06% 实测吻合。P0-4 的像素级统计（农田垄线位置、石板缝、簇数、贴边
 装饰）为代码级核实（Node 光栅化被 phaser 在 Node 下缺可选依赖 phaser3spectorjs 阻塞，
 未独立复现，标注为施工自报）。
+
+---
+
+## 12. L794 pageerror 等价：实现规格（待收口前统一补）
+
+**背景**：原 `scripts/smoke.mjs` 的 L780/L794 用 Playwright 的 `pageerror` 事件流核验
+「页面加载无 JS 报错 / 全程无 JS 报错」。ego-browser 不提供该事件流，当前以 3 项 MAN
+单列记账（间接覆盖：Oracle 可调用 + 套件跑完 + 清档/reload 不崩）。该覆盖抓不住**非致命**
+未捕获异常（rAF 回调抛错被 Phaser 吞掉之类）。
+
+**方案**：ego 的 CDP 通道已通（rAF 替身就是走 `Page.addScriptToEvaluateOnNewDocument`
+注入的），同一 session 上补 `Runtime` 域即可拿到真正的 pageerror 等价——且比 Playwright 的
+pageerror 更全（覆盖未捕获异常含 Promise rejection）。
+
+**实现规格**（落在 `smoke-ego.mjs` 或抽出的共用 helper）：
+
+1. CDP session attach 后（与 rAF 注入同一 session），调用 `Runtime.enable`；
+2. 监听 `Runtime.exceptionThrown`，把每条事件的 `{ timestamp, exceptionDetails.text,
+   url, lineNumber, columnNumber }` 收集进数组 `pageErrors`；
+3. （可选加强）同时监听 `Runtime.consoleAPICalled`，筛 `type === "error"` 的条目进
+   `consoleErrors`——console.error 不是 pageerror，但作为附加信号单独记账、不混入断言；
+4. **断言**：套件结束时 `assert.equal(pageErrors.length, 0)`——这就是 L794 的等价；
+   L780 保留现有 S-L780 等价（Oracle 可调用 + canvas/overlay 挂载），exceptionThrown
+   额外覆盖加载窗口期；
+5. **通过条件**：全程 0 条未捕获异常。consoleErrors 只记账不断言（避免把既有 warning
+   级输出误判为失败）；
+6. **自验（变异探针，必须做）**：实现后临时在页面脚本里插一句 `throw new Error('qa-probe')`，
+   确认 `pageErrors` 收到 1 条、断言变红；拔掉探针恢复绿。没有这一步就不能证明监听真的通；
+7. **边界**：`Runtime.enable` 须在 goto 之前或之后立刻调用（事件不回溯）；若 smoke 中途
+   reload 页面（S-L767 清档后 reload），需确认 session 保持、事件继续收集。
+
+**验收**：实现 + 自验通过后，3 项 MAN 里的 L780/L794 两条从「不可自动化」升级为「已自动化」，
+L548（元素级截图）那条保留（ego 无 locator.screenshot，已降级整页截图且断言 L544 仍执行）。
+
+---
+
+## 13. P0-3 depth 回归测试的复验口径（`building-depth.test.ts` 落地后执行）
+
+**背景**：`7eade0a`（建筑三层深度）没有配套提交测试，遮挡行为无回归保护——这是 QA 在
+P0-3 复验时提的条件。施工已在补 `building-depth.ts` + `building-depth.test.ts`（工作区
+WIP，未提交）。本节是落地后的独立复验口径，**现在写好，提交后直接执行**。
+
+**测试应断言的不变量（强形式，不是锁常量）**：
+
+1. 深度序：`back(−2) < body(0) < 站门口角色(+24) < front(+32) < 门口下一格角色(+40)`；
+2. 角色深度公式与 `villager.ts:60` **同一把尺子**：`ALTITUDE + py + 8`，
+   `py = (pos.y+1)×TILE_PX`——测试里若复写公式，必须注释链回源码行号（防副本漂移）；
+3. `baseY = py + h = door.y×16` 的推导前提（prefabs 四栋 `door.y == footprint.h`）；
+4. 台阶归 body 层（不归 front）的遮挡方向。
+
+**弱形式识别**：只写 `assert.equal(BUILDING_DEPTH.front, 32)` 锁常量值的测试**不算**——
+它锁的是数字不是不变量，改公式时不会红。见到这种形式记为 P3 并要求改不变量形式。
+
+**变异探针协议（落地后由 QA 执行，逐个改→跑→还原）**：
+
+| # | 变异 | 预期 | 验什么 |
+|---|---|---|---|
+| M1 | `BUILDING_DEPTH.front` 32 → 12（旧规范值） | **必须红** | 挡住「檐压不住任何人」的回退 |
+| M2 | `BUILDING_DEPTH.front` 32 → 45 | **必须红** | 挡住「檐压到门口下一格的人」 |
+| M3 | `BUILDING_DEPTH.back` −2 → +5（高于 body） | **必须红** | 挡住地面层顺序颠倒 |
+| M4 | 角色公式偏移 +8 → +0（若测试复写了公式） | **必须红** | 挡住「两把尺子」漂移 |
+| M5 | 台阶从 body 移到 front（若可参数化） | **必须红** | 挡住台阶横穿角色身体 |
+
+每个变异：改 → `npm run test:inprocess` 确认目标测试红（记下红的用例名）→ 还原 → 确认
+全绿。M1/M2 是核心（这两个不红就说明测试没锁住遮挡语义）；M3–M5 视测试实现可达性。
+
+**通过条件**：M1、M2 至少两条探针能让目标测试变红，且还原后 206+ 条全绿。若测试只锁
+常量、探针不改数字就无法触发，判 P3 并要求补不变量断言。
+
+---
+
+## 14. 待办总账（2026-10-20 晚）
+
+1. **L794**：按 §12 规格实现 + 自验，收口前统一补（Chief 已采纳）；
+2. **P0-3 depth 测试**：施工 WIP 中（`building-depth.ts` + `building-depth.test.ts`），
+   落地后按 §13 执行变异探针复验；
+3. **P0-3 运行时遮挡**：Chief 补采「交付态站门口」截图（当前 p0-3 那张角色在屋里
+   `visible=false`，看不到檐压人），落地后 QA 做像素级判定（檐色是否压在角色头顶）；
+4. **A1 三问 + A2 人眼判定**：五步都没跑，需人工观察者排期；
+5. **S5 世界端 e2e**：服务端已落地（71 测试 + 12/12 live probe 绿），缺「真实派单 →
+   像素世界角色去干活 → 台账回执」一环，合同标「待 QA」——QA 出验证协议，Chief 代跑
+   浏览器部分；
+6. **小径 trim 高光**：ΔL* 21.31 本就可辨，保留待美术裁决（16 色内无「比 plaza 亮又不
+   读成白线」的替代色）；
+7. **源码冻结**：施工正在改 `buildings.ts`/`decor.ts`/`smoke-ego.mjs`，冻结前 QA 不跑
+   浏览器类验证（HMR 重载会冲掉 `window.Oracle`）。
