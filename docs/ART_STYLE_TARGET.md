@@ -1,6 +1,6 @@
 # ART_STYLE_TARGET — 像素世界视觉升级目标规格（2026-10-20）
 
-> 作者：像素美术 II · 状态：**已逐条核对现状代码**（2026-10-20 复核：本文全部 file:line 与 worktree 当前源码一致；待 Chief 批准后由像素世界施工落进 `docs/PIXEL_WORLD_VISUAL_UPGRADE_PLAN.md`）
+> 作者：像素美术 II · 状态：**P0 四步已落地**（2026-10-20 18:05 复核，基线 HEAD `7514246`：§1.1 落地 `260ad93`、§1.2 落地 `899611d`、§1.3 落地 `7eade0a`、§1.4 落地 `7514246`；本文 file:line 已按 `7514246` 实测修正）。**注意**：行号随每次施工变动，引用一律以「文件 + 符号名」为准（`tilemap.ts` 在 P0-4 从 127 行涨到 237 行）
 > 依据：`docs/PIXEL_WORLD_RESEARCH.md`（Stardew / AI Town / Generative Agents / Habitica 反面教材）、`docs/ART_SPEC.md` v0.2（已定稿）、`docs/ART_S4_OBJECTIVE_REVIEW.md`（现状实测）、`docs/PIXEL_WORLD_ARCHITECTURE.md`
 > 硬约束（不得破）：世界 **16 色** + UI **8 色**，加色必须 ADR + 用户批准；480×320 / 16px tile / 固定 2× 整数缩放；12fps 只做动画采样、位置取整；静态文字用图标、动态中文走 DOM overlay；alpha 只用于阴影/压暗/脉冲（ART_SPEC §2.4）。
 > 说明：研究文档里「不引 Phaser / 480×300 / 16×32 角色」是**已被 D1-A/D6-A 取代的历史提案**，本文按现状写。
@@ -10,8 +10,8 @@
 
 | # | 症状 | 证据 |
 |---|---|---|
-| D1 | **通铺 1px 网格线**把地面画成了坐标纸 | `src/render/tilemap.ts:98-111`（`drawGridLines`，soil α0.25，52 条贯穿线：31 竖 + 21 横） |
-| D2 | **每格一个纯色方块**，材质之间零过渡 | `src/render/tilemap.ts:29-31`（逐格 `fillRect` 整格）；地形按分区整块分配 `src/world/grid.ts:275-286` |
+| D1 | **通铺 1px 网格线**把地面画成了坐标纸 | `src/render/tilemap.ts:224-237`（`drawGridLines`，soil α0.25，52 条贯穿线：31 竖 + 21 横）— **已修**：`260ad93` 改为 `?debug-grid=1` 才画 |
+| D2 | **每格一个纯色方块**，材质之间零过渡 | `src/render/tilemap.ts:31-32`（逐格 `fillStyle` + `fillRect` 整格）；地形按分区整块分配 `src/world/grid.ts:275-286` |
 | D3 | 画布 88% 是 4 个平色：grass 41.1% / stone 21.2% / soil 16.6% / farm 9.4% | S4 实测 nearest-token（`ART_S4_OBJECTIVE_REVIEW.md` §2） |
 | D4 | **建筑只有一层深度**，屋顶/墙/门廊/投影同属一个容器 | `src/render/buildings.ts:31-33`、`:182`（`depth = ALTITUDE + baseY` 单点） |
 | D5 | **道具没有深度**，树/灯/旗永远压在角色下面 | `src/render/decor.ts:23`（props 容器未设 depth，落默认层） |
@@ -26,8 +26,8 @@
 ### 1.1 删通铺网格线（批次第一步，最便宜、见效最快）
 
 - **偷什么**：Stardew 的地面读起来是「材质」，不是「格子」——没有坐标纸感。
-- **怎么落地**：`drawGridLines`（`tilemap.ts:98-111`）用 `lineStyle(1, WORLD.soil, 0.25)` 铺满全图 52 条贯穿线（31 竖 + 21 横），改为**条件调用**：在入口读 `location.search`，与 `SandboxScene.ts:154` 的 `new URLSearchParams(window.location.search)` 同法；`?debug-grid=1` 才画，默认不画。不碰协议、不加字段。
-- **文件:行**：`tilemap.ts:98-111`（条件化）、`:35`（调用点）、`SandboxScene.ts:154`（同法参照）。
+- **怎么落地**：`drawGridLines`（`tilemap.ts:224-237`）用 `lineStyle(1, WORLD.soil, 0.25)` 铺满全图 52 条贯穿线（31 竖 + 21 横），改为**条件调用**：在入口读 `location.search`，与 `SandboxScene.ts:154` 的 `new URLSearchParams(window.location.search)` 同法；`?debug-grid=1` 才画，默认不画。不碰协议、不加字段。**已落地 `260ad93`。**
+- **文件:行**：`tilemap.ts:224-237`（条件化）、`:38-41`（注释 :38-39 / `params` :40 / 调用 :41）、`SandboxScene.ts:154`（同法参照）。
 - **不加色**：删的是 `soil` α0.25 合成线，不新增任何色。
 - **落地后硬约束（批次要求）**：`soil` α0.25 铺全图会污染所有屏幕统计——落地后必须 ① 重跑 `audit-palette`（源码色数 16/8 不变、屏幕色会变）② 重拍 `demo-*`/`slice-*` 基线截图 ③ 检查 smoke/e2e 是否含像素断言需重录；本文 §0 与 `ART_S4_OBJECTIVE_REVIEW.md` 里 `W02 soil 16.6%` 这类数字随之失效，需重测。
 
@@ -37,8 +37,8 @@
 - **怎么落地**：新建 `src/render/terrain-edges.ts`（纯函数 + 绘制，~180 行），对每格算 **4 邻边掩码（16 值）+ 4 内凹角修正 = 20 变体**（47 块 blob 全集的可用子集），只画 1px 边界：
   - 亮边在**上/左**用该材质亮一档 token（草→`grassLit`、石→`plaza`）；暗边在**下/右**用 `soil`；
   - 材质高度序：`tree > grass > farm > stone > plaza`，边只画在**高材质一侧**；
-  - 接线：`tilemap.ts:29-31` 每格底色之后调用 `drawTileEdge(...)`。
-- **文件:行**：`tilemap.ts:29-31`（接线）；新增 `terrain-edges.ts`。
+  - 接线：`tilemap.ts:31-34` 每格底色之后调用 `drawTileEdge(...)`。**已落地 `899611d`**（`terrain-edges.ts` 197 行）。
+- **文件:行**：`tilemap.ts:31-34`（接线）、`:45-58`（`neighborsOf`）；`terrain-edges.ts`（已落地 `899611d`）。
 - **不加色**：只用 `soil / plaza / stone / grassLit` 现有 token。
 
 ### 1.3 建筑多层深度（屋顶 / 墙体 / 门廊 / 投影）
@@ -59,12 +59,38 @@
 
 - **偷什么**：Stardew 的 tilled soil 垄线、石板接缝、路径镶边——材质靠**内部结构**区分，不靠加色。
 - **怎么落地**（全部改 `tilemap.ts` 与 `decor.ts` 的既有绘制函数）：
-  1. **路径**（`decor.ts:31-41`）由「内缩矩形」改三段：1px `soil` 描边 + `plaza` 面 + **上缘 1px `trim` 高光**；拐角补角砖，读成「铺过的路」；
-  2. **农田**（`tilemap.ts:43-62` 按 terrain 分支）：横向垄线，每 4px 一条 1px `soil`，代替随机簇；
-  3. **石 / 广场**：石板接缝（横 2×1、每 8px 一段 1px `soil` α0.25）代替随机 2×2 簇；
-  4. **草**：簇数从 2–3 降到 1–2（`tilemap.ts:54`），并把 `tuft` 优先放在**贴路边 2px 内**（`tilemap.ts:81-86`），让边界长草而不是满地噪点。
-- **文件:行**：`tilemap.ts:43-62`（分支纹理）、`:65-96`（草簇贴边）、`:54`（簇数）；`decor.ts:31-41`（路径三段）。
-- **不加色**：`soil / plaza / stone / trim / grassLit / grass` 全在 16 色内。
+  1. **路径**（`decor.ts:31-41`）由「内缩矩形」改三段：1px `soil` **实心**描边 + `plaza` 面 + 上缘 **1px `plaza` 亮一档**；拐角补角砖，读成「铺过的路」；
+  2. **农田**（`tilemap.ts:90-95` `drawFarmRows`）：横向垄线，**每 4px 一条 1px `soil` 实心**（y=2,6,10,14），代替随机簇；
+  3. **石 / 广场**：石板接缝（横 2×1、每 8px 一段 1px `soil` **实心**）代替随机 2×2 簇；
+  4. **草**：簇数从 2–3 降到 1–2（`tilemap.ts:138`），并把 `tuft` 优先放在**贴路边 2px 内**（`tilemap.ts:193-196`，方向判定 `nearestNonGrassSide` `:209`），让边界长草而不是满地噪点。
+- **【必须遵守】缝线一律实心、不用 alpha**（2026-10-20 补）：`soil` α0.25 叠在 `stone` 上合成 `#323833`，对底色 **dL\* 只有 3.3（luma 落差 7.3）**——与 P0-1 刚删掉的网格线是同一个手法，画了等于没画。改实心 `soil` 后 dL\* **14.1（luma 30.3）**，与已证明可读的角色墨线（dL\* 18.1）同量级。α0.5 也只有 dL\* 6.9，仍不达标。
+- **【必须遵守】不用 `trim` 做地面高光**：`trim` vs `plaza` dL\* **37.7**，是墨线基准的 2.1 倍，会读成白线；上缘高光改用 `plaza`（对 `soil` 描边 dL\* 20.8，对 `stone` 6.7）。
+- **【必须遵守】`grass` 的 speck 要换 token**：现状 `TERRAIN_SPECK.grass = grassLit`（`palette-data.ts:65`）对底色 dL\* **3.0 = 不可见**，而 grass 占画布 **37.15%**——这是「一片同亮度色块」的第一来源。建议改 `soil`（dL\* **11.3**、dE 12.8，且 soil 与 grass 同色相族 hue 148.5 vs 145.1，读起来是「草的暗部」而非脏点）。覆盖面积 3.1%–4.7%/tile → 全画布约 **1.5%**，是已删网格线面积（实测 **9.57%**）的 16%，且不成线，不会读回坐标纸。
+- **文件:行**：`tilemap.ts:70-87`（`drawTexture` 分派）、`:90-95`（`drawFarmRows`）、`:98-120`（`drawSlabSeams`）、`:127-147`（`drawGrassClusters`）、`:156-206`（`drawDressing`）、`:138`（簇数）、`:193-196`（`tuft`）；`decor.ts:31-55`（路径三段）；`palette-data.ts:64-70`（`TERRAIN_SPECK`）。
+- **不加色**：`soil / plaza / stone / grassLit / grass` 全在 16 色内。
+
+### 1.4b P0-4 落地后的客观复核（2026-10-20 18:05 事后补，供返工参考）
+
+施工按 §1.4 落地 `7514246`，但**踩到本文同一节警告过的两个坑**。用 `dL*` ≥8 门槛逐项实测（截图 `pixel-world/eval/screens/p0-4-{textures-3x,zoom-10x}.png` 反解合成色）：
+
+| 项 | 实现 | 合成色 | luma 差 | `dL*` | 判定 |
+|---|---|---|---:|---:|---|
+| 农田垄线 | `soil` 实心 | `#1b211c` | 20.9 | 10.0 | 偏弱，可接受 |
+| 小径 soil 描边 | `soil` α0.85 over plaza | `#222822` | 38.7 | 17.4 | 通过 |
+| 小径 trim 上缘 | `trim` α0.55 over plaza | `#908058` | 51.5 | 21.3 | **过亮**（墨线基准 18.1 的 1.18×），应降为 `plaza` |
+| 石板横缝/竖缝 | `soil` **α0.25** over stone | `#323833` | 7.3 | **3.3** | **不通过**：与 P0-1 已删网格线同一 α 手法 |
+| 广场板面高光 | `stone` α0.35 over plaza | `#444940` | 5.7 | **2.5** | **不通过** |
+| 草地 2×2 簇 | `grassLit` 实心 over grass | `#334234` | 6.7 | **3.0** | **不通过**：`TERRAIN_SPECK.grass` 未换 token |
+| 草簇 tuft | `grassLit` α0.9 over grass | `#324133` | 5.7 | **2.6** | **不通过** |
+
+**返工建议（P1，全部 16 色内、不加色）**：
+1. `drawSlabSeams` 的 `soil` α0.25 → **实心 `soil`**（`dL*` 3.3 → 14.1）；广场板面高光 `stone` α0.35 直接删（2.5 本就不可见）。
+2. `TERRAIN_SPECK.grass` 由 `grassLit` 改 **`soil`**（`dL*` 3.0 → 11.3），tuft 同步改实心 `soil`。**这一项影响最大**：grass 占画布 37.15%，是「一片同亮度」的第一来源。
+3. 小径上缘 `trim` α0.55 → `plaza`（对 soil 描边 `dL*` 20.8，足够，不与草地抢亮度）。
+
+**已通过、不要动的**：农田垄线（10.0）、小径 soil 描边（17.4）、小径逐边判断与草地贴边装饰（结构性改进，实测 89% 贴边率）。
+
+---
 
 ### 1.5 角色接地与遮挡
 
