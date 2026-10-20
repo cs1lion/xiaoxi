@@ -1106,6 +1106,20 @@ retry=3 claude、1 blocked retry=0 scribe），全在隔离临时库。
 **时间线备注**：Chief 的三路径追查在 b3bc7b8 上完成（当时路径 3 未修、施工认领明早
 修）；f4200e5 于 01:10 落地把路径 3 也修了。**当前 HEAD 两条缺陷路径均已修复。**
 
+**验证边界（CH-1 补，Chief 与施工对齐，2026-10-21）**：
+
+D-1 两条缺陷路径（live-sync 撤单走 `abandonActiveTask`、读档后首次对账缺席走
+`removeTask`）各有单测覆盖 + 共用方法的变异探针；**smoke 只覆盖 live 路径**，
+结构上测不到读档对账——smoke 是新建 world 跑的，`ledgerReconciled` 默认为 `true`，
+而 `sync` 只在 `!ledgerReconciled` 时才进 `reconcile`（simulation.ts:191 / :404）。
+已重跑 smoke 确认无回归（116/116），但那只能证明「没把别的东西弄坏」，不能证明读档
+分支被覆盖。
+
+读档分支的直接证据来自单测本身：`toSave → fromSave → 首次 sync 缺席` 精确构造了
+任务卡要求的场景，断言不变量（mode / taskId / visible / 位置可走 / 再跑 12 秒位移），
+比 smoke 的间接覆盖更强。若将来需要 e2e 级证据，需另造「带存档启动 + 首次 sync」用例，
+当前不在 D-1 范围内。
+
 **D-1 判定：已关闭**（P2 → 两路径修复 + 3 条回归测试 + QA 变异探针 + 门禁全绿）。
 e2e 缺陷清单：P2 清零；剩 2 条 P3（驱动采样全部角色、E 的 found=false 分支未跑）。
 
