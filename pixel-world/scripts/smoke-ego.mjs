@@ -274,14 +274,31 @@ let page;
 try {
   page = task.page('p1');
 
-  // 先把窗口拉回最大化。ego 的窗口被最小化时，page.screenshot() 会整轮中断在
-  // `Cannot capture a screenshot while the window is minimized`；而窗口是否最小化
-  // 不受脚本控制（用户切窗口、系统锁屏都会导致）。这一步把环境恢复到可截图状态，
+  // 先把窗口恢复到可截图状态。
+  //
+  // 为什么需要：ego 窗口被最小化时，page.screenshot() 会整轮中断在
+  // `Cannot capture a screenshot while the window is minimized`；而窗口状态不受脚本
+  // 控制（用户切窗口、系统锁屏都会导致）。
+  //
+  // 为什么必须**先 normal 再 maximized**：CDP 不允许从 fullscreen/minimized 直接跳到
+  // maximized，会报 `To maximize a minimized or fullscreen window, restore it to normal
+  // state first`。这是一条实测踩到的心跳限制，不是可选的保险。
+  //
   // 失败不致命：真拿不到窗口就当没发生，让后续截图自己报错。
   try {
     const win = await page.cdp('Browser.getWindowForTarget', {});
     if (win !== null && typeof win.windowId === 'number') {
-      await page.cdp('Browser.setWindowBounds', { windowId: win.windowId, bounds: { windowState: 'maximized' } });
+      // 第一步：先落回 normal（从 fullscreen / minimized 出发的唯一合法前置状态）
+      await page.cdp('Browser.setWindowBounds', {
+        windowId: win.windowId,
+        bounds: { windowState: 'normal' },
+      });
+      // 给窗口管理器一点时间完成状态切换，再最大化；直接连发会被拒。
+      await pause(400);
+      await page.cdp('Browser.setWindowBounds', {
+        windowId: win.windowId,
+        bounds: { windowState: 'maximized' },
+      });
     }
   } catch {
     /* 窗口操作不可用时继续，不因为环境限制让整轮 smoke 直接失败 */
