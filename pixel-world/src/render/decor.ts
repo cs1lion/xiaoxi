@@ -49,11 +49,18 @@ export function createDecorView(scene: Phaser.Scene, originX: number, originY: n
         if (!isRoad(cell.x, cell.y + 1)) roads.fillRect(px + 1, py + TILE_PX - 2, TILE_PX - 2, 1);
         if (!isRoad(cell.x - 1, cell.y)) roads.fillRect(px + 1, py + 1, 1, TILE_PX - 2);
         if (!isRoad(cell.x + 1, cell.y)) roads.fillRect(px + TILE_PX - 2, py + 1, 1, TILE_PX - 2);
-        // 上缘高光：光从左上打，受光面在顶边。用 trim 让路面「亮起来」，与草地分开。
-        roads.fillStyle(WORLD.trim, 0.55);
-        if (!isRoad(cell.x, cell.y - 1)) roads.fillRect(px + 2, py + 2, TILE_PX - 4, 1);
-        // 石材板缝：路面内部 8px 一道，只用 stone，读成「铺过的路」而不是一块毡。
-        roads.fillStyle(WORLD.stone, 0.6);
+        // 上缘高光已删除：原实现是 trim α0.55 叠在 plaza 面上，合成 #908058，
+        // 对路面色 ΔL* 21.3 —— 比已证明可读的角色墨线（ink vs grass，18.1）还高 1.18 倍，
+        // 会读成一条白线而不是「石板受光」。
+        // 规格原本要求改成实心 plaza，但路面本身就是 plaza（实心 plaza 对 plaza ΔL*=0.0），
+        // 改过去等于把白线换成隐形线，两种都不对。16 色内没有「比 plaza 亮一档、又不刺眼」的
+        // 可用 token（stone 更暗，trim/amber/pale 都过亮），所以直接删掉这条线 —— 与
+        // 「广场板面高光已删除」同一处理：留一条看不见的线比没有更糟。
+        // 路面与地面的分界由下面那条实心 soil 描边承担（对 plaza ΔL* 20.8，强度已足够）。
+        // 石材板缝：路面内部 8px 一道，读成「铺过的路」而不是一块毡。
+        // 改实心：原 stone α0.6 叠在 plaza 上合成 #40453e，对路面色 ΔL* 只有 4.2（刚过不可见下限）；
+        // 实心 stone 是 6.7，落在可读区间。这是同一批 α 混合返工的最后一条。
+        roads.fillStyle(WORLD.stone, 1);
         roads.fillRect(px + 1, py + TILE_PX / 2, TILE_PX - 2, 1);
       }
     },

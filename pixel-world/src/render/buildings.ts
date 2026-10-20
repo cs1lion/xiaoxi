@@ -19,29 +19,10 @@ import Phaser from 'phaser';
 import { TILE_PX } from '../world/setup.ts';
 import type { PlacedBuilding, WorkstationSnapshot } from '../world/types.ts';
 import { WORLD } from '../world/palette-data.ts';
+import { BUILDING_DEPTH, buildingBaseY, layerDepth } from './building-depth.ts';
 
-/**
- * 三层相对 baseY 的 depth 偏移。三个值都是**像素**，在 ALTITUDE 之上。
- *
- * front 为什么是 32（而不是美术文档 §1.3 写的 12）
- * ------------------------------------------------
- * 角色 depth 是 `ALTITUDE + py + 8`，而 py = (pos.y + 1) * TILE_PX。
- * 门口格恒在占地底边**下一行**（prefabs.json 的 door.y == footprint.h，三栋铺子实测
- * 都是差 16px），所以：
- *
- *   baseY            = origin.y*16 + h = door.y * 16          ← 门口格的**上**边
- *   角色站门口：py    = (door.y + 1) * 16 = baseY + 16
- *   角色站门口：depth = baseY + 16 + 8     = baseY + 24
- *   再往下一格：depth = baseY + 32 + 8     = baseY + 40
- *
- * 要让檐压住「站在门口」的人，需要 front > baseY + 24；要同时不压到门口再下一格的人，
- * 需要 front < baseY + 40。取区间中点 baseY + 32。
- *
- * 文档原来的 +12 → baseY+12 < baseY+24，实测压不住任何人（檐完全在人后面），
- * 等于这一层白做。此处按文档写的**意图**（站门口时头顶被檐压 1–2px）取正确值，
- * 若要回到 +12 只改这一个常量即可。
- */
-export const BUILDING_DEPTH = { back: -2, body: 0, front: 32 } as const;
+export { BUILDING_DEPTH };
+
 
 export interface BuildingView {
   /** 地面层：三步投影 + 门口光池，depth = ALTITUDE + baseY - 2。 */
@@ -146,7 +127,8 @@ export function createBuilding(
     progress,
     sign,
     chimneyWorld: new Phaser.Math.Vector2(px + w - 10, py - 2),
-    baseY: py + h,
+    // baseY 用纯函数算，测试与实现共用同一个算式，不会各写一套而漂移。
+    baseY: buildingBaseY(py, building.footprint.h),
   };
 }
 
@@ -319,9 +301,9 @@ export function updateBuilding(
   // 三层各自一个 depth（相对数值见 BUILDING_DEPTH）：
   //   back  < body  < 站门口的角色(+24) < front(+32) < 门口下 1 格的人(+40)
   // 于是只有「站在门口」这一格会被檐压住，再往外走一格就恢复正常。
-  view.back.setDepth(altitude + view.baseY + BUILDING_DEPTH.back);
-  view.container.setDepth(altitude + view.baseY + BUILDING_DEPTH.body);
-  view.front.setDepth(altitude + view.baseY + BUILDING_DEPTH.front);
+  view.back.setDepth(layerDepth('back', view.baseY, altitude));
+  view.container.setDepth(layerDepth('body', view.baseY, altitude));
+  view.front.setDepth(layerDepth('front', view.baseY, altitude));
   view.sign.setAlpha(busy ? 1 : 0.72);
   view.chimney.setAlpha(busy ? 1 : 0);
 
