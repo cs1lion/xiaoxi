@@ -3,7 +3,7 @@
 // 子进程 detached，父进程退出后继续存活。不碰 8000/8010。
 import { spawn } from 'node:child_process';
 import net from 'node:net';
-import { cpSync, mkdirSync, mkdtempSync, openSync, writeFileSync } from 'node:fs';
+import { cpSync, existsSync, mkdirSync, mkdtempSync, openSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -44,6 +44,15 @@ cpSync(join(SERVER_SRC, 'config'), join(tempRoot, 'config'), { recursive: true }
 // worker（cli_subproc）按仓库相对路径跑 scripts/worker_shims/*.py，必须一起复制，
 // 否则子进程找不到脚本直接退出码 2（round-03 实测踩到）。
 cpSync(join(SERVER_SRC, 'scripts'), join(tempRoot, 'scripts'), { recursive: true, filter: (q) => !q.includes('__pycache__') });
+// worker 的网关地址改指向隔离网关（15725，直连 StepFun）。
+// 用户自己的 15722 上游 15721 是关闭的，worker 会立刻失败；这里换成一个等价但上游可用的
+// 网关，让 D（交付）和 H（并发）能在 e2e 里真验。只改临时副本，不动主仓库。
+const rosterPath = join(tempRoot, 'config', 'agents_roster.yaml');
+if (existsSync(rosterPath)) {
+  const before = readFileSync(rosterPath, 'utf8');
+  const after = before.replace(/127\.0\.0\.1:15722/g, '127.0.0.1:15725');
+  if (after !== before) writeFileSync(rosterPath, after, 'utf8');
+}
 mkdirSync(join(tempRoot, 'data'), { recursive: true });
 mkdirSync(join(tempRoot, 'web'), { recursive: true });
 cpSync(join(SERVER_SRC, 'web', 'index.html'), join(tempRoot, 'web', 'index.html'));
