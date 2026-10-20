@@ -7,10 +7,13 @@ import Phaser from 'phaser';
 import { TILE_PX } from '../world/setup.ts';
 import type { ConstructionSnapshot, GridPoint, WorldProp } from '../world/types.ts';
 import { WORLD } from '../world/palette-data.ts';
+import { propDepth, propFootY } from './prop-depth.ts';
+
+/** 场景把 ALTITUDE 传给装饰层，道具 depth 与角色用同一把尺子。 */
+export const DECOR_ALTITUDE = 1000;
 
 export interface DecorView {
   readonly roads: Phaser.GameObjects.Graphics;
-  readonly props: Phaser.GameObjects.Container;
   readonly scaffolds: Map<string, Phaser.GameObjects.Container>;
   readonly redrawRoads: (cells: readonly GridPoint[]) => void;
   readonly syncProps: (props: readonly WorldProp[]) => void;
@@ -20,13 +23,14 @@ export interface DecorView {
 export function createDecorView(scene: Phaser.Scene, originX: number, originY: number): DecorView {
   const roads = scene.add.graphics();
   roads.setDepth(1);
-  const props = scene.add.container(0, 0);
+  // 道具**不能**放进容器：Phaser 的 Container 按 list 顺序渲染子对象，容器内子对象的
+  // depth 不参与全局排序（见 ContainerWebGLRenderer：直接遍历 container.list）。
+  // 所以每个道具都是独立顶层对象，各自 setDepth，才能与角色做 Y-Sort。
+  const props = new Map<string, Phaser.GameObjects.Graphics>();
   const scaffolds = new Map<string, Phaser.GameObjects.Container>();
-  let propCount = 0;
 
   return {
     roads,
-    props,
     scaffolds,
     redrawRoads(cells) {
       roads.clear();
@@ -54,11 +58,22 @@ export function createDecorView(scene: Phaser.Scene, originX: number, originY: n
       }
     },
     syncProps(list) {
-      if (list.length === propCount) return;
-      propCount = list.length;
-      props.removeAll(true);
+      // 按 id 增量对齐：摆件只增不删，但存档可用任意顺序重建，不能假设长度即内容。
+      const alive = new Set(list.map((prop) => prop.id));
+      for (const [id, node] of [...props.entries()]) {
+        if (alive.has(id)) continue;
+        node.destroy();
+        props.delete(id);
+      }
       for (const prop of list) {
-        drawProp(scene, props, prop, originX, originY);
+        const existing = props.get(prop.id);
+        if (existing !== undefined) {
+          // 只在落地位置真的变了时改 depth，避免每帧无意义写入。
+          const depth = propDepth(prop, originY, DECOR_ALTITUDE);
+          if (existing.depth !== depth) existing.setDepth(depth);
+          continue;
+        }
+        props.set(prop.id, drawProp(scene, prop, originX, originY));
       }
     },
     syncScaffolds(constructions) {
@@ -79,15 +94,23 @@ export function createDecorView(scene: Phaser.Scene, originX: number, originY: n
   };
 }
 
+/**
+ * 画一个摆件，返回它自己（顶层对象，**不**挂容器）。
+ *
+ * 为什么必须是顶层对象：Phaser 的 Container 渲染时直接按 list 顺序遍历子对象，
+ * 子对象的 depth 不参与全局深度排序。放进容器等于所有摆件共用一个 depth，
+ * 角色永远压在它们前面（这就是 §1.5 说的 D5「道具没有深度」）。
+ *
+ * 落点 y 与 depth 都由 prop-depth.ts 算，保证与 drawProp 里的 setPosition 同源。
+ */
 function drawProp(
   scene: Phaser.Scene,
-  parent: Phaser.GameObjects.Container,
   prop: WorldProp,
   originX: number,
   originY: number,
-): void {
+): Phaser.GameObjects.Graphics {
   const px = originX + (prop.at.x + 0.5) * TILE_PX;
-  const py = originY + (prop.at.y + 0.8) * TILE_PX;
+  const py = propFootY(prop, originY);
   const g = scene.add.graphics();
   if (prop.kind === 'lamp') {
     g.fillStyle(WORLD.ink, 1);
@@ -112,6 +135,8 @@ function drawProp(
     g.fillRect(-3, -15, 8, 1);
   }
   g.setPosition(px, py);
-  parent.add(g);
+  // 与角色同口径的 Y-Sort：落点 y 越大（越靠下）越靠前，角色能走到树后面/前面。
+  g.setDepth(propDepth(prop, originY, DECOR_ALTITUDE));
   // 摆件标签已随 D5-A 删除：图形自己说明是什么，中文不进 canvas。
+  return g;
 }

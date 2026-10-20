@@ -27,9 +27,14 @@ export function createVillager(
   originX: number,
   originY: number,
 ): VillagerView {
+  // D6：接地不能只有一枚椭圆。椭圆说明「这里有团暗」，但脚和地面没有接触点，
+  // 走起来会像浮着。加一条 1px 接触线压在脚底，才是「踩在地上」。
+  // alpha 纪律（ART_SPEC §2.4）：阴影只允许 ink，且不超过既有档位（0.55 是现值上限）。
   const shadow = scene.add.graphics();
   shadow.fillStyle(WORLD.ink, 0.35);
   shadow.fillEllipse(0, 0, 14, 5);
+  shadow.fillStyle(WORLD.ink, 0.55);
+  shadow.fillRect(-4, 0, 8, 1);
 
   const body = scene.add.graphics();
   drawBody(body, 'down', villagerPose('idle', 0));
@@ -59,6 +64,8 @@ export function updateVillager(
   drawBody(view.body, villager.facing, pose);
   if (villager.umbrella) drawUmbrella(view.body, pose.offsetY);
 
+  // 走路时整条阴影（椭圆 + 接触线）一起变淡：抬脚时接触减弱，落地时才压深。
+  // 用容器级 alpha 而不是改每个 fillStyle，保证椭圆与接触线的相对深浅不变。
   const walking = villager.mode === 'toWork' || villager.mode === 'toAltar';
   view.shadow.setAlpha(walking ? 0.28 : 0.35);
 }
