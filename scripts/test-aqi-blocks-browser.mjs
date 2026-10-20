@@ -234,10 +234,9 @@ assert.equal(await page.locator("#workDrawer").evaluate((el) => el.hidden), fals
 assert.equal(await page.locator("#drawerViewOps").evaluate((el) => el.hidden), false, "预览定位到战况视图");
 assert.deepEqual(await page.evaluate(() => window.__harness.previews), ["report.md"], "预览广播真实成果 ref");
 /* 这一步验的是：抽屉被拉开、切到战况视图、ref 被广播出去。
- * **不验**成果卡被描金边——`.ops-card.is-highlighted` 这个类会加上
- * （executive.js，注释写"协议 §23…ref 命中这一单时描金边"），但生产 CSS 里
- * 没有对应规则，金边从未真正出现过。见 docs/OPTIMIZATION_ROUND3_20261018.md §9。 */
-pass("ui:preview 本地预览联动：抽屉 + 战况视图 + ref 广播（金边高亮未实现，不在此验）");
+ * 金边样式由 test-ui-browser 的真实 computed style 断言覆盖；本用例的 ref
+ * 与卡片 id 不同，因此这里不应把"类没加上"当成失败。 */
+pass("ui:preview 本地预览联动：抽屉 + 战况视图 + ref 广播");
 
 // ---- ③a nav 抽屉联动：四个目标各自跳到既有视图 ----
 for (const [nav, view] of [["notes", "drawerViewWriting"], ["threads", "drawerViewCompanion"], ["starmap", "drawerViewStarmap"], ["ops", "drawerViewOps"]]) {

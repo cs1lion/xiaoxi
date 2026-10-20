@@ -17,7 +17,7 @@
 ### 门禁报告（一条命令确认"每道门都真的跑过"）
 
 ```bash
-.\.venv\Scripts\python.exe scripts\run_gates.py                 # 23 道门全跑，跳过即失败
+.\.venv\Scripts\python.exe scripts\run_gates.py                 # 59 道门全跑，跳过即失败
 .\.venv\Scripts\python.exe scripts\run_gates.py --allow-skip    # 跳过只告警（兼容旧口径）
 .\.venv\Scripts\python.exe scripts\run_gates.py --only protocol,core,evals
 ```
@@ -41,7 +41,17 @@
 - **offline 层**：无网络、无 Key、确定性，记忆库强制 `:memory:`。已纳入上面的全局门禁与 CI，失败即非零退出码。涉及记忆装配 / Prompt / 模型切换的改动必须跑。
 - **live 层**：真实模型，需显式 `--live` 且配置 `LLM_API_KEY`；无 Key 或 Mock 模式时自动跳过并明示，退出码仍为 0（不算失败）。换模型或改 Prompt 装配逻辑时手动跑一次，每次运行把每条用例每次的原始回复和判定写入 `evals/results/`（gitignore，只存回复与判定，不存 prompt 与凭据），并打印通过率表。live 的「是否编造」第一版用正则判断，有误判风险，必须抽查落盘的原始回复。
 - **live 层的装配口径（重要）**：live 用例走 `build_messages` + `EMOTION_INSTRUCTION` + 真实检索的"装配级"调用（`complete_raw`），**不是**生产全链路 `Orchestrator.respond()`（少了 `_render_turn_context` 动态段、pacing 后处理、历史裁剪）。它只多了一步与生产同款的截断救援：`finish_reason=length` 且正文过短时，用 `reasoning_effort="minimal"` 再要一次短回复；`finish_reason / rescued / completion_tokens` 会随结果落盘。live 结果代表"Prompt 装配与截断救援没坏"，不代表端到端行为；要验全链路需另起浏览器回归。**2026-10-17 复核**：此前记录的"emotion-tag-retention-live 10 次中 3 次缺标签"根因不是多轮指令遗忘，而是推理占满 token 预算（`finish_reason=length`、正文 0 字），修前 2/3 轮通过。`LLM_REPLY_TOKENS` 900→1200、救援改为 minimal 推理、生产空回复兜底后，连续 12 次运行 / 72 轮全绿；这是 R2 抽样，不是稳定性结论。
+- **2026-10-20 live 实跑**：`emotion-tag-retention-live` 3/3、`accuracy-over-persona-live` 3/3、`hallu-empty-retrieval-live` 3/3；原始回复与判定按上面的规则落在 `evals/results/`，仍是装配级，不是生产全链路。
 - **xfail**：`status: xfail` 的用例照常运行并在汇报中列出，但不计入失败（必须写 `reason`）。
+
+### 退役/不在门禁内的评测夹具（2026-10-20）
+
+下面这些测试依赖曾随 `/eval` 清理被删、未入 git 的本地夹具，当前只会 `SkipTest`，**不在 `run_gates.py` 里，也不能作为验收证据**：
+
+- `scripts/test_memory_eval.py`（`memory_live_cases.json`）
+- `scripts/test_procedural_memory_eval.py` / `_induction.py` / `_diagnostics.py` / `_source_projection.py` / `_boundaries.py`
+
+如果以后重新提供夹具，它们会自动恢复；在恢复前，引用这些层的历史结果时必须标明"夹具缺失、未复跑"。不要把 `run_gates` 全绿解释成这些评测也跑过。
 - **新增用例**：每次出幻觉事故就加一条 YAML。字段见 `evals/cases/` 现例；`checks` 支持 `contains / not_contains / regex_any / not_regex / custom`，custom 判定函数写在 `evals/checks.py`，用例里以 `evals.checks:<函数名>` 引用。预置状态写 `setup.memories`，用户轮次写 `turns`，live 默认跑 `runs: 3` 次，通过线由 `pass_rule: all | min_rate:0.8` 控制。`origin` 必填（来源实验 / 事故 / commit）。
 
 ## V3 内阁总管（全员适用，2026-10-15 起）

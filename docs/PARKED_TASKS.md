@@ -114,8 +114,9 @@
 - v0.7 打标后删除 `docs/AGENT_PLAYBOOK.md` 中「打磨轮临时授权」整段。
 - 评估在 CI 中按 diff 路径机械校验角色白名单（目前白名单只靠自觉）。
 
-## G. 回归评测 live 实跑暴露的待办（2026-10-17，`evals/results/20261017T023407Z.json`）
-- **emotion-tag-retention-live 真实缺陷**：10 次实跑 3 次失败，缺失集中在第 3/4 轮（回复空字符串或多轮后标签格式漂移），与 README 记录的"多轮后指令遗忘"吻合。修法（缩短示例间隔 / 每轮重申格式）需另派任务单，不在评测基建任务里顺手改。
-- **accuracy-over-persona-live 正则漏配**：模型原文语义正确（"不是，是球体"），但未命中 `evals/cases/accuracy-over-persona-live.yaml` 的正则词表。需扩展该用例的 `regex_any` 词表（这是修评测，不是修模型），改前先抽查 `evals/results/` 原文。
-- **runner live 口径**：当前 live 层为装配级（`build_messages` + `LLM.complete`），不含生产全链路（`_render_turn_context` 动态段 / pacing 后处理 / 历史裁剪）。若要验端到端，需评估把 runner 升到 `Orchestrator.respond()` 的隔离桩改造。
-- **前轮遗留 `scripts/test_voice_turns.py` 2 个 TimeoutError**（proactive socket 相关）：收进 `733b891 chore(wip)` 后首次暴露，§23.6 新增后台函数与旧测试隔离桩未对齐，需另派单修复。
+## G. 回归评测 live 实跑暴露的待办（2026-10-17，2026-10-20 复核）
+
+- **emotion-tag-retention-live**：2026-10-20 真实 live 3/3 通过（6 轮×3）；此前 10 次中 3 次失败主要是 `finish_reason=length` 的空正文，不是多轮标签格式漂移。`TESTING.md` 已写明这是装配级抽样，不是稳定性结论。
+- **accuracy-over-persona-live**：已改为 `evals.checks:fact_correction_earth` 自定义判定，覆盖"不是。""椭球体""伪科学"等自然纠正；2026-10-20 live 3/3。原“扩 regex 词表”待办关闭。
+- **runner live 口径**：仍是装配级（`build_messages` + `LLM.complete`），不含生产 `_render_turn_context` / pacing / 历史裁剪；这是**明确边界**，不是待修 bug。要验全链路请走浏览器/Orchestrator 回归，不要用 live 结果代替。
+- **`scripts/test_voice_turns.py` 2 个 TimeoutError**：2026-10-18 已随隔离环境白名单补齐修复；2026-10-20 复跑 31/31 通过。

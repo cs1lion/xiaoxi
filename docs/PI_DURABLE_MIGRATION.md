@@ -431,7 +431,7 @@ models.setProvider(provider);
   - 对账只覆盖"宿主重启、内核活着"这一种死法。内核自己死了，适配器连不上，那一单如实转 BLOCKED 请示；答一句后靠 attempt 递增真的重新拉起执行体（见下面"接管与重做"）。
 - [x] 归档/保留策略（`data/durable/*.sqlite` 纳入 `backup_local_databases.py`）
 - [x] 配置接线：`config/agents_roster.yaml` 新增 `durable:` 段（默认 `enabled: false`）
-- [ ] **三个 Worker 全量切换**：见下方 A/B 小节末尾的说明。花名册现有四个 `cli_subproc`，切过去是能力回退，留 `switch_agents: []` 待拍板。
+- [ ] **三个 Worker 全量切换**：见下方 A/B 小节末尾的说明。花名册现有四个 `cli_subproc`，切过去是能力回退；当前 `durable.enabled: false`，`switch_agents: [scribe]` 只是"启用后先切文档类"的预备配置，不是已切换。
 
 **验收（A/B）**：同一批 10 个真实委托，同一模型，`cli_subproc` vs `durable`，按 L1 初审通过率、token、端到端耗时、人工盲评比较；`durable` 不得在通过率上显著落后。混沌测试见 §6。
 
@@ -444,14 +444,14 @@ models.setProvider(provider);
 
 **通过率上 `durable` 不落后，Phase 2 的验收线过了。** 但有两件事必须一起读，否则这个 10/10 会被读错：
 
-1. **基线的 8/10 失败全是预算闸，不是能力**：`max_prompt_tokens: 80000` 低于真机 Claude 跑一轮的真实上下文（约 10 万），而 `telemetry.commission_usage` 把一单三次重试的 prompt_tokens **求和**（24–63 万）。也就是说这一档配小一点，慢环今天就会把大多数真机委托打回三次再拦掉——与迁移无关的生产问题，需要 Role 0 定预算口径（按次还是按单）。
+1. **基线的 8/10 失败全是预算闸，不是能力**：当时 `max_prompt_tokens: 80000` 低于真机 Claude 跑一轮的真实上下文（约 10 万），而 `telemetry.commission_usage` 把一单三次重试的 prompt_tokens **求和**（24–63 万）。**2026-10-20 已收口**：`max_prompt_tokens_per_call=120000` 只做单次质量闸，`max_total_prompt_tokens=400000` 只做成本告警；`test_budget_scope.py` 钉住"重试不翻倍打回"。
 2. **`durable` 早期是 7/10，差的 3 单全是"产不出可验证的成果"**：它的工具集原本只有 `submit_artifact` / `block_and_ask`，没有写文件的能力，模型却会编出 `kind: "file"` 的路径（`work/title-3vers/titles.md`、`/tmp/three_titles_workdir/titles.md`、`workspace/titles/three-titles.md`），被项目自己的 `no_unwired_dry_run` 抓住；剩下 7 单能过是因为模型改报 `kind: "note"`，而那条路径**根本不验存在性**——等于"过了但没有可核成果"。
 
 补上 `write_file`（沙箱内写文件，见 §4.5）与 `submit_artifact` 的 ref 规范化之后才是 10/10：
 - `write_file` 只认 `RunMeta.workspace` 一个目录，`../`、工作目录外的绝对路径、同名前缀的兄弟目录全部拒绝；基目录不存在时明说"这不是路径问题"，不让模型改路径重试。
 - `submit_artifact` 交差前把 file 型 ref 规范化并验真：模型把路径转义两遍产生的 `D:\\project\\...` 会被还原，没写过的文件直接拒收（不记一张指向空气的卡）。
 
-**仍未做**：三个 Worker 全量切换。花名册里现在有**四个** `cli_subproc`（claude / workbuddy / dsh / codex，比本文档写"三个"时多了一个），它们的真机 CLI 自带 Read/Bash/Grep，而 durable 的工具面窄得多。切过去是**能力回退**，所以 `config/agents_roster.yaml` 的 `durable.switch_agents` 留空、`enabled: false`，等确认过那些 Worker 不需要真机工具再动这一行。
+**仍未做**：三个 Worker 全量切换。花名册里现在有**四个** `cli_subproc`（claude / workbuddy / dsh / codex，比本文档写"三个"时多了一个），它们的真机 CLI 自带 Read/Bash/Grep，而 durable 的工具面窄得多。切过去是**能力回退**；当前 `durable.enabled: false`，`switch_agents: [scribe]` 只是启用后先切文档类的预备配置。等确认过那些 Worker 不需要真机工具再谈扩大。
 
 token 差 15 倍（5,193 vs 80,723）不能直接当收益：`durable` 干的活也严格更少（不跑校验脚本、不读仓库），而这个差主要来自两侧的工具面不同，不是引擎效率。
 

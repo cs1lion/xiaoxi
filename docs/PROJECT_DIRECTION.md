@@ -90,6 +90,8 @@
 
 同时让health反映调度是否仍活着、最近成功扫描和构建/能力版本。当前调度循环未处理异常时会退出，而健康接口仍可能显示ok。备份脚本已有单库完整性检查，跨库一致时点及临时目录恢复演练仍需补充。
 
+> **2026-10-20 收口**：写动作已加 `operation_id` + `agent_outbox`，回执与 checkpoint 同事务、启动幂等补投，拿不到回执的操作标 `unknown` 且禁止盲目 resume；`/api/health` 已返回 `scheduler` 与 `build`，调度异常会退避并保持存活；备份默认要求停写，manifest 记录模式/哈希，新增 `restore_local_databases.py` 做临时目录恢复演练。对应回归见 `AGENT_RUNTIME.md`、`test_operation_outbox.py`、`test_scheduler_health.py`、`test_backup_restore.py`。
+
 ## 4. 阶段顺序与交付判断
 
 按依赖推进，不给尚无基线的工作承诺固定工期。

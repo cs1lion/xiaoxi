@@ -239,6 +239,10 @@ taskkill //F //PID <占用 8000 的 PID> && .\.venv\Scripts\python.exe scripts\r
 多久、和 hover/focus 怎么共存"是设计判断，该走项目的视觉审计流程
 （`docs/UI_VISUAL_AUDIT.md` / oil-ui skill），不该在修死代码时顺手定掉。
 
+> 2026-10-20 收口：`is-highlighted`、`nav-spotlight`、`editor-discussion-message`
+> 已在 `almanac.css` / `writing.css` 落真实样式；`test-ui-browser` 用 computed
+> style 断言，避免再出现"类加了、CSS 没有"的假绿。
+
 ## 11. 另外两处本轮修掉的
 
 ### `--aqi-i` 死接线（视觉层缺口的第一例）

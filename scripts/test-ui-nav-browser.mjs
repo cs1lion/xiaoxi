@@ -185,11 +185,9 @@ try {
   check(await currentView() === 'drawerViewOps', 'ui_nav(ops) 切到督办与战况标签页');
   const navEvents = await page.evaluate(() => window.__navEvents || []);
   check(navEvents.some(e => e.target_view === 'ops' && e.focus_id === 'c_1f0a'),
-    /* 这条验的是"领航事件带对了 target_view 与 focus_id"，**不是**卡片被高亮。
-     * `.nav-spotlight` 这个类确实会被加上（executive.js 三处各加 1600ms 后移除），
-     * 但生产 CSS 里没有任何规则消费它——所以视觉上什么都没有发生。
-     * 详见 docs/OPTIMIZATION_ROUND3_20261018.md §9 的"视觉层缺口"。
-     * 标签按实际断言写，不把没验的效果写进名字里。 */
+    /* 这条验的是"领航事件带对了 target_view 与 focus_id"；类对应的可见样式
+     * 由 test-ui-browser 的 computed style 断言覆盖，避免把时序性 class 检查
+     * 写成视觉已生效。 */
     'ui_nav(ops) 事件带对 target_view 与 focus_id（定位指令本身已下达）');
 
   /* ---- 2. open_preview：展开交付验收卡 ---- */
