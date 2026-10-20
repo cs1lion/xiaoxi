@@ -30,6 +30,7 @@
  */
 
 import { createServer } from 'vite';
+import { connect } from 'node:net';
 import { parseOverrides, paletteOverridePlugin } from '../vite.palette.mjs';
 
 const ROOT = new URL('..', import.meta.url).pathname.replace(/^\/([A-Za-z]:)/, '$1');
@@ -45,6 +46,35 @@ const overrides = parseOverrides(OVERRIDE);
  * 原因：vite.palette.mjs 顶层的 env 读取是模块级的，同进程里第二次 createServer
  * 会复用已缓存的模块、拿不到新值——那会让「覆盖」和「基线」变成同一份，两张图一样。
  */
+/**
+ * 端口预检：端口被占时给一句能看的提示，而不是让 Vite 抛一屏堆栈。
+ *
+ * 为什么需要：这个脚本最常撞的问题就是上一次运行留下的进程还占着 5189/5190
+ * （实测撞过多次，一个 node 进程同时占两个端口）。Vite 的报错只有
+ * "Port 5189 is already in use"，不告诉你怎么办，也不告诉你是谁占着。
+ */
+async function assertPortFree(port) {
+  const inUse = await new Promise((resolve) => {
+    const socket = connect({ port, host: '127.0.0.1' }, () => {
+      socket.destroy();
+      resolve(true);
+    });
+    socket.on('error', () => resolve(false));
+    socket.setTimeout(1500, () => {
+      socket.destroy();
+      resolve(false);
+    });
+  });
+  if (inUse) {
+    console.error(`\n[端口被占] ${port} 上已经有服务在监听。`);
+    console.error('  多半是上一次 palette-serve.mjs 没退出。处理方式：');
+    console.error(`    PowerShell:  Get-NetTCPConnection -LocalPort ${port} -State Listen | ForEach-Object { Stop-Process -Id $_.OwningProcess -Force }`);
+    console.error(`    或者换端口:  $env:PALETTE_BASE_PORT=${port + 10}; $env:PALETTE_OVR_PORT=${port + 11}; node scripts/palette-serve.mjs`);
+    console.error('  另一条路：如果那个服务就是要用的那份，直接把 URL 传给 palette-capture.mjs，本脚本不用起。\n');
+    process.exit(1);
+  }
+}
+
 async function startServer(port, ovr) {
   const server = await createServer({
     root: ROOT,
@@ -62,6 +92,10 @@ const servers = [];
 const urls = {};
 
 try {
+  // 起服务之前先确认端口空闲：撞端口时给能照做的提示，而不是 Vite 的堆栈。
+  await assertPortFree(BASE_PORT);
+  if (overrides.size > 0) await assertPortFree(OVR_PORT);
+
   // 基线：空覆盖（插件原样返回源码）
   servers.push(await startServer(BASE_PORT, new Map()));
   urls.BASE_URL = `http://127.0.0.1:${BASE_PORT}/`;

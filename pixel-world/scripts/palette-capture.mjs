@@ -39,7 +39,8 @@
  * 产物：eval/screens/palette-verify-{BASE|<LABEL>}.png（gitignored）
  */
 
-import { mkdirSync } from 'node:fs';
+import { mkdirSync, writeFileSync } from 'node:fs';
+import { inflateSync } from 'node:zlib';
 import { parseOverrides } from '../vite.palette.mjs';
 
 const ROOT = new URL('..', import.meta.url).pathname.replace(/^\/([A-Za-z]:)/, '$1');
@@ -49,6 +50,63 @@ const SHOT_DIR = `${ROOT}eval/screens`;
 function safeLabel(text) {
   const cleaned = String(text).toUpperCase().replace(/[^A-Z0-9-]/g, '-').replace(/-+/g, '-').replace(/^-|-$/g, '');
   return cleaned === '' ? 'OVR' : cleaned;
+}
+
+/** 判断 PNG 是否「全白/全黑」这类空白图。
+ *
+ * 为什么需要：canvas.toDataURL() 在窗口未正常合成时会静默返回全黑图，
+ * 不抛错、字节数也正常。只看 length 判不出来，必须解到像素。
+ * 这里不做通用 PNG 解码（避免引依赖），只按 zlib 解压后统计 IDAT 里
+ * 是否存在两个不同的字节值——真正的游戏画面必然有丰富变化，
+ * 全黑/全白图的解压数据几乎全是同一个值。
+ */
+function isLikelyBlank(pngBuf) {
+  try {
+    let pos = 8;
+    let width = 0, height = 0, colorType = 2;
+    const idat = [];
+    while (pos + 8 <= pngBuf.length) {
+      const len = pngBuf.readUInt32BE(pos);
+      const type = pngBuf.toString("ascii", pos + 4, pos + 8);
+      const data = pngBuf.subarray(pos + 8, pos + 8 + len);
+      if (type === "IHDR") {
+        width = data.readUInt32BE(0);
+        height = data.readUInt32BE(4);
+        colorType = data[9] ?? 2;
+      }
+      else if (type === "IDAT") idat.push(data);
+      else if (type === "IEND") break;
+      pos += 12 + len;
+    }
+    if (idat.length === 0) return true;
+    if (colorType === 0 || colorType === 2 || colorType === 4 || colorType === 6) {
+      // 可解
+    } else {
+      return false;
+    }
+    const raw = inflateSync(Buffer.concat(idat));
+    // 每行布局是 [1 字节 filter][stride 字节像素]，所以 raw.length = height * (stride + 1)。
+    // stride 必须由**实际字节数反推**，不能自己编公式：早先写成
+    // Math.floor((raw.length - height) / height) 会少算 1 字节，导致每行错位一字节、
+    // 采样到的基本是 filter 字节（全 0），于是把「100% 纯黑」误判成「有变化」。
+    // 实测代价：两张 native 图 100% #000000 却通过了校验，被当成有效图写盘。
+    const stride = Math.floor(raw.length / height) - 1;
+    if (stride <= 0) return true;
+    const seen = new Set();
+    for (let y = 0; y < height; y += 1) {
+      const base = y * (stride + 1) + 1;
+      for (let x = 0; x < stride; x += 1) {
+        const v = raw[base + x];
+        if (v === undefined) break;
+        seen.add(v);
+        if (seen.size > 8) return false;
+      }
+    }
+    return seen.size <= 2;
+  } catch {
+    // 解不出来就当作有效，交给下游判断
+    return false;
+  }
 }
 
 /** 默认标签：取覆盖串第一个 token 名（stone → STONE）。 */
@@ -116,8 +174,65 @@ async function capture(page, label, url, overrides, expectOverride, settleMs) {
   }
 
   const file = `palette-verify-${label}.png`;
-  await page.screenshot({ path: `${SHOT_DIR}/${file}` });
-  console.log(`  截图：${SHOT_DIR}/${file}`);
+  // 必须裁到 canvas 区域再截，不能用 page.screenshot() 的整页/视口截图。
+  //
+  // 为什么：page.screenshot() 拍的是整个视口，画面里混着 header、状态行、
+  // 神谕输入区与纸面日报。任何拿这两张图做像素统计的人（明度分布、色数覆盖、
+  // 众数亮度带）都会把页面 UI 的像素算进去，得到与本文件目的不符的数字。
+  // 实测证据：旧实现产出的 palette-verify-*.png 是 1126×765（整页）。
+  //
+  // 产出**两张**，尺寸口径不同，绝对不要混用：
+  //
+  //   palette-verify-<label>.png
+  //     裁到 canvas 区域（CDP clip）。**产出尺寸 = canvas CSS 尺寸 × 设备像素比**。
+  //     本机实测：CSS 960×640、devicePixelRatio 2.25 → 产出 **2160×1440**。
+  //     用途：人眼看整体观感、对比材质与配色。
+  //     注意它既不是 480×320 也不是 960×640；拿它做像素统计会把 DPR 放大算进去。
+  //
+  //   palette-verify-<label>-native.png
+  //     canvas.toDataURL() 的原始 backing = **480×320**（Phaser 逻辑分辨率）。
+  //     用途：像素统计（明度分布、色数、众数亮度带）。一个像素 = 一个游戏原生像素，
+  //     没有缩放插值，也不含任何页面 UI 像素；与 round-12 回读口径一致。
+  //
+  // 三个尺寸记清：backing 480×320 / CSS 960×640 / clip 产出 2160×1440（本机 DPR 2.25）。
+  // DPR 随机器与窗口大小变，别把这三个数写死进任何断言，用实测回读。
+  const measured = await page.evaluate(() => {
+    const c = document.querySelector('#app canvas');
+    const rect = c.getBoundingClientRect();
+    return {
+      x: Math.round(rect.left),
+      y: Math.round(rect.top),
+      width: Math.round(rect.width),
+      height: Math.round(rect.height),
+      nativeWidth: c.width,
+      nativeHeight: c.height,
+      dataUrl: c.toDataURL('image/png'),
+    };
+  });
+  // 不加 captureBeyondViewport：canvas 一定在视口内，加了反而可能改变布局。
+  const shot = await page.cdp('Page.captureScreenshot', {
+    format: 'png',
+    clip: { x: measured.x, y: measured.y, width: measured.width, height: measured.height, scale: 1 },
+  });
+  writeFileSync(`${SHOT_DIR}/${file}`, Buffer.from(shot.data, 'base64'));
+
+  // native 回读有一个已知陷阱：canvas.toDataURL() 在窗口未正常合成时
+  // 会返回一张**全黑**图，而且它不会报错——字节数甚至可能是正常的。
+  // 实测：ego 窗口最小化或 DPR≠1 的某些状态下，toDataURL 出来是 100% #000000，
+  // 而同一时刻 CDP 截图是正常的。所以必须校验非空，否则下游用它算像素统计
+  // 会得到「100% 落在 band 0」这种假数据（本项目已踩过一次）。
+  const nativeFile = `palette-verify-${label}-native.png`;
+  const base64 = String(measured.dataUrl).replace(/^data:image\/png;base64,/, "");
+  const nativeBuf = Buffer.from(base64, "base64");
+  const nativeBlank = isLikelyBlank(nativeBuf);
+  if (nativeBlank) {
+    console.warn(`  原生：跳过（toDataURL 返回空白图，窗口未正常合成时会发生；以 CSS 截图为准）`);
+  } else {
+    writeFileSync(`${SHOT_DIR}/${nativeFile}`, nativeBuf);
+  }
+
+  console.log(`  截图：${SHOT_DIR}/${file}  (CSS ${measured.width}x${measured.height})`);
+  if (!nativeBlank) console.log(`  原生：${SHOT_DIR}/${nativeFile}  (canvas ${measured.nativeWidth}x${measured.nativeHeight})`);
   // 不 close：两次 capture 复用同一个 p1，关掉第二次就没页面了。
 }
 
