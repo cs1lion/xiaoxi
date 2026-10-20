@@ -555,6 +555,19 @@ export class Simulation {
     villager.mode = 'idle';
     villager.taskId = null;
     villager.visible = true;
+    // 必须把人从工位挪出来（D-1）。
+    //
+    // 干活时 pos 被设成 building.workSpot —— 那是**建筑占地内**的格，不可走
+    // （arriveAtWork: villager.pos = workSpot）。只把 mode 收回 idle、恢复 visible
+    // 是不够的：她站在原地，而 grid.path 在起点不可走时直接返回空数组
+    // （grid.ts path(): !inBounds 或寻不到就走空），于是永远迈不出第一步 ——
+    // 人看得见了，但钉在屋里不动，且这个状态会入档跨会话持久。
+    //
+    // 挪到门口：door 保证在占地之外且可走（assertWorldInvariants 强校验
+    // 「门口不可通行」会直接拒绝开工），是这里唯一不需要再找空地的落点。
+    if (building !== undefined && !this.grid.isWalkable(this.cellOf(villager.pos))) {
+      villager.pos = { x: building.door.x, y: building.door.y };
+    }
     villager.path = [];
     villager.bubble = '这单被撤了。';
     villager.bubbleUntil = this.now + 1600;
