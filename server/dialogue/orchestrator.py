@@ -190,6 +190,7 @@ from ..speech.tts import micro_pause, split_for_speech_micro, tts
 
 # V2 三梯度梯度1（micro_act）可用的无声舞台微动作；前端 ambient.js 安全降级未知项。
 _MICRO_ACTIONS = ("glance_away", "tilt_head", "stretch", "fidget", "thoughtful", "soft_blink")
+from .intent_guard import classify as classify_suspicion, guard_for  # noqa: E402  (after _MICRO_ACTIONS)
 from .performance import (MOTION_INSTRUCTION, MotionMetadataFilter,
                           performance_plan, slice_performance, strip_motion_metadata)
 from .aqi_blocks import (AQI_BLOCK_INSTRUCTION, AqiBlockFilter, alert_card,
@@ -445,6 +446,40 @@ class Orchestrator:
                 mood = ""
         return circadian, mood
 
+    def _trace_intent_guard(self, user_text: str, session_id: str) -> None:
+        """Record that the suspicion constraint fired, for later analysis.
+
+        The constraint is silent by design: the user sees a normal clarifying
+        reply, so without this line there would be no way to measure how often
+        it fires or to build an evaluation set from real traffic.
+
+        Deliberately non-fatal. This runs on the voice fast loop; a broken log
+        path must never cost the user a turn. Appends one JSONL row, matching
+        the durable-shadow precedent (assistant/durable_shadow.py): no schema,
+        no ledger write, no telemetry table (that one feeds the budget gate).
+        """
+        try:
+            from ..config import DATA_DIR
+            kind = classify_suspicion(user_text)
+            # Nothing was suspected: there is nothing to trace. Guarding here as
+            # well as at the call site keeps the row count honest if a future
+            # caller traces unconditionally.
+            if not kind:
+                return
+            row = {
+                'ts': time.time(),
+                'session': str(session_id or '')[:64],
+                'kind': kind,
+                # Bounded: this is a trace, not a transcript.
+                'text': (user_text or '')[:200],
+            }
+            path = DATA_DIR / 'intent-guard.jsonl'
+            path.parent.mkdir(parents=True, exist_ok=True)
+            with path.open('a', encoding='utf-8') as handle:
+                handle.write(json.dumps(row, ensure_ascii=False) + "\n")
+        except Exception:  # noqa: BLE001 - fast loop: never let a trace break a turn
+            pass
+
     def _render_turn_context(self, data: dict[str, Any]) -> list[dict[str, str]]:
         """Render only the dynamic portion counted by the shared character cap."""
         messages = [{'role': 'system', 'content': self.composer.render(data['response_policy'])}]
@@ -461,7 +496,8 @@ class Orchestrator:
         dynamic = dynamic_prompt(memory_found=memory['status'] in ('found', 'disabled', 'omitted_by_budget'),
             current_state=state['current_state'], user_state_note=state['user_state_note'],
             proactivity=state['proactivity'], emotion_instruction=EMOTION_INSTRUCTION,
-            bias_block=bias, circadian=data.get('circadian') or '', mood=data.get('mood') or '')
+            bias_block=bias, circadian=data.get('circadian') or '', mood=data.get('mood') or '',
+            intent_guard=data.get('intent_guard') or '')
         if dynamic:
             if memory['status'] == 'omitted_by_budget':
                 dynamic += '\n本轮检索记忆因补充上下文预算省略；不能据此断言经历没有发生，也不能补写缺失内容。'
@@ -529,7 +565,15 @@ class Orchestrator:
         # ——后者同时被 limit_context 当测量函数反复调用，那边只能读、不能写。
         # 心境衰减是幂等的状态迁移，但也没必要为了量一次长度就写几回库。
         circadian, mood = self._circadian_and_mood(enabled=enabled)
+        # Fast-loop suspicion (see dialogue.intent_guard). Computed HERE, once,
+        # because _render_turn_context doubles as limit_context's measure
+        # callback and therefore runs many times per turn. The trace below is a
+        # side effect and must not live inside that callback.
+        intent_guard = guard_for(user_text)
+        if intent_guard:
+            self._trace_intent_guard(user_text, session_id)
         data = {'response_policy': bundle['response_policy'], 'companion_thread': thread,
+                'intent_guard': intent_guard,
                 'activity_data': activity, 'long_term_memory': self._memory_records(block, enabled=enabled),
                 'procedural_lessons': procedural, 'circadian': circadian, 'mood': mood,
                 'history': [dict(message) for message in recent if message.get('role') in ('user', 'assistant')],
