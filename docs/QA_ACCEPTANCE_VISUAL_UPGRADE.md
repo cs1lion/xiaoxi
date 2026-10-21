@@ -1351,3 +1351,69 @@ master 的直连版同时服务两个调用点，且重启路径的失败语义�
 全绿）。合并 `ccde463` + 修复 `dc7aa95` 的最终状态：**通过**。
 
 ---
+
+---
+
+## 27. S5 D 腿证据独立复验（2026-10-21，PR #6 / issue #2）
+
+**证据**：`pixel-world/eval/screens/s5-e2e-evidence-d4.json`（round r11-D-after-routing-fix）。
+**代码**：`fix/s5-d-worker-routing`（基于 master 38bc53a，2 文件 +55/−5）。
+QA 逐条独立核实，不采信转述。
+
+### 27.1 证据逐条核实
+
+| Chief 断言 | QA 独立核实 |
+|---|---|
+| commission `c_36e915fb05a2` 终态 done / retry 0 / agent dsh | **成立**：approved.status=done、retry_count=0、agent_id=dsh；verdict.ledgerFinal 为 c_36e915fb05a2=done |
+| max_prompt_tokens_per_call = 4607，闸门 120000 | **成立**：usage.max_prompt_tokens_per_call=4607、limit=120000、total_budget_exceeded=false；audit.passed=true、findings 0 条 |
+| 时间线出现 delivering 与 toAltar | **部分成立**：delivering 出现（t=249）；**toAltar 未出现**（采集窗口在 delivering 处结束）。worldFinal 为 v0:idle 证明她已返回。检查器的该断言是 OR 逻辑（delivering 或 toAltar 即过），比「两者都出现」弱 |
+| ledgerDeliveries = 1 | **成立**：verdict.worldFinal.ledgerDeliveries=1 |
+| ledger.connected=true / mock=false | **无法直接核实**：时间线 ledger 字段全为 null，检查器也不查该项。间接证据：驱动 URL 为 ?ledger=on、世界快照任务 source=ledger、REST 有该单记录、ledgerDeliveries 递增——真实台账路可推断，但字段本身未留证 |
+
+**完整 mode 序列**（236 帧）：idle → saluting → toWork → working → delivering，
+末态 idle——角色真的走进去干活、出来交付、回到祭坛。
+
+### 27.2 注入帧检查
+
+**无注入**：驱动脚本（s5-e2e-drive-r11.mjs）只做三件事——WS 发文本、收到
+confirmation 后发 assistant_confirm（approve:true）、轮询 Oracle.view() 与
+REST。没有 Oracle.feed、没有直接操作仿真、没有伪造帧。证据形状与真实链路一致。
+
+### 27.3 检查器独立运行
+
+`node scripts/check-s5-d.mjs eval/screens/s5-e2e-evidence-d4.json` → **6/6 passed**
+（QA 自己跑）。检查器逻辑评估：六条断言覆盖 commission_id / 终态 / 世界交付数 /
+交付动作 / 单次 token / 无 bloat 打回，且带 self-test 能区分 good 与 blocked 证据。
+唯一偏弱处即 27.1 的 OR 逻辑（delivering 或 toAltar）。
+
+### 27.4 代码改动复核
+
+`git diff master...fix/s5-d-worker-routing`：**2 文件 +55/−5**——
+`config/agents_roster.yaml`（claude 摘掉长任务关键词、dsh 接住）+
+`scripts/test_executive_v3.py`（新测试 + main 注册）。
+**没碰 server/ 逻辑、没放宽预算闸（120000 原样）、没动世界侧**。
+
+**新测试质量**：锁的是 roster 分工本身（claude 的 strengths 不得含
+代码/脚本/测试/实现/重构 + dsh 必须全含 + 4 条行为侧落 dsh + 2 条反向不抢
+workbuddy/scout），docstring 明确写了「只断言选中 dsh 是假绿」的理由。
+**QA 变异探针**：把「代码」加回 claude 的 strengths → 测试**变红**
+（仍含 代码，241 passed / 1 failed）→ 还原 → 234/234、工作区干净。锁有效。
+
+### 27.5 门禁（PR 状态，QA 独立实跑）
+
+| 命令 | 实测 |
+|---|---|
+| `scripts/test_executive_v3.py` | **242/242** |
+| `scripts/check_protocol.py` | **exit 0** |
+| 像素世界 `npm run check` | **exit 0** |
+
+### 27.6 结论
+
+**通过**（2 条 P3 证据注记，非缺陷）：
+1. toAltar 未进时间线（采集窗口所限，worldFinal=idle 佐证已返回；检查器 OR 逻辑比
+   Chief 表述弱——建议后续驱动把 worldFinal 前的 mode 也纳入时间线）
+2. ledger.connected/mock 未直接留证（可推断，建议驱动快照补记该字段）
+D 腿核心断言（done/retry 0/dsh、4607 ≤ 120000、ledgerDeliveries=1、角色交付动作、
+无注入、roster 分工锁 + 变异探针、门禁全绿）全部独立验通过。
+
+---
