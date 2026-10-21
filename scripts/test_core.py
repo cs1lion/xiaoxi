@@ -416,6 +416,37 @@ def test_cancel_records_reason() -> None:
         db.close()
 
 
+def test_contract_layer_wired_into_dispatch() -> None:
+    """契约层必须真的接进派单路径，否则 252 条测试覆盖的是死代码。
+
+    背景：server/contract/ 有 252 条测试，但 app.py 对它有 0 处引用——
+    契约层写完了、测完了，运行时完全没用到。
+    这里断言 dispatch 的密件里带 contract_gaps，且真的能算出缺口。
+    """
+    print("[contract wired into dispatch]")
+    import dataclasses
+    from server.assistant.dispatcher import BriefingPacket, _contract_gaps
+
+    fields = {f.name for f in dataclasses.fields(BriefingPacket)}
+    check("BriefingPacket 带 contract_gaps 字段", "contract_gaps" in fields)
+
+    thin = _contract_gaps({"id": "c_1", "title": "写一份季度报告", "brief": "整理Q3"}, None)
+    check("信息不全的单报出缺口", len(thin) > 0)
+    checks_hit = {g["check"] for g in thin}
+    check("缺交付物时 G3 报出", "G3" in checks_hit)
+    check("缺验收标准时 G4 报出", "G4" in checks_hit)
+
+    broken = _contract_gaps({"id": None, "title": None, "brief": None}, None)
+    check("脏输入不抛异常", isinstance(broken, tuple))
+
+    packet = BriefingPacket(
+        commission_id="c_1", objective="写报告", deliverable="file",
+        agent_id="writer", agent_name="写手", contract_gaps=thin,
+    )
+    stored = packet.as_stored()
+    check("序列化后仍带缺口", len(stored.get("contract_gaps") or []) == len(thin))
+
+
 def main() -> int:
     for test in (
         test_sanitize,
@@ -431,6 +462,7 @@ def main() -> int:
         test_circadian_and_mood_reach_the_prompt,
         test_internal_proxy_requires_token,
         test_cancel_records_reason,
+        test_contract_layer_wired_into_dispatch,
     ):
         test()
     print(f"\n=== {passed} passed, {len(failed)} failed ===")
