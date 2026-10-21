@@ -16,6 +16,41 @@ import { isWalkingMode, pixelAt, villagerPose, type VillagerPose } from './villa
 export const VILLAGER_W = 12;
 export const VILLAGER_H = 20;
 
+interface VillagerStyle {
+  readonly hair: number;
+  readonly cloak: number;
+  readonly cloakDark: number;
+  readonly scarf: number;
+  readonly scarfLit: number;
+  readonly satchel: number;
+  readonly satchelLit: number;
+}
+
+const MAIN_STYLE: VillagerStyle = {
+  hair: WORLD.timberDark,
+  cloak: WORLD.cloak,
+  cloakDark: WORLD.cloakDark,
+  scarf: WORLD.ember,
+  scarfLit: WORLD.trim,
+  satchel: WORLD.timberDark,
+  satchelLit: WORLD.trim,
+};
+
+/** 阿雾：暖木斗篷 + 浅金围巾，和莞尔的蓝斗篷/橙围巾分开；仍是 16 色内。 */
+const ALT_STYLE: VillagerStyle = {
+  hair: WORLD.timberDark,
+  cloak: WORLD.timber,
+  cloakDark: WORLD.timberDark,
+  scarf: WORLD.trim,
+  scarfLit: WORLD.pale,
+  satchel: WORLD.ember,
+  satchelLit: WORLD.trim,
+};
+
+function villagerStyle(villager: VillagerSnapshot): VillagerStyle {
+  return villager.name === '莞尔' ? MAIN_STYLE : ALT_STYLE;
+}
+
 export interface VillagerView {
   readonly container: Phaser.GameObjects.Container;
   readonly body: Phaser.GameObjects.Graphics;
@@ -38,7 +73,7 @@ export function createVillager(
   shadow.fillRect(-4, 0, 8, 1);
 
   const body = scene.add.graphics();
-  drawBody(body, 'down', villagerPose('idle', 0), 'idle', false);
+  drawBody(body, 'down', villagerPose('idle', 0), 'idle', false, MAIN_STYLE, 0);
 
   // 名字/气泡已迁 DOM overlay（D5-A）：canvas 里不再画中文。
   const container = scene.add.container(originX, originY, [shadow, body]);
@@ -68,6 +103,8 @@ export function updateVillager(
     pose,
     villager.mode,
     isWalkingMode(villager.mode),
+    villagerStyle(villager),
+    nowMs,
   );
   if (villager.umbrella) drawUmbrella(view.body, pose.offsetY);
 
@@ -103,9 +140,12 @@ function drawBody(
   pose: VillagerPose,
   mode: VillagerSnapshot['mode'],
   walking: boolean,
+  style: VillagerStyle,
+  nowMs: number,
 ): void {
   const y = -VILLAGER_H + pose.offsetY;
   const scarfLift = walking ? pose.frame % 2 : 0;
+  const blink = nowMs > 0 && !walking && Math.floor(nowMs / 100) % 43 === 0;
 
   // 轮廓：头/肩/斗篷各一圈 1px 最暗色。斗篷下摆比肩宽 2px，形成 A 字剪影。
   g.fillStyle(WORLD.ink, 1);
@@ -117,7 +157,7 @@ function drawBody(
   g.fillRect(-4, y + 3, 8, 6);
 
   // 发：顶 2px + 两侧，另加马尾/后发。发色与靴子同源，保持 16 色。
-  g.fillStyle(WORLD.timberDark, 1);
+  g.fillStyle(style.hair, 1);
   g.fillRect(-4, y + 1, 8, 2);
   g.fillRect(-5, y + 1, 1, 6);
   g.fillRect(4, y + 1, 1, 6);
@@ -135,15 +175,20 @@ function drawBody(
   g.fillStyle(WORLD.pale, 1);
   g.fillRect(-4, y, 1, 1);
 
-  // 眼
+  // 眼：平时 1px；每 4.3 秒闭一次，只闭 100ms，不拖慢动作。
   g.fillStyle(WORLD.ink, 1);
   if (facing === 'down') {
-    g.fillRect(-2, y + 5, 1, 1);
-    g.fillRect(2, y + 5, 1, 1);
+    if (blink) {
+      g.fillRect(-2, y + 5, 2, 1);
+      g.fillRect(2, y + 5, 2, 1);
+    } else {
+      g.fillRect(-2, y + 5, 1, 1);
+      g.fillRect(2, y + 5, 1, 1);
+    }
   } else if (facing === 'left') {
-    g.fillRect(-3, y + 5, 1, 1);
+    g.fillRect(-3, y + 5, blink ? 2 : 1, 1);
   } else if (facing === 'right') {
-    g.fillRect(2, y + 5, 1, 1);
+    g.fillRect(2, y + 5, blink ? 2 : 1, 1);
   }
   // 嘴：1px，朝下时可见。
   if (facing === 'down') {
@@ -152,29 +197,38 @@ function drawBody(
   }
 
   // 斗篷：肩 8px、下摆 12px；右侧暗部，底边再压一档。
-  g.fillStyle(WORLD.cloak, 1);
+  g.fillStyle(style.cloak, 1);
   g.fillRect(-4, y + 8, 8, 4);
   g.fillRect(-5, y + 12, 10, 4);
   g.fillRect(-6, y + 16, 12, 2);
-  g.fillStyle(WORLD.cloakDark, 1);
+  g.fillStyle(style.cloakDark, 1);
   g.fillRect(3, y + 8, 1, 10);
   g.fillRect(-6, y + 16, 12, 2);
   g.fillRect(0, y + 9, 1, 7);
 
+  // 手臂：走路时前后摆 1px；静止时垂在斗篷两侧。
+  const swing = walking ? (pose.frame % 2 === 0 ? 1 : 0) : 0;
+  g.fillStyle(style.cloakDark, 1);
+  g.fillRect(-5, y + 10 + swing, 1, 3);
+  g.fillRect(4, y + 10 - swing, 1, 3);
+  g.fillStyle(WORLD.skin, 1);
+  g.fillRect(-5, y + 13 + swing, 1, 1);
+  g.fillRect(4, y + 13 - swing, 1, 1);
+
   // 围巾：2px 横贯 + 左侧飘尾；走路时尾端 1px 上下。
-  g.fillStyle(WORLD.ember, 1);
+  g.fillStyle(style.scarf, 1);
   g.fillRect(-6, y + 7, 12, 2);
   g.fillRect(-8, y + 8 + scarfLift, 3, 1);
   g.fillRect(-7, y + 9 + scarfLift, 2, 1);
-  g.fillStyle(WORLD.trim, 1);
+  g.fillStyle(style.scarfLit, 1);
   g.fillRect(-5, y + 7, 4, 1);
 
   // 侧包：打破矩形，给“出门办事”的读法。
   g.fillStyle(WORLD.ink, 1);
   g.fillRect(4, y + 12, 4, 5);
-  g.fillStyle(WORLD.timberDark, 1);
+  g.fillStyle(style.satchel, 1);
   g.fillRect(4, y + 13, 3, 3);
-  g.fillStyle(WORLD.trim, 1);
+  g.fillStyle(style.satchelLit, 1);
   g.fillRect(4, y + 13, 3, 1);
 
   // 靴子：走路的 4 帧就是这两只脚的前伸组合（整数像素）。
@@ -185,14 +239,14 @@ function drawBody(
   g.fillRect(-4 + pose.footLeft, y + 19, 3, 1);
   g.fillRect(1 + pose.footRight, y + 19, 3, 1);
 
-  // 轮廓光：固定左上，1px trim/ pale；不是每一侧都描亮。
-  g.fillStyle(WORLD.trim, 1);
+  // 轮廓光：固定左上，1px；主角色暖金，阿雾浅金，保持两套识别。
+  g.fillStyle(style.scarfLit, 1);
   g.fillRect(-6, y + 8, 1, 5);
   g.fillRect(-5, y + 2, 1, 3);
   g.fillStyle(WORLD.pale, 1);
-  g.fillRect(-4, y + 1, 2, 1);
+  g.fillRect(-4, y + 1, 1, 1);
 
-  drawHeldItem(g, y, facing, mode);
+  drawHeldItem(g, y, facing, mode, pose.frame);
 }
 
 /** 手里拿的东西：工作=锤，交付=纸，行礼=抬手。都只占 2–4px。 */
@@ -201,22 +255,24 @@ function drawHeldItem(
   y: number,
   facing: VillagerSnapshot['facing'],
   mode: VillagerSnapshot['mode'],
+  frame: number,
 ): void {
   const side = facing === 'left' ? -1 : 1;
+  const bob = mode === 'working' || mode === 'delivering' ? frame % 2 : 0;
   if (mode === 'working') {
     g.fillStyle(WORLD.ink, 1);
-    g.fillRect(side * 5 - 1, y + 11, 2, 6);
+    g.fillRect(side * 5 - 1, y + 11 - bob, 2, 6);
     g.fillStyle(WORLD.plaza, 1);
-    g.fillRect(side * 5 - 2, y + 10, 4, 2);
+    g.fillRect(side * 5 - 2, y + 10 - bob, 4, 2);
     g.fillStyle(WORLD.pale, 1);
-    g.fillRect(side * 5 - 2, y + 10, 4, 1);
+    g.fillRect(side * 5 - 2, y + 10 - bob, 4, 1);
   } else if (mode === 'delivering') {
     g.fillStyle(WORLD.ink, 1);
-    g.fillRect(3 * side - (side < 0 ? 3 : 0), y + 12, 5, 5);
+    g.fillRect(3 * side - (side < 0 ? 3 : 0), y + 12 - bob, 5, 5);
     g.fillStyle(WORLD.pale, 1);
-    g.fillRect(4 * side - (side < 0 ? 3 : 0), y + 12, 3, 4);
+    g.fillRect(4 * side - (side < 0 ? 3 : 0), y + 12 - bob, 3, 4);
     g.fillStyle(WORLD.soil, 1);
-    g.fillRect(4 * side - (side < 0 ? 3 : 0), y + 14, 3, 1);
+    g.fillRect(4 * side - (side < 0 ? 3 : 0), y + 14 - bob, 3, 1);
   } else if (mode === 'saluting') {
     g.fillStyle(WORLD.skin, 1);
     g.fillRect(4 * side - (side < 0 ? 2 : 0), y + 3, 2, 4);

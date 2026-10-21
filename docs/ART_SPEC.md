@@ -50,7 +50,7 @@
 | 抄书斋 | `ink_house` | 4×3 | **flat**（平顶） | agriculture |
 | 新工坊 | `workshop_plot` | 4×3 | **gable**（扩建样板，蓝顶 W13） | industry（扩建） |
 
-- 屋顶高 = `max(8, round(h*0.34))`（`buildings.ts` `createBuilding`）；门/窗/烟囱/工位全数据化（`prefabs.json`）。
+- 屋顶高 = `max(10, round(h*0.34))`（`buildings.ts` `createBuilding`）；门/窗/烟囱/工位全数据化（`prefabs.json`）。
 - 剪影绘制：gable 逐阶收尖、tower 中塔+檐、flat 平顶+竖饰条（`buildings.ts` `drawRoof`）。
 - 深度 Y-Sort：建筑 `depth = ALTITUDE + baseY`（`buildings.ts` `updateBuilding`），天气层固定 8000–8002（`weather.ts` `createWeatherView`）。
 
@@ -87,10 +87,12 @@
 
 `#e8e2d2`（纸面/深底亮字）、`#24211b`（纸上墨字/气泡字）、`#8e968c`（次要文字）、`#171b18`（面板底）、`#2b322c`（分隔线/边框）、`#e3a13c`（强调，与世界共享）、`#0c0f0d`（页面底/投影）、`#c8876a`（警告/错误）。收敛后**世界与 UI 仅 `#e3a13c` 共享 1 色**。
 
+- **UI 字体**：标题、按钮、状态行、overlay 名字/气泡、报纸刊头用 **Fusion Pixel 12px**（SIL OFL 1.1，`pixel-world/public/fonts/`，许可文件 `OFL.txt`）；新闻纸正文仍用 `Noto Serif SC`。像素字只在 12px 与 24px（2×）整数倍使用，关闭字体平滑。
+
 ### 2.3 材质色阶与像素簇方向（模板 §2 要求）
 
 - 每种主要材质 3 级色阶：基色 / 暗部（同 token 降 1 档或 alpha）/ 亮部（相邻亮 token）。木 = W08 基 + W09 暗；石/地 = W05 基 + W06 亮 + W02 暗；草 = W03 基 + W04 亮。
-- **像素簇方向**：草地 speck 朝草簇（竖 2×3），石/广场 speck 朝石板接缝（横 2×1），农田 speck 朝垄（竖），统一 2×2 簇形状，方向随材质，不随机（见 §3.4）。
+- **像素簇方向**：草地=簇状草叶，石/广场=板岩缝，农田=垄线与幼苗；方向随材质，不随机。**统一 2×2 簇形状**不再适用于石/广场（已改为 3–4 块不规则板岩，见 §3.4）。
 - 限制 W11（amber）与 W15（ember）使用：只给角色围巾、窗光、进度、路灯、祭坛符文、故障线；**不得铺大面积**，让角色/路径/工坊状态优先可读（§1 亮部稀缺原则）。
 
 ### 2.4 alpha 纪律（硬性）
@@ -104,9 +106,9 @@
 ### 2.5 雨天用色（现状即规范）
 
 - 雨幕压暗 = `WORLD.cloakDark`（W14），`alpha = intensity × 0.28`（`weather.ts` `createWeatherView`）；**明令禁止用 W01 `ink` 压雨**（雨幕会发绿）。
-- 雨滴/水花 = `WORLD.pale`（W16）：雨滴 `alpha 0.35+0.35·intensity`、水花 `alpha 0.22·intensity`（`weather.ts` 雨滴/水花绘制）。
+- 雨滴/水花 = `WORLD.pale`（W16）：远/中/近三层雨滴 alpha 约 0.14–0.26 / 0.28–0.58 / 0.42–0.80，水花 `0.22·intensity`（`weather.ts` 雨滴/水花绘制）。
 - 主角雨天可读靠 W11 `amber` + W12 `skin`（亮部 4 色中的 2 个）+ 围巾 W15。
-- 雨滴 140 滴（其中 1/3 画斜线）、水花 18 个，深度 8000–8002 盖在所有世界标签之上（`weather.ts` `createWeatherView`）；确定性种子 `window.__RAIN_SEED__` 供截图复现（`weather.ts` `setRainSeed`/`rainRandom`）。
+- 雨滴 150 滴分远/中/近三层（长度 3/5/7px，透明度分层）、水花 18 个；雨幕深度 8000–8002，地面水洼 depth 2、底部低雾 7999（`weather.ts` `createWeatherView`）；确定性种子 `window.__RAIN_SEED__` 供截图复现（`weather.ts` `setRainSeed`/`rainRandom`）。
 
 ---
 
@@ -129,27 +131,29 @@
 
 ### 3.2 角色亮部最低规则（现状 + 验收）
 
-- 围巾 W15 与皮肤 W12 亮边**原生 ≥2px**（400% 下视觉 ≥8px 块）；`villager.ts` 皮肤 8×8、围巾 10×2，400% 下成块可读。
-- 眼睛 1px 可接受，但**必须贴 ≥2px 皮肤块**（`villager.ts` 眼睛贴脸 8×8 皮肤），不孤立悬浮。
+- 围巾 W15 与皮肤 W12 亮边**原生 ≥2px**（400% 下视觉 ≥8px 块）；`villager.ts` 皮肤 8×8、围巾 12×2，400% 下成块可读。
+- 眼睛 1px 可接受，但**必须贴 ≥2px 皮肤块**（`villager.ts` 眼睛贴脸 8×8 皮肤），不孤立悬浮；眨眼为 2px 横线，每 4.3 秒一次、持续 100ms。
 - 斗篷 W13 `cloak` 对草地 1.40:1，**并入 16 色后不得只剩 1px 孤点**：补 1px 高光或删该亮部层（§1.4 角色亮部风险）。
 - 多角色同框时角色间亮部**不粘连**（间隔 ≥2px 暗部或留白）。
+- 多角色识别（不新增色）：莞尔用 W13 `cloak` 斗篷 + W15 `ember` 围巾；阿雾用 W08 `timber` 斗篷 + W10 `trim` 围巾 + W15 `ember` 侧包，靠色相/明度区分。
 
 ### 3.3 建筑与装饰规格
 
-- 门窗/烟囱尺寸（现状）：门 10×14、窗 8×6、烟囱 7×10（`buildings.ts` 门窗/烟囱绘制）；屋顶出檐 2px（`buildings.ts` `createBuilding`）。
+- 门窗/烟囱尺寸（现状）：门 14×18、窗 10×9（含框）、烟囱 9×14（`buildings.ts` 门窗/烟囱绘制）；屋顶出檐 3–4px（`buildings.ts` `createBuilding`）。
 - 装饰 3 类：lamp / tree / banner（`decor.ts`），带 1px 接触阴影；每区可交互物 ≤8（架构预算）。
+- 地面另有种植带与农庄矮篱（`tilemap.ts` `drawPlantingBeds`/`drawFarmFence`），为渲染层装饰，不参与碰撞、不新增色。
 - 天气/装饰不得淹没角色轮廓：雨幕深度 8000+ 在上，但**角色 1px 轮廓（W01）必须保留**，雨天压暗后主角亮部 ≥2 个相邻像素块可辨（§2.5）。
 
-### 3.4 地面 speck（现状：稀疏 2×2 确定性簇）
+### 3.4 地面材质（现状：低频草甸 / 不规则板岩 / 农田垄作）
 
 - **不再单开近色 speck**：`TERRAIN_SPECK` 取基色的相邻 1 档（草→`grassLit`、石→`plaza`、广场→`stone`、农田→`soil`、树→`grass`，`palette-data.ts` `TERRAIN_SPECK`），省 5 个源色。
-- 绘制 = **每 tile 2–3 个 2×2 实心像素簇，位置由格坐标哈希确定性决定**（`tilemap.ts` `drawTexture`），**非随机、非满铺**（满铺 Bayer 实测像织物，已改稀疏成簇）。
-- 约束：簇形状统一 2×2；方向随材质（§2.3）；**不引入第 17/18 色**；密度偏差（满铺→稀疏）是受控偏差，需保留注释说明。
-- 已知问题：**祭坛遮挡**——角色名/祭坛符文在 400% 下叠字风险，静态文字已改图标（`SandboxScene.ts` `drawAltar` 祭坛符文），但角色 DOM overlay 名字压在祭坛区仍需用户评审（B9 残留项）。
+- 草地用 **4×4 格低频草甸掩码**，只在部分区域长 1–2 组草簇；石/广场用 **3–4 块不规则板岩**（缝 1px 实心 `soil`/`stone`）；农田保留垄线并加幼苗/麦穗（`tilemap.ts` `drawMeadow`/`drawFlagstones`/`drawFarmRows`）。
+- 约束：**不引入第 17/18 色**；缝线实心、不用 alpha 做材质；位置由格坐标哈希确定性决定；种植带/矮篱为渲染层装饰（§3.3）。
+- 已知问题：祭坛已缩为 26×26 石龛并向右偏 12px，角色名/符文在 400% 下的叠字风险仍需用户评审（B9 残留项）。
 
 ### 3.5 植物
 
-- 草簇/石子/花 3 类装饰（`tilemap.ts` `drawDressing`），`tuft` 竖 1×3、`pebble` 横 2×1、`flower` 单点 amber，**确定性哈希、非随机散点**；`bare` 留空。
+- 草簇/石子/花 3 类装饰（`tilemap.ts` `drawDressing`），`tuft` 竖 1×3、`pebble` 横 2×1、`flower` 单点 `trim`/`pale`，**确定性哈希、非随机散点**；`bare` 留空。
 
 ---
 
