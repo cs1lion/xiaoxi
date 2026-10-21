@@ -1196,3 +1196,93 @@ Chief 代跑。冲突 6 文件若合并后有语义损失（不是文本冲突�
 记 P1（关键集成链路断裂）。
 
 ---
+
+---
+
+## 25. 合并落地后独立复验结果（2026-10-21，HEAD `20db387`）
+
+### 25.1 两层门禁（QA 独立实跑，非采信 Chief 数字）
+
+**第一层 · 主产品**（cwd=worktree 根，python 用 master 的 `.venv\Scripts\python.exe`，
+Python 3.12.4 / numpy 2.5.4；worktree 无自有 venv）：
+
+| 命令 | QA 实测 |
+|---|---|
+| `python scripts/check_protocol.py` | **exit 0**（PASS） |
+| `python scripts/test_core.py` | **64 passed, 0 failed** |
+| `python scripts/test_world_bridge.py` | **75 passed, 0 failed**（合并前 71，master 的幂等测试 +4） |
+| `python scripts/test_executive_v3.py` | **231 passed, 0 failed** |
+
+**第二层 · 像素世界**（cwd=pixel-world）：
+
+| 命令 | QA 实测 |
+|---|---|
+| `npm run check` | **exit 0** |
+| `npm run test:inprocess` | **221/221**（fail 0） |
+| `node scripts/audit-palette.mjs --strict` | **exit 0**；世界 16（引用 **267**）/ UI 8（51）/ 并集 23 / 越界 0 |
+| `python scripts/test_pixel_world.py` | **PASS** |
+
+注：audit 引用数 110 → 267 来自合并前的视觉工作提交（ca0bca3 世界美术重建 +
+8acac73 像素字体与双角色），非合并引入；唯一色数仍 16、越界 0，调色板纪律守住。
+smoke-ego 116/116 为 Chief 代跑（浏览器部分），QA 未独立复跑——ego 沙箱限制，
+记为「Chief 代跑、QA 核口径」。
+
+### 25.2 冲突解法逐处核查（4 处，3 处正确、1 处断裂）
+
+| # | 冲突点 | 解法 | QA 核查结果 |
+|---|---|---|---|
+| 1 | `extra_env` | 取 master | **正确**：`:1437` `extra_env = _durable_extra_env(cfg)` → `:1458` 传入；`:1412` 含 `XIAOXI_APPROVAL_TOOLS`，未回退成空 |
+| 2 | `bind_durable` 参数 | 取 master | **正确**：`:1469` `workspace_root` + `:1471` `apply_to=_durable_switch_agents(cfg)` 都在 |
+| 3 | shutdown 全局 | 两边合并 | **正确**：`:1553` 四个 global；`:1555-1558` 订阅解绑 + `_loop=None`；`:1560-1566` `_reconcile_task.cancel()` + 置 None——两件事都在，注册/解绑、启动/取消均成对 |
+| 4 | `durable_lookup` | 取 master | **断裂（P1，见 25.3）** |
+
+### 25.3 P1：合并后 `_durable_lookup` 双定义遮蔽，durable 重启收口断裂
+
+**现象**：合并后的 `server/app.py` 有**两个模块级 `_durable_lookup` 定义**——
+`:1339`（master 版，直连查询函数 `(commission_id, attempt)`）与 `:1498`（我们版，
+**工厂** `()` 返回闭包）。Python 后定义遮蔽前定义，**运行时绑定的是工厂**。
+而两个调用点都是 master 的不带括号风格：`:1375` `reconcile_durable, _durable_lookup`、
+`:1542` `recover_interrupted(durable_lookup=_durable_lookup)`——传出去的是工厂。
+
+**实证（QA 自己跑，非推理）**：把两个定义原样提取 exec，运行时
+`_durable_lookup.__code__.co_argcount == 0`（工厂）；模拟 master `_adopt_durable`
+的调用模式（`lookup(id, attempt)` → TypeError → 回退 `lookup(id)`）→
+**抛出未捕获的 `TypeError: _durable_lookup() takes 0 positional arguments
+but 1 was given`**。
+
+**影响**：
+1. **P1 · 启动即崩**：`recover_interrupted`（executive.py:366）对 `_adopt_durable`
+   没有 try/except 包裹 → TypeError 穿透到 `startup()` → **服务端在存在在飞单
+   （running/briefing）时重启起不来**——恰是 durable 重启收口要用的场景。
+   （auditing 态因 `_adopt_durable` 前置状态检查提前 return False 不触发；
+   e2e 的 G 重启时单都是 blocked，所以没暴露。）
+2. **P2 · 周期对账静默失效**：`:1375` 的 `reconcile_durable` 同样拿到工厂 →
+   TypeError 被 `_reconcile_loop` 的 `except Exception: continue` 吞掉 → 周期对账
+   永远不跑，无任何报错。
+
+**为什么门禁没抓到**：test_core / test_world_bridge / test_executive_v3 都不走
+app.py 的 startup 路径 + 在飞单组合；e2e 的 G 重启发生在单已 blocked 之后。
+
+**根因**：冲突解法意图是「durable_lookup 取 master」，但两个定义位于不同区段，
+git 自动合并把**两边都留下**，我们的工厂遮蔽了 master 的直连版——意图未达成。
+
+**修复建议（施工执行，QA 复验）**：删掉遮蔽的工厂定义（`:1498-1528`）——
+master 的直连版同时服务两个调用点，且重启路径的失败语义不变
+（`_adopt_durable` 的 `except Exception: return False` 与工厂返回 None 等价，
+都走「转 BLOCKED」）。备选：把工厂改名并恢复带括号调用，但删工厂是最小正确修。
+
+### 25.4 主仓库未跟踪项判断
+
+- **`pixel-world/`（134 文件）不提交进 master**：与 Chief 判断一致——像素世界属
+  特性分支，提交进 master 会造成双份真相与漂移风险；master 里那份是独立本地副本，
+  保持未跟踪即可。
+- **两个评审 HTML**：主产品线的评审产物，是否入库由主产品侧定；QA 不干预。
+  若它们被其他文档引用则应入库保迹，否则保持未跟踪亦可。
+
+### 25.5 合并复验总结论
+
+**不通过（1 条 P1）**：两层门禁全绿、4 处冲突解法 3 处正确，但 `durable_lookup`
+双定义遮蔽导致 durable 重启收口断裂（启动即崩 + 周期对账静默失效），实证确认。
+修复 + QA 复验通过后，合并结论可改「通过」。
+
+---
