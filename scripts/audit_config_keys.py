@@ -21,10 +21,15 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 
-# 访问器 -> (defaults 常量, memory.yaml 里的段名, 同模块内消费 cfg 的函数)
+# 访问器 -> (defaults 常量, memory.yaml 里的段名, 消费 cfg 的 (文件, 函数))
+# 消费者**可以跨文件**：self_evolution_cfg() 的 cfg 实际在 server/assistant/loop.py
+# 的 _reflect 里消费。第一版把它们当同模块，`_reflect` 的读取一个都没扫到，
+# 于是"读了但没登记"这条主检查形同虚设（2026-10-18 修）。
 TARGETS = [
     ("server/memory/evolution.py", "self_evolution_cfg", "SELF_EVOLUTION_DEFAULTS",
-     "self_evolution", ["_reflect"]),
+     "self_evolution", [("server/assistant/loop.py", "_reflect"),
+                        ("server/assistant/loop.py", "_fork_bounds"),
+                        ("server/dialogue/orchestrator.py", "_circadian_and_mood")]),
     ("server/memory/feedback.py", "feedback_cfg", "FEEDBACK_DEFAULTS",
      "feedback", []),
     ("server/memory/lessons.py", "lessons_cfg", "LESSON_DEFAULTS",
@@ -53,24 +58,42 @@ def defaults_keys(tree: ast.Module, name: str) -> set[str] | None:
     return None
 
 
-def cfg_variables(tree: ast.Module, func_name: str) -> set[str]:
-    """访问器里出现过的局部变量名——凡是能被 `.get()` / `[]` 读的都算候选。
+def _mentions(node: ast.AST, name: str) -> bool:
+    return any(isinstance(sub, ast.Name) and sub.id == name for sub in ast.walk(node))
 
-    不猜"哪个变量才是配置"：访问器只有几行，候选集大一点没有误报风险，
-    猜错了才会整个漏掉。
+
+def cfg_variables(tree: ast.Module, func_name: str, accessor: str | None = None) -> set[str]:
+    """函数里哪些变量能当"配置对象"读。
+
+    - `accessor is None`（访问器自身）：局部变量全收。函数只有几行，候选集大一点
+      不会误报，猜错才会整个漏掉。
+    - `accessor` 给定（消费函数）：只收**由该访问器产出**的变量（`cfg = ... or
+      self_evolution_cfg()`），以及名字本身像配置的参数。全收会把 `trace.get(...)`
+      这类日志字段算成"读了但没登记的配置键"，制造一堆假阳性——假阳性比漏检更糟，
+      它会让真问题淹在噪声里。
     """
     names: set[str] = set()
     for node in ast.walk(tree):
         if not (isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
                 and node.name == func_name):
             continue
+        for arg in [*node.args.posonlyargs, *node.args.args, *node.args.kwonlyargs]:
+            lowered = arg.arg.lower()
+            if accessor is None or any(tok in lowered for tok in ("cfg", "config", "conf")):
+                names.add(arg.arg)
         for sub in ast.walk(node):
             targets = []
             if isinstance(sub, ast.Assign):
+                if accessor is not None and not _mentions(sub.value, accessor):
+                    continue
                 targets = sub.targets
             elif isinstance(sub, ast.AnnAssign):
+                if accessor is not None and (sub.value is None or not _mentions(sub.value, accessor)):
+                    continue
                 targets = [sub.target]
             elif isinstance(sub, (ast.For, ast.comprehension)):
+                if accessor is not None:
+                    continue
                 targets = [sub.target]
             for target in targets:
                 if isinstance(target, ast.Name):
@@ -78,10 +101,24 @@ def cfg_variables(tree: ast.Module, func_name: str) -> set[str]:
     return names
 
 
-def read_keys(tree: ast.Module, variables: set[str]) -> set[str]:
-    """这些变量上读到的字面量键：`.get("k", ...)` 与 `["k"]`。"""
-    keys: set[str] = set()
+def _find_func(tree: ast.Module, name: str) -> ast.AST | None:
     for node in ast.walk(tree):
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) and node.name == name:
+            return node
+    return None
+
+
+def read_keys(func_node: ast.AST | None, variables: set[str]) -> set[str]:
+    """这些变量**在当前函数体内**读到的字面量键：`.get("k", ...)` 与 `["k"]`。
+
+    必须限定作用域：`variables` 是一个跨函数的并集（`cfg` 在好几个函数里都叫 cfg），
+    若整棵树扫，`loop.py` 里别的函数读的 `cfg.get("mumble_seconds")` 会被算到
+    `self_evolution_cfg()` 头上，报出一堆"读了但没登记"的假阳性。
+    """
+    keys: set[str] = set()
+    if func_node is None:
+        return keys
+    for node in ast.walk(func_node):
         if isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute):
             if node.func.attr != "get" or not node.args:
                 continue
@@ -117,9 +154,19 @@ def main() -> int:
             print(f"  {const} 不是字面量 dict，本脚本判不了，跳过")
             continue
         variables = cfg_variables(tree, func)
-        for name in consumers:
-            variables |= cfg_variables(tree, name)
-        reads = read_keys(tree, variables)
+        reads = read_keys(_find_func(tree, func), variables)
+        for rel_consumer, consumer_fn in consumers:
+            cpath = ROOT / rel_consumer
+            if not cpath.is_file():
+                print(f"  !! 消费方文件不存在，跳过: {rel_consumer}")
+                continue
+            ctree = ast.parse(cpath.read_text(encoding="utf-8"), filename=str(cpath))
+            cfunc = _find_func(ctree, consumer_fn)
+            if cfunc is None:
+                print(f"  !! 消费方函数不存在，跳过: {rel_consumer}::{consumer_fn}")
+                continue
+            variables |= cfg_variables(ctree, consumer_fn, accessor=func)
+            reads |= read_keys(cfunc, variables)
         configured = (memory_yaml or {}).get(section)
         configured_keys = set(configured) if isinstance(configured, dict) else set()
         print(f"  defaults 键 : {sorted(whitelist)}")

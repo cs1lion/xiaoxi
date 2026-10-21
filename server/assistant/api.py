@@ -2,10 +2,70 @@
 from __future__ import annotations
 
 import asyncio
+import time
 from contextlib import suppress
+from dataclasses import dataclass, field
 from urllib.parse import urlsplit
 
 from fastapi import APIRouter, HTTPException, Request
+
+
+@dataclass
+class SchedulerState:
+    """Observable liveness for the one in-process reminder scheduler.
+
+    The scheduler used to be a bare ``while True``: one transient SQLite error
+    stopped every future reminder while ``/api/health`` kept saying ``ok``.
+    This state is written only by the scheduler task and read by health.
+    """
+
+    alive: bool = False
+    started_at: float | None = None
+    last_scan_at: float | None = None
+    last_success_at: float | None = None
+    last_error: str | None = None
+    consecutive_failures: int = field(default=0)
+    scan_count: int = field(default=0)
+
+    def start(self) -> None:
+        self.alive = True
+        self.started_at = time.time()
+        self.last_error = None
+        self.consecutive_failures = 0
+
+    def attempt(self) -> None:
+        self.last_scan_at = time.time()
+        self.scan_count += 1
+
+    def success(self) -> None:
+        self.last_success_at = time.time()
+        self.consecutive_failures = 0
+
+    def failure(self, exc: BaseException) -> None:
+        self.last_error = f"{type(exc).__name__}: {exc}"[:300]
+        self.consecutive_failures += 1
+
+    def stop(self) -> None:
+        self.alive = False
+
+    def snapshot(self) -> dict[str, object]:
+        return {
+            "alive": self.alive,
+            "started_at": self.started_at,
+            "last_scan_at": self.last_scan_at,
+            "last_success_at": self.last_success_at,
+            "last_error": self.last_error,
+            "consecutive_failures": self.consecutive_failures,
+            "scan_count": self.scan_count,
+            "degraded": (not self.alive) or self.consecutive_failures > 0,
+        }
+
+
+SCHEDULER_STATE = SchedulerState()
+
+
+def scheduler_snapshot() -> dict[str, object]:
+    return SCHEDULER_STATE.snapshot()
 
 
 def create_router(service):
@@ -241,8 +301,30 @@ def create_router(service):
     return router
 
 
-async def scheduler(service):
-    """No model call for deterministic reminders. Notifications survive disconnect."""
-    while True:
-        service.store.scan_due()
-        await asyncio.sleep(2)
+async def scheduler(service, state: SchedulerState | None = None, *,
+                    base_delay: float = 2.0, max_delay: float = 30.0):
+    """No model call for deterministic reminders. Notifications survive disconnect.
+
+    A transient store failure must not stop all future reminders. The loop keeps
+    running with bounded exponential backoff and publishes the last error so
+    ``/api/health`` can say ``degraded`` instead of lying with ``ok``.
+    """
+    current = state or SCHEDULER_STATE
+    current.start()
+    delay = base_delay
+    try:
+        while True:
+            current.attempt()
+            try:
+                service.store.scan_due()
+            except asyncio.CancelledError:
+                raise
+            except Exception as exc:
+                current.failure(exc)
+                delay = min(max(delay * 2, base_delay), max_delay)
+            else:
+                current.success()
+                delay = base_delay
+            await asyncio.sleep(delay)
+    finally:
+        current.stop()

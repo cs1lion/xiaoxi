@@ -81,9 +81,9 @@ export class VrmRig {
       container.appendChild(canvas);
       state.scene = new THREE.Scene();
       state.camera = new THREE.PerspectiveCamera(30, 1, 0.01, 100);
-      state.ambient = new THREE.HemisphereLight(0xffffff, 0xb6b2c9, 2);
+      state.ambient = new THREE.HemisphereLight(0xfff6ec, 0x9c9aa8, 1.62);
       state.scene.add(state.ambient);
-      const key = new THREE.DirectionalLight(0xffffff, 2.5);
+      const key = new THREE.DirectionalLight(0xfff2e2, 2.45);
       key.position.set(1, 2, 3);
       state.key = key;
       state.scene.add(key);
@@ -229,6 +229,8 @@ export class VrmRig {
         }
       }
       this._captureHairPhysics(state);
+      this._buildAtmosphere(state);
+      this._watchInteraction(state);
       resize();
       this.draw({}, 0);
       return this;
@@ -379,6 +381,12 @@ export class VrmRig {
     const hairRim = look.hair_rim || {};
     const rimColor = new THREE.Color(hairRim.color || '#a9c9e8')
       .multiplyScalar(Number.isFinite(hairRim.strength) ? hairRim.strength : 1);
+    // 衣料的轮廓光：暗窗里衣服是一整片米白，没有边缘就贴在背景上。
+    // 只给布料，不动皮肤与五官——脸上打冷边光会立刻变成塑料。
+    const bodyRim = look.body_rim || {};
+    const clothRim = new THREE.Color(bodyRim.color || '#cfe2ff')
+      .multiplyScalar(Number.isFinite(bodyRim.strength) ? bodyRim.strength : 0.5);
+    const CLOTH = /jacket|sleeve|trouser|collar|neckline|knit|waistband|cuff|wear/i;
     const seen = new Set();
     state.vrm.scene.traverse(node => {
       for (const material of Array.isArray(node.material) ? node.material : [node.material]) {
@@ -397,6 +405,17 @@ export class VrmRig {
             material.rimLightingMixFactor = Number.isFinite(hairRim.mix) ? hairRim.mix : 0.7;
           }
           if (Number.isFinite(look.hair_outline)) material.outlineWidthFactor = look.hair_outline;
+        } else if (CLOTH.test(name)) {
+          material.parametricRimColorFactor?.copy(clothRim);
+          if (material.parametricRimFresnelPowerFactor !== undefined) {
+            material.parametricRimFresnelPowerFactor = Number.isFinite(bodyRim.fresnel) ? bodyRim.fresnel : 4.4;
+          }
+          if (material.parametricRimLiftFactor !== undefined) {
+            material.parametricRimLiftFactor = Number.isFinite(bodyRim.lift) ? bodyRim.lift : 0.0;
+          }
+          if (material.rimLightingMixFactor !== undefined) {
+            material.rimLightingMixFactor = Number.isFinite(bodyRim.mix) ? bodyRim.mix : 0.32;
+          }
         } else if (name === 'body_bake' || name === 'body_bake (Outline)') {
           if (Number.isFinite(look.face_toony)) material.shadingToonyFactor = look.face_toony;
           if (Number.isFinite(look.face_outline)) material.outlineWidthFactor = look.face_outline;
@@ -694,6 +713,206 @@ export class VrmRig {
     this.secondaryScale = finiteClamp(scale, 0, 1);
   }
 
+  /* ---------- 舞台空气：尘埃、头顶光晕、状态补光 ----------
+   * 三样都是新增的发光体，只读真实状态（#avatarStage[data-interaction] 由
+   * app.js 每帧写入，另加 speak/listen 时的麦克风包络），不新增业务状态。
+   * 刻意不改 ambient / key / fill：calibration 会冻结这三盏灯并在退出时还原，
+   * 逐帧改写它们会破坏眼部标定与指纹比对。新灯在静默时强度为 0，所以
+   * 默认画面与加这一层之前一致，只在状态变化时才有光。 */
+  _buildAtmosphere(state) {
+    if (!state?.scene || typeof document === 'undefined') return;
+    const height = state.modelHeight || 1.6;
+    const framing = state.framing;
+    const center = (framing?.center ? framing.center : new THREE.Vector3(0, height * 0.78, 0)).clone();
+    const visH = framing?.height || height * 0.5;
+
+    // 一张 64px 的径向渐变贴图，光晕与尘埃共用：不额外请求图片。
+    const canvas = document.createElement('canvas');
+    canvas.width = canvas.height = 64;
+    const brush = canvas.getContext('2d');
+    if (!brush) return;
+    const grad = brush.createRadialGradient(32, 32, 0, 32, 32, 32);
+    grad.addColorStop(0, 'rgba(255,255,255,1)');
+    grad.addColorStop(0.32, 'rgba(255,255,255,.6)');
+    grad.addColorStop(1, 'rgba(255,255,255,0)');
+    brush.fillStyle = grad;
+    brush.fillRect(0, 0, 64, 64);
+    const sprite = new THREE.CanvasTexture(canvas);
+    sprite.colorSpace = THREE.SRGBColorSpace;
+    state.atmosTexture = sprite;
+
+    // 头顶光晕：一块加色 sprite，摆在人物身后。必须开 depthTest——加色精灵
+    // 属于透明队列，无论 renderOrder 多小都在不透明几何之后绘制；关掉深度
+    // 测试就等于把整张脸盖上一层白光（第一次调就是这么白掉的）。
+    const halo = new THREE.Sprite(new THREE.SpriteMaterial({
+      map: sprite, color: 0xffc47d, transparent: true, opacity: 0.46,
+      depthWrite: false, depthTest: true, blending: THREE.AdditiveBlending,
+    }));
+    halo.scale.setScalar(visH * 2.1);
+    halo.position.set(center.x, center.y + visH * 0.3, center.z - visH * 1.1);
+    halo.renderOrder = -2;
+    state.halo = halo;
+    state.scene.add(halo);
+
+    // 空气尘分两层：后景大而虚的光斑，和前景细而亮的浮尘。同一张三通道
+    // 贴图，只靠尺寸与透明度拉开景深；全部在她身后，被身体正常遮挡。
+    const narrow = (globalThis.innerWidth || 1440) < 760;
+    const halfW = visH * 0.78;
+    const halfH = visH * 0.72;
+    const make = (count, size, opacity, zNear, zFar) => {
+      const positions = new Float32Array(count * 3);
+      const seeds = new Float32Array(count * 3);
+      for (let i = 0; i < count; i++) {
+        positions[i * 3] = center.x + (Math.random() - 0.5) * halfW * 2;
+        positions[i * 3 + 1] = center.y + (Math.random() - 0.5) * halfH * 2;
+        positions[i * 3 + 2] = center.z - visH * (zNear + Math.random() * (zFar - zNear));
+        seeds[i * 3] = Math.random() * Math.PI * 2;
+        seeds[i * 3 + 1] = 0.5 + Math.random();
+        seeds[i * 3 + 2] = 0.35 + Math.random() * 0.65;
+      }
+      const geometry = new THREE.BufferGeometry();
+      geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+      const points = new THREE.Points(geometry, new THREE.PointsMaterial({
+        map: sprite, color: 0xffd2a0, size, sizeAttenuation: true,
+        transparent: true, opacity, depthWrite: false,
+        blending: THREE.AdditiveBlending,
+      }));
+      points.frustumCulled = false;
+      state.scene.add(points);
+      return { points, seeds };
+    };
+    const motes = make(narrow ? 40 : 92, height * 0.026, 0.6, 0.05, 0.45);
+    const bokeh = make(narrow ? 6 : 12, height * 0.075, 0.055, 0.3, 1.05);
+    state.dust = [motes, bokeh];
+    state.dustBox = { minY: center.y - halfH, maxY: center.y + halfH, halfW };
+    state.dustFocus = new THREE.Vector3(center.x, center.y + visH * 0.28, center.z - visH * 0.4);
+    state.dustSpeed = visH;
+
+    // 状态补光：暖侧光（说话/倾听时抬起）与冷背光（思考时抬起）。
+    const warm = new THREE.PointLight(0xffb877, 0, visH * 2.4);
+    warm.position.set(center.x + visH * 0.7, center.y + visH * 0.35, center.z + visH * 0.55);
+    state.moodWarm = warm;
+    state.scene.add(warm);
+    const cool = new THREE.PointLight(0x9cc4ff, 0, visH * 1.8);
+    cool.position.set(center.x - visH * 0.8, center.y + visH * 0.2, center.z - visH * 0.5);
+    state.moodCool = cool;
+    state.scene.add(cool);
+
+    state.atmosClock = 0;
+    state.atmosWarm = 0.42;
+    state.atmosCool = 0;
+    state.atmosVisH = visH;
+    state.reduceMotion = !!globalThis.matchMedia?.('(prefers-reduced-motion: reduce)')?.matches;
+  }
+
+  /* 状态源只有一处：容器上是哪个 data-interaction，光就长什么样。 */
+  _watchInteraction(state) {
+    const host = state.container;
+    const read = () => (state.interaction = host?.dataset?.interaction || 'idle');
+    read();
+    if (!host || typeof MutationObserver !== 'function') return;
+    state.atmosObserver = new MutationObserver(read);
+    state.atmosObserver.observe(host, { attributes: true, attributeFilter: ['data-interaction'] });
+  }
+
+  /* 麦克风包络：app.js 把真实 RMS 写进 #meterFill 的宽度，这里只读，不猜。 */
+  _listenLevel() {
+    const fill = document.getElementById?.('meterFill');
+    const value = fill ? parseFloat(fill.style.width || '0') : 0;
+    return Number.isFinite(value) ? Math.min(1, Math.max(0, value / 100)) : 0;
+  }
+
+  _updateAtmosphere(state, dt) {
+    const halo = state.halo;
+    if (!halo || !state.dust?.length) return;
+    const seconds = Number.isFinite(dt) && dt > 0 ? Math.min(0.1, dt) : 0;
+    state.atmosClock = (state.atmosClock || 0) + seconds;
+    const clock = state.atmosClock;
+    const mood = state.interaction || 'idle';
+    const listening = mood === 'listening';
+    const speaking = mood === 'speaking';
+    const thinking = mood === 'thinking' || mood === 'preparing';
+    const quiet = mood === 'unavailable' || mood === 'yielding';
+    const level = listening || speaking ? this._listenLevel() : 0;
+
+    // 权重指数趋近，避免状态切换时光硬切；静默时几乎不动。
+    const ease = Math.min(1, seconds * 2.4);
+    const targetWarm = quiet ? 0.08 : listening ? 1 : speaking ? 0.7 : 0.34;
+    const targetCool = thinking ? 1 : 0;
+    state.atmosWarm += (targetWarm - state.atmosWarm) * ease;
+    state.atmosCool += (targetCool - state.atmosCool) * ease;
+    const warm = state.atmosWarm;
+    const cool = state.atmosCool;
+    const breath = state.reduceMotion ? 0.5 : 0.5 + 0.5 * Math.sin(clock * 0.52);
+
+    // 光晕：暖金呼吸 + 思考时转冷；说话时随音量再亮一点。
+    halo.material.opacity = (0.2 + warm * 0.26 + breath * 0.12 + level * 0.12) * (quiet ? 0.45 : 1);
+    halo.material.color.setRGB(
+      1 - cool * 0.36,
+      1 - cool * 0.2 + warm * 0.02,
+      1 - warm * 0.42 + cool * 0.12,
+    );
+    const haloScale = (state.atmosVisH || 1) * (2.0 + breath * 0.12 + warm * 0.16);
+    halo.scale.setScalar(haloScale);
+
+    // 补光：暖侧光吃"倾听/说话"，冷背光只在思考时抬起来。
+    // 点光源按平方衰减，这里离脸不到一米，强度必须压得很低——1 以上会把
+    // 整张脸推到过曝（第一次调就是 1.1，人物直接白掉）。
+    if (state.moodWarm) {
+      state.moodWarm.intensity = ((listening ? 0.9 : speaking ? 0.72 : 0.42) * warm + level * 0.8) * 0.16;
+      state.moodWarm.color.setHex(warm > 0.6 ? 0xffc487 : 0xff9f66);
+    }
+    if (state.moodCool) state.moodCool.intensity = cool * 0.3;
+
+    // 尘埃：慢速上升 + 横向摆动；思考时向她聚拢，静默时几乎停住。
+    const box = state.dustBox;
+    const focus = state.dustFocus;
+    const unit = state.atmosVisH || 1;
+    const drift = state.reduceMotion ? 0.25 : quiet ? 0.5 : 1;
+    const converge = thinking ? 0.55 : 0;
+    for (const layer of state.dust) {
+      const attr = layer.points.geometry.attributes.position;
+      const seeds = layer.seeds;
+      for (let i = 0, n = attr.count; i < n; i++) {
+        const i3 = i * 3;
+        const phase = seeds[i3];
+        const speed = seeds[i3 + 1];
+        let x = attr.array[i3];
+        let y = attr.array[i3 + 1];
+        y += (0.008 + speed * 0.008) * unit * seconds * drift;
+        x += Math.sin(clock * 0.34 + phase) * 0.0014 * unit * seconds * drift;
+        if (converge) {
+          x += (focus.x - x) * converge * seconds * 0.5;
+          y += (focus.y - y) * converge * seconds * 0.5;
+        }
+        if (y > box.maxY || Math.abs(x - focus.x) > box.halfW) {
+          y = box.minY;
+          x = focus.x + (Math.random() - 0.5) * box.halfW * 2;
+        }
+        attr.array[i3] = x;
+        attr.array[i3 + 1] = y;
+      }
+      attr.needsUpdate = true;
+      const base = layer.baseOpacity ?? layer.points.material.opacity;
+      layer.baseOpacity = base;
+      layer.points.material.opacity = base * (0.72 + warm * 0.5 + level * 0.4) * (quiet ? 0.55 : 1);
+    }
+  }
+
+  _disposeAtmosphere(state) {
+    state.atmosObserver?.disconnect();
+    const objects = [state.halo, ...(state.dust || []).map(layer => layer.points)];
+    for (const object of objects) {
+      if (!object) continue;
+      object.removeFromParent();
+      object.material?.dispose?.();
+      if (object.geometry) object.geometry.dispose();
+    }
+    for (const light of [state.moodWarm, state.moodCool]) light?.removeFromParent();
+    state.atmosTexture?.dispose?.();
+    state.halo = state.dust = state.moodWarm = state.moodCool = state.atmosTexture = null;
+  }
+
   draw(params, dt) {
     const state = this._state;
     if (!state?.vrm) return;
@@ -768,6 +987,7 @@ export class VrmRig {
         state.dolly.focus.z + state.dolly.offset.z * k);
       state.camera.lookAt(state.dolly.focus);
     }
+    this._updateAtmosphere(state, safeDelta(dt));
     state.renderer.render(state.scene, state.camera);
   }
 
@@ -783,6 +1003,7 @@ export class VrmRig {
     if (state.vrm?.lookAt?.target === state.target) state.vrm.lookAt.target = null;
     state.eyeAdapter?.dispose();
     state.accessories?.dispose();
+    this._disposeAtmosphere(state);
     releaseScenes(state.roots);
     state.renderer?.dispose();
     state.renderer?.forceContextLoss();

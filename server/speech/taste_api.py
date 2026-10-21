@@ -46,7 +46,10 @@ def create_taste_router(engine):
                 raise HTTPException(502, 'audition_failed')
         from ..config import settings
         info = catalog(engine)
+        # Report the container the bytes actually are. Trimming re-encodes to WAV,
+        # so claiming tts_format here would hand the browser a mismatched MIME.
+        wire = 'wav' if settings.tts_trim_silence and info['engine'] == 'stepaudio' else settings.tts_format
         return {**info, 'style':style, 'text':text, 'profile':selected,
                 'audio':base64.b64encode(audio).decode(),
-                'format':settings.tts_format if info['engine']=='stepaudio' else 'mp3'}
+                'format':wire if info['engine'] == 'stepaudio' else 'mp3'}
     return router

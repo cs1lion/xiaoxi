@@ -185,7 +185,10 @@ try {
   check(await currentView() === 'drawerViewOps', 'ui_nav(ops) 切到督办与战况标签页');
   const navEvents = await page.evaluate(() => window.__navEvents || []);
   check(navEvents.some(e => e.target_view === 'ops' && e.focus_id === 'c_1f0a'),
-    '目标卡领航定位（.nav-spotlight 动效由 aqi-ui-nav 事件触发）');
+    /* 这条验的是"领航事件带对了 target_view 与 focus_id"；类对应的可见样式
+     * 由 test-ui-browser 的 computed style 断言覆盖，避免把时序性 class 检查
+     * 写成视觉已生效。 */
+    'ui_nav(ops) 事件带对 target_view 与 focus_id（定位指令本身已下达）');
 
   /* ---- 2. open_preview：展开交付验收卡 ---- */
   await closeDrawerForText();

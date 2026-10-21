@@ -4,10 +4,13 @@ import { fileURLToPath } from 'node:url';
 
 // Actual homepage DOM and UI modules, entirely synthetic routes. No live user DB,
 // model, paid speech, microphone or WebSocket is involved.
-const files = ['style.css', 'workspace.css', 'writing.css', 'experience.css', 'voice/interaction-state.css', 'companion.css', 'almanac.css', 'avatar/dialogue-review.css',
+const files = ['style.css', 'workspace.css', 'writing.css', 'experience.css', 'voice/interaction-state.css', 'companion.css', 'almanac.css', 'avatar/dialogue-review.css', 'stage-fx.css',
   'companion.js', 'note-proposals.js', 'note-proposals.css', 'assistant.js', 'task-card.js', 'interaction-preferences.js', 'ui.js', 'chat-scroll.js', 'context-usage.js'];
 const assets = new Map(await Promise.all(files.map(async name => [`/static/${name}`, await readFile(fileURLToPath(new URL(`../web/${name}`, import.meta.url)), 'utf8')])));
+// 字体表也剥掉：夹具是离线的，@font-face 一挂就会去要上百个 woff2 分片，
+// 而这条测试只验行为与几何，不该被字体资源拖下水（排版度量差异不影响断言）。
 const index = (await readFile(fileURLToPath(new URL('../web/index.html', import.meta.url)), 'utf8'))
+  .replace(/<link[^>]*\/static\/fonts\/[^>]*>/g, '')
   .replace(/<script\b[^>]*>[\s\S]*?<\/script>/g, '')
   .replace('</body>', `<script type="module">
 import {bootCompanion} from '/static/companion.js';

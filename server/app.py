@@ -3,8 +3,12 @@ from __future__ import annotations
 import asyncio
 import base64
 import json
+import os
+import secrets
+import subprocess
 import time
 import uuid
+from pathlib import Path
 from typing import Any
 
 import numpy as np
@@ -32,19 +36,42 @@ ensure_dirs()
 
 app = FastAPI(title="聊天角色系统", version="0.1.0")
 
+
+def _build_commit() -> str:
+    try:
+        result = subprocess.run(
+            ["git", "rev-parse", "--short", "HEAD"], cwd=str(ROOT),
+            capture_output=True, text=True, timeout=2, check=True)
+        return result.stdout.strip() or "unknown"
+    except Exception:
+        return "unknown"
+
+
+BUILD = {"version": app.version, "commit": _build_commit()}
+
 from .assistant.service import AssistantService
-from .assistant.api import create_router, scheduler
+from .assistant.api import create_router, scheduler, scheduler_snapshot
 
 assistant = AssistantService(ROOT / "data", llm, manager)
 orchestrator.context_broker = assistant.context_broker
 orchestrator.activity_facade = assistant.activity
 # ExecutiveService 由 AssistantService 持有并统一关闭（同生命周期、同一关闭路径）。
 from .assistant.executive_api import create_executive_router, create_telemetry_proxy_router
+from .assistant.durable_api import create_durable_router, set_host_token
+from .assistant.durable_state import DurableState
 executive = assistant.executive
 orchestrator.executive = executive
+# sidecar 的 /internal/durable 与老板工作台的 /api/executive/durable 必须看到
+# 同一份 lease/确认单/提议；否则老板批的确认号没有任何派单会消费。
+durable_state = DurableState(executive.ledger)
 app.include_router(create_router(assistant))
-app.include_router(create_executive_router(executive))
+app.include_router(create_executive_router(executive, durable_state=durable_state))
 app.include_router(create_telemetry_proxy_router(executive))
+# 只读宿主接口：durable 的 search_memory / read_note / list_workers 走这里。
+# 没启用 durable 时 token 为空，请求一律 503，不会意外暴露记忆库。
+app.include_router(create_durable_router(
+    assistant, manager, runtime_provider=lambda: _durable_runtime_config(),
+    state=durable_state))
 from .interaction.threads_api import create_threads_router
 app.include_router(create_threads_router(assistant))
 from .interaction.proposals_api import create_proposals_router
@@ -64,6 +91,7 @@ from .memory.api import create_diary_router, create_starmap_router
 app.include_router(create_diary_router(manager))
 app.include_router(create_starmap_router(manager))
 _scheduler_task: asyncio.Task | None = None
+_reconcile_task: asyncio.Task | None = None
 # 启动期续跑的督办：create_task 的返回值必须有人拿住，否则可能被回收。
 _startup_tasks: set[asyncio.Task] = set()
 # 已连上的 /ws 连接。督办状态变化要推给所有在线连接（协议 §19 变更通知）。
@@ -211,10 +239,23 @@ async def transcript(session_id: str, limit: int = 100) -> Any:
     return {"items": store.recent_messages(session_id, limit=limit)}
 
 
+def _scheduler_done(task: asyncio.Task) -> None:
+    if task.cancelled():
+        return
+    try:
+        exc = task.exception()
+    except asyncio.CancelledError:
+        return
+    if exc is not None:
+        print(f"[scheduler] stopped unexpectedly: {type(exc).__name__}: {exc}")
+
+
 @app.get("/api/health")
 async def health() -> Any:
+    scheduler_state = scheduler_snapshot()
     return {
         "ok": True,
+        "build": BUILD,
         "llm": {
             "provider": llm.provider,
             "model": llm.model,
@@ -223,6 +264,8 @@ async def health() -> Any:
         },
         "tts": {"engine": settings.tts_engine, "model": settings.tts_model, "voice": settings.tts_voice},
         "asr": {"engine": settings.asr_engine, "model": settings.asr_model_id if settings.asr_engine == "stepaudio" else settings.asr_model},
+        "scheduler": scheduler_state,
+        "degraded": bool(scheduler_state["degraded"]),
         "memories": store.count(),
         "proactivity": orchestrator.state["proactivity_enabled"],
     }
@@ -528,13 +571,9 @@ async def _maybe_self_evolution(conn: Connection) -> None:
                 payload = self_evolution_payload(event)
                 if payload is not None:
                     await conn.send(payload)
-            # 其余带 type 的事件不发。当前唯一会走到这里的是 V2 思想引擎的
-            # `curiosity_reflection`：它携带 child_seed_ids / reflection_id，
-            # 与协议 §十 的 self_evolution{kind:taste|worldview|spark} 不是一回事。
-            # 直接发等于自造 WS 事件（前端对未知 type 安全忽略，两边都看不出来）；
-            # 映射成 self_evolution 又得先给 change.kind 加 `child_seed` 取值——
-            # 那是协议变更，归 Role 0。在此之前宁可不发，也不要发一个语义不对的。
-            # 前端因此收不到"我刚想通一件事"的信号；星图仍会显示新节点。
+            # 其余带 type 的事件不发：协议外的事件宁可少发，也不要发一个
+            # 前端对未知 type 安全忽略、两边都看不出来的"自造事件"。V2 的
+            # curiosity 信息现在只进 reflection trace，星图仍会显示子节点。
             # 见 docs/OPTIMIZATION_ROUND3_20261018.md §9。
     except asyncio.CancelledError:
         raise
@@ -1287,6 +1326,105 @@ async def scenarios() -> Any:
 app.mount("/static", AppStaticFiles(directory=str(ROOT / "web")), name="static")
 
 
+def _durable_runtime_config() -> dict[str, str] | None:
+    supervisor = _durable_supervisor
+    if supervisor is None:
+        return None
+    try:
+        return supervisor.config()
+    except Exception:
+        return None
+
+
+def _durable_lookup(commission_id: str, attempt: int = 0):
+    """Ask the live sidecar about one commission. Raises when the kernel is
+    unreachable; returns None only when the kernel positively has no such task.
+    The distinction keeps periodic reconciliation from blocking live orders on
+    a transient connection failure.
+    """
+    import httpx
+
+    supervisor = _durable_supervisor
+    endpoint = supervisor.current_endpoint() if supervisor is not None else None
+    if endpoint is None:
+        raise RuntimeError("durable_unavailable")
+    headers = {"authorization": f"Bearer {supervisor.token}"}
+    with httpx.Client(timeout=10.0) as client:
+        found = client.get(f"{endpoint}/v1/lookup", headers=headers,
+                           params={"commission_id": commission_id, "attempt": int(attempt)})
+        found.raise_for_status()
+        payload = found.json()
+        if not payload.get("found"):
+            return None
+        task_id = int(payload.get("task_id") or 0)
+        if task_id <= 0:
+            return None
+        view = client.get(f"{endpoint}/v1/runs/{task_id}", headers=headers)
+        view.raise_for_status()
+        return view.json()
+
+
+async def _reconcile_loop(interval: float) -> None:
+    """Periodic ledger-vs-kernel check. Health patrol is not ledger
+    reconciliation; this is the one that adopts finished work and surfaces
+    missing/failed kernel tasks."""
+    while True:
+        await asyncio.sleep(max(15.0, float(interval)))
+        try:
+            # The lookup is loopback HTTP; keep it off the event loop.
+            await asyncio.to_thread(executive.reconcile_durable, _durable_lookup)
+        except Exception:
+            continue
+
+
+def _durable_enabled(cfg: dict[str, Any]) -> bool:
+    """YAML 默认关闭；`XIAOXI_DURABLE_ENABLED` 可显式覆盖。
+
+    测试与日常开发会反复启动 app；让 YAML 默认开启会把每条用例都变成一次
+    Node sidecar 启动。运行时用环境变量点亮，YAML 保持可回退的默认值。
+    """
+    raw = os.environ.get("XIAOXI_DURABLE_ENABLED")
+    if raw is None or raw.strip() == "":
+        return bool(cfg.get("enabled"))
+    return raw.strip().lower() not in {"0", "false", "no", "off"}
+
+
+def _durable_switch_agents(cfg: dict[str, Any]) -> list[str] | None:
+    raw = os.environ.get("XIAOXI_DURABLE_SWITCH_AGENTS")
+    if raw is None or raw.strip() == "":
+        return cfg.get("switch_agents") or None
+    if raw.strip().lower() in {"none", "-"}:
+        return None
+    return [item.strip() for item in raw.split(",") if item.strip()] or None
+
+
+def _durable_extra_env(cfg: dict[str, Any]) -> dict[str, str]:
+    """sidecar 启动前必须拿到的配置；进程起来后改环境变量不会生效。"""
+    extra: dict[str, str] = {}
+
+    def put(name: str, value: Any) -> None:
+        if value is None:
+            return
+        text = str(value).strip()
+        if text:
+            extra[name] = text
+
+    put("XIAOXI_APPROVAL_TOOLS", cfg.get("approval_tools"))
+    put("XIAOXI_DURABLE_LEASE_MODE", cfg.get("lease_mode"))
+    put("XIAOXI_CONTEXT_WINDOW", cfg.get("context_window"))
+    put("XIAOXI_MAX_TOKENS", cfg.get("max_tokens"))
+    put("XIAOXI_RESERVE_TOKENS", cfg.get("reserve_tokens"))
+    put("XIAOXI_KEEP_RECENT_TOKENS", cfg.get("keep_recent_tokens"))
+    put("XIAOXI_BACKGROUND_TOKENS", cfg.get("background_tokens"))
+    for key, name in (("skills_dir", "XIAOXI_SKILLS_DIR"), ("mcp_config", "XIAOXI_MCP_CONFIG")):
+        value = cfg.get(key)
+        if not value:
+            continue
+        path = Path(str(value))
+        put(name, str(path if path.is_absolute() else (ROOT / path).resolve()))
+    return extra
+
+
 async def _start_durable_if_enabled() -> None:
     """按 config 的 durable 段拉起慢环执行内核；默认不启用，失败不阻断主服务。"""
     global _durable_supervisor
@@ -1294,29 +1432,52 @@ async def _start_durable_if_enabled() -> None:
     from .assistant.durable_supervisor import DurableSupervisor
 
     cfg = ((agents_roster_cfg() or {}).get("durable") or {})
-    if not cfg.get("enabled"):
+    if not _durable_enabled(cfg):
         return
+    extra_env = _durable_extra_env(cfg)
+    # Sidecar -> host 的只读能力令牌。每次启动新生成，只通过进程环境传给
+    # sidecar；浏览器和日志都看不到它。
+    host_token = secrets.token_urlsafe(32)
+    set_host_token(host_token)
+    extra_env["XIAOXI_HOST_TOKEN"] = host_token
+    host = str(getattr(settings, "host", "127.0.0.1") or "127.0.0.1")
+    if host in {"0.0.0.0", "::"}:
+        host = "127.0.0.1"
+    port = int(getattr(settings, "port", 8000) or 8000)
+    extra_env["XIAOXI_HOST_URL"] = (
+        os.environ.get("XIAOXI_HOST_URL") or f"http://{host}:{port}"
+    )
     supervisor = DurableSupervisor(
-        directory=cfg.get("directory") or "data/durable",
+        directory=os.environ.get("XIAOXI_DURABLE_DIR") or cfg.get("directory") or "data/durable",
         node=str(cfg.get("node") or "node"),
         startup_timeout=float(cfg.get("startup_timeout") or 15.0),
         auto_restart=bool(cfg.get("auto_restart", True)),
-        # 审批工具白名单是 sidecar 进程的环境变量，必须随进程一起给出：此前只有
+        # sidecar 的环境变量由 _durable_extra_env 统一算出（含 XIAOXI_APPROVAL_TOOLS、
+        # lease mode、context window、skills/mcp 路径等），必须随进程一起给出：此前只有
         # 测试设过它，生产里一个工具都没登记，审批 hook 因此从未生效过。
-        extra_env={"XIAOXI_APPROVAL_TOOLS": str(cfg.get("approval_tools") or "")},
+        extra_env=extra_env,
     )
     try:
         await supervisor.start()
         if cfg.get("patrol_seconds"):
             await supervisor.start_patrol(float(cfg["patrol_seconds"]))
         bound = executive.bind_durable(
-            supervisor.config(),
-            apply_to=cfg.get("switch_agents") or None,
-            # 内核被硬杀后监督器会换端口重起，写死的 endpoint 就失效了。适配器
-            # 每次派单前问一次当前端点，重试才不会连到死端口。
+            {
+                **supervisor.config(),
+                # 每单沙箱的根。以前只写在 YAML 的 durable 段里，bind 时没带过去，
+                # 被 switch_agents 切过来的 Worker 因此拿不到写盘目录。
+                "workspace_root": str(cfg.get("workspace_root") or "data/commissions"),
+            },
+            apply_to=_durable_switch_agents(cfg),
+            # 硬杀后 sidecar 会在新端口重起；每次派单重新取地址，不能缓存
+            # bind 时的旧端口。
             endpoint_provider=supervisor.current_endpoint,
         )
         print(f"[durable] 执行内核就绪 {supervisor.endpoint}；已绑定 {bound} 个 Worker")
+        global _reconcile_task
+        if _reconcile_task is None:
+            _reconcile_task = asyncio.create_task(
+                _reconcile_loop(float(cfg.get("patrol_seconds") or 60.0)))
         if cfg.get("shadow"):
             from .assistant.durable_shadow import DurableShadow
             shadow = DurableShadow(endpoint=supervisor.endpoint, token=supervisor.token,
@@ -1327,6 +1488,7 @@ async def _start_durable_if_enabled() -> None:
     except Exception as exc:
         # 配置开了但内核起不来：不阻断主服务。派单会转 BLOCKED 并明说不可用。
         print(f"[durable] 执行内核不可用：{exc}")
+        set_host_token(None)
         try:
             await supervisor.stop()
         except Exception:
@@ -1377,8 +1539,9 @@ async def startup() -> None:
     await _start_durable_if_enabled()
     # 重启收口要排在调度器之前：先把上次没跑完的单转成请示状态或重新派出，
     # 否则它们会一直占着 worker 的并发槽，新单直接没人接。
-    recovered = executive.recover_interrupted(durable_lookup=_durable_lookup())
+    recovered = executive.recover_interrupted(durable_lookup=_durable_lookup)
     _scheduler_task = asyncio.create_task(scheduler(assistant))
+    _scheduler_task.add_done_callback(_scheduler_done)
     for commission_id in recovered["resumed"]:
         task = asyncio.create_task(executive.resume(commission_id))
         _startup_tasks.add(task)
@@ -1387,15 +1550,24 @@ async def startup() -> None:
 
 @app.on_event("shutdown")
 async def shutdown() -> None:
-    global _durable_supervisor, _commission_unsubscribe, _loop
+    global _durable_supervisor, _commission_unsubscribe, _loop, _reconcile_task
+    # 台账订阅解绑：旁路推送的订阅者必须清掉，否则测试里会残留（协议 §19）。
     if _commission_unsubscribe is not None:
         _commission_unsubscribe()
         _commission_unsubscribe = None
     _loop = None
     editor_insights.close()
+    if _reconcile_task is not None:
+        _reconcile_task.cancel()
+        try:
+            await _reconcile_task
+        except asyncio.CancelledError:
+            pass
+        _reconcile_task = None
     if _durable_supervisor is not None:
         await _durable_supervisor.stop()
         _durable_supervisor = None
+        set_host_token(None)
     if _scheduler_task is not None:
         _scheduler_task.cancel()
         try:

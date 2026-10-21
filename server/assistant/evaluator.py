@@ -149,14 +149,24 @@ def _check_no_topbar_button(artifact, packet, usage, thresholds):
 
 
 def _check_token_budget(artifact, packet, usage, thresholds):
-    budget = int(((packet or {}).get("budget") or {}).get("max_prompt_tokens") or 0)
-    spent = int((usage or {}).get("prompt_tokens") or 0)
-    if not budget or not (usage or {}).get("calls"):
+    """Quality gate: one call's context must fit, even if the commission retried.
+
+    The per-commission SUM is deliberately not checked here. Retrying a rejected
+    delivery doubles the SUM while each call is still healthy; that is a cost
+    signal, not evidence of context bloat. The SUM lives in audit.usage and the
+    review panel instead.
+    """
+    budget_cfg = (packet or {}).get("budget") or {}
+    limit = int(budget_cfg.get("max_prompt_tokens_per_call")
+                or budget_cfg.get("max_prompt_tokens") or 0)
+    spent = int((usage or {}).get("max_prompt_tokens_per_call")
+                or (usage or {}).get("prompt_tokens") or 0)
+    if not limit or not (usage or {}).get("calls"):
         return []  # 没有真实 span 就无从判断；不猜，也不因此判不合格
     ratio = float(thresholds.get("token_bloat_ratio", 1.0))
-    if spent > budget * ratio:
+    if spent > limit * ratio:
         return [_finding("prompt_token_bloat", "major",
-                         f"Prompt Tokens {spent} 超出预算 {budget}：先砍上下文再谈质量。")]
+                         f"单次调用 Prompt Tokens {spent} 超出上限 {limit}：先砍上下文再谈质量。")]
     return []
 
 
@@ -520,20 +530,31 @@ class Evaluator:
             "layer": layer,
             "findings": findings,
             "retry_count": int((commission or {}).get("retry_count") or 0),
-            "usage": self._usage_note(commands, usage),
+            "usage": self._usage_note(commands, usage, packet),
             "scolding": scold("accepted", self._accept_note(artifact)) if passed else self._scold(findings, layer),
             "created_at": self.clock(),
         }
 
     @staticmethod
-    def _usage_note(commands: list[str], usage: dict[str, Any]) -> dict[str, Any]:
+    def _usage_note(commands: list[str], usage: dict[str, Any],
+                    packet: dict[str, Any] | None = None) -> dict[str, Any]:
         """这次初审到底有没有拿到真实用量。
 
         没有 span 时预算检查本来就不下结论（不猜，也不因此判不合格），但结论里
         必须写清"未验证"——不能让人把"没查"读成"查过了"。
         """
         calls = int(usage.get("calls") or 0)
-        return {"calls": calls, "prompt_tokens": int(usage.get("prompt_tokens") or 0),
+        total = int(usage.get("prompt_tokens") or 0)
+        per_call = int(usage.get("max_prompt_tokens_per_call") or (total if calls else 0) or 0)
+        budget_cfg = (packet or {}).get("budget") or {}
+        per_call_limit = int(budget_cfg.get("max_prompt_tokens_per_call")
+                             or budget_cfg.get("max_prompt_tokens") or 0)
+        total_limit = int(budget_cfg.get("max_total_prompt_tokens") or 0)
+        return {"calls": calls, "prompt_tokens": total,
+                "max_prompt_tokens_per_call": per_call,
+                "max_prompt_tokens_per_call_limit": per_call_limit,
+                "max_total_prompt_tokens": total_limit,
+                "total_budget_exceeded": bool(total_limit and calls and total > total_limit),
                 "budget_checked": bool("token_budget" in commands and calls)}
 
     def _l2(self, artifact):

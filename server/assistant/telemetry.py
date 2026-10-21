@@ -181,17 +181,24 @@ class TelemetryStore:
         return [dict(row) for row in rows]
 
     def commission_usage(self, commission_id: str) -> dict[str, Any]:
-        """Real token/latency totals for one commission; L1 budget checks read this."""
+        """Real token/latency totals for one commission; L1 budget checks read this.
+
+        ``prompt_tokens`` is the per-commission SUM (cost), while
+        ``max_prompt_tokens_per_call`` is the largest single call (quality).
+        Retries must not turn a healthy per-call context into a "bloated" one.
+        """
         with self._lock:
             row = self._db.execute(
                 "SELECT COUNT(*) AS calls, COALESCE(SUM(prompt_tokens),0) AS prompt_tokens,"
                 " COALESCE(SUM(completion_tokens),0) AS completion_tokens,"
                 " COALESCE(SUM(duration_ms),0) AS duration_ms,"
+                " COALESCE(MAX(prompt_tokens),0) AS max_prompt_tokens_per_call,"
                 " COALESCE(MAX(ttft_ms),0) AS max_ttft_ms FROM agent_telemetry_spans"
                 " WHERE commission_id=?", (commission_id,)).fetchone()
         total = int(row["prompt_tokens"]) + int(row["completion_tokens"])
         return {"calls": int(row["calls"]), "prompt_tokens": int(row["prompt_tokens"]),
                 "completion_tokens": int(row["completion_tokens"]), "total_tokens": total,
+                "max_prompt_tokens_per_call": int(row["max_prompt_tokens_per_call"]),
                 "duration_ms": int(row["duration_ms"]), "max_ttft_ms": int(row["max_ttft_ms"])}
 
     def summary(self, *, since: float | None = None, now: float | None = None) -> dict[str, Any]:

@@ -25,6 +25,9 @@ class Tool:
     required: tuple[str, ...]
     handler: Callable[..., Any]
     mutation: bool = False
+    # Keyword accepted by the handler for an idempotency key. It is injected
+    # server-side, never exposed in the model-facing schema.
+    idempotency_key: str | None = None
 
     def validate(self, arguments: Any) -> dict[str, Any]:
         if not isinstance(arguments, dict) or set(arguments) - set(self.parameters):
@@ -106,7 +109,7 @@ class AgentLoop:
         plan, plan_reason = await self._build_plan(safe_text, context or {})
         state = {'user_text': safe_text, 'context': context or {}, 'observations': [],
                  'steps': 0, 'step_limit': self.max_steps, 'tool_count': 0,
-                 'pending_action': None, 'input_rounds': 0,
+                 'action_seq': 0, 'pending_action': None, 'input_rounds': 0,
                  'latest_user_text': safe_text,
                  'input_history': [{'role': 'user', 'content': safe_text}],
                  'completed_actions': {}, 'plan': plan, 'plan_reason': plan_reason}
@@ -158,10 +161,13 @@ class AgentLoop:
         与 `resume` 的区别：这里没有待确认动作，只是重新进入推进循环。
         恢复的安全性由 `_execute` 的"先落检查点再产生副作用"和
         `completed_actions` 去重共同保证——已成功的 mutation 不会被重放。
+        没有拿到回执的 mutation 只标记 unknown，必须人工核对后才能继续。
         """
         run = self.runtime.get(run_id)
         if run['status'] in ('completed', 'cancelled', 'waiting_confirmation', 'waiting_input'):
             raise ValueError(f'run_not_resumable:{run["status"]}')
+        if self.runtime.unknown_operations(run_id):
+            raise ValueError('run_has_unknown_operation')
         state = run['state']
         if context is not None:
             state['context'] = context
@@ -486,21 +492,54 @@ class AgentLoop:
         tool = self.tools[action['tool']]
         arguments = tool.validate(action['arguments'])
         state['tool_count'] += 1
-        self.runtime.event(run_id, 'tool_started', {'tool': tool.name})
-        # This checkpoint deliberately precedes side effects; a crash is not replayed.
-        self.runtime.save(run_id, 'running', state)
+        operation_id = None
+        if tool.mutation:
+            state['action_seq'] = int(state.get('action_seq') or 0) + 1
+            operation_id = self.runtime.operation_id(run_id, state['action_seq'])
+            previous = self.runtime.operation(operation_id)
+            if previous is not None and previous.get('status') == 'succeeded':
+                receipt = json.loads(previous.get('receipt') or '{}')
+                if receipt and receipt not in state['observations']:
+                    state['observations'].append(receipt)
+                state.setdefault('completed_actions', {})[
+                    self.action_hash(action)] = len(state['observations']) - 1
+                self.runtime.save(run_id, 'running', state)
+                self._raise_if_cancelling()
+                return
+            context = state.get('context') or {}
+            thread = context.get('companion_thread') if isinstance(context, dict) else None
+            thread_id = (context.get('companion_thread_id') if isinstance(context, dict) else '') \
+                or (thread.get('id') if isinstance(thread, dict) else '') or ''
+            self.runtime.begin_operation(run_id, state['action_seq'], tool.name,
+                                         self.action_hash(action), state)
+            handler_args = dict(arguments)
+            if tool.idempotency_key and tool.idempotency_key not in handler_args:
+                handler_args[tool.idempotency_key] = operation_id
+        else:
+            thread_id = ''
+            handler_args = dict(arguments)
+            self.runtime.event(run_id, 'tool_started', {'tool': tool.name})
+            # Reads still checkpoint before the call; mutations use the outbox
+            # transaction above, which persists the same checkpoint plus intent.
+            self.runtime.save(run_id, 'running', state)
         try:
-            value = tool.handler(**arguments)
+            value = tool.handler(**handler_args)
             if hasattr(value, '__await__'):
                 value = await value
             receipt = {'tool': tool.name, 'status': 'succeeded', 'data': value}
         except (ValueError, KeyError) as exc:
             receipt = {'tool': tool.name, 'status': 'failed', 'error_code': str(exc)[:160]}
         state['observations'].append(receipt)
+        observation_index = len(state['observations']) - 1
         if tool.mutation and receipt['status'] == 'succeeded':
-            state.setdefault('completed_actions', {})[self.action_hash(action)] = len(state['observations']) - 1
-        self.runtime.event(run_id, 'tool_finished', receipt)
-        self.runtime.save(run_id, 'running', state)
+            state.setdefault('completed_actions', {})[self.action_hash(action)] = observation_index
+        if tool.mutation:
+            self.runtime.finish_operation(
+                run_id, operation_id, receipt['status'], receipt, state,
+                observation_index=observation_index, thread_id=thread_id)
+        else:
+            self.runtime.event(run_id, 'tool_finished', receipt)
+            self.runtime.save(run_id, 'running', state)
         # Preserve a handler's successful side effect and receipt before stopping.
         self._raise_if_cancelling()
 
@@ -545,6 +584,26 @@ REFLECT_MAX_CHILDREN = 2
 MAX_DELTA_FEEDBACK = 2000
 
 
+def _fork_bounds(cfg: dict[str, Any]) -> tuple[int, int]:
+    """`self_evolution.seed_fork_min/max` → 反思校验的数量闸门（§14 强制裂变）。
+
+    配置坏了就退回协议常量，不猜一个"更好"的数。这里显式判类型而不是沿用文件里
+    常见的 `or` 写法：`seed_fork_min: 0` 是个（不合理的）配置，被 `or 1` 悄悄改成
+    1 会让人以为配置生效了——那正是这一轮在清的那类静默。
+
+    键名必须是字面量 `cfg.get('seed_fork_min')`：scripts/audit_config_keys.py 只认
+    字面量，动态键在它眼里等于"没人读"，这两个配置会重新沉回去。
+    """
+    def _int(value: Any, fallback: int) -> int:
+        return value if isinstance(value, int) and not isinstance(value, bool) else fallback
+
+    low = _int(cfg.get('seed_fork_min'), REFLECT_MIN_CHILDREN)
+    high = _int(cfg.get('seed_fork_max'), REFLECT_MAX_CHILDREN)
+    if low < 0 or high < low:
+        return REFLECT_MIN_CHILDREN, REFLECT_MAX_CHILDREN
+    return low, high
+
+
 def _plan_is_trivial(plan) -> bool:
     """一步且不带任何验收/执行器/依赖信息的计划，等于没有计划。
 
@@ -585,7 +644,9 @@ def _is_hollow(text: str) -> bool:
     return any(pattern in stripped for pattern in REFLECT_HOLLOW_PATTERNS)
 
 
-def validate_reflection_payload(payload: Any, material: list[dict[str, Any]] | None = None
+def validate_reflection_payload(payload: Any, material: list[dict[str, Any]] | None = None,
+                                *, min_children: int | None = None,
+                                max_children: int | None = None
                                 ) -> tuple[dict[str, Any] | None, str | None]:
     """Gate a reflection payload (§14.2/§14.3): (normalized, None) or (None, reason).
 
@@ -624,7 +685,13 @@ def validate_reflection_payload(payload: Any, material: list[dict[str, Any]] | N
         if not any(ref in available for ref in source_refs):
             return None, "source_refs_untraceable"
     children = payload.get("child_seeds")
-    if not isinstance(children, list) or not (REFLECT_MIN_CHILDREN <= len(children) <= REFLECT_MAX_CHILDREN):
+    # 数量闸门由 memory.yaml 的 self_evolution.seed_fork_min/max 控制（§14 强制裂变）。
+    # 默认仍取模块常量，所以直接调用本函数的既有测试与调用方行为不变。
+    low = REFLECT_MIN_CHILDREN if min_children is None else int(min_children)
+    high = REFLECT_MAX_CHILDREN if max_children is None else int(max_children)
+    if low > high:
+        low, high = REFLECT_MIN_CHILDREN, REFLECT_MAX_CHILDREN
+    if not isinstance(children, list) or not (low <= len(children) <= high):
         return None, "child_seeds_count"
     norm_children: list[dict[str, Any]] = []
     for child in children:
@@ -871,7 +938,7 @@ class SelfEvolutionCycle:
                        notes_provider: Any, threads_provider: Any) -> dict[str, Any]:
         from ..llm import _loose_json, llm
         from ..memory import seeds as seed_mod
-        from ..memory.diary import local_date
+        from ..memory.diary import local_date, mood_overlap
         from ..memory.evolution import (load_self_state, plan_state_changes, save_self_state,
                                         self_evolution_cfg, self_evolution_payload)
 
@@ -905,6 +972,7 @@ class SelfEvolutionCycle:
 
         max_calls = max(1, int(cfg.get('max_model_calls_per_cycle', 2) or 2))
         max_retries = int(cfg.get('max_retries', 2) or 0)
+        fork_min, fork_max = _fork_bounds(cfg)
         provider = self.provider or llm
         normalized: dict[str, Any] | None = None
         raw_payload: Any = None
@@ -923,7 +991,8 @@ class SelfEvolutionCycle:
                 trace['error'] = f'{type(exc).__name__}: {exc}'
                 last_reason = 'model_call_failed'
                 continue
-            normalized, reason = validate_reflection_payload(raw_payload, material)
+            normalized, reason = validate_reflection_payload(
+                raw_payload, material, min_children=fork_min, max_children=fork_max)
             if normalized is not None:
                 last_reason = 'ok'
                 break
@@ -992,9 +1061,45 @@ class SelfEvolutionCycle:
         new_state['cycles_today'] = (1 if state.get('cycles_on') != today
                                      else int(state.get('cycles_today') or 0) + 1)
         save_self_state(self.store, new_state)
-        events.append({'type': 'curiosity_reflection', 'quiet': True,
-                       'change': {'kind': 'child_seed', 'topic': refl['title'], 'summary': refl['discovery'][:120],
-                                  'child_seed_ids': child_ids, 'reflection_id': reflection_id,
-                                  'source_refs': refl['source_refs']}})
+
+        # Mood is the one narrative state that had no writer. Only a successful
+        # idle reflection may write it; a low-novelty discovery must not erase
+        # the carry-over just because the cycle ran again.
+        mood_cfg = cfg.get('mood') if isinstance(cfg.get('mood'), dict) else {}
+        trace['mood_written'] = False
+        if not mood_cfg.get('enabled', True):
+            trace['mood_skipped'] = 'disabled'
+        else:
+            try:
+                current = self.store.get_mood() or {}
+                current_text = str(current.get('narrative') or '').strip()
+                narrative = str(refl.get('narrative') or '').strip()[:240]
+                overlap = (mood_overlap(refl.get('discovery') or narrative, current_text)
+                           if current_text else 0.0)
+                limit = float(mood_cfg.get('overwrite_overlap_max', 0.30) or 0.30)
+                trace['mood_overlap'] = round(overlap, 3)
+                if narrative and (not current_text or overlap < limit):
+                    ttl = float(mood_cfg.get('default_ttl_minutes', 30) or 30)
+                    self.store.save_mood(
+                        narrative=narrative, reason=f'idle_reflection:{reflection_id}',
+                        source_refs=refl.get('source_refs') or [],
+                        influence_note='来自一次安静反思，只作余温',
+                        related_summary=str(refl.get('discovery') or '')[:120],
+                        state='active', expires_at=now + max(ttl, 1.0) * 60)
+                    trace['mood_written'] = True
+                elif current_text:
+                    trace['mood_skipped'] = 'low_novelty'
+                else:
+                    trace['mood_skipped'] = 'empty_narrative'
+            except Exception as exc:  # a mood write must never fail the reflection
+                trace['mood_error'] = f'{type(exc).__name__}: {exc}'
+                trace['mood_skipped'] = 'error'
+
+        # This used to be a fully shaped `curiosity_reflection` event that app.py
+        # silently dropped because §10 has no such event. It is internal trace
+        # data now; the star map still gets the child nodes.
+        trace['curiosity_reflection'] = {
+            'child_seed_ids': child_ids, 'reflection_id': reflection_id,
+            'source_refs': refl['source_refs']}
         trace.update(reflection_id=reflection_id, status_changes=status_changes)
         return {'status': 'ok', 'events': events, 'trace': trace}

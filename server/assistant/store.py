@@ -210,11 +210,12 @@ class AssistantStore:
         with self._transaction() as db:
             return [dict(row) for row in db.execute("SELECT * FROM tasks ORDER BY created_at,id")]
 
-    def update_task(self, task_id, changes):
+    def update_task(self, task_id, changes, request_id=None):
         allowed = {"title", "description", "status", "next_action", "due_at", "timezone", "version"}
         if not isinstance(changes, dict) or set(changes) - allowed:
             raise ValueError("unknown task changes")
         changes = dict(changes)
+        arguments = {"task_id": task_id, "changes": dict(changes)}
         for key in ("title", "description", "next_action"):
             if key in changes:
                 self._text(changes[key], key, key == "title")
@@ -228,10 +229,14 @@ class AssistantStore:
         if expected is not None and (type(expected) is not int or expected < 1):
             raise ValueError("version must be a positive integer")
         with self._transaction() as db:
+            replay = self._replay(db, "update_task", request_id, arguments)
+            if replay is not None:
+                return replay
             task = self._row(db, "tasks", task_id)
             if expected is not None and expected != task["version"]:
                 raise ValueError("task version conflict")
             if not changes:
+                self._remember(db, "update_task", request_id, arguments, task)
                 return task
             now = self._now()
             changes.update(updated_at=now, version=task["version"] + 1)
@@ -244,7 +249,9 @@ class AssistantStore:
                                  (task_id,)).fetchall()
                 for row in ids:
                     self._cancel(db, row["id"], now)
-            return self._row(db, "tasks", task_id)
+            result = self._row(db, "tasks", task_id)
+            self._remember(db, "update_task", request_id, arguments, result)
+            return result
 
     def create_reminder(self, content, scheduled_at, task_id=None, request_id=None):
         self._text(content, "content", True)
@@ -283,14 +290,24 @@ class AssistantStore:
                        (now, reminder_id))
         return self._row(db, "reminders", reminder_id)
 
-    def cancel_reminder(self, id):
+    def cancel_reminder(self, id, request_id=None):
         """Cancel undelivered occurrences; an acknowledged delivery cannot be recalled."""
+        arguments = {"id": id}
         with self._transaction() as db:
-            return self._cancel(db, id, self._now())
+            replay = self._replay(db, "cancel_reminder", request_id, arguments)
+            if replay is not None:
+                return replay
+            result = self._cancel(db, id, self._now())
+            self._remember(db, "cancel_reminder", request_id, arguments, result)
+            return result
 
-    def snooze_reminder(self, id, scheduled_at):
+    def snooze_reminder(self, id, scheduled_at, request_id=None):
         scheduled_at = self._timestamp(scheduled_at)
+        arguments = {"id": id, "scheduled_at": scheduled_at}
         with self._transaction() as db:
+            replay = self._replay(db, "snooze_reminder", request_id, arguments)
+            if replay is not None:
+                return replay
             reminder = self._row(db, "reminders", id)
             if reminder["status"] == "cancelled":
                 raise ValueError("cannot snooze a cancelled reminder")
@@ -303,7 +320,9 @@ class AssistantStore:
             db.execute("""UPDATE reminders SET scheduled_at=?, expires_at=?, status='scheduled',
                           updated_at=?, version=version+1 WHERE id=?""",
                        (scheduled_at, scheduled_at + self.EXPIRY_SECONDS, now, id))
-            return self._row(db, "reminders", id)
+            result = self._row(db, "reminders", id)
+            self._remember(db, "snooze_reminder", request_id, arguments, result)
+            return result
 
     def preferences(self):
         with self._transaction() as db:

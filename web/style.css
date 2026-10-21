@@ -233,6 +233,18 @@ button.mode-chip:hover { background:#e6ebdd; color:var(--text); }
 .ops-rubric-rule { margin:5px 0 0; font-size:12px; }
 .ops-rubric-evidence { margin:5px 0 0; font-size:11px; color:var(--muted); white-space:pre-wrap; }
 .ops-rubric button { margin-top:8px; }
+.ops-auth { display:grid; gap:9px; margin:0 0 14px; }
+.ops-auth .ops-heading { margin:0 0 2px; }
+.ops-auth-card { border:1px solid var(--accent); border-radius:12px; padding:11px 12px; background:#f4f7ee; }
+.ops-auth-card[data-kind="approval"] { border-color:var(--danger); background:#fbf1f0; }
+.ops-auth-kind { margin:0; font-size:12px; font-weight:600; }
+.ops-auth-body { margin:5px 0 0; font-size:11.5px; color:var(--muted); overflow-wrap:anywhere; white-space:pre-wrap; }
+.ops-auth-card .ops-ask-input { margin-top:7px; }
+.ops-auth-card .ops-actions { margin-top:8px; }
+.ops-review-pane { margin-top:10px; padding:10px; border:1px solid var(--line); border-radius:10px; background:#f7f8f2; }
+.ops-review-head { margin:0 0 6px; font-size:11.5px; font-weight:600; }
+.ops-review-item { margin:0 0 3px; list-style:none; font-size:11px; color:var(--muted); overflow-wrap:anywhere; }
+.ops-review .ops-finding { list-style:none; margin:0 0 4px; font-size:11px; color:var(--danger); }
 .composer-foot { display:flex; align-items:center; justify-content:space-between; padding:2px 8px 0; gap:15px; }
 .composer-foot .hint { font-size:10px; }.composer-signature { font-size:10px; color:var(--muted); white-space:nowrap; }
 .assistant-panel input:not([type=checkbox]) { width:100%; margin:5px 0; font-size:12px; }

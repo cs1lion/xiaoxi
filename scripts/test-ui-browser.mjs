@@ -136,6 +136,33 @@ try {
  await page.locator('#memRefresh').click();
  await page.waitForFunction(()=>document.querySelector('#memoryFeedback').textContent.includes('记忆未刷新'));
  assert(await page.locator('.mem').count()===1,'Failed refresh preserves last loaded memories');
+ // 视觉状态类必须真的有样式消费；只断言 classList 会让"类加了、CSS 没有"恒绿。
+ const visual = await page.evaluate(() => {
+   const card = document.createElement('article'); card.className = 'ops-card';
+   const highlighted = document.createElement('article'); highlighted.className = 'ops-card is-highlighted';
+   const nav = document.createElement('article'); nav.className = 'ops-card nav-spotlight';
+   const bot = document.createElement('div'); bot.className = 'msg bot';
+   const discussion = document.createElement('div'); discussion.className = 'msg bot editor-discussion-message';
+   document.body.append(card, highlighted, nav, bot, discussion);
+   const style = (el) => getComputedStyle(el);
+   return {
+     highlightBorder: style(highlighted).borderColor,
+     baseBorder: style(card).borderColor,
+     highlightShadow: style(highlighted).boxShadow,
+     navAnimation: style(nav).animationName,
+     navOutline: style(nav).outlineStyle,
+     discussionBg: style(discussion).backgroundColor,
+     botBg: style(bot).backgroundColor,
+     discussionBorder: style(discussion).borderLeftColor,
+     botBorder: style(bot).borderLeftColor,
+   };
+ });
+ assert(visual.highlightShadow !== 'none' || visual.highlightBorder !== visual.baseBorder,
+   'is-highlighted has a visible style');
+ assert(visual.navAnimation !== 'none' || visual.navOutline !== 'none',
+   'nav-spotlight has a visible style');
+ assert(visual.discussionBg !== visual.botBg || visual.discussionBorder !== visual.botBorder,
+   'editor-discussion-message differs from a normal bot bubble');
  assert(errors.length===0,`No page errors: ${errors.join('; ')}`);
  await writeFile('eval/ui/results.json',JSON.stringify({checks,errors,transport:'Mock WebSocket and assistant preference/list APIs; other existing read-only APIs; no model request',screenshots:['desktop.png','conversation.png','mobile.png','mobile-conversation.png','mobile-preferences.png']},null,2));
  console.log(JSON.stringify({checks,errors},null,2));

@@ -40,6 +40,17 @@ SELF_EVOLUTION_DEFAULTS: dict[str, Any] = {
     # 子种子新颖度下限：子问题的内容里必须有多大比例是父问题没有的。
     # 相似度阈值分不开"换措辞的近义复述"和"只差一个字的敷衍"，所以另立一道闸门。
     "child_novelty_min": 0.45,
+    # 子种子派生数量（§14 强制裂变 1~2 个）。此前只在 validate_reflection_payload
+    # 里硬编码成 REFLECT_MIN/MAX_CHILDREN，memory.yaml 的 seed_fork_min/max 写了
+    # 没人读——审计脚本第一次跑就把它们报成死键。
+    "seed_fork_min": 1,
+    "seed_fork_max": 2,
+    # 下面两个是**嵌套**段，§15.1 / §15.2 的配置就挂在这里。同样必须登记：
+    # self_evolution_cfg() 只放行 defaults 里出现过的键，而 2026-10-18 之前这两个
+    # 键没登记，于是 `circadian.timezone` 与 `mood.*` 在 memory.yaml 里怎么写都读不
+    # 到，回落值又恰好等于配置值（Asia/Shanghai / 30 分钟），所以零症状。
+    "circadian": {"timezone": "Asia/Shanghai"},
+    "mood": {"enabled": True, "default_ttl_minutes": 30, "overwrite_overlap_max": 0.30},
 }
 
 OPENING_SYSTEM = """你是角色本人，现在用户没说话，你想主动开口说一句。
@@ -52,11 +63,22 @@ OPENING_SYSTEM = """你是角色本人，现在用户没说话，你想主动开
 
 
 def self_evolution_cfg() -> dict[str, Any]:
-    """Config with protocol defaults; a missing section behaves as disabled."""
+    """Config with protocol defaults; a missing section behaves as disabled.
+
+    Nested sections (`circadian` / `mood`) merge one level deep: a yaml that only
+    sets `mood.enabled: false` must keep `default_ttl_minutes` from the defaults
+    instead of dropping the whole dict.
+    """
     cfg = copy.deepcopy(SELF_EVOLUTION_DEFAULTS)
     configured = memory_cfg().get("self_evolution")
     if isinstance(configured, dict):
-        cfg.update({key: value for key, value in configured.items() if key in cfg})
+        for key, value in configured.items():
+            if key not in cfg:
+                continue
+            if isinstance(cfg[key], dict) and isinstance(value, dict):
+                cfg[key] = {**cfg[key], **value}
+            else:
+                cfg[key] = value
     sources = cfg.get("allow_sources")
     cfg["allow_sources"] = [kind for kind in (sources or []) if kind in CHANGE_KINDS]
     return cfg

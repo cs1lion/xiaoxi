@@ -26,4 +26,6 @@ body.is-writing #writingToggle{color:var(--accent);background:#2a2c22}
 .editor-discussion{margin:0 0 8px;padding:10px 12px;border:1px solid var(--line);border-radius:var(--r-control);background:var(--raise);color:var(--text)}
 .editor-discussion[hidden]{display:none!important}.editor-discussion p{margin:0 0 7px;font-size:13px;line-height:1.5;overflow-wrap:anywhere}.editor-discussion small{display:block;font-size:13px;color:var(--muted);margin-bottom:7px}.editor-discussion-actions{display:flex;gap:8px;flex-wrap:wrap}.editor-discussion-actions button{font-size:13px;padding:6px 10px;min-height:32px}.editor-discussion.is-invalid{background:#2c2c22}
 .editor-discussion p{max-height:4.5em;overflow-y:auto;scrollbar-width:thin}
+/* 稿件讨论的回复与普通 bot 气泡区分：左侧朱线 + 暖纸底。 */
+.msg.bot.editor-discussion-message{border-left:3px solid var(--verm);background:#f7ece3}
 @media(max-height:600px){body.has-editor-discussion .room-label,body.has-editor-discussion #interactionState,body.has-editor-discussion #companionMount,body.has-editor-discussion .composer-foot{display:none}body.has-editor-discussion .chat{padding-block:12px}}

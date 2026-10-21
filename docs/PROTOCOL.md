@@ -335,15 +335,16 @@ V3 内阁总管的督办台账，与共同事项同库同规约（`server/intera
   ```json
   {"id":"c_1f0a…","thread_id":"","title":"把便笺整理成三版标题","brief":"老板原话",
    "agent_id":"scribe","status":"running","step_idx":2,"retry_count":1,
-   "blocked_question":"","delivery":{},"audit":{},"rubric_ids":["no_topbar_button"],
+   "blocked_question":"","blocked_kind":"","delivery":{},"audit":{},"rubric_ids":["no_topbar_button"],
    "created_at":1760000000.0,"updated_at":1760000100.0,"closed_at":null}
   ```
 - `delivery` 是《三句话交付验收卡》：`{summary, intercepted, artifacts[]}`。`summary` 说做了什么，`intercepted` 说小溪替他拦了什么，`artifacts` 每项 `{kind,ref,preview}`；缺一项即视为未交差，初审直接 L1 驳回。
 - `audit` 是初审结论：`{passed, layer, findings[], usage, scolding, retry_count, created_at}`。`layer` 取值 `none` / `l1` / `l2`；`findings[]` 每项 `{rule_id, severity, detail}`。
-- `audit.usage` 是这次初审拿到的真实用量：`{calls, prompt_tokens, budget_checked}`。`budget_checked` 为 `false` 表示**没有真实 span、预算未被验证**——此时初审不因此判不合格，但也不得把"没查"读成"查过了"。没有遥测时该字段为 `{"calls":0,"prompt_tokens":0,"budget_checked":false}`。
+- `audit.usage` 是这次初审拿到的真实用量：`{calls, prompt_tokens, max_prompt_tokens_per_call, max_prompt_tokens_per_call_limit, max_total_prompt_tokens, total_budget_exceeded, budget_checked}`。`prompt_tokens` 是整单累计（成本），`max_prompt_tokens_per_call` 是单次最大值（质量闸）；重试只推高前者，不得据此打回。`total_budget_exceeded` 只是成本告警，不参与 `passed`。`budget_checked` 为 `false` 表示**没有真实 span、预算未被验证**——此时初审不因此判不合格，但也不得把"没查"读成"查过了"。没有遥测时该字段为 `{"calls":0,"prompt_tokens":0,"max_prompt_tokens_per_call":0,"max_prompt_tokens_per_call_limit":0,"max_total_prompt_tokens":0,"total_budget_exceeded":false,"budget_checked":false}`。
 - **执行触发与唯一性**：正常委派（`ExecutiveService.delegate`）与请示获答后的续跑（`answer`）由服务端自己驱动执行体到终态；`POST /api/executive/commissions/{id}/run` 是外部/手动再驱动的入口。同一 commission 同时只允许一个执行体：重复或并发触发第二个直接 `400 commission_already_running`，不排队、不重复开工。适配器产出 `artifact` 之后又出现 `error` 事件，一律判失败转 `blocked`（部分产物留待人工核），不当成功交付。
 - `retry_count` 上限 2（`Evaluator.MAX_RETRY`）。打回时 `retry_count+1` 并回到 `running`；已达上限仍不过则转 `blocked` 并带完整批注请示，不无限重试。
 - `blocked_question` 非空是 `blocked` 状态的前置条件。问题必须是一句话、二选一或可一句话回答；琐事由总管依花名册 `trivia_policy` 或已有偏好代答，大事才起气泡请示。
+- `blocked_kind` 是结构化的阻塞类型：`clarification`（可被自动编排代答）或 `approval`（必须走确认单 action hash + CAS，模型无权代答）。旧记录该字段为空时，C2 不自动回答；不得用问题文本猜类型。
 - 台账只存公开决定与结果，**不存模型思考过程，不存凭据**。缺失 ID 抛 `KeyError`；事件表 `commission_events` 只追加不改写。
 - **变更通知 `commission_update`**：台账每次落库（开票、迁移、记录步骤）后，向所有在线 `/ws` 连接广播一条
   `{"type":"commission_update","commission":{…}}`。`commission` 就是 `GET /api/executive/commissions` 的 items 元素本身，

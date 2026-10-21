@@ -566,16 +566,16 @@ stage:
     # 给到约 95px 脸宽；height 只要不低于 width 项即可，留出头顶与锁骨。
     speaking: { width: 0.22, height: 0.30, centerY: 0.05, yaw: 9 }
   framing:
-    headroom: 0.12                   # 头顶留白（相对身高）
+    headroom: 0.055                  # 头顶留白（相对身高）：暗窗里再留 12% 会显得空
     chest: 0.43                      # 构图下沿在头下多少（相对身高）
-    zoom: 1.08                       # 推拉系数
+    zoom: 0.94                       # 推拉系数：>1 是拉远，<1 才是推近
     eye_raise: 0.05                  # 眼部特写：中心上移量
     eye_height: 0.23
     eye_width: 0.22
     eye_depth: 0.04
   lights:
-    rim_color: "#bfd8ff"             # 边缘光：冷色轮廓，把肩线和发丝从背景里剥出来
-    rim_intensity: 0.9
+    rim_color: "#c6dcff"             # 边缘光：冷色轮廓，把肩线和发丝从背景里剥出来
+    rim_intensity: 1.75
     rim_position: [1.9, 2.2, -2.4]    # 右后上方：只勾右肩与发缘，不参与正面塑形
     # 演出打光（主舞台/实验室 presentation）：暖主光在左前上方，冷补光在右前，
     # 冷轮廓灯从右后勾边。补光只把阴影从死黑里拉起来，强度低于主光。
@@ -595,6 +595,9 @@ stage:
     hair_outline: 0.0008
     face_outline: 0.0009
     face_toony: 0.62
+    # 布料轮廓光：只吃衣料（外套/袖子/裤装/领口/袖口），给暗窗里的米白
+    # 衣服勾一道冷边，衣服和背景才分得开。皮肤与五官不参与。
+    body_rim: { color: "#d3e2ff", strength: 0.46, fresnel: 4.4, lift: 0.0, mix: 0.32 }
   # 默认表情（只在资产真有这些 morph 时生效，见 render/stage.js）：
   # mouth_wide 把嘴线横向拉开一点，mouse_open 留一道很浅的唇缝——
   # 静止时嘴线才有可见的暗部。这里不用任何资产没有的通道。

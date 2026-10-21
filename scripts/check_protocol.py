@@ -184,7 +184,28 @@ def duplicate_routes() -> dict[tuple[str, str], list[str]]:
     return {key: where for key, where in seen.items() if len(where) > 1}
 
 
-INTERNAL_ROUTES = ('/internal/telemetry_proxy',)
+INTERNAL_ROUTES = (
+    '/internal/telemetry_proxy',
+    '/internal/durable/memory/search',
+    '/internal/durable/notes/search',
+    '/internal/durable/notes/read',
+    '/internal/durable/threads/read',
+    '/internal/durable/workers',
+    '/internal/durable/workers/status',
+    '/internal/durable/lease',
+    '/internal/durable/orchestrator',
+    '/internal/durable/confirmations',
+    '/internal/durable/confirm',
+    '/internal/durable/dispatch',
+    '/internal/durable/task/status',
+    '/internal/durable/task/events',
+    '/internal/durable/answer',
+    '/internal/durable/review',
+    '/internal/durable/propose',
+    '/internal/durable/authorize',
+    '/internal/durable/accept',
+    '/internal/durable/reject',
+)
 """服务端自用路由：前端不引用，所以第五类检查看不到它们。
 
 观测网关这条最怕被顺手重构掉——改了路径，Worker 的调用会静默 404，

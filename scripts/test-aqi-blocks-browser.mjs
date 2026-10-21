@@ -157,6 +157,30 @@ assert.ok((await sent()).some((m) => m.type === "aqi_action" && m.cmd === "dispa
   "胶囊点击回传 aqi_action，cmd 带真实 commission_id");
 pass("dispatch:accept 业务动作回传");
 
+// ---- ②a2 choice:<index> 本地动作：通用按钮触发同一张卡的第 N 颗胶囊 ----
+// 协议 §23.3 声明过这个动词，但前端曾没有分支，点了落进"未知动词：忽略"。
+// 这里走真实渲染路径：积木自带的 actions 里放一个 choice:1，点它必须等价于
+// 点第二颗胶囊（回传 dispatch:accept:c-102），越界 index 必须什么都不做。
+await emitTurn({
+  type: "aqi_blocks", turn_id: "t-choice", layout: "stage_holo", nav: null, gaze: "holo_right",
+  blocks: [{ kind: "choice_pills", question: "这两单先收哪个？",
+    options: [{ label: "甲", cmd: "dispatch:accept:c-101" },
+              { label: "乙", cmd: "dispatch:accept:c-102" }],
+    actions: [{ label: "收第二单", cmd: "choice:1" },
+              { label: "越界", cmd: "choice:9" }] }],
+});
+const sentBefore = (await sent()).length;
+await page.locator('#holoDeck .aqi-block[data-kind="choice_pills"] .aqi-action').first().click();
+await page.waitForTimeout(150);
+let afterChoice = (await sent()).slice(sentBefore);
+assert.ok(afterChoice.some((m) => m.type === "aqi_action" && m.cmd === "dispatch:accept:c-102"),
+  `choice:1 等价于点第二颗胶囊（实际发出 ${JSON.stringify(afterChoice)}）`);
+const sentAfterValid = (await sent()).length;
+await page.locator('#holoDeck .aqi-block[data-kind="choice_pills"] .aqi-action').nth(1).click();
+await page.waitForTimeout(150);
+assert.equal((await sent()).length, sentAfterValid, "越界 choice:9 无任何副作用");
+pass("choice:<index> 本地动作与越界忽略");
+
 // ---- ②b say:* 走普通文字轮次，小溪语音确认；去文字框化断言 ----
 await page.locator('#holoDeck .aqi-block[data-kind="note_snippet"] .aqi-action').click();
 assert.ok((await sent()).some((m) => m.type === "text" && m.text === "那你说来听听"),
@@ -167,12 +191,26 @@ assert.match(await page.locator(".glimmer-bubble .glimmer-text").textContent(), 
 assert.equal(await page.locator("#chat .msg.bot").count(), 0, "去文字框化：小溪不再产生 bot 文字气泡");
 pass("say 动作语音确认 + 去文字框化（微光接手，无文字气泡）");
 
-// ---- ④a Holo-Deck 6 张上限：再递一张，最旧回收 ----
+// ---- ④a Holo-Deck 6 张上限：再递两张，最旧的请示卡被回收 ----
+// 这里递两张而不是一张：第一张填满上限，第二张才把最早那张挤出去。
+// 原来只递一张就断言"最旧被回收"，只要前面多渲染了一张卡，这条断言就会
+// 把"回收机制坏了"和"测试自己的计数漂了"混成同一个失败。
 await emitTurn({ type: "aqi_blocks", turn_id: "t-2", layout: "stage_holo", nav: null, gaze: "holo_right",
   blocks: [{ kind: "note_snippet", text: "星图里又亮了一颗。", title: "星图近况", ref: "note:78",
     actions: [{ label: "看星图", cmd: "ui:starmap" }] }] });
-assert.equal(await deckCount(), 6, "超过 6 张收回最旧的，卡片区不无限生长");
-assert.equal(await page.locator('#holoDeck .aqi-block[data-kind="choice_pills"]').count(), 0, "最旧的请示卡被回收");
+await emitTurn({ type: "aqi_blocks", turn_id: "t-3", layout: "stage_holo", nav: null, gaze: "holo_right",
+  blocks: [{ kind: "note_snippet", text: "又一张。", title: "再一张", ref: "note:79",
+    actions: [{ label: "看星图", cmd: "ui:starmap" }] }] });
+// 回收发生在 render 之后；卡片挂载有错峰入场，等一拍再数。
+await page.waitForTimeout(200);
+const deckKinds = await page.locator("#holoDeck .aqi-block").evaluateAll(
+  (els) => els.map((el) => el.dataset.kind));
+assert.equal(await deckCount(), 6, `超过 6 张收回最旧的，卡片区不无限生长（实际 ${deckKinds}）`);
+// 按内容断言，不按 kind：②a2 又递过一张请示卡，按 kind 数会把"最早那张
+// 被回收"和"后面那张还在"混成同一个失败。
+assert.equal(
+  await page.locator('#holoDeck .aqi-block[data-kind="choice_pills"]').filter({ hasText: "说个名字" }).count(),
+  0, `最早那张请示卡被回收（实际顺序 ${deckKinds}）`);
 pass("Holo-Deck 上限 6 张回收最旧");
 
 // ---- ②c ui:starmap 本地动作：点亮星图（不经过后端） ----
@@ -184,11 +222,21 @@ await page.waitForFunction(() => document.getElementById("starmapMount").hidden 
 pass("ui:starmap 本地点亮星图");
 
 // ---- ②d ui:preview 本地动作：拉战况抽屉 + 广播成果 ref ----
-await page.locator('#holoDeck .aqi-block[data-kind="spotlight_card"] .aqi-action').click();
+// 上限回收已经把最早那张 spotlight_card 挤出去了（① 与 ②a2 之后又递了 4 张）。
+// 补递一张带 ui:preview 的，确保这一步验的是预览联动本身，不是卡片还在不在。
+await emitTurn({ type: "aqi_blocks", turn_id: "t-preview", layout: "stage_holo", nav: null, gaze: "holo_right",
+  blocks: [{ kind: "spotlight_card", title: "预览用卡", summary: "验 ui:preview。",
+    artifacts: [{ kind: "文档", ref: "report.md", preview: "# 周报" }],
+    actions: [{ label: "预览成果", cmd: "ui:preview:report.md" }] }] });
+await page.locator('#holoDeck .aqi-block[data-kind="spotlight_card"]').filter({ hasText: "预览用卡" })
+  .locator(".aqi-action").click();
 assert.equal(await page.locator("#workDrawer").evaluate((el) => el.hidden), false, "ui:preview 自动拉开工作台抽屉");
 assert.equal(await page.locator("#drawerViewOps").evaluate((el) => el.hidden), false, "预览定位到战况视图");
 assert.deepEqual(await page.evaluate(() => window.__harness.previews), ["report.md"], "预览广播真实成果 ref");
-pass("ui:preview 本地预览联动抽屉与高亮广播");
+/* 这一步验的是：抽屉被拉开、切到战况视图、ref 被广播出去。
+ * 金边样式由 test-ui-browser 的真实 computed style 断言覆盖；本用例的 ref
+ * 与卡片 id 不同，因此这里不应把"类没加上"当成失败。 */
+pass("ui:preview 本地预览联动：抽屉 + 战况视图 + ref 广播");
 
 // ---- ③a nav 抽屉联动：四个目标各自跳到既有视图 ----
 for (const [nav, view] of [["notes", "drawerViewWriting"], ["threads", "drawerViewCompanion"], ["starmap", "drawerViewStarmap"], ["ops", "drawerViewOps"]]) {

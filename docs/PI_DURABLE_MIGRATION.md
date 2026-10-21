@@ -269,6 +269,8 @@ await conv.configure({
 - **密件渲染与 shim 对齐**：`briefingOf()` 只取 objective / deliverable / constraints 三个字段，和 `scripts/worker_shims/*.py` 的 `prompt_for` 同源。第一版只取了 objective，**把 deliverable 整个丢了**——durable 的 Worker 因此看不见密件里已经写明的职责行；这也是 A/B 早期不公平的来源。引擎自己的交付指令（"必须调用 submit_artifact"）单独一行放在 user message 里，与 shim 尾段同构；没有它模型有时只用文字回答，整单只能以"执行体没交差"失败。
 - **记忆块走 section**：`section("memory", () => bridge.memory(commissionId))`，带超时与"没查成/没查到"的区分。
 - **模型按 `cost_tier` 映射**：花名册已有三档，Pi Durable 支持 per-conversation model，这是顺手拿到的收益（琐事走廉价档）。
+- **`maxTokens` 别继承快环的预算**：`models.ts` 原来硬编码 1200，推理型模型会把整个 completion 预算烧在 reasoning 上——`step-5-preview` 连续三次返回 `finish_reason: "length"`、正文空、无工具调用，于是整单以"执行体没交差"失败，而失败信息里 `said` 也是空的，看不出是预算问题。改成 8000（可用 `XIAOXI_MAX_TOKENS` 覆盖）后同一提示一次交差、实耗 1188 token。**不能读 `.env` 的 `LLM_MAX_TOKENS`**：那是快环短回复的 400，拿来更糟。
+- **模型有时只用文字回答**：harness 没有强制工具调用（`ToolChoice` 只有 `auto | none`），`step-5-preview` 大约每五轮有一轮不调 `submit_artifact` 只答散文。`deliverWithModel` 因此在同一 conversation 里催一次（各自独立 `requestId`），`test-nudge.ts` 把这条路钉住了。
 - **输出规格由工具 schema 钉死**：`submit_artifact` 的参数必须是 §19 的 `delivery` 形状，L1 初审不用猜字段。
 - **终止语义**：`submit_artifact` 与 `block_and_ask` 都必须返回 `control: { terminate: true }`（该轮所有结果都请求终止时 run 结束），否则模型会再跑一轮，把"交差"变成"交差后继续闲聊"，既多花钱又可能改口。
 
@@ -418,13 +420,377 @@ models.setProvider(provider);
 
 ### Phase 2 — Worker 全量 + 审批 + 观测（8–12 人日）
 
-- 三个 Worker 全量切换；`cost_tier → model` 映射生效。
-- 审批 hook + memo + Python CAS 全链路；拒绝即终止。
-- 遥测回填、鬼打墙熔断走 RPC 取消。
-- 启动对账 + 60s 巡检。
-- 归档/保留策略。
+- [x] `cost_tier → model` 映射生效（`XIAOXI_MODEL_CHEAP/MEDIUM/HIGH`，按 conversation 选模型；`test-tier-model.ts`）
+- [x] 审批全链路：hook 拦下 → 待批准清单 → 老板答复后 `/v1/approvals` 按单放行 → 不跨单泄漏（`test-approval-chain.ts`）。此前链子断在最后一环——被拦的工具在 sidecar 存活期内一直拦着。
+  - **2026-10-18 修正**：链子在测试里是通的，在生产里从没生效过。`XIAOXI_APPROVAL_TOOLS` 只有测试设过，sidecar 启动时一个工具都没登记，hook 因此从不拦任何调用。现在花名册 `durable.approval_tools` 经 `DurableSupervisor(extra_env=...)` 随进程注入；留空 = 不拦。写操作类工具（`write_file` / `run_worker`）建议列上。
+- [x] 成果可核：`write_file` 沙箱内写文件 + `submit_artifact` 的 ref 规范化与验真（`test-write-file.ts` / `test-handin.ts`）
+- [x] 遥测回填（`emitUsage` 读 `pi.usage`）、鬼打墙熔断走 RPC 取消
+  - **2026-10-18 补接管侧**：`cli_subproc` 会把密件里的 `telemetry.proxy_url` 注成 `AQI_TELEMETRY_PROXY`，durable 接管执行体时只从 sidecar 进程环境读这个变量，而监督器从不设它——被接管执行体的模型调用因此一条 span 都不落。现在 `RunMeta.telemetry_proxy` 从密件带进 sidecar，`shimEnv()` 优先用它。实测 DSH 一单 `calls=3`、`prompt_tokens=23678`。
+- [x] 启动对账 + 60s 巡检（`patrol_seconds`，`test_durable_supervisor.py`）
+  - **2026-10-18 修正**：这一条此前是虚的。巡检只探进程健康，账实核对根本不存在——`recover_interrupted()` 把 running 一律转 BLOCKED，sidecar 里已经跑完的单成果被扔掉。现已补：`GET /v1/lookup`（按 `commission_id@attempt` 查单，不建单）+ `ExecutiveService.recover_interrupted(durable_lookup=...)` 只采纳内核已终态 `completed` 且带 summary 的成果，其余一律照旧转 BLOCKED。铁律不变：对账永不替内核把没跑完的单判成功，也永不自动 `done`。回归在 `scripts/test_durable_adapter.py`。
+  - 对账只覆盖"宿主重启、内核活着"这一种死法。内核自己死了，适配器连不上，那一单如实转 BLOCKED 请示；答一句后靠 attempt 递增真的重新拉起执行体（见下面"接管与重做"）。
+- [x] 归档/保留策略（`data/durable/*.sqlite` 纳入 `backup_local_databases.py`）
+- [x] 配置接线：`config/agents_roster.yaml` 新增 `durable:` 段（默认 `enabled: false`）
+- [ ] **三个 Worker 全量切换**：见下方 A/B 小节末尾的说明。花名册现有四个 `cli_subproc`，切过去是能力回退；当前 `durable.enabled: false`，`switch_agents: [scribe]` 只是"启用后先切文档类"的预备配置，不是已切换。
 
 **验收（A/B）**：同一批 10 个真实委托，同一模型，`cli_subproc` vs `durable`，按 L1 初审通过率、token、端到端耗时、人工盲评比较；`durable` 不得在通过率上显著落后。混沌测试见 §6。
+
+**2026-10-18 A/B（`scripts/probe_durable_ab.py --repeat 10`，两侧同为 `claude-opus-5-5`，同一份密件、同一提示词）**：
+
+| | L1 通过（按配置） | 排除预算闸 | 均时 | 均 token |
+|---|---|---|---|---|
+| `durable` | **10/10** | 10/10 | 34.3s | 5,193 |
+| `cli_subproc` | 2/10 | **10/10** | 64.3s | 80,723 |
+
+**通过率上 `durable` 不落后，Phase 2 的验收线过了。** 但有两件事必须一起读，否则这个 10/10 会被读错：
+
+1. **基线的 8/10 失败全是预算闸，不是能力**：当时 `max_prompt_tokens: 80000` 低于真机 Claude 跑一轮的真实上下文（约 10 万），而 `telemetry.commission_usage` 把一单三次重试的 prompt_tokens **求和**（24–63 万）。**2026-10-20 已收口**：`max_prompt_tokens_per_call=120000` 只做单次质量闸，`max_total_prompt_tokens=400000` 只做成本告警；`test_budget_scope.py` 钉住"重试不翻倍打回"。
+2. **`durable` 早期是 7/10，差的 3 单全是"产不出可验证的成果"**：它的工具集原本只有 `submit_artifact` / `block_and_ask`，没有写文件的能力，模型却会编出 `kind: "file"` 的路径（`work/title-3vers/titles.md`、`/tmp/three_titles_workdir/titles.md`、`workspace/titles/three-titles.md`），被项目自己的 `no_unwired_dry_run` 抓住；剩下 7 单能过是因为模型改报 `kind: "note"`，而那条路径**根本不验存在性**——等于"过了但没有可核成果"。
+
+补上 `write_file`（沙箱内写文件，见 §4.5）与 `submit_artifact` 的 ref 规范化之后才是 10/10：
+- `write_file` 只认 `RunMeta.workspace` 一个目录，`../`、工作目录外的绝对路径、同名前缀的兄弟目录全部拒绝；基目录不存在时明说"这不是路径问题"，不让模型改路径重试。
+- `submit_artifact` 交差前把 file 型 ref 规范化并验真：模型把路径转义两遍产生的 `D:\\project\\...` 会被还原，没写过的文件直接拒收（不记一张指向空气的卡）。
+
+**仍未做**：三个 Worker 全量切换。花名册里现在有**四个** `cli_subproc`（claude / workbuddy / dsh / codex，比本文档写"三个"时多了一个），它们的真机 CLI 自带 Read/Bash/Grep，而 durable 的工具面窄得多。切过去是**能力回退**；当前 `durable.enabled: false`，`switch_agents: [scribe]` 只是启用后先切文档类的预备配置。等确认过那些 Worker 不需要真机工具再谈扩大。
+
+token 差 15 倍（5,193 vs 80,723）不能直接当收益：`durable` 干的活也严格更少（不跑校验脚本、不读仓库），而这个差主要来自两侧的工具面不同，不是引擎效率。
+
+### 能力层收口（2026-10-20）
+
+这一轮把 durable 从“能跑单”补到“像一个可用的后台 Agent”，范围仍是 Worker
+执行层，不碰快环与秘书循环：
+
+- **Skills**：`agent-runtime/src/skills.ts` 按 Agent Skills 布局扫描
+  `XIAOXI_SKILLS_DIR`（默认 `config/skills`）。system prompt 只放 name/description，
+  正文由 `read_skill` 按需读取；支持技能目录内的文本参考文件，路径逃逸会拒绝，
+  `disable-model-invocation: true` 不进入模型列表。没有指向 `.agents/skills`：
+  那是开发工具的技能，会漏进生产 Worker。
+- **MCP**：`agent-runtime/src/mcp.ts` 用 `@earendil-works/pi-mcp@1.3.0` 连接
+  `config/mcp.json` 的 stdio/HTTP servers，把 tools 包成 durable 原生工具
+  `mcp__<server>__<tool>`。只读注解工具才 `replay:"safe"`；有副作用的工具自动
+  登记进审批链。MCP server 只拿到最小环境变量，不继承 sidecar 的 LLM key。
+  `run_worker`（按模型给的命令行拉起本地执行体）默认也列入审批。
+- **压缩**：`models.ts` 不再把 `contextWindow` 写死为 32768；可用
+  `XIAOXI_CONTEXT_WINDOW` / `XIAOXI_MAX_TOKENS` 配置，并由
+  `compactionSettings()` 推导 reserve/keep/background。此前的 Pi 默认值
+  （reserve 16384、keep 20000）放在 32k 窗口下会出现“切点比阻塞阈值还靠后”的
+  矛盾组合，现在启动时断言 `contextWindow - reserve > keep`，不满足直接报错。
+- **文件回读**：新增 `read_file`（工作目录内、`replay:"safe"`）。此前 durable
+  Worker 只能 `write_file`、不能回读，长任务无法检查自己写出的成果；现在
+  `write_file` / `read_file` 共用同一套 `insideSandbox` 边界。
+- **密件上下文**：`task.ts` 的 `briefingOf()` 现在把 `memory_block`、`rubrics`、
+  `acceptance`、`feedback` 一起写进 `instructions`。此前 durable 模型路径只拿到
+  objective/deliverable/constraints，记忆和验收规则都在 Python 密件里空转。
+- **接线修正**：`server/app.py` 现在把 `approval_tools`、`switch_agents`、
+  `workspace_root`、`endpoint_provider` 真正传给监督器/适配器；此前
+  `approval_tools` 从未注入，`endpoint_provider` 未传导致硬杀重启后仍连旧端口，
+  `workspace_root` 也没有随 `bind_durable` 下发。`XIAOXI_DURABLE_ENABLED=1`
+  点亮，`XIAOXI_DURABLE_SWITCH_AGENTS=scribe` 或 YAML `switch_agents` 决定切换；
+  YAML 默认关闭，避免测试反复拉 Node。
+- **存储**：`backup_local_databases.py` 已包含 `data/durable/*.sqlite`；新增
+  `scripts/archive_durable.py` 做在线冷归档（不停止 sidecar，不动活库），
+  只有显式 `--prune-days N` 才删除旧档。自动轮转仍未做。
+- **回归**：`test-compaction.ts`（8）、`test-skills.ts`（11）、
+  `test-read-file.ts`（5）、`test-mcp.ts`（10）、`test_durable_app_wiring.py`（7），
+  以及原有 supervisor/adapter/takeover/revive/approval 全绿。
+
+仍未做：三个（现在是四个）真机 CLI Worker 全量切换——它们自带 Read/Bash/Grep，
+切过去是能力回退；代码类继续 `cli_subproc`，文档/整理类先切 `scribe`。真实 MCP
+server 的端到端联调也还没做，目前只有 fake client 的单测。
+
+### C1 只读参谋（2026-10-20）
+
+编排者路线的第一段：先让 durable Agent **看得见**记忆、便笺、事项和 Worker
+花名册，但不给它任何写权限。
+
+- **宿主接口**：`server/assistant/durable_api.py` 提供
+  `/internal/durable/memory/search`、`/notes/search`、`/notes/read`、
+  `/threads/read`、`/workers`、`/workers/status`。全部只读；`server/app.py`
+  在 sidecar 启动时生成一次性 `XIAOXI_HOST_TOKEN`，经进程环境注入，不落盘。
+  未启用 durable 时 token 为空，路由返回 503，不会意外暴露记忆库。
+- **sidecar 工具**：`search_memory` / `search_notes` / `read_note` /
+  `read_thread` / `list_workers` / `worker_status` / `list_files`。前六个走
+  宿主接口，`list_files` 只读本单沙箱；全部 `replay:"safe"`，不进审批。
+- **记忆语义**：返回 `stated` / `inferred` / `uncertain` 三档，带
+  `requires_confirmation`；空检索显式返回“没查到不等于没发生”，记忆关闭
+  返回 `disabled`，检索异常返回 `unavailable`，都不编造。
+- **边界**：`workers` 只返回 id/name/adapter/summary/strengths/weaknesses/
+  cost_tier/max_concurrent/in_flight/available，不返回 `env`/`executable`/
+  token/endpoint；`available` 只是并发容量，不是健康检查。
+- **回归**：`test_durable_read_api.py`（14）、`test-host-tools.ts`（10）、
+  `test-list-files.ts`（7），并纳入 `check_protocol.py` 的
+  `INTERNAL_ROUTES`。
+
+仍未做：C3 的 `accept_delivery`/`reject_delivery`。C1 明确不写台账、不派单、不验收。
+
+### C2 编排者（2026-10-20）
+
+C2 把“理解并派发任务、跟踪、请示”接到 durable，但写权限仍只在 Python：
+
+- **Profile 隔离**：`runtime.ts` 拆成 `Tasks` / `ReadOnly` / `Worker` /
+  `Orchestrator` 四个扩展。Worker 默认只选前三个（+Skills/MCP），没有
+  `dispatch_task`；Orchestrator 移除 Worker 与 MCP，只保留只读工具、
+  Skills 和 C2 工具。Worker 不能派单，编排者不能写文件或跑本地执行体。
+- **Lease**：`durable_leases.py` 由宿主按会话签发，模型从 RunMeta 拿不到
+  额度字段。首期 `dry_run` 默认、1 并发、3 单/小时、`cost_tier<=medium`、
+  TTL 30 分钟、只允许 `scribe`；high 档与 shell Worker 不进入 C2 派单池。
+  模型伪造 lease/额度不会生效。
+- **派单**：`dispatch_task` -> `/internal/durable/dispatch` ->
+  `ExecutiveService.open/dispatch/start`，随后后台 `executive.drive()`；
+  工具立即返回 `commission_id`。幂等键由 `(taskId, callId)` 生成，重复调用
+  返回同一 Commission；不会直接写 `commissions.db`。
+- **跟踪**：`task_status` / `task_events` 只读台账，返回状态、blocked 问题、
+  `blocked_question_id`、L1/L2 findings 和交付摘要；只能查当前 lease 派出的单。
+- **请示**：`answer_blocked` 只答 clarification。带确认/审批语义的问题直接
+  403；它调用 `dispatcher.answer`，**不调用** `_grant_durable_approvals`。
+  确认单仍走 action hash + CAS，模型无权代答。同一 `(commission_id,
+  blocked_question_id, answer_hash)` 幂等。
+- **审计**：dispatch / answer / orchestrator start 都写 telemetry span；
+  不新增浏览器 WS 事件。`check_protocol.py` 已登记所有 `/internal/durable/*`。
+- **入口**：`POST /internal/durable/orchestrator`（host token）用当前 user
+  intent 签发 lease，再向 sidecar 创建 orchestrator profile 的 run。没有
+  user intent 不发 lease；记忆/笔记内容不能单独触发派单。
+- **回归**：`test_durable_orchestrator_api.py`（22）、
+  `test-orchestrator-tools.ts`（10）、`test-profiles.ts`（12）、
+  `test-orchestrator-run.ts`（8）；覆盖重复 dispatch、lease 过期/并发/小时
+  额度、Worker 越权与自派、确认单误答、dry-run/confirm、任务跟踪与审计
+  span、重启后 lease 失效。
+
+### C2.1 硬化（2026-10-20）
+
+C2 第一版的三个安全返工点已经收口：
+
+- **confirm 是真确认**：`ConfirmationStore` 用一次性 `confirmation_id` 绑定
+  lease/session/agent/title/brief/thread/intent 的 action hash。`/dispatch`
+  在 confirm 模式首次只返回 `confirmation_id`；宿主通过
+  `/internal/durable/confirm` 批准/拒绝（不是模型工具），之后 `/dispatch`
+  必须带同一个确认号且 title/brief 不变，消费一次即失效。换标题/换 brief
+  会得到 `confirmation_action_changed`，不能拿确认号派另一件活。
+  `dispatch_task` 工具现在会自己等待宿主确认（最长 120s），批准后用同一
+  confirmation_id 自动重试；真实模型不需要理解重试协议。
+- **确认单不再靠正则**：`block_and_ask` 增加 `kind: "clarification" |
+  "approval"`，错误事件带 `blocked_kind` 穿过 durable SSE / 适配器 / 台账；
+  `answer_blocked` 只认 `blocked_kind=clarification`，`approval` 直接 403，
+  空 kind 的旧单也拒绝（不猜文本）。`_grant_durable_approvals` 仍完全不在
+  C2 路径上。该接口还要求 `lease.mode=auto`，且同一单最多答 3 次澄清；
+  超过返回 `clarification_limit`，防止真实模型自问自答循环。
+- **无 Worker 不再记 done**：`_fail_dispatch` 对 `drafting` 先转 `briefing`
+  再 `blocked`，带请示与 `blocked_kind=clarification`，与 `delegate` 一致；
+  回归直接断言台账状态，不只断言 HTTP 409。
+- **重启孤儿**：新增“创建 Commission 后宿主崩溃 → 新进程
+  `recover_interrupted`”回归，孤儿单转 blocked 并留下请示。
+
+回归更新：`test_durable_orchestrator_api.py`（36）、
+`test-orchestrator-tools.ts`（15，含 confirm 自动重试）、`test-profiles.ts`（16）、
+`test-orchestrator-run.ts`（8）。
+
+C2 的 `confirm` 需要宿主/老板侧调用 `/internal/durable/confirm`；模型只能拿到
+确认号，不能批准。
+
+### C3 验收三层（2026-10-20）
+
+C3 没有把 `accept_delivery` 交给模型，而是拆成 review / propose / commit：
+
+- **review_delivery（只读）**：只对 `ready_to_report` 的单生效，返回
+  L1/L2 findings、rubric 命中、artifact checks、推荐结论、blockers 和
+  `evidence_hash`。不改变台账。`can_accept` 会拒绝复验失败（例如初审后文件
+  被删除）的交付；`artifacts_verified` 只有所有 artifact 都重验且存在才为
+  true，note/相对路径等未重验项明确标 false。
+- **propose_accept / propose_reject（只读）**：返回 `proposal_id`、建议与
+  证据，不改变台账。L1/L2 有 blocker 时 accept 提案直接 409；reject 提案
+  可带 `suggested_feedback` 供宿主参考，但模型不写规则。
+- **宿主 commit**：`/internal/durable/authorize` 由老板/宿主一次性授权；
+  `/internal/durable/accept` 调 `ExecutiveService.accept`，只走
+  `ready_to_report -> done`；`/internal/durable/reject` 调
+  `ExecutiveService.reject`，保留 `dispatcher.reject` 的判例学习。两个
+  commit 都需要 `proposal_id + authorization_id`，幂等、记审计 span。
+- **权限**：模型工具面只有 review/propose，没有 accept/reject commit 工具；
+  proposal 的 `evidence_hash` 绑定当前 audit findings / blockers /
+  artifact_checks / delivery，台账或 artifact 变化后 commit 会被拒绝。
+  `source=policy` 的自动授权目前 403，等独立策略引擎（allowlist + L1 + 无
+  L2 blocker + lease + kill switch）再开。
+- **reject 后续跑**：`/reject` 仍只走 `ExecutiveService.reject` 到
+  `running`，不自动 drive；新增回归用宿主 `/run` 路径（`run_commission`）
+  证明 running 单真的会重新执行到 `ready_to_report`。
+- **状态机**：没有新增边；accept 只从 ready_to_report 到 done，reject 走
+  ready_to_report -> running，仍然只由 Dispatcher 迁移。
+
+回归：`test_durable_c3_api.py`（30），覆盖 review/propose 只读、L1 不可
+accept、宿主授权 commit、accept/reject 幂等、reject 批注与动作不匹配、
+文件删除后 accept 409、findings 变化使旧提案失效、note artifact 不标
+verified、reject 后宿主重新执行，以及工作台 `/review` + `/accept` +
+`/reject` 入口（验收按钮现在也过 C3 review）。另有
+`test_durable_clarification_cap.py`（3）用脚本化 BlockingAdapter 证明
+adapter error → blocked_kind → 第 4 次澄清 429，不依赖真实模型。
+`test-profiles.ts`（16）与 `test-orchestrator-tools.ts`（14）钉住模型没有
+commit 权。
+
+**产品入口（C4 补齐）**：内部 `/internal/durable/authorize` 仍只对宿主
+（bearer token）开放；老板现在能在督办抽屉里完成同一条授权链：
+
+- `/api/executive/durable/*` 与 `/internal/durable/*` 在 `app.py` 里共用同一个
+  `DurableState`（lease / 确认单 / 提议 / 幂等表）。测试单独建 router 时仍可只
+  传一个 `LeaseStore`，向后兼容。
+- 抽屉新增“等你拍板”：待批派单（模型在 `confirm` 模式下等待，老板点击后
+  `dispatch_task` 自己重试，不需要再发一句话）、待放行工具（展示 tool +
+  action_hash 前缀，只放行这一次调用，然后宿主 `answer + resume` 恢复执行）、
+  模型验收建议（授权验收/授权打回；打回理由由老板填写，不把模型建议直接
+  变成判例）。
+- 交付卡新增只读“验收详情”：按 C3 `build_review` 重跑成果复验，展示文件是否
+  还在、L1/L2 findings、blockers；`收工` 仍走同一个 review 门禁，409 时把原因
+  摊开，而不是静默失败。
+- 所有写路由都做同源校验；没有 durable 状态时授权接口 503，前端降级为空，
+  不影响旧台账。
+
+### Live probe（2026-10-20，隔离临时库）
+
+`scripts/probe_c3_live.py` 用临时 assistant/durable/workspace 目录起本地宿主
+和 sidecar，不碰真实 `data/`：
+
+- **5/5 happy path**：真实 `step-3.7-flash` 按契约 dispatch → scribe 写真实
+  文件 → ready_to_report → review → propose → authorize → accept，全部 done。
+- **1 次缺素材场景失败**：真实 orchestrator 连续回答 clarification 11 次，
+  commission 在 blocked/running 间循环，orchestrator task 240s 未收口。已加
+  每单最多 3 次 clarification 的宿主上限，并有单测覆盖第 4 次返回 429。
+  加上限后复测同一场景，模型这次直接交了一张“无法取得素材”的说明并被验收，
+  没有再次进入 blocked 循环；因此上限本身仍只由单测证明。
+- **1 次真实 reject**：宿主授权 reject 成功，`dispatcher.reject` 学到判例
+  `boss_8d704292`；随后 `/run` 确实重新执行，但重做结果仍是 blocked（被新
+  判例/素材条件挡住），不是 ready_to_report。打回重做链路存在，但“重做后
+  一定可验收”未证明。
+- **DSH 新工作区 3/3 成功**：`scripts/probe_dsh_workspace.py --tasks 3 --keep`
+  在 `tmp/dsh-workspace-*` 下跑 hello.txt / titles.md / notes.md，3 单全部
+  ready_to_report，真实文件存在、L1 通过。没有写 `data/commissions`。
+- **manager→DSH 2/2 成功**：`probe_c3_live.py --worker dsh --runs 2` 用
+  confirm lease（宿主自动批准待确认单），真实 orchestrator 派给 dsh，2 单都
+  ready_to_report 并被接受。此前同一路径有 2 次模型拿到 confirmation_id 后只
+  转述给老板、不重试；把等待/重试收进 `dispatch_task` 工具后消失。
+- **工作台入口**：`/api/executive/commissions/{id}/review` 只读；原有
+  accept/reject 按钮现在必须先过 `build_review`，L1/blocker/文件复验失败
+  不能从 UI 绕过 C3。
+
+仍未完成：真实模型下的 blocked 上限自然复测（现在由脚本化 Worker 覆盖）、
+5–10 单全部路径成功样本、coding Worker 外派的高档/确认策略、C4。
+
+### C4 起步（2026-10-20）
+
+- **真实 MCP**：新增 `agent-runtime/fixtures/mcp-echo-server.mjs` 和
+  `test-mcp-live.ts`。不是 fake client：真的 spawn stdio server、initialize、
+  tools/list、tools/call、close；9/9 通过。只读工具 replay safe，写工具
+  unsafe 且自动进审批。
+- **接入引导**：新增 `docs/AGENT_INTEGRATION_GUIDE.md`，覆盖“CLI / durable
+  接管 / HTTP / MCP Worker / MCP 工具 / manual”选择、工作区派生、roster/MCP
+  配置、审批与验证命令。
+- **接入体检**：新增 `scripts/doctor_integration.py`，不联网检查 adapter
+  登记、executable/args、workspace、MCP 配置和 skills；当前花名册 6 个
+  Worker 全部 OK（codex 仅 enabled=false 警告）。
+- **DSH 外派**：`probe_c3_live.py --worker dsh` 在 confirm lease 下 2/2
+  成功；`dispatch_task` 现在自己等待宿主确认（120s）并自动重试。
+
+- **长任务 compaction**：`test-compaction-live.ts` 用假端点同时服务正常对话
+  和摘要请求；低窗口下第 2 轮自动产生 `pi.compaction`，摘要请求真的发出，
+  压缩后对话继续。6/6 通过。
+- **周期账实对账**：`ExecutiveService.reconcile_durable()` + app 的
+  `_reconcile_loop`（60s，线程内执行）。内核已完成 → 走 submit 采纳；内核
+  丢失/失败 → BLOCKED 带请示；仍在跑或查询不可用 → 不动；永不自动 `done`。
+  app 启动收口现在也真正带 `durable_lookup`。`test_durable_reconcile.py`
+  7/7。
+
+- **混沌/soak**：`test_durable_soak.py` 创建 8 单后硬杀 sidecar，监督器换
+  端口重起，8/8 完成；每单 3 条进度不重不漏、artifact 恰好 1 条。27 项断言
+  通过。这是短时 chaos，不是 24h soak。
+- **审批按调用绑定**：审批从“按工具放行”改成“工具 + 参数哈希一次消费”。
+  `/v1/approvals` 返回 `{tool, action_hash}`，Python 按哈希放行；同一工具换
+  参数或被消费后重试仍需重新批准。`test-approval-per-call.ts` 5/5，
+  `test-approval-chain.ts` 9/9（改成 grant 后 attempt+1 重跑验证真的执行）。
+
+- **存储增长/冷却归档**：`storage_doctor.py` 只读报告活库/归档/备份体积；
+  `archive_durable.py --rotate --yes` 在拿到与 sidecar 相同的 proper-lockfile
+  目录锁后，先做 integrity-check 快照，再删除活 SQLite/WAL/SHM，下一次
+  sidecar 从空库启动。锁被 sidecar 持有时拒绝轮转；不加 `--yes` 只打印计划。
+  `test_storage_archive.py` 9/9。轮转会放弃旧库里可续跑的 run，Python 台账
+  下次对账会转 BLOCKED 请示，不伪造结果。
+
+- **24h soak harness**：新增 `scripts/soak_durable.py`，可配置时长/并发/提交
+  间隔/周期硬杀；采样 `/v1/stats` 的 RSS/heap/handles 与 SQLite/WAL 体积，
+  输出 JSON 报告；每单检查 3 条唯一进度 + 1 条 artifact。15 秒 smoke
+  （3 并发、3 次硬杀）5/5 完成、0 restart failure。正式 24h 需单独挂机跑。
+- **工作台授权面**：`DurableState` 共享 + `/api/executive/durable/*` 产品路由 +
+  抽屉“等你拍板”/“验收详情”。`test_durable_authorization_ui.py` 24 项断言，
+  含同源拒绝、确认号真正落地、授权后 C3 commit、错哈希不放行、按调用放行后
+  恢复执行、驳回只 revoke、未启用 durable 时 503。浏览器侧用临时脚本验证
+  3 张卡渲染、确认 POST 与验收详情展开，无 page error。
+
+- **真实模型 compaction 样本**：`agent-runtime/probe-compaction-real.ts` 用
+  真实 `step-3.7-flash` 跑了 6 次长会话探针；5 次成功生成 `pi.compaction`
+  （另 1 次把输出上限压到 512，摘要自身被截断，说明“压缩输出预算”不能低于
+  真实摘要需要）。生产档（32k window / 8k answer / reserve 9024 /
+  keepRecent 11872）的结果：
+  - 压缩后继续对话：5/5 状态完成；其中 1 次单条消息约 10k tokens，压缩无法
+    在消息内部切，下一轮 `stopReason=length`、只输出 1 token，答案不可用。
+  - 早期“暗号”标识符：4/5 被摘要保留；1 次在对话被工具失败噪声占满时丢失。
+    结论：关键任务事实不能只放在早期用户消息里；密件/约束走系统段，每轮重绘，
+    不依赖摘要——与“检索为空必须显式负向约束”是同一条纪律。
+  - 近期硬约束复述：有正常输出预算的样本全部正确；模型在裸探针（未配宿主）
+    下有时先尝试 search_memory/list_files，失败后回答“无法获取”，即使摘要
+    里有答案。产品路径应把“对话内事实先看摘要，不要拿记忆检索代替”写进
+    Worker/编排者指令。
+  - 边界处置：`read_file` 与 MCP 文本结果都截到 12000 字符（低于
+    keepRecentTokens），`test-read-file.ts` 6/6、`test-mcp.ts` 11/11。
+    直接粘贴超大文本仍可能触发该边界；产品路径应走文件/MCP 并受同一上限约束。
+
+- **2h 混合负载 soak（2026-10-20 完成）**：`soak_durable.py` 跑满 7200.8s，
+  3361 提交 / 3227 完成 / 134 取消 / **0 失败 / 0 检查失败**；7 次硬杀、
+  **0 restart failure**；67 次重复派单校验 0 失败。RSS 93.7→91.8 MiB
+  （min 80.2、max 118.1，峰值出现在重启窗口），heap 23.9→21.2 MiB，
+  handles 恒为 4；SQLite 0.3→19.9 MiB（≈6.1 KB/单；按同一负载外推 24h
+  约 240 MiB，真实使用远低于 soak 的 0.47 单/秒）。报告
+  `tmp/soak-mixed-2h.json`。
+
+C4 仍未做：24h 连续 soak（需单独挂机；2h 只证明短时稳定与重启正确）；
+存储轮转仍是“有锁保护 + 显式确认”的离线操作，不是无人值守自动换库；
+自动调度需要额外的停机窗口编排。
+
+### 接管与重做（2026-10-18 新增，实测通过）
+
+durable 不只是"自己的模型"，它还能**接管本机执行体**：sidecar 用 `env.exec` 拉起花名册里配的 `executable/args`，解析它 stdout 上的五行事件协议。这条桥让真机 CLI 的 Read/Bash/Grep 与 durable 的崩溃续跑同时拿到，不必二选一。
+
+实测（`scripts/probe_takeover_production.py`，DSH + step-3.7-flash，走 `ExecutiveService.delegate` 生产链路）：
+
+- `status=ready_to_report`，初审 0 findings，交付 `out/titles.md`
+- 遥测 `calls=3`、`prompt_tokens=23678`：DSH 自己的模型调用被记进 span（`AQI_TELEMETRY_PROXY` 由密件带进 sidecar，此前只读 sidecar 进程环境，等于没有）
+- 台账事件 13 条：逐步收的，不是跑完才知道发生了什么
+
+三个把接管咬住的缺陷，都已修并落测试：
+
+1. **相对路径**：花名册的 `args` 是相对仓库根写的，而 sidecar 子进程的 cwd 是本单沙箱。`python scripts/worker_shims/dsh_worker.py` 打不开脚本、退出码 0、stderr 一句都看不到，整单只剩"本地执行体没有交差"。现在适配器把 args 解析成绝对路径，把 `python` 解析到 `.venv/Scripts/python.exe`（Windows 上裸 `python` 会落在 Anaconda，numpy 2.x 直接 ImportError），把 `node` 解析到 PATH 上的那个。
+2. **stderr 丢失**：`runLocalAgent` 只读 stdout。现在分开收集 stderr 尾部，执行体没交差时把它带进失败信息。
+3. **幂等键太粗**：`RunIndex` 只用 `commission_id` 且永不过期，初审打回后的重做拿回上一版已终态的任务，执行体根本不会被再拉起，旧成果被原样再交一次（实测两个 create 同一 taskId、子进程只跑一次）。现在键是 `commission_id@attempt`，attempt 取台账 `retry_count`；重投同一次仍幂等，重做拿新单并真的再跑。
+
+`GET /v1/lookup` 是重启对账的配套：按 `commission_id@attempt` 查单，不建单。
+
+**仍未做**：三个 Worker 全量切换（见上文）。接管之后"要不要切"的答案变了——切过去不再必然等于能力回退，因为真机 CLI 的工具还在。但仍需逐个确认那四个 Worker 的 shim 是否接受 `AQI_WORKDIR` 注入（DSH 接受，`resolve_workdir()` 优先读它）。
+
+### 中断恢复的两个断点（2026-10-18 实测并修复）
+
+`probe_takeover_production.py` 的 ③ 段把 sidecar 硬杀（`taskkill /F /T`），暴露出两处恢复断裂。都不是"运气不好"，都会 100% 复现：
+
+1. **锁的重试预算短于过期窗口。** `proper-lockfile` 只在 mtime 超过 `stale`
+   （10s）之后才认锁过期，而重试预算是 `10 × 500ms = 5s`。硬杀留下锁，重试先
+   耗尽，`_spawn` 抛 `ELOCKED`，监督器记 `restart_failed` 就放弃了——内核再也
+   没被拉回来。改成 `40 × 500ms = 20s > 10s`，并加 `test-revive.ts`（真硬杀 +
+   重开）。这条有回归：把 `RETRIES` 调回 10，测试立刻失败。
+2. **写死的端点让重试连到死端口。** 内核在新端口重起，花名册里那份 endpoint
+   还是绑定时那份，于是"内核拉回来了、重试却报 All connection attempts
+   failed"。现在 `DurableSupervisor.current_endpoint()` 作为 `endpoint_provider`
+   注入，适配器每次派单前重新取地址；内核不可用时返回 None，适配器照旧抛错。
+
+顺带修掉 `dispatcher.answer()` 不递增 `retry_count`：durable 按 attempt 幂等，
+answer 不动计数就会拿回内核里那个已 failed 的任务，执行体一次都不跑。请示获答
+是一次新开工，计数必须动（`test_answer_starts_a_new_attempt` 钉住）。
+
+**探针现状**：①②③④ 四段全通过（一次完整运行 4/4）。① 偶发失败，根因是
+step-3.7-flash 上游偶发返回空 content（`EMPTY_RESPONSE`），与接管链路无关。
 
 ### Phase 3 — 后台长任务（可选，5 人日）
 
@@ -468,6 +834,11 @@ npm test
 cd agent-runtime
 node --experimental-strip-types selftest.ts                   # 硬崩溃后续跑 + 重复投递幂等
 node --experimental-strip-types test-model-run.ts             # 模型驱动：artifact + usage + 密件落在 instructions
+node --experimental-strip-types test-nudge.ts                 # 只答散文不交差时，催一次能救回来
+node --experimental-strip-types test-write-file.ts            # write_file：沙箱内放行、逃逸全拒、真写出文件
+node --experimental-strip-types test-handin.ts                # 交差 ref 规范化：双反斜杠还原、没写过的文件拒收
+node --experimental-strip-types test-approval-chain.ts        # 审批全链：拦下→登记→按单放行→不跨单泄漏
+node --experimental-strip-types test-tier-model.ts            # cost_tier → 模型映射
 node --experimental-strip-types test-background.ts            # 后台任务：每步 checkpoint
 node --experimental-strip-types test-approval.ts              # 审批门
 node --experimental-strip-types reference\24-child-tasks.ts   # 官方示例：failFast / abort 级联 / 重启续跑

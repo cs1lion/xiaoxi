@@ -13,6 +13,7 @@ from typing import Any, Callable
 
 from ..interaction.threads import CommissionStore
 from .dispatcher import IN_FLIGHT_STATUSES, Dispatcher, roster_agents
+from .durable_state import DurableApprovals
 from .evaluator import Evaluator, load_roster
 from .telemetry import SpinningGuard, TelemetryGateway, TelemetryStore
 
@@ -68,17 +69,38 @@ class ExecutiveService:
         fresh = self.roster
         if not fresh or fresh is self.evaluator.roster:
             return False
+        # YAML 里没有 endpoint / token / endpoint_provider——它们是 bind_durable
+        # 在运行时注入的。整份替换会把 durable 单变成"没配 endpoint"，下一次
+        # 派单直接 BLOCKED。只迁移运行时字段，不动 adapter：用户把某条从
+        # durable 改回 cli_subproc 时，那次回退必须生效。
+        previous = {str(item.get("id")): item
+                    for item in (self.evaluator.roster.get("agents") or [])
+                    if isinstance(item, dict)}
+        for agent in fresh.get("agents") or []:
+            if not isinstance(agent, dict) or str(agent.get("adapter")) != "durable":
+                continue
+            old = previous.get(str(agent.get("id")))
+            if not isinstance(old, dict) or str(old.get("adapter")) != "durable":
+                continue
+            for key in ("endpoint", "token", "endpoint_provider", "workspace_root"):
+                if key in old and key not in agent:
+                    agent[key] = old[key]
         self.evaluator.roster = fresh
         self.evaluator.thresholds = dict(fresh.get("eval_thresholds") or {})
         self.dispatcher.roster = fresh
         return True
 
     # ---------- 记忆注入 ----------
-    def bind_durable(self, config: dict[str, Any], *, apply_to: list[str] | None = None) -> int:
+    def bind_durable(self, config: dict[str, Any], *, apply_to: list[str] | None = None,
+                     endpoint_provider: Callable[[], str | None] | None = None) -> int:
         """把执行内核的端点与令牌写进花名册里 `adapter: durable` 的条目。
 
         幂等，返回被绑定的 Worker 数。没绑定时派单不会静默改派：适配器会抛
         AdapterError，那一单转 BLOCKED 并明说执行内核不可用。
+
+        `endpoint_provider` 是"内核现在在哪"的活查询。内核被硬杀后监督器换
+        端口重起，写死的 endpoint 会让每一次重试都连到死端口；提供者让适配器
+        每次派单前重新取地址。返回 None（内核没起来）时适配器照旧抛错。
         """
         bound = 0
         for key in ("agents", "workers"):
@@ -92,8 +114,25 @@ class ExecutiveService:
                 # 回退就是改回配置，改坏了也不会留下半套花名册。
                 if str(worker.get("adapter")) == "durable" or (
                         apply_to and str(worker.get("id")) in apply_to):
-                    worker.update(config)
+                    # 被 switch_agents 切过来的 Worker 原本是 cli_subproc，写盘根
+                    # 写在 env.AQI_WORKSPACE_ROOT 里，没有顶层 workspace_root。
+                    # 不补这一项，durable 适配器算不出沙箱，sidecar 的 write_file
+                    # 会拒绝一切写入——切换后看着能跑，成果只能是一段文字。
+                    own_root = str(
+                        worker.get("workspace_root")
+                        or (worker.get("env") or {}).get("AQI_WORKSPACE_ROOT")
+                        or "").strip()
+                    # A worker-specific root wins over the roster-wide default;
+                    # otherwise every switched worker would share one directory.
+                    worker.update({
+                        k: v for k, v in config.items()
+                        if v not in (None, "") and not (k == "workspace_root" and worker.get("workspace_root"))
+                    })
+                    if not worker.get("workspace_root") and own_root:
+                        worker["workspace_root"] = own_root
                     worker["adapter"] = "durable"
+                    if endpoint_provider is not None:
+                        worker["endpoint_provider"] = endpoint_provider
                     bound += 1
         return bound
 
@@ -120,8 +159,12 @@ class ExecutiveService:
                                     preference_provider=preference_reader, query=query)
 
     # ---------- 慢环入口 ----------
-    def open(self, title: str, brief: str = "", thread_id: str = "") -> dict[str, Any]:
-        return self.dispatcher.open(title, brief, thread_id)
+    def open(self, title: str, brief: str = "", thread_id: str = "", *,
+             request_id: str | None = None) -> dict[str, Any]:
+        return self.dispatcher.open(title, brief, thread_id, request_id=request_id)
+
+    def request_commission(self, request_id: str | None) -> dict[str, Any] | None:
+        return self.dispatcher.commissions.request_commission(request_id)
 
     def dispatch(self, commission_id: str, *, intent: str = "") -> dict[str, Any]:
         commission, packet = self.dispatcher.dispatch(commission_id, intent=intent)
@@ -130,53 +173,74 @@ class ExecutiveService:
     def start(self, commission_id: str) -> dict[str, Any]:
         return self.dispatcher.start(commission_id)
 
-    async def delegate(self, text: str, *, thread_id: str = "",
-                       acceptance: Any = None) -> dict[str, Any]:
-        """后台接单：open -> dispatch -> start -> 驱动执行体跑完。
+    def begin_commission(self, title: str, brief: str = "", thread_id: str = "",
+                         *, intent: str = "", acceptance: Any = None,
+                         request_id: str | None = None) -> dict[str, Any]:
+        """Open -> dispatch -> start, without waiting for the worker.
 
-        执行所有权在这里：正常委派由服务端自己驱动到终态，调用方不需要
-        （也不能）只派不跑。任何一步失败都只在台账里留痕，不向外抛——
-        语音轮次早就说完"接单了"，不该被慢环拖住，更不该被它带崩。
-
-        初审打回后自动重做，但重做次数与 Evaluator.MAX_RETRY 同一个上限：
-        每次重做前把上一轮的 scolding 写回密件（Worker 下一轮 prepare_context
-        就能看到），状态转出 running（ready_to_report / blocked / done）或
-        重做次数用尽就停。循环还额外有 retries 计数兜底，即使台账没有正常
-        累计重试次数也不会无限转。
+        The world bridge calls this from a tool handler; waiting for a real
+        worker there would blow the AgentLoop turn budget. Every failure is
+        settled in the ledger (briefing -> blocked) so the caller always gets a
+        row, and the shadow starts exactly once for this path and delegate().
         """
-        title = (text or "").strip()[:80] or "未命名督办"
-        commission = self.dispatcher.open(title, text or "", thread_id)
+        title = (title or "").strip()[:80] or "未命名督办"
+        commission = self.dispatcher.open(title, brief or "", thread_id,
+                                          request_id=request_id)
+        if commission["status"] != "drafting":
+            # A replayed request_id returns the existing row; never dispatch or
+            # drive a commission that is already in flight or terminal.
+            return {"commission_id": commission["id"], "status": commission["status"],
+                    "agent_id": commission["agent_id"],
+                    "agent_name": self._agent_name(commission["agent_id"])}
         try:
-            self.dispatcher.dispatch(commission["id"], intent=text or "", acceptance=acceptance)
+            self.dispatcher.dispatch(commission["id"], intent=intent or brief or "",
+                                     acceptance=acceptance)
             commission = self.dispatcher.start(commission["id"])
-            await self._drive(commission["id"])
-            commission = self.ledger.get(commission["id"])
-            retries = 0
-            while (commission["status"] == "running"
-                   and int(commission["retry_count"]) <= self.evaluator.MAX_RETRY
-                   and retries < self.evaluator.MAX_RETRY):
-                retries += 1
-                audit = commission.get("audit") or {}
-                feedback = str(audit.get("scolding") or FALLBACK_FEEDBACK)
-                self.dispatcher.retry_with_feedback(commission["id"], feedback)
-                await self._drive(commission["id"])
-                commission = self.ledger.get(commission["id"])
         except LookupError:
             # 选不出将：先承认进了组密件阶段，再带一句请示转 BLOCKED。
             # 只用协议 §19 里写明的迁移，不为了顺手新开一条边。
             self.ledger.transition(commission["id"], "briefing")
             commission = self.dispatcher.block(commission["id"], NO_WORKER_QUESTION)
-        except Exception as exc:  # A broken dispatch must never break the voice turn.
-            current = self.ledger.get(commission["id"])
-            if current["status"] == "drafting":
-                current = self.ledger.transition(commission["id"], "briefing")
-            if current["status"] in ("briefing", "running", "auditing"):
-                self.ledger.transition(commission["id"], "blocked",
-                                       blocked_question=f"派单没组成：{type(exc).__name__}。要我再试一次吗？")
-            commission = self.ledger.get(commission["id"])
+        except Exception as exc:
+            commission = self._block_begin_failure(commission["id"], exc)
         self._start_shadow(commission)
         return {"commission_id": commission["id"], "status": commission["status"],
-                "agent_id": commission["agent_id"], "agent_name": self._agent_name(commission["agent_id"])}
+                "agent_id": commission["agent_id"],
+                "agent_name": self._agent_name(commission["agent_id"])}
+
+    def _block_begin_failure(self, commission_id: str, exc: Exception) -> dict[str, Any]:
+        current = self.ledger.get(commission_id)
+        if current["status"] == "drafting":
+            current = self.ledger.transition(commission_id, "briefing")
+        if current["status"] in ("briefing", "running", "auditing"):
+            self.ledger.transition(commission_id, "blocked",
+                                   blocked_question=f"派单没组成：{type(exc).__name__}。要我再试一次吗？")
+        return self.ledger.get(commission_id)
+
+    async def delegate(self, text: str, *, thread_id: str = "",
+                       acceptance: Any = None) -> dict[str, Any]:
+        """后台接单：begin_commission -> drive 到终态。
+
+        执行所有权在这里：正常委派由服务端自己驱动到终态，调用方不需要
+        （也不能）只派不跑。任何一步失败都只在台账里留痕，不向外抛——
+        语音轮次早就说完"接单了"，不该被慢环拖住，更不该被它带崩。
+
+        初审打回后自动重做，但重做次数与 Evaluator.MAX_RETRY 同一个上限；
+        循环在 drive() 里，delegate 只负责组合，返回形状保持不变。
+        """
+        begun = self.begin_commission(text or "", text or "", thread_id,
+                                      intent=text or "", acceptance=acceptance)
+        if begun["status"] != "running":
+            return begun
+        try:
+            commission = await self.drive(begun["commission_id"])
+        except Exception as exc:
+            # drive() swallows adapter failures; this only covers a fault in the
+            # retry loop itself. Keep delegate's old guarantee: never throw.
+            commission = self._block_begin_failure(begun["commission_id"], exc)
+        return {"commission_id": commission["id"], "status": commission["status"],
+                "agent_id": commission["agent_id"],
+                "agent_name": self._agent_name(commission["agent_id"])}
 
     def _start_shadow(self, commission: dict[str, Any]) -> None:
         if self.shadow is None:
@@ -201,6 +265,31 @@ class ExecutiveService:
             await self.run_commission(commission_id)
         except Exception:
             return
+
+    async def drive(self, commission_id: str) -> dict[str, Any]:
+        """Drive one already-started commission to a stable state.
+
+        The C2 internal dispatch route starts the commission and hands it to this
+        method in a background task, so the tool can return a commission id
+        immediately. Retry policy stays identical to `delegate`.
+        """
+        await self._drive(commission_id)
+        commission = self.ledger.get(commission_id)
+        retries = 0
+        while (commission["status"] == "running"
+               and int(commission["retry_count"]) <= self.evaluator.MAX_RETRY
+               and retries < self.evaluator.MAX_RETRY):
+            retries += 1
+            audit = commission.get("audit") or {}
+            feedback = str(audit.get("scolding") or FALLBACK_FEEDBACK)
+            self.dispatcher.retry_with_feedback(commission["id"], feedback)
+            await self._drive(commission["id"])
+            commission = self.ledger.get(commission["id"])
+        return commission
+
+    def agent_name(self, agent_id: str) -> str:
+        """Public name lookup for receipts; never exposes the roster entry."""
+        return self._agent_name(agent_id)
 
     def _agent_name(self, agent_id: str) -> str:
         for worker in roster_agents(self.evaluator.roster):
@@ -246,8 +335,14 @@ class ExecutiveService:
     def open_commissions(self) -> list[dict[str, Any]]:
         return self.ledger.open_commissions()
 
-    def recover_interrupted(self, question: str = RESTART_QUESTION) -> dict[str, list[str]]:
+    def recover_interrupted(self, question: str = RESTART_QUESTION,
+                            durable_lookup: Callable[[str], Any] | None = None) -> dict[str, list[str]]:
         """重启收口：把半路的单变成有出路的，把没派出去的重新派一遍。
+
+        `durable_lookup` 是执行内核的查询函数（commission_id -> 该单在内核里的
+        任务，或 None）。给了就先问内核：跑在 durable 上的单，内核可能已经把活
+        干完并落了成果，一律转 BLOCKED 等于把做完的活扔掉。对账规则只有一条：
+        **只采纳内核已经终态的成果，永不替内核把没跑完的单判成功。**
 
         briefing / running / auditing 只有活着的进程能推进，重启后没人持有它们，
         而且它们算在 Worker 的并发槽里（dispatcher 的 in_flight_load）。blocked
@@ -261,12 +356,16 @@ class ExecutiveService:
         重复调用返回空。
         """
         if self._recovery_done:
-            return {"blocked": [], "resumed": []}
+            return {"blocked": [], "resumed": [], "adopted": []}
         blocked: list[str] = []
         resumed: list[str] = []
+        adopted: list[str] = []
         for item in self.ledger.open_commissions():
             status = item.get("status")
             if status in IN_FLIGHT_STATUSES:
+                if durable_lookup is not None and self._adopt_durable(item, durable_lookup):
+                    adopted.append(item["id"])
+                    continue
                 self.dispatcher.block(item["id"], question)
                 blocked.append(item["id"])
             elif status == "drafting":
@@ -286,7 +385,105 @@ class ExecutiveService:
                     self.dispatcher.start(item["id"])
                     resumed.append(item["id"])
         self._recovery_done = True
-        return {"blocked": blocked, "resumed": resumed}
+        return {"blocked": blocked, "resumed": resumed, "adopted": adopted}
+
+    def reconcile_durable(self, lookup: Callable[..., Any]) -> dict[str, list[str]]:
+        """Periodic ledger-vs-kernel reconciliation for durable workers.
+
+        Never promotes a commission to `done` and never invents a result:
+        - terminal completed with a complete artifact -> adopt through submit;
+        - terminal failed / missing -> BLOCKED with a question;
+        - still running or lookup unavailable -> leave it alone.
+        """
+        adopted: list[str] = []
+        blocked: list[str] = []
+        pending: list[str] = []
+        for item in self.ledger.open_commissions():
+            status = str(item.get("status") or "")
+            if status not in ("briefing", "running", "auditing"):
+                continue
+            try:
+                entry = self.dispatcher.agent_entry(str(item.get("agent_id") or ""))
+            except Exception:
+                continue
+            if str(entry.get("adapter") or "") != "durable":
+                continue
+            attempt = int(item.get("retry_count") or 0)
+            try:
+                run = lookup(str(item["id"]), attempt)
+            except TypeError:
+                try:
+                    run = lookup(str(item["id"]))
+                except Exception:
+                    pending.append(str(item["id"]))
+                    continue
+            except Exception:
+                pending.append(str(item["id"]))
+                continue
+            if not isinstance(run, dict):
+                try:
+                    self.dispatcher.block(
+                        item["id"],
+                        "执行内核里找不到这一单（可能被归档或重置）。要我再派一次吗？")
+                    blocked.append(str(item["id"]))
+                except Exception:
+                    pending.append(str(item["id"]))
+                continue
+            if str(run.get("status")) != "terminal":
+                pending.append(str(item["id"]))
+                continue
+            if self._adopt_durable(item, lookup):
+                adopted.append(str(item["id"]))
+                continue
+            try:
+                self.dispatcher.block(
+                    item["id"],
+                    "执行内核里这一单已经终止，但没有可采纳的成果。要我再派一次吗？")
+                blocked.append(str(item["id"]))
+            except Exception:
+                pending.append(str(item["id"]))
+        return {"adopted": adopted, "blocked": blocked, "pending": pending}
+
+    def _adopt_durable(self, commission: dict[str, Any],
+                       lookup: Callable[[str], Any]) -> bool:
+        """内核已经把这一单干完时，采纳它的成果而不是判"重启过、重跑吧"。
+
+        只认两件事：内核报的是终态，且它交了一个带 summary 的成果。其余情况
+        （查不到、还在跑、失败了、成果不完整）一律返回 False，交给原有收口转
+        BLOCKED——对账绝不替内核把没跑完的单判成功，也不自动 `done`。
+        走的是 `dispatcher.submit`，初审、打回、重试与平时完全同一条路。
+        """
+        status = str(commission.get("status"))
+        # auditing 的单已经交过差，内核里那份不是新的；briefing 的单只是还没开跑。
+        if status not in ("running", "briefing"):
+            return False
+        # 幂等键是 `commission_id@attempt`，查询必须带同一个 attempt。只按
+        # commission_id 查会落到 @0：重做过（retry_count > 0）的单在内核里叫
+        # @1/@2，于是"内核已经跑完"被误判成"查不到"，成果照样被扔。
+        attempt = int(commission.get("retry_count") or 0)
+        try:
+            run = lookup(str(commission["id"]), attempt)
+        except TypeError:
+            # 兼容只收一个参数的旧查询函数：行为退回改动前，不因签名差异崩掉收口。
+            run = lookup(str(commission["id"]))
+        except Exception:
+            return False
+        if not isinstance(run, dict) or str(run.get("status")) != "terminal":
+            return False
+        outcome = run.get("outcome") or {}
+        if str(outcome.get("status")) != "completed":
+            return False
+        result = outcome.get("result") or {}
+        artifact = result.get("artifact")
+        if not isinstance(artifact, dict) or not artifact.get("summary"):
+            return False
+        try:
+            if status == "briefing":
+                self.dispatcher.start(commission["id"])
+            self.dispatcher.submit(commission["id"], artifact)
+        except Exception:
+            return False
+        return True
 
     async def resume(self, commission_id: str) -> None:
         """接着驱动一单已经回到 RUNNING 的督办（重启收口之后用）。"""
@@ -304,9 +501,33 @@ class ExecutiveService:
         只是换了个入口。返回值是驱动之后的真实状态。
         """
         commission, reply, auto = self.dispatcher.answer(commission_id, answer)
+        await self._grant_durable_approvals(commission["id"])
         await self._drive(commission["id"])
         return {"commission": self.commission(commission["id"]), "reply": reply,
                 "auto_answered": auto}
+
+    async def _grant_durable_approvals(self, commission_id: str) -> None:
+        """老板答复之后，把这一单还在等批准的工具放行。
+
+        审批链原本断在最后一环：sidecar 拦下调用、让模型请示，可没有任何代码
+        把老板的答复送回去，被拦的工具在 sidecar 存活期内一直拦着。这里补上
+        ——先问 sidecar 在等什么，再按它报的逐项放行，不自己猜工具名。
+        """
+        client = DurableApprovals(self)
+        try:
+            pending = await client.pending(commission_id)
+        except Exception:
+            return
+        for item in pending:
+            tool = str(item.get("tool") or "")
+            if not tool:
+                continue
+            try:
+                await client.decide(commission_id, tool=tool,
+                                    action_hash=str(item.get("action_hash") or ""),
+                                    approved=True)
+            except Exception:
+                continue
 
     def submit(self, commission_id: str, artifact: dict[str, Any]) -> dict[str, Any]:
         usage, spinning = self.dispatcher.audit_inputs(commission_id)

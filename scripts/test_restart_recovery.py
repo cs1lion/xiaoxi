@@ -130,7 +130,8 @@ def test_restart_recovery() -> None:
     load = in_flight_load(second.open_commissions())
     check("blocked 不占并发槽", load == {"w1": 1}, f"实际 {load}")
 
-    check("重复收口是幂等的", second.recover_interrupted() == {"blocked": [], "resumed": []})
+    check("重复收口是幂等的",
+          second.recover_interrupted() == {"blocked": [], "resumed": [], "adopted": []})
 
     # 收口的目的是"重新有出路"：老板答一句，那句重启请示就该被消费掉。
     # 答完会继续驱动执行体（manual 适配器如实报"没有配置执行体"），所以这里

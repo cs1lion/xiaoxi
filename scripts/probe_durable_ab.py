@@ -42,7 +42,11 @@ def durable_worker_from(baseline: dict[str, any]) -> dict[str, any]:
     """同一份密件：只换 adapter，其余（职责/短板/预算/初审命令）原样保留。"""
     worker = {key: value for key, value in baseline.items()
               if key not in ("adapter", "executable", "args", "env", "id", "name")}
-    worker.update({"id": "durable-ab", "name": "durable 对照", "adapter": "durable"})
+    # 与 claude 的 env.AQI_WORKSPACE_ROOT 同一个根：durable 的 write_file 只认
+    # 这一个目录，成果必须落在每单独立的树里。
+    workspace_root = str((baseline.get("env") or {}).get("AQI_WORKSPACE_ROOT") or "")
+    worker.update({"id": "durable-ab", "name": "durable 对照", "adapter": "durable",
+                   **({"workspace_root": workspace_root} if workspace_root else {})})
     return worker
 
 
@@ -176,17 +180,20 @@ def report(rows: list[dict]) -> None:
 async def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--repeat", type=int, default=2)
+    parser.add_argument("--side", choices=("both", "durable", "cli_subproc"), default="both")
     args = parser.parse_args()
     if not os.environ.get("LLM_API_KEY"):
         print("SKIP: 没有 LLM_API_KEY")
         return 0
     rows: list[dict] = []
-    durable = await durable_side(args.repeat)
-    if durable is not None:
-        rows.extend(durable)
-    claude = await claude_side(args.repeat)
-    if claude is not None:
-        rows.extend(claude)
+    if args.side in ("both", "durable"):
+        durable = await durable_side(args.repeat)
+        if durable is not None:
+            rows.extend(durable)
+    if args.side in ("both", "cli_subproc"):
+        claude = await claude_side(args.repeat)
+        if claude is not None:
+            rows.extend(claude)
     report(rows)
     # 同模型是这次 A/B 有效的前提，把它和两侧的模型一起说出来。
     models = sorted({str(row.get("model") or "") for row in rows if row.get("model")})

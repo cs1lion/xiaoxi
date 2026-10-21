@@ -1,14 +1,23 @@
-/* Midnight Living Stage · 舞台氛围层（Canvas 2D，无新依赖）
+/* 舞台氛围层（Canvas 2D，无新依赖）
+ *
+ * 两件事：
+ *   1. 图版窗内的空气层——光柱 / 光池 / 慢扫描 / 颗粒（DOM + CSS，见 stage-fx.css）。
+ *      结构只建一次；强弱交给 CSS 按 data-interaction 分档，不由 JS 逐帧改。
+ *   2. 纸面上的浮尘——一张 2D canvas，慢速上升的极淡金色尘点。人物那边已经有
+ *      真 3D 尘埃，这一层只负责让纸面不至于死板。
  *
  * 状态源全部是真实运行状态，不新增业务状态：
  *   - #avatarStage[data-interaction]：app.js reflectInteractionState 每帧写入
- *     idle / monitoring / listening / speaking / preparing / thinking / yielding / unavailable
- *   - #meterFill 的宽度：app.js 用真实麦克 RMS 写入，仅倾听时读取作音量响应
+ *   - #meterFill 的宽度：app.js 用真实麦克 RMS 写入（光层用它调音量响应）
  *   - #holoDeck 内 .aqi-lane[data-status="running"]：任务真实执行态（executive 积木）
  *   - #holoDeck 子节点新增：卡片送达 = 一次完成反馈
  *
  * 渲染约束：唯一一条 rAF；页面隐藏即暂停；prefers-reduced-motion 不启动画布
- * （CSS 静态光场兜底，见 stage-fx.css）；DPR 上限 1.5；粒子 ≤12。
+ * （CSS 静态光场兜底）；DPR 上限 1.5；纸面粒子 ≤8。
+ *
+ * 2026-10-18：人物搬进暗色图版窗之后，原来画在 canvas 上的"立绘光晕"和
+ * 完成星屑都被图版挡住了（canvas 在最底层，图版是不透明窗口）。这两样改成
+ * 图版内的 CSS 层：光晕交给 .plate-atmos 的分档变量，星屑变成一次径向闪光。
  */
 (() => {
   const stage = document.querySelector('.stage');
@@ -16,6 +25,23 @@
   const holoDeck = document.getElementById('holoDeck');
   const meterFill = document.getElementById('meterFill');
   if (!stage || !avatarStage) return;
+
+  /* 图版窗内的空气层：两道光柱 + 光池 + 慢扫描 + 颗粒。纯装饰，不进无障碍树。 */
+  const plateInner = document.querySelector('.plate-inner');
+  let plateAtmos = null;
+  if (plateInner && !plateInner.querySelector('.plate-atmos')) {
+    plateAtmos = document.createElement('div');
+    plateAtmos.className = 'plate-atmos';
+    plateAtmos.setAttribute('aria-hidden', 'true');
+    for (const name of ['pa-shaft', 'pa-shaft pa-shaft-b', 'pa-pool', 'pa-scan', 'pa-grain']) {
+      const layer = document.createElement('span');
+      layer.className = name;
+      plateAtmos.appendChild(layer);
+    }
+    plateInner.prepend(plateAtmos);
+  } else {
+    plateAtmos = plateInner?.querySelector('.plate-atmos') || null;
+  }
 
   const reduceMotion = matchMedia('(prefers-reduced-motion: reduce)');
   const canvas = document.createElement('canvas');
@@ -27,7 +53,6 @@
 
   let W = 0, H = 0, DPR = 1;
   let particles = [];
-  let sparks = [];        // 完成反馈的一次性星屑
   let running = false;    // rAF 是否在跑
   let raf = 0;
   let last = 0;
@@ -35,11 +60,10 @@
   let interaction = 'idle';
   let taskRunning = false;
   let amp = 0;            // 平滑后的真实音量 0..1
-  let avatarRect = null;  // 立绘在画布坐标系里的位置缓存
-  let frame = 0;
+  let burstTimer = 0;
 
   const NARROW = () => W < 760;
-  const COUNT = () => (NARROW() ? 6 : 12);
+  const COUNT = () => (NARROW() ? 4 : 8);
 
   function resize() {
     const r = stage.getBoundingClientRect();
@@ -51,15 +75,7 @@
     canvas.style.width = `${W}px`;
     canvas.style.height = `${H}px`;
     ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
-    avatarRect = null;
     seed();
-  }
-
-  function measureAvatar() {
-    const s = stage.getBoundingClientRect();
-    const a = avatarStage.getBoundingClientRect();
-    if (a.width < 2 || a.height < 2) return null;
-    return { x: a.left - s.left + a.width / 2, y: a.top - s.top + a.height * 0.42, r: Math.max(a.width, a.height) * 0.5, footY: a.top - s.top + a.height * 0.94 };
   }
 
   function seed() {
@@ -69,16 +85,16 @@
   }
 
   function spawn(t = Math.random()) {
-    // 低密度、慢速、偏向舞台右半（立绘区）；左侧文本区只放更暗的少数
-    const right = Math.random() < 0.7;
+    // 纸面上的尘点：极淡的金与墨，慢速上升；左侧文字区更少更暗。
+    const right = Math.random() < 0.62;
     return {
-      x: right ? W * (0.55 + Math.random() * 0.42) : W * Math.random() * 0.5,
+      x: right ? W * (0.52 + Math.random() * 0.44) : W * Math.random() * 0.45,
       y: H * Math.random(),
-      r: 1.2 + Math.random() * 1.6,
-      vx: (Math.random() - 0.5) * 3.2,          // px/s，很慢
-      vy: -2 - Math.random() * 3.5,
-      o: (right ? 0.32 : 0.16) + Math.random() * 0.18,
-      warm: Math.random() < 0.28,               // 少量暖黄，其余月白
+      r: 0.9 + Math.random() * 1.5,
+      vx: (Math.random() - 0.5) * 2.2,
+      vy: -1.6 - Math.random() * 3,
+      o: (right ? 0.16 : 0.09) + Math.random() * 0.08,
+      gold: Math.random() < 0.55,
       phase: Math.random() * Math.PI * 2,
       t,
     };
@@ -89,14 +105,15 @@
     interaction = id || 'idle';
   }
 
+  /* 卡片送达：一次极短的径向闪光，落在图版内部，不播报警式循环。 */
   function burst() {
-    const a = avatarRect || measureAvatar();
-    if (!a) return;
-    for (let i = 0; i < 10; i++) {
-      const ang = Math.random() * Math.PI * 2;
-      const sp = 26 + Math.random() * 46;
-      sparks.push({ x: a.x, y: a.y - a.r * 0.2, vx: Math.cos(ang) * sp, vy: Math.sin(ang) * sp - 18, life: 1, r: 1.4 + Math.random() * 1.4 });
-    }
+    if (!plateAtmos) return;
+    plateAtmos.classList.remove('is-burst');
+    // 强制重排，让同一个动画能被连续触发
+    void plateAtmos.offsetWidth;
+    plateAtmos.classList.add('is-burst');
+    clearTimeout(burstTimer);
+    burstTimer = setTimeout(() => plateAtmos?.classList.remove('is-burst'), 900);
   }
 
   function readHolo() {
@@ -106,8 +123,6 @@
 
   function step(dt) {
     clock += dt;
-    frame++;
-    if (frame % 30 === 0 || !avatarRect) avatarRect = measureAvatar();
 
     // 音量响应只来自真实 RMS（meterFill 的宽度由 app.js 的麦克包络写入）
     const targetAmp = interaction === 'listening' && meterFill
@@ -116,64 +131,36 @@
 
     const thinking = interaction === 'thinking' || interaction === 'preparing';
     const quiet = interaction === 'unavailable' || interaction === 'yielding';
-    const converge = thinking && avatarRect ? avatarRect : null;
 
     ctx.clearRect(0, 0, W, H);
 
-    // 倾听光环：局部柔和光晕，半径随真实音量呼吸
-    if ((interaction === 'listening' || interaction === 'speaking') && avatarRect && !quiet) {
-      const a = avatarRect;
-      const glowR = a.r * (1.15 + amp * 0.5 + Math.sin(clock * 2.2) * 0.04);
-      const g = ctx.createRadialGradient(a.x, a.y, a.r * 0.3, a.x, a.y, glowR);
-      const warm = interaction === 'listening';
-      g.addColorStop(0, warm ? `rgba(201,162,39,${0.10 + amp * 0.12})` : 'rgba(125,150,210,0.10)');
-      g.addColorStop(1, 'rgba(0,0,0,0)');
-      ctx.fillStyle = g;
-      ctx.beginPath(); ctx.arc(a.x, a.y, glowR, 0, Math.PI * 2); ctx.fill();
-    }
-
-    // 任务执行：一条克制的流动轨迹沿舞台右侧缓慢行进
+    // 任务执行：一条克制的流光沿舞台右缘缓慢下行，只在有单在跑时出现
     if (taskRunning && !NARROW()) {
-      const t = (clock % 6) / 6;                    // 6s 一轮
-      const x = W * 0.985;
+      const t = (clock % 6) / 6;
+      const x = W - 3;
       const y = H * (0.12 + t * 0.76);
       const trail = 90;
       const g = ctx.createLinearGradient(x, y - trail, x, y);
-      g.addColorStop(0, 'rgba(201,162,39,0)');
-      g.addColorStop(1, 'rgba(232,194,106,0.5)');
-      ctx.strokeStyle = g; ctx.lineWidth = 1.5;
+      g.addColorStop(0, 'rgba(155,122,62,0)');
+      g.addColorStop(1, 'rgba(169,58,42,.42)');
+      ctx.strokeStyle = g; ctx.lineWidth = 1.4;
       ctx.beginPath(); ctx.moveTo(x, y - trail); ctx.lineTo(x, y); ctx.stroke();
-      ctx.fillStyle = 'rgba(232,194,106,0.85)';
-      ctx.beginPath(); ctx.arc(x, y, 2, 0, Math.PI * 2); ctx.fill();
+      ctx.fillStyle = 'rgba(169,58,42,.7)';
+      ctx.beginPath(); ctx.arc(x, y, 1.8, 0, Math.PI * 2); ctx.fill();
     }
 
-    // 粒子：慢漂浮；思考时向立绘轻微汇聚
-    const speedScale = quiet ? 0.4 : 1;
+    // 浮尘：慢漂浮，粗细与亮度各带一点随机，落笔感来自呼吸式明暗
+    const speedScale = quiet ? 0.45 : 1;
     for (const p of particles) {
-      if (converge) {
-        p.vx += ((converge.x - p.x) * 0.006 - p.vx) * dt * 0.9;
-        p.vy += ((converge.y - p.y) * 0.006 - p.vy) * dt * 0.9;
-      } else {
-        p.vx += ((Math.sin(clock * 0.3 + p.phase) * 2.4) - p.vx) * dt * 0.25;
-        p.vy += ((-3.2) - p.vy) * dt * 0.25;
-      }
+      p.vx += ((Math.sin(clock * 0.26 + p.phase) * 1.6) - p.vx) * dt * 0.22;
+      p.vy += ((-2.4) - p.vy) * dt * 0.22;
       p.x += p.vx * dt * speedScale;
       p.y += p.vy * dt * speedScale;
       if (p.y < -6 || p.x < -6 || p.x > W + 6 || p.y > H + 6) Object.assign(p, spawn(), { y: H + 4 });
-      const breathe = 0.75 + 0.25 * Math.sin(clock * 0.8 + p.phase);
-      const alpha = p.o * breathe * (quiet ? 0.5 : 1) * (thinking ? 1.25 : 1);
-      ctx.fillStyle = p.warm ? `rgba(232,194,106,${alpha})` : `rgba(232,228,217,${alpha * 0.8})`;
+      const breathe = 0.7 + 0.3 * Math.sin(clock * 0.7 + p.phase);
+      const alpha = p.o * breathe * (quiet ? 0.5 : 1) * (thinking ? 1.2 : 1) * (1 + amp * 0.5);
+      ctx.fillStyle = p.gold ? `rgba(155,122,62,${alpha})` : `rgba(33,28,22,${alpha * 0.55})`;
       ctx.beginPath(); ctx.arc(p.x, p.y, p.r, 0, Math.PI * 2); ctx.fill();
-    }
-
-    // 完成反馈：一次性星屑，800ms 内散完
-    for (let i = sparks.length - 1; i >= 0; i--) {
-      const s = sparks[i];
-      s.life -= dt / 0.8;
-      if (s.life <= 0) { sparks.splice(i, 1); continue; }
-      s.x += s.vx * dt; s.y += s.vy * dt; s.vy += 30 * dt;
-      ctx.fillStyle = `rgba(232,194,106,${s.life * 0.9})`;
-      ctx.beginPath(); ctx.arc(s.x, s.y, s.r * s.life + 0.4, 0, Math.PI * 2); ctx.fill();
     }
   }
 

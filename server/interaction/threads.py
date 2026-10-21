@@ -550,6 +550,7 @@ class CommissionStore:
                     agent_id TEXT NOT NULL DEFAULT '', status TEXT NOT NULL,
                     step_idx INTEGER NOT NULL DEFAULT 0, retry_count INTEGER NOT NULL DEFAULT 0,
                     blocked_question TEXT NOT NULL DEFAULT '',
+                    blocked_kind TEXT NOT NULL DEFAULT '',
                     delivery TEXT NOT NULL DEFAULT '{}', audit TEXT NOT NULL DEFAULT '{}',
                     packet TEXT NOT NULL DEFAULT '{}',
                     rubric_ids TEXT NOT NULL DEFAULT '[]',
@@ -557,6 +558,12 @@ class CommissionStore:
                 self._db.execute('''CREATE TABLE IF NOT EXISTS commission_events (
                     id INTEGER PRIMARY KEY AUTOINCREMENT, commission_id TEXT NOT NULL,
                     kind TEXT NOT NULL, payload TEXT NOT NULL, created_at REAL NOT NULL)''')
+                self._db.execute('''CREATE TABLE IF NOT EXISTS commission_requests (
+                    request_id TEXT PRIMARY KEY, commission_id TEXT NOT NULL,
+                    arguments TEXT NOT NULL, created_at REAL NOT NULL)''')
+                columns = {row['name'] for row in self._db.execute('PRAGMA table_info(commissions)')}
+                if 'blocked_kind' not in columns:
+                    self._db.execute("ALTER TABLE commissions ADD COLUMN blocked_kind TEXT NOT NULL DEFAULT ''")
                 self._db.execute('CREATE INDEX IF NOT EXISTS commission_status ON commissions(status, updated_at)')
                 self._db.execute('CREATE INDEX IF NOT EXISTS commission_events_id ON commission_events(commission_id, id)')
         except BaseException:
@@ -615,18 +622,35 @@ class CommissionStore:
         return value
 
     # ---------- 写入 ----------
-    def create(self, title, brief='', thread_id='', agent_id=''):
+    def create(self, title, brief='', thread_id='', agent_id='', *, request_id=None):
         title = self._string(title, 'title', self.MAX_TITLE)
         brief = self._string(brief, 'brief', self.MAX_BRIEF)
         thread_id = self._string(thread_id, 'thread_id', 100)
         agent_id = self._string(agent_id, 'agent_id', 100)
+        if request_id is not None:
+            request_id = self._string(request_id, 'request_id', 200)
+            if not request_id:
+                raise ValueError('request_id must be nonempty')
+        arguments = json.dumps({'title': title, 'brief': brief, 'thread_id': thread_id,
+                                'agent_id': agent_id}, ensure_ascii=False, sort_keys=True)
         commission_id, now = 'c_' + uuid.uuid4().hex[:12], time.time()
         with self._transaction():
+            if request_id is not None:
+                previous = self._db.execute(
+                    'SELECT commission_id, arguments FROM commission_requests WHERE request_id=?',
+                    (request_id,)).fetchone()
+                if previous is not None:
+                    if previous['arguments'] != arguments:
+                        raise ValueError('request_id already used with different arguments')
+                    return self._row(previous['commission_id'])
             self._db.execute('''INSERT INTO commissions
                 (id, thread_id, title, brief, agent_id, status, step_idx, retry_count,
                  blocked_question, delivery, audit, packet, rubric_ids, created_at, updated_at, closed_at)
                 VALUES (?,?,?,?,?, 'drafting', 0, 0, '', '{}', '{}', '{}', '[]', ?, ?, NULL)''',
                 (commission_id, thread_id, title, brief, agent_id, now, now))
+            if request_id is not None:
+                self._db.execute('INSERT INTO commission_requests VALUES (?,?,?,?)',
+                                 (request_id, commission_id, arguments, now))
             self._event(commission_id, 'opened', {'title': title, 'brief': brief[:200]}, now)
             created = self._row(commission_id)
         self._publish(commission_id)
@@ -637,7 +661,8 @@ class CommissionStore:
         if not isinstance(status, str) or status not in self.STATUSES:
             raise ValueError('invalid commission status')
         allowed_changes = {'agent_id', 'step_idx', 'retry_delta', 'blocked_question',
-                           'delivery', 'audit', 'rubric_ids', 'packet', 'title', 'brief'}
+                           'blocked_kind', 'delivery', 'audit', 'rubric_ids', 'packet',
+                           'title', 'brief'}
         if set(changes) - allowed_changes:
             raise ValueError('unknown commission changes')
         with self._transaction():
@@ -663,6 +688,16 @@ class CommissionStore:
                     raise ValueError('blocked requires a question')
                 updates['blocked_question'] = question
                 payload['question'] = question
+                if status == 'blocked':
+                    kind = changes.get('blocked_kind', row['blocked_kind'] or 'clarification')
+                    if kind not in ('clarification', 'approval'):
+                        raise ValueError('blocked_kind must be clarification or approval')
+                    updates['blocked_kind'] = kind
+                    payload['blocked_kind'] = kind
+                else:
+                    updates['blocked_kind'] = ''
+            elif 'blocked_kind' in changes:
+                raise ValueError('blocked_kind only applies to blocked')
             for key in ('delivery', 'audit', 'rubric_ids', 'packet'):
                 if key in changes:
                     value = changes[key]
@@ -736,6 +771,19 @@ class CommissionStore:
     def get(self, commission_id):
         with self._transaction():
             return self._row(commission_id)
+
+    def request_commission(self, request_id):
+        """Return the commission bound to an idempotency key, or None."""
+        if request_id is None:
+            return None
+        request_id = self._string(request_id, 'request_id', 200)
+        if not request_id:
+            return None
+        with self._transaction():
+            row = self._db.execute(
+                'SELECT commission_id FROM commission_requests WHERE request_id=?',
+                (request_id,)).fetchone()
+            return self._row(row['commission_id']) if row is not None else None
 
     def list_commissions(self, status=None, limit=50):
         clause, params = '', []

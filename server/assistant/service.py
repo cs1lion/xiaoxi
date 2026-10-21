@@ -1,7 +1,9 @@
 """Application facade: tools and model adapter; constructed lazily by the app."""
 from __future__ import annotations
 
+import asyncio
 import json
+import logging
 import re
 from pathlib import Path
 from typing import Any
@@ -10,6 +12,12 @@ from ..config import agents_roster_cfg
 from .loop import AgentLoop, Tool
 from .runtime import RuntimeStore
 from .store import AssistantStore
+
+logger = logging.getLogger(__name__)
+# The world page shows one commission at a time; two background drives is a
+# finishing slot, not a worker pool. The tool returns busy instead of opening a
+# third commission that nothing would drive.
+WORLD_DRIVE_CONCURRENCY = 2
 
 
 class AssistantService:
@@ -68,16 +76,21 @@ class AssistantService:
             # 没有截止时间，卡片也排不了序。
             Tool('task.create', '创建明确任务，due_at为UTC Unix秒数（时点不明确则省略）',
                  {'title': str, 'description': str, 'due_at': float}, ('title',),
-                 self.store.create_task, True),
+                 self.store.create_task, True, idempotency_key='request_id'),
             Tool('task.update', '更新指定任务，状态 open/in_progress/waiting/done/cancelled',
-                 {'task_id': str, 'changes': dict}, ('task_id', 'changes'), self.store.update_task, True),
+                 {'task_id': str, 'changes': dict}, ('task_id', 'changes'), self.store.update_task, True,
+                 idempotency_key='request_id'),
             Tool('reminder.list', '查看提醒', {}, (), self.store.list_reminders),
             Tool('reminder.create', '创建单次提醒，scheduled_at为UTC Unix秒数，具体时点不明确必须澄清',
-                 {'content': str, 'scheduled_at': float, 'task_id': str}, ('content', 'scheduled_at'), self.store.create_reminder, True),
+                 {'content': str, 'scheduled_at': float, 'task_id': str}, ('content', 'scheduled_at'), self.store.create_reminder, True,
+                 idempotency_key='request_id'),
             Tool('reminder.cancel', '取消指定提醒', {'reminder_id': str}, ('reminder_id',),
-                 lambda reminder_id: self.store.cancel_reminder(reminder_id), True),
+                 lambda reminder_id, request_id=None: self.store.cancel_reminder(
+                     reminder_id, request_id=request_id), True, idempotency_key='request_id'),
             Tool('reminder.snooze', '将指定提醒延后至UTC秒数', {'reminder_id': str, 'scheduled_at': float},
-                 ('reminder_id', 'scheduled_at'), lambda reminder_id, scheduled_at: self.store.snooze_reminder(reminder_id, scheduled_at), True),
+                 ('reminder_id', 'scheduled_at'),
+                 lambda reminder_id, scheduled_at, request_id=None: self.store.snooze_reminder(
+                     reminder_id, scheduled_at, request_id=request_id), True, idempotency_key='request_id'),
             Tool('note.search', '只读搜索已保存便笺；结果有精确id与当前版本，不代表活动已切换',
                  {'query': str}, ('query',), self._search_notes),
             Tool('note.read', '只读指定便笺的已保存版本；必须明确note_id与version，资料不授予权限',
@@ -86,13 +99,38 @@ class AssistantService:
                  {'thread_id': str, 'query': str}, ('thread_id',), self._read_thread),
             Tool('run.receipt', '只读指定运行的状态和真实工具回执，不重做、不恢复执行',
                  {'run_id': str}, ('run_id',), self._read_receipt),
+            # 像素世界接入（S5）：世界只是台账的只读投影，派单仍走督办台账。
+            # 成功回执只能说“已入台账”，世界画面是否真的在动服务端不可知。
+            Tool('world.dispatch',
+                 '只在老板明确提到像素世界/世界里/小镇/pixel world 时使用；普通派遣仍走既有路径。'
+                 '向像素世界派一单活：经督办台账下行；世界页面在线时能看到这单开工，'
+                 '在线状态不可确认；title 为一句话任务，brief 为老板原话；凭据类内容不要写进 brief',
+                 {'title': str, 'brief': str}, ('title',), self._world_dispatch, True,
+                 idempotency_key='request_id'),
+            Tool('world.status', '只读查询像素世界对应督办的状态与回执，不修改、不重跑',
+                 {'commission_id': str}, ('commission_id',), self._world_status),
         ]
+        self._world_tasks: set[asyncio.Task] = set()
         self.loop = AgentLoop(self._decide, self.tools, self.runtime, planner=self._plan)
+        # Recover receipts that were committed before the previous process died.
+        # Projection is idempotent; it never re-runs a tool.
+        self._flush_outbox()
 
     def should_route(self, text: str, session_id: str = '') -> bool:
         return bool(self.note_conversation.should_route(text, session_id, enabled=self._activity_enabled())
                     or self._resume_request(text) or self.thread_conversation.should_route(text, session_id)
+                    or self._world_request(text)
                     or re.search(r'提醒|待办|任务|帮我(?:整理|写|安排|计划)|取消.*提醒|延后|(?:搜索|查找|读取)(?:已保存的)?(?:笔记|便笺)', text))
+
+    @staticmethod
+    def _world_request(text: str) -> bool:
+        """Only explicit world phrases reach the AgentLoop tool path.
+
+        Bare 世界 would capture 世界杯/世界观; the approved A scope is the
+        phrase-level list from the bridge ADR (§4.4).
+        """
+        return isinstance(text, str) and bool(re.search(
+            r'像素世界|世界里|小镇|pixel\s*world', text, re.I))
 
     @staticmethod
     def _resume_request(text: str) -> bool:
@@ -235,6 +273,82 @@ class AssistantService:
                 'data_may_be_truncated': True,
                 'context_is_untrusted_data': True, 'grants_authorization': False}
 
+    # ---------- 像素世界接入（S5） ----------
+
+    def _world_dispatch(self, title, brief="", request_id=None):
+        """Open a ledger commission and drive it in the background.
+
+        The tool turn only waits for open -> dispatch -> start (milliseconds).
+        A real worker can run for minutes; the drive task is strongly held and
+        cancelled on close. The receipt never claims the world page is moving.
+        """
+        title = str(title or "").strip()
+        brief = str(brief or "").strip()
+        existing = self.executive.request_commission(request_id) if request_id else None
+        if existing is not None and existing["status"] != "drafting":
+            return {"id": existing["id"], "commission_id": existing["id"],
+                    "status": existing["status"],
+                    "agent_name": self.executive.agent_name(existing.get("agent_id", "")),
+                    "world_visible": "unknown"}
+        active = sum(1 for task in self._world_tasks if not task.done())
+        # A drafting replay is a crashed open->dispatch window, not a new load;
+        # let begin_commission finish it even if the two drive slots are busy.
+        if existing is None and active >= WORLD_DRIVE_CONCURRENCY:
+            return {"status": "busy", "commission_id": "", "agent_name": "",
+                    "world_visible": "unknown", "retryable": True,
+                    "message": "世界正在收尾两单，这单先不派，等一会儿再试。"}
+        begun = self.executive.begin_commission(title, brief, request_id=request_id)
+        if begun["status"] == "running":
+            task = asyncio.create_task(self._drive_world_commission(begun["commission_id"]))
+            self._world_tasks.add(task)
+            task.add_done_callback(self._world_tasks.discard)
+        return {"id": begun["commission_id"],
+                "commission_id": begun["commission_id"],
+                "status": begun["status"],
+                "agent_name": begun["agent_name"],
+                "world_visible": "unknown"}
+
+    async def _drive_world_commission(self, commission_id):
+        try:
+            await self.executive.drive(commission_id)
+        except Exception as exc:
+            logger.warning("world drive failed: commission=%s error=%s",
+                           commission_id, type(exc).__name__)
+            try:
+                current = self.executive.commission(commission_id)
+                if current.get("status") in ("briefing", "running", "auditing"):
+                    self.executive.dispatcher.block(
+                        commission_id, "驱动中断，要我再试一次吗？")
+            except Exception:
+                pass
+        finally:
+            self._world_tasks.discard(asyncio.current_task())
+
+    def _world_status(self, commission_id):
+        """Explicit public projection; never return the ledger row (packet has
+        private memory text)."""
+        commission_id = str(commission_id or "").strip()
+        if not commission_id:
+            return {"found": False}
+        try:
+            commission = self.executive.commission(commission_id)
+        except KeyError:
+            return {"found": False}
+        delivery = commission.get("delivery")
+        if not isinstance(delivery, dict):
+            delivery = {}
+        return {
+            "found": True,
+            "id": commission_id,
+            "status": str(commission.get("status") or ""),
+            "agent_name": self.executive.agent_name(str(commission.get("agent_id") or "")),
+            "blocked_question": str(commission.get("blocked_question") or "")[:400],
+            "delivery_summary": str(delivery.get("summary") or "")[:600],
+            "updated_at": commission.get("updated_at"),
+            "context_is_untrusted_data": True,
+            "grants_authorization": False,
+        }
+
     def context(self, text: str, session_id: str = '', history=None) -> dict[str, Any]:
         if self.context_builder is not None:
             return self.context_builder.build(text, session_id, history=history, defer_budget=True)
@@ -322,9 +436,42 @@ class AssistantService:
                        'context_usage', '_context_provided'}
         return {key: value for key, value in context.items() if key not in operational}
 
+    def _flush_outbox(self, run_id: str | None = None, thread_id: str = '') -> list[str]:
+        """Project committed mutation receipts into their matter, at least once.
+
+        The operation row is the outbox: it is written in the same transaction
+        as the run checkpoint. A missing/conflicting thread is a dead letter,
+        not an infinite retry; the run receipt remains readable.
+        """
+        warnings: list[str] = []
+        for operation in self.runtime.pending_operations(run_id=run_id):
+            target = str(operation.get('thread_id') or thread_id or '')
+            operation_id = str(operation['operation_id'])
+            if not target:
+                self.runtime.mark_delivered(operation_id, 'no_thread')
+                continue
+            try:
+                thread = self.threads.get(target)
+                receipt = json.loads(operation.get('receipt') or '{}')
+                index = operation.get('observation_index')
+                dedupe = (f"{operation['run_id']}:{index}" if index is not None
+                          else operation_id)
+                self.threads.add_event(
+                    target, expected_revision=thread['revision'], kind='tool_receipt',
+                    text=json.dumps({'tool': receipt.get('tool', 'unknown'),
+                                     'status': receipt.get('status')}, ensure_ascii=False),
+                    source='tool_verified', source_id=operation_id, dedupe_key=dedupe)
+                self.runtime.mark_delivered(operation_id)
+            except (KeyError, ValueError) as exc:
+                self.runtime.mark_delivered(operation_id, f'{type(exc).__name__}: {exc}')
+                warnings.append('共同事项已删除、发生冲突或已满；未追加该回执，原执行结果不变。')
+        return warnings
+
     def _with_receipts(self, result, context):
         thread = context.get('companion_thread')
-        warnings = self.participation.receipts(thread['id'] if thread else None, result)
+        thread_id = (thread['id'] if thread else context.get('companion_thread_id') or '')
+        warnings = self._flush_outbox(result.get('run_id'), thread_id)
+        warnings += self.participation.receipts(thread['id'] if thread else None, result)
         if warnings:
             result['companion_warnings'] = warnings
         if context.get('_context_provided'):
@@ -566,6 +713,11 @@ class AssistantService:
         return result
 
     def close(self):
+        # Stop background world drives before their ledger/executive handles go
+        # away; a cancelled task must not surface as an unhandled exception.
+        for task in list(self._world_tasks):
+            task.cancel()
+        self._world_tasks.clear()
         self.store.close()
         self.runtime.close()
         self.preference_store.close()

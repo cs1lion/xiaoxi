@@ -569,7 +569,7 @@ def test_real_usage_and_partial_failure() -> None:
     # 不过就转 blocked 请示——重做上限与 Evaluator.MAX_RETRY 同一个数。
     bloated = [
         make_event("progress", step_idx=1, text="读完派单密件，开始整理"),
-        token_event(model="stub-model", prompt_tokens=99999, completion_tokens=200,
+        token_event(model="stub-model", prompt_tokens=130000, completion_tokens=200,
                     ttft_ms=90, duration_ms=400, status_code=200),
         artifact_event(GOOD_ARTIFACT),
     ]
@@ -586,7 +586,7 @@ def test_real_usage_and_partial_failure() -> None:
           str(audit.get("findings")))
     check("用量标注为已核对", (audit.get("usage") or {}).get("budget_checked") is True,
           str(audit.get("usage")))
-    check("用量数字是三次真实 span 的累计", (audit.get("usage") or {}).get("prompt_tokens") == 299997,
+    check("用量数字是三次真实 span 的累计", (audit.get("usage") or {}).get("prompt_tokens") == 390000,
           str(audit.get("usage")))
     first_packet = StubAdapter.instances[0].prepared[0]
     second_packet = StubAdapter.instances[1].prepared[0]
