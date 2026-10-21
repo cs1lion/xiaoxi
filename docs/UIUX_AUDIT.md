@@ -682,6 +682,51 @@ await page.cdp('Page.addScriptToEvaluateOnNewDocument', { source: RAF_SHIM });
 >
 > **旧章节数据一律标为历史，不删。** 删了就无法追溯当时为什么判它是好是坏。
 
+### 17.0 数据基准：这组数能用多久，取决于哪几个文件
+
+> **采集基准：HEAD `2076770`（2026-10-21 17:42:35）。**
+>
+> **这组数不是靠采集时间判有效性的，是靠「决定它的文件有没有变」。** 时间过去多久不重要，依赖有没有动才重要。
+
+决定这组像素统计的文件只有 7 个（渲染层 + 色值表）：
+
+| 文件 | `2076770` 之后是否改动 |
+|---|---|
+| `pixel-world/src/world/palette-data.ts` | **无** |
+| `pixel-world/src/render/terrain-edges.ts` | **无** |
+| `pixel-world/src/render/decor.ts` | **无** |
+| `pixel-world/src/render/tilemap.ts` | **无** |
+| `pixel-world/src/scenes/SandboxScene.ts` | **无** |
+| `pixel-world/src/render/villager.ts` | **无** |
+| `pixel-world/src/render/buildings.ts` | **无** |
+
+验证命令（任一文件出现输出即失效，须重测）：
+
+```powershell
+git diff --numstat 2076770..HEAD -- `
+  pixel-world/src/world/palette-data.ts `
+  pixel-world/src/render/terrain-edges.ts `
+  pixel-world/src/render/decor.ts `
+  pixel-world/src/render/tilemap.ts `
+  pixel-world/src/scenes/SandboxScene.ts `
+  pixel-world/src/render/villager.ts `
+  pixel-world/src/render/buildings.ts
+```
+
+**2026-10-21 23:33 在 master `5f4d8f5` 上复测确认（round-18）**：`2076770..5f4d8f5` 之间 pixel-world 只改了 3 个文件（`README.md`、`scripts/check-s5-d.mjs`、`scripts/s5-e2e-drive.mjs`），**全部是脚本与文档，一个像素都没变**。实测三项指标与 §17.1 逐位一致：
+
+| 指标 | `2076770`（round-17） | `5f4d8f5`（round-18） | 差 |
+|---|---:|---:|---|
+| IQR | 0 | **0** | 0 |
+| q1 / 中位 / q3 | 55.1 / 55.1 / 55.1 | **55.1 / 55.1 / 55.1** | 0 |
+| 众数带 48–63 | 58.43% | **58.53%** | +0.10pp（帧间噪声内） |
+| 单色最大占比（`#2d3b2e` grass） | 50.95% | **50.95%** | 0 |
+| 唯一色 | 82 | 81–83 | — |
+
+> **⚠️ 已知的失效条件**：外部 Agent（`.claude/worktrees/optimistic-clarke-71e4fd`，用户本人开）正在改 `decor.ts`（摆件画像：灯挂齿轮 / 树带书 / 旗带砚台）与 `faith.ts`。**一旦它的改动进 master，`decor.ts` 就变了，§17 的「单色最大占比」与「众数带」需要重测。**
+>
+> `IQR = 0` 这条**不受摆件影响**：q1/中位/q3 全部等于 grass 的 luma 55.08，而 grass 占 50.95%。要让中位数离开它，需要有超过 50% 的像素不再是 grass，摆件做不到。
+
 ### 17.1 实测数据
 
 | 指标 | 帧 0 | 帧 1 | 帧 2 | **中位数** |
