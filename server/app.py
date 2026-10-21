@@ -1495,37 +1495,13 @@ async def _start_durable_if_enabled() -> None:
             pass
 
 
-def _durable_lookup():
-    """给重启对账用的内核查询函数；内核没起来就返回 None。
-
-    返回的是同步函数而不是协程：`recover_interrupted` 是同步收口，它需要的只是
-    "这一单在内核里现在是什么状态"。sidecar 只监听 loopback，查询走一次短连接
-    即可，查询失败一律当作"内核里没有这一单"，由原有收口转 BLOCKED。
-    """
-    if _durable_supervisor is None or not _durable_supervisor.available:
-        return None
-    endpoint = _durable_supervisor.endpoint
-    token = _durable_supervisor.token
-
-    def lookup(commission_id: str, attempt: int = 0):
-        """按 `commission_id@attempt` 查单；attempt 缺省 0 只为兼容旧调用。"""
-        import httpx
-        headers = {"authorization": f"Bearer {token}"}
-        try:
-            with httpx.Client(timeout=10.0) as client:
-                found = client.get(f"{endpoint}/v1/lookup", headers=headers,
-                                   params={"commission_id": commission_id,
-                                           "attempt": int(attempt)}).json()
-                if not found.get("found"):
-                    return None
-                task_id = int(found.get("task_id") or 0)
-                if task_id <= 0:
-                    return None
-                return client.get(f"{endpoint}/v1/runs/{task_id}", headers=headers).json()
-        except Exception:
-            return None
-
-    return lookup
+# 注意：`_durable_lookup` 只有上面 :1339 那一个定义（直连查询，签名
+# `(commission_id, attempt=0)`）。合并时曾把本分支的「工厂版」定义一起带进来，
+# 后者在文件里位置更靠后，按 Python 的遮蔽规则会覆盖前者——于是两个调用点
+# （reconcile_durable 与 recover_interrupted）拿到的都是 0 参数工厂，
+# `_adopt_durable` 的 `lookup(id, attempt)` 与回退 `lookup(id)` 都会 TypeError，
+# 且第二次抛在 except TypeError 块内无人接，直接穿透到 startup()：
+# 有在飞单（running/briefing）时服务端重启起不来。已删除工厂版，只留直连版。
 
 
 @app.on_event("startup")

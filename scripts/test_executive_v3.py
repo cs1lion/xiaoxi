@@ -882,8 +882,38 @@ def test_commission_change_notifications() -> None:
     check("坏订阅者不连累其它订阅者", len(other) == 1)
 
 
+def test_durable_lookup_single_definition() -> None:
+    """_durable_lookup 必须只有一个定义，且签名收 (commission_id, attempt)。
+
+    合并 master 时本分支的工厂版定义被一起带进来，位置更靠后，按 Python 的遮蔽
+    规则覆盖了 master 的直连版——两个调用点于是拿到 0 参数工厂，
+    _adopt_durable 的 lookup(id, attempt) 与回退 lookup(id) 都 TypeError，
+    且第二次抛在 except TypeError 块内无人接，直接穿透到 startup()：
+    有在飞单（running/briefing）时服务端重启起不来（P1）。
+
+    这条用 AST 静态锁住「同名模块级函数只能有一个定义 + 签名对」，
+    不依赖 durable 内核是否在线，因此确定性可跑。
+    """
+    print("[durable_lookup single definition]")
+    import ast
+
+    source = (ROOT / "server" / "app.py").read_text(encoding="utf-8")
+    tree = ast.parse(source)
+    defs = [node for node in ast.walk(tree)
+            if isinstance(node, ast.FunctionDef) and node.name == "_durable_lookup"]
+    check("_durable_lookup 只有一个定义（防遮蔽）", len(defs) == 1,
+          "实际 %d 个：行号 %s" % (len(defs), [d.lineno for d in defs]))
+    if len(defs) != 1:
+        return
+    params = [arg.arg for arg in defs[0].args.args]
+    check("签名收 commission_id 与 attempt（直连版，不是 0 参数工厂）",
+          params == ["commission_id", "attempt"], "实际参数 %s" % (params,))
+    check("attempt 有默认值（兼容旧调用）", len(defs[0].args.defaults) == 1)
+
+
 def main() -> int:
     for test in (test_commission_state_machine, test_commission_change_notifications,
+                 test_durable_lookup_single_definition,
                  test_briefing_packet, test_roster_selection_and_capacity,
                  test_memory_block_is_framed, test_memory_block_survives_serialization,
                  test_telemetry_store_and_summary, test_spinning_guard,
