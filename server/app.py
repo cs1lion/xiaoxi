@@ -14,7 +14,7 @@ from typing import Any
 import numpy as np
 from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
 from fastapi.responses import FileResponse, JSONResponse
-from .static import AppStaticFiles
+from .static import AppStaticFiles, mount_pixel_world
 
 from .config import ROOT, avatar_cfg, ensure_dirs, pacing_cfg, persona_cfg, settings
 from .dialogue.aqi_blocks import (aqi_blocks_message, compose_delivery_card,
@@ -1324,6 +1324,8 @@ async def scenarios() -> Any:
 
 
 app.mount("/static", AppStaticFiles(directory=str(ROOT / "web")), name="static")
+# 同源部署：pixel-world 以 base=/world/ 构建后挂在 /world；API/WS 继续走本服务。
+mount_pixel_world(app, ROOT)
 
 
 def _durable_runtime_config() -> dict[str, str] | None:

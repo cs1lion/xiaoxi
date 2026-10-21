@@ -103,8 +103,9 @@
 - **构建**：`pixel-world` 以 base `/world/` 构建；实现项是让 Vite base 由部署环境注入，产物由部署任务发布，**不把源码复制进 `web/`**。
 - **服务端**：同源静态挂载或反向代理 `/world`，SPA fallback 到 `/world/index.html`；API/WS 仍由原服务处理。
 - **不选独立静态站**：跨域 + WS 需要额外 CORS/凭据配置，S5 最小闭环不增加这一层；以后拆独立站另开 ADR。
+- **当前状态**：**已实现**（2026-10-21）：`pixel-world` 用 `npm run build:world` 生成 base `/world/` 的 dist；`server/static.py:mount_pixel_world()` 在 `dist/index.html` 存在时把产物挂到 `/world`，不存在时跳过（测试/开发不炸）。部署顺序是先构建 dist，再启动主服务；API/WS 不变。CI 有 hosting-build 校验 base，Python 侧有 `scripts/test_pixel_world_hosting.py` 验证挂载与静态资源。
 - **部署验收**：`GET /world/` 返回页面；`/world/?ledger=on` 能收到现有 REST/WS 真帧；断线重连不新增协议。
-- **当前状态**：拓扑已定，**部署实现未开始**；D 仍卡 worker token，是世界侧之外的集成阻塞，不影响先做同源部署。
+- **D 仍卡 worker token**：这是独立于同源部署的集成阻塞，不改变上面的托管结论。
 
 ## 3. 世界团队可依赖 / 不可做
 

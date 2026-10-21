@@ -68,6 +68,40 @@ jobs:
         working-directory: pixel-world
         run: node scripts/audit-palette.mjs --strict
 
+  hosting-build:
+    name: 同源 /world 构建
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: "npm"
+          cache-dependency-path: pixel-world/package-lock.json
+
+      - name: Install dependencies
+        working-directory: pixel-world
+        run: npm ci
+
+      - name: Build with /world base
+        working-directory: pixel-world
+        run: npm run build:world
+
+      - name: Verify built asset base
+        working-directory: pixel-world
+        run: |
+          node -e "const fs=require('fs'); const h=fs.readFileSync('dist/index.html','utf8'); if(!h.includes('/world/assets/')) { console.error('index.html does not reference /world/assets'); console.error(h.slice(0,500)); process.exit(1); }"
+
+      - name: Upload world dist
+        uses: actions/upload-artifact@v4
+        with:
+          name: pixel-world-dist
+          path: pixel-world/dist
+          if-no-files-found: error
+
   browser-smoke:
     name: 像素世界浏览器 smoke + 截图 artifact
     runs-on: ubuntu-latest

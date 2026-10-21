@@ -7,6 +7,7 @@
   "scripts": {
     "dev": "vite",
     "build": "tsc --noEmit && vite build",
+    "build:world": "tsc --noEmit && vite build --base=/world/",
     "preview": "vite preview",
     "check": "tsc --noEmit",
     "test": "node --test test/*.test.ts",
