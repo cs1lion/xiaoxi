@@ -14,6 +14,7 @@ const prop = (y: number): WorldProp => ({
   label: '树',
   sourceTaskKind: null,
   sourceTaskId: null,
+  sourceSummary: null,
 });
 
 /** 角色 depth：villager.ts 的 `altitude + py + 8`，py = (pos.y + 1) * TILE_PX。 */

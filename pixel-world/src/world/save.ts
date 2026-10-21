@@ -36,7 +36,7 @@ export const SETTLED_WARN_THRESHOLD = 5000;
 /** v1 冻结指纹（ADR_SAVE §1，frozen）。旧档迁移前用它自证，仍然有效。 */
 export const SCHEMA_V1_FINGERPRINT = 'f53a0736d782d657';
 /** v2 冻结指纹（ADR_WORLD_ALIVE §8）。由 docs/save-v2.sample.json 算出，单测核对。 */
-export const SCHEMA_V2_FINGERPRINT = '2b24e070ebaadaa5';
+export const SCHEMA_V2_FINGERPRINT = '6ba0205c8e69f6cc';
 
 /** v1 冻结路径全集（99 条，来自 docs/save-v1.sample.json；指纹见上，单测核对）。
  * `assertSaveV1` 做**集合包含**校验：存档出现的每条叶子路径都必须在这个集合里；
@@ -163,6 +163,7 @@ export const SAVE_V2_ADDED_PATHS: readonly string[] = [
   'world.oracle[].at',
   'world.oracle[].raw',
   'world.oracle[].receipt',
+  'world.props[].sourceSummary',
   'world.props[].sourceTaskId',
   'world.props[].sourceTaskKind',
 ];
@@ -586,6 +587,9 @@ function validateWorldFields(raw: Record<string, unknown>, version: 1 | 2): void
       checkStringOrNull(requireKey(prop, 'sourceTaskId', path), `${path}.sourceTaskId`, {
         allowEmpty: true,
       });
+      checkStringOrNull(requireKey(prop, 'sourceSummary', path), `${path}.sourceSummary`, {
+        allowEmpty: true,
+      });
     }
   });
 
@@ -867,6 +871,7 @@ export const MIGRATIONS: Record<number, Migration> = {
                 ...prop,
                 sourceTaskKind: prop.sourceTaskKind ?? null,
                 sourceTaskId: prop.sourceTaskId ?? null,
+                sourceSummary: prop.sourceSummary ?? null,
               }
             : prop,
         ),

@@ -212,7 +212,8 @@
         },
         "label": "一盏路灯",
         "sourceTaskKind": "code",
-        "sourceTaskId": "t0"
+        "sourceTaskId": "t0",
+        "sourceSummary": "写一个爬虫"
       }
     ],
     "oracle": [
@@ -335,6 +336,6 @@
   "meta": {
     "savedAtWallClock": 1792500000000,
     "savedReconciled": true,
-    "schemaFingerprint": "2b24e070ebaadaa5"
+    "schemaFingerprint": "6ba0205c8e69f6cc"
   }
 }

@@ -22,6 +22,7 @@ import { createPhaseView, type PhaseView } from '../render/phase-view.ts';
 import { parsePhaseParam, phaseAt, type PhaseId } from '../render/day-phase.ts';
 import { createDecorView, type DecorView } from '../render/decor.ts';
 import { composeReport, type DailyReport } from '../world/report.ts';
+import { describePropSource } from '../world/faith.ts';
 import { createLazyAnimalese, type Animalese } from '../audio/animalese.ts';
 import { toWorldCommand, type AgentToWorld } from '../world/bridge.ts';
 import { LedgerClient } from '../world/ledger.ts';
@@ -714,7 +715,10 @@ export class SandboxScene extends Phaser.Scene {
     );
     const finishHint =
       defaultWorker === undefined ? '' : `　　默认交付：${defaultWorker.name}的单`;
-    return `${summary}　　${weather}　　${ledger}　　台账交付 ${ledgerDelivered} 单 · Mock 交付 ${mockDelivered} 单　　神恩 ${faith.points}/${3}${waiting}${queue}${finishHint}${saveNote}`;
+    // 最近落下的那件摆件写清来路：这是"被记住"在纸面上唯一的具体落点。
+    const latestProp = this.snapshot.props[this.snapshot.props.length - 1];
+    const memory = latestProp === undefined ? '' : `　　${describePropSource(latestProp)}`;
+    return `${summary}　　${weather}　　${ledger}　　台账交付 ${ledgerDelivered} 单 · Mock 交付 ${mockDelivered} 单　　神恩 ${faith.points}/${3}${memory}${waiting}${queue}${finishHint}${saveNote}`;
   }
 
   private buildingName(id: string | null): string | null {

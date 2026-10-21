@@ -246,7 +246,7 @@ test('v1→v2 迁移：除新增字段外，世界状态逐字段不变', () => 
 
   const strip = (props: readonly WorldProp[]): unknown[] =>
     props.map((prop) => {
-      const { sourceTaskKind: _kind, sourceTaskId: _id, ...rest } = prop;
+      const { sourceTaskKind: _kind, sourceTaskId: _id, sourceSummary: _sum, ...rest } = prop;
       return rest;
     });
   assert.deepEqual(strip(migratedProps), strip(v1Props), '摆件除来源外必须逐字段一致');

@@ -233,6 +233,7 @@ const NULLABLE_PATHS: ReadonlySet<string> = new Set([
   'world.weather.remainingMs',
   'world.props[].sourceTaskKind',
   'world.props[].sourceTaskId',
+  'world.props[].sourceSummary',
 ]);
 
 /* ---------------------------------------------------------------- 用例 */

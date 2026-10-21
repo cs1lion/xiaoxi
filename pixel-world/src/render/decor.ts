@@ -5,7 +5,7 @@
 
 import Phaser from 'phaser';
 import { TILE_PX } from '../world/setup.ts';
-import type { ConstructionSnapshot, GridPoint, WorldProp } from '../world/types.ts';
+import type { ConstructionSnapshot, GridPoint, TaskKind, WorldProp } from '../world/types.ts';
 import { WORLD } from '../world/palette-data.ts';
 import { propDepth, propFootY } from './prop-depth.ts';
 
@@ -130,18 +130,32 @@ function drawProp(
   const py = propFootY(prop, originY);
   const g = scene.add.graphics();
   const seed = propHash(prop.id);
+  // 外观由「换来它的那种活」决定，其次才是摆件大类：
+  // 写代码的灯带齿轮，查资料的树带书，整理文稿的旗带砚台。
+  // 老档的摆件没有来源，退回原来的三种画法。
+  const accent = accentFor(prop.sourceTaskKind);
   if (prop.kind === 'lamp') {
-    drawLamp(g, seed);
+    drawLamp(g, seed, accent);
   } else if (prop.kind === 'tree') {
-    drawTree(g, seed);
+    drawTree(g, seed, accent);
   } else {
-    drawBanner(g, seed);
+    drawBanner(g, seed, accent);
   }
   g.setPosition(px, py);
   // 与角色同口径的 Y-Sort：落点 y 越大（越靠下）越靠前，角色能走到树后面/前面。
   g.setDepth(propDepth(prop, originY, DECOR_ALTITUDE));
   // 摆件标签已随 D5-A 删除：图形自己说明是什么，中文不进 canvas。
   return g;
+}
+
+/** 摆件上的来源记号。`null` 表示老档摆件，不加记号。 */
+type PropAccent = 'gear' | 'book' | 'inkstone' | null;
+
+function accentFor(kind: TaskKind | null): PropAccent {
+  if (kind === 'code') return 'gear';
+  if (kind === 'research') return 'book';
+  if (kind === 'writing') return 'inkstone';
+  return null;
 }
 
 /** 稳定的道具哈希：同 id 永远同外观，截图可复现。 */
@@ -155,7 +169,7 @@ function propHash(id: string): number {
 }
 
 /** 路灯：柱 + 灯笼 + 1px 硬光池。不用 fillCircle，避免矢量圆和像素块混用。 */
-function drawLamp(g: Phaser.GameObjects.Graphics, seed: number): void {
+function drawLamp(g: Phaser.GameObjects.Graphics, seed: number, accent: PropAccent = null): void {
   // 接触阴影：两级实心块，读成“灯柱踩在地上”。
   g.fillStyle(WORLD.deepShade, 0.28);
   g.fillRect(-4, -1, 9, 2);
@@ -183,6 +197,16 @@ function drawLamp(g: Phaser.GameObjects.Graphics, seed: number): void {
   g.fillRect(-5, -22, 11, 1);
   g.fillRect(-1, -23, 3, 1);
 
+  if (accent === 'gear') {
+    // 齿轮：灯罩下沿一枚 5×5 的小记号，四角留缺口读成齿。
+    g.fillStyle(WORLD.trim, 1);
+    g.fillRect(-2, -15, 5, 5);
+    g.fillStyle(WORLD.ink, 1);
+    g.fillRect(-1, -14, 3, 3);
+    g.fillStyle(WORLD.trim, 1);
+    g.fillRect(0, -14, 1, 1);
+  }
+
   // 灯下光池：两层硬边矩形 + 抖动缺口，不用大 alpha 圆。
   const flicker = seed % 3;
   g.fillStyle(WORLD.amber, 0.1);
@@ -195,7 +219,7 @@ function drawLamp(g: Phaser.GameObjects.Graphics, seed: number): void {
 }
 
 /** 树：树干 + 3–5 个树冠团块 + 根部阴影。树冠用实心像素块，不用圆。 */
-function drawTree(g: Phaser.GameObjects.Graphics, seed: number): void {
+function drawTree(g: Phaser.GameObjects.Graphics, seed: number, accent: PropAccent = null): void {
   const size = seed % 3; // 小 / 中 / 大
   const trunkH = 8 + size * 2;
   const cw = 13 + size * 3;
@@ -236,10 +260,21 @@ function drawTree(g: Phaser.GameObjects.Graphics, seed: number): void {
   g.fillRect(-2 + (seed % 3), top + 4, 1, 2);
   g.fillRect(3 - (seed % 2), top + 7, 2, 1);
   if (size > 0) g.fillRect(-Math.floor(cw / 2) + 3, top + 8, 1, 2);
+
+  if (accent === 'book') {
+    // 书：树脚一块斜靠的石板 + 两页浅色书页，读成「这里查过资料」。
+    g.fillStyle(WORLD.stone, 1);
+    g.fillRect(4, -6, 6, 5);
+    g.fillStyle(WORLD.plaster, 1);
+    g.fillRect(5, -5, 4, 3);
+    g.fillStyle(WORLD.ink, 1);
+    g.fillRect(6, -5, 1, 3);
+    g.fillRect(4, -1, 6, 1);
+  }
 }
 
 /** 旗帜：木杆 + 布面 + 顶部亮边；布面有一个像素缺口，读成被风吹起。 */
-function drawBanner(g: Phaser.GameObjects.Graphics, seed: number): void {
+function drawBanner(g: Phaser.GameObjects.Graphics, seed: number, accent: PropAccent = null): void {
   g.fillStyle(WORLD.ink, 0.2);
   g.fillRect(-3, -1, 8, 2);
   g.fillStyle(WORLD.ink, 1);
@@ -256,4 +291,14 @@ function drawBanner(g: Phaser.GameObjects.Graphics, seed: number): void {
   // 风吹缺口：固定在右侧，不逐帧抖动。
   g.fillStyle(WORLD.soil, 1);
   g.fillRect(8, -15 + (seed % 2), 1, 2);
+
+  if (accent === 'inkstone') {
+    // 砚台：旗杆底一方浅石台，中央一点墨。
+    g.fillStyle(WORLD.plaster, 1);
+    g.fillRect(-4, -3, 9, 3);
+    g.fillStyle(WORLD.stone, 1);
+    g.fillRect(-4, -1, 9, 1);
+    g.fillStyle(WORLD.ink, 1);
+    g.fillRect(-1, -3, 3, 1);
+  }
 }

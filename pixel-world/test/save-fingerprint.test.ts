@@ -51,9 +51,9 @@ test('v1 冻结样例原样不动：99 条路径、旧指纹仍然成立', () =>
   assert.equal(saveFingerprint(sampleV1), SCHEMA_V1_FINGERPRINT);
 });
 
-test('v2 样例：105 条叶子路径，指纹等于新常量', () => {
+test('v2 样例：106 条叶子路径，指纹等于新常量', () => {
   const paths = [...new Set(collectSavePaths(sample))].sort();
-  assert.equal(paths.length, 105, 'v2 路径条数');
+  assert.equal(paths.length, 106, 'v2 路径条数');
   assert.equal(fingerprintOfPaths(paths), SCHEMA_V2_FINGERPRINT);
   assert.equal(sample.meta.schemaFingerprint, SCHEMA_V2_FINGERPRINT);
   assert.equal(saveFingerprint(sample), SCHEMA_V2_FINGERPRINT);

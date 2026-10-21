@@ -233,6 +233,14 @@ export interface WorldProp {
   readonly sourceTaskKind: TaskKind | null;
   /** 换来摆件的那条活的 id，没有来源时记 null。 */
   readonly sourceTaskId: string | null;
+  /**
+   * 换来摆件的那条活的摘要。
+   *
+   * 为什么抄一份：任务结算后会被 `removeTask` 删掉，`settled` 只留 id。
+   * 只存 id 的话，纸面永远只能显示一个编号，说不出「那单爬虫」。
+   * 老摆件没有来源，记 null。
+   */
+  readonly sourceSummary: string | null;
 }
 
 export interface VillagerSnapshot {

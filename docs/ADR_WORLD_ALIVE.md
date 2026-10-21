@@ -1,6 +1,6 @@
 # ADR: 世界变活（时辰、神谕石板、有来源的摆件）
 
-- **状态**：已批准（用户，2026-10-21）。切片 0 与 1a 已落地，1b 起待开工。
+- **状态**：已批准（用户，2026-10-21）。切片 0、1a、1b 已落地，1c 起待开工。
 - **日期**：2026-10-21
 - **决策范围**：`pixel-world/` 的渲染层、世界层、存档 schema；不改主产品 `server/`，不改 `web/`，不新增 WS 事件
 - **上游**：用户 2026-10-21 拍板「形态 B（神谕小镇）」与「角色 = 手，不是 Agent」
@@ -98,10 +98,12 @@
 改法：
 
 - `nextProp` 增加按 `TaskKind` 选型的映射表：code → 灯与齿轮（复用 `lamp`），research → 书与望远镜（复用 `tree` 的外观改绘），writing → 砚台与旗（复用 `banner`）。
-- `WorldProp` 增加 `sourceTaskKind` 与 `sourceTaskId`。这是唯一的存档新增字段。
-- 纸面状态行能说「这盏灯是十月十八号那单爬虫换来的」。玩家碰到摆件时看到的是具体来源，不是一个抽象计数。
+- `WorldProp` 增加 `sourceTaskKind`、`sourceTaskId`、`sourceSummary`。纸面要能说「这盏灯是那单爬虫换来的」，而任务结算后就被删掉（`removeTask`），`settled` 只留 id，所以摘要必须在落摆件时抄一份。
+- 纸面状态行能说「这盏灯是那单爬虫换来的」。玩家碰到摆件时看到的是具体来源，不是一个抽象计数。
 
 不新增 `PropKind` 枚举值，避免改动 `PROP_KINDS` 常量与 `save-validate.test.ts` 里的逐项断言。外观差异靠 `sourceTaskKind` 驱动绘制分支。
+
+**对原方案的修正**：原计划只加两个字段（kind + id），实际落不了地——id 指向的任务已经不在 `tasks` 里，纸面拿不到摘要。补 `sourceSummary` 是这一片唯一超出原 ADR 的字段。
 
 ### 5. 编年史从快照推导，不落档
 
@@ -135,18 +137,19 @@
 1. **切片 0 单独一个 PR，只升版本、写迁移、补 v2 样例与新指纹，不带任何功能。** 已有 v1 档必须能迁移。
 2. 迁移函数骨架已经在 `save.ts:731` 躺着（`MIGRATIONS[1]` 是一条从未跑过的 1→2 样例迁移，因为 `CURRENT_SCHEMA_VERSION` 一直是 1）。
 
-v2 新增的叶子路径共六条，实测样例从 99 条涨到 105 条：
+v2 新增的叶子路径共七条，样例从 99 条涨到 106 条：
 
 ```
 world.props[].sourceTaskKind
 world.props[].sourceTaskId
+world.props[].sourceSummary
 world.oracle[]
 world.oracle[].at
 world.oracle[].raw
 world.oracle[].receipt
 ```
 
-（`world.oracle[]` 是数组容器本身，也单独计一条。）
+（`world.oracle[]` 是数组容器本身，也单独计一条。`sourceSummary` 是切片 1b 补上的，见 §4 的修正说明。）
 
 ## 非目标
 
@@ -163,9 +166,9 @@ world.oracle[].receipt
 
 | 切片 | 内容 | 交付证据 |
 |---|---|---|
-| 0 | 存档 v2 空壳：版本、迁移、样例、指纹 | **已落地**：v1 档可迁移；`SCHEMA_V2_FINGERPRINT = 2b24e070ebaadaa5` |
+| 0 | 存档 v2 空壳：版本、迁移、样例、指纹 | **已落地**：v1 档可迁移；`SCHEMA_V2_FINGERPRINT = 6ba0205c8e69f6cc` |
 | 1a | 四刻光配方 | **已落地**：`scripts/check-phases.mjs` 15 项；四刻真机截图 |
-| 1b | 摆件来源（先于石板，玩家会撞见的是它） | 按任务类型落不同外观；来源进状态行 |
+| 1b | 摆件来源（先于石板，玩家会撞见的是它） | **已落地**：按活类型换外形；来源进状态行与日报 |
 | 1c | 神谕石板 | 存读档不丢；封顶 20 条 |
 | 1d | 三件神迹 | 有回执；与摆件去重 |
 | 2 | 造物模式与章节法则 | 另开 ADR |
@@ -213,7 +216,7 @@ node proto/measure.mjs ./day-phase.html
 | `npm run build` | 通过 |
 | `audit-palette --strict` | 退出码 0，世界仍 24 色 |
 | `check_protocol.py` / `test_core.py` | PASS / 64 passed |
-| v2 指纹 | `2b24e070ebaadaa5`，105 条路径，样例自洽 |
+| v2 指纹 | `6ba0205c8e69f6cc`，106 条路径，样例自洽 |
 | 真机迁移 | v1 老档注入 localStorage → 读档 → 重建 4 栋楼、1 个摆件（来源 null）、天气沿用雨、槽位写成 v2，无 JS 报错 |
 
 一个在实现中才发现的问题：字段级校验原本不分版本，导致 v1 老档在迁移前就被要求带 v2 字段，旧档永远过不了自证。改成 `validateSaveFields(raw, version)`，v1 跳过 v2 新增字段。这条记在这里，因为下一个加字段的人会踩同一脚。
@@ -235,6 +238,22 @@ node proto/measure.mjs ./day-phase.html
 **雾带改了三版，前两版都失败。** 贴底实带读成「画面被裁了一条」；「远层冷雾 + 近层厚雾」
 把草地洗成一条灰条；放在画面中部则会糊住街道与角色。最终落在街面**以下**、下端留
 8px 草地收边，才读成「雾浮在田地上」。
+
+### 切片 1b 实测记录（2026-10-21）
+
+| 验证 | 结果 |
+|---|---|
+| `npm test` | 256 通过（新增 16 项信仰与来源用例） |
+| 真机三类来源 | code→灯带齿轮、research→树带书、writing→旗带砚台；来源字段三项齐全；状态行与日报都写出摘要 |
+| `smoke` / `check-phases` | 120 项 / 17 项通过 |
+
+**实现中发现的老缺陷**：`nextProp` 原先只用 `walkable` 判断落点，不知道已有摆件的位置，
+第二件会落在第一件**完全相同的格子**上（同一个环、同一个首个空格），画面上就是两件叠成一件。
+已在 1b 一并修掉：传入已占位置，当前环满了就往外扩。
+
+**ego-browser 的环境限制**：用 ego 验证时世界时钟完全不前进（`requestAnimationFrame`
+在 700ms 内只跑了 1 帧，Phaser 的 `update` 不触发）。这是 ego 后台页面的运行环境行为，
+不是这一片的缺陷；Playwright 无头模式下同一页面正常推进。世界的真机验证以 Playwright 为准。
 
 ## 附录 B：被否决的方案
 

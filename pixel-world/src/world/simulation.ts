@@ -11,7 +11,7 @@ import { TASK_PROFILES } from './tasks.ts';
 import {
   nextProp,
   MILESTONE_POINTS,
-  milestoneFor,
+  describePropSource,
   POINTS_PER_TASK,
 } from './faith.ts';
 import { routineBeats, routineFor, shelterTarget, type RoutineBeat } from './routines.ts';
@@ -1189,15 +1189,18 @@ export class Simulation {
     this.faithPoints += POINTS_PER_TASK;
     if (this.faithPoints < FAITH_MILESTONE) return;
     this.faithPoints -= FAITH_MILESTONE;
-    const prop = nextProp(this.milestones, this.altar, (p) => this.grid.isWalkable(p), {
-      kind: task.kind,
-      taskId: task.id,
-    });
+    const prop = nextProp(
+      this.milestones,
+      this.altar,
+      (p) => this.grid.isWalkable(p),
+      { kind: task.kind, taskId: task.id, summary: task.summary },
+      this.props.map((item) => item.at),
+    );
     if (prop === null) return;
     this.props.push(prop);
     this.milestones += 1;
-    const name = milestoneFor(this.milestones - 1).label;
-    this.log('info', `神恩落地：祭坛边多了${name}。`);
+    // 日志写清是哪一单换的：这是"被记住"在事件流里的第一次落地。
+    this.log('info', `神恩落地：${describePropSource(prop)}。`);
   }
 
   private stepConstructions(deltaMs: number): void {
