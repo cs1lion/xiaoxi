@@ -157,7 +157,7 @@
 
 ### 技术验收（对照 smoke）
 
-- [ ] 以 `?ledger=off` 跑 `node scripts/smoke.mjs` 全绿（114/114）。
+- [ ] 以 `?ledger=off` 跑 `node scripts/smoke.mjs` 全绿（2026-10-21 实测 118/118；本数字随断言增加而变，以命令输出为准）。
 - [ ] 以 `LEDGER=1 node scripts/smoke.mjs` 跑台账模式全绿（21/21）。
 - [ ] `python scripts/check_protocol.py` PASS。
 - [ ] `python scripts/test_core.py` 64/0。
@@ -334,7 +334,7 @@
 
 - **221/221**：`npm run test:inprocess` 测试总数（`docs/DEMO_SCRIPT.md` 技术验收清单；2026-10-21 复跑；本节数字随测试增长而变，以实跑为准）。
 - **24/8/1/31**：调色板审计结果（世界 24 色 / UI 8 色 / 共享 1 色 / 并集 31 色）。世界层 2026-10-21 从 16 扩到 24 色，用户批准。来源 `docs/ADR_PALETTE_24.md`、`docs/ART_PALETTE_AUDIT.md`，复跑 `node scripts/audit-palette.mjs --strict`（exit 0）。
-- **114/114**：smoke 沙盒模式断言总数，来源 `scripts/smoke.mjs` 与 `docs/RUNTIME_VERIFICATION.md`。
+- **118/118**：smoke 沙盒模式断言总数（2026-10-21 实测），来源 `scripts/smoke.mjs` 与 `docs/RUNTIME_VERIFICATION.md`。
 - **21/21**：smoke 台账模式断言总数，来源 `scripts/smoke.mjs`。
 - **64/0**：`python scripts/test_core.py` 通过/失败数，来源 `docs/RUNTIME_VERIFICATION.md`。
 - **139/139**：`npm test` 通过数（S2 基线），来源 `docs/PROJECT_PROGRESS.md` 与 `docs/RUNTIME_VERIFICATION.md`。
