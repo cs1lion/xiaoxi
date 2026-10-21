@@ -411,6 +411,14 @@ def create_telemetry_proxy_router(executive):
         origin = request.headers.get('origin')
         if origin and urlsplit(origin).netloc != request.headers.get('host'):
             raise HTTPException(403, 'cross_origin_write_denied')
+        # 同源校验挡不住「不带 Origin 头」的调用方——本机任意进程一条 curl
+        # 就是这种情况，而下面 :transport 拿的是真实 llm_api_key。
+        # 所以再要一道共享令牌：INTERNAL_TOKEN 配了就必须带对，
+        # 没配（默认）则保持旧行为，不破坏既有调用方。
+        from ..config import settings
+        expected = str(getattr(settings, 'internal_token', '') or '')
+        if expected and request.headers.get('x-internal-token') != expected:
+            raise HTTPException(401, 'internal_token_required')
         try:
             data = await request.json()
         except Exception:

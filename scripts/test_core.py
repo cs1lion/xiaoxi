@@ -314,6 +314,60 @@ def test_circadian_and_mood_reach_the_prompt() -> None:
     store.delete_all()
 
 
+def test_internal_proxy_requires_token() -> None:
+    """内部代理必须能要求令牌，否则本机任意进程可白嫖 llm_api_key。
+
+    背景：/internal/telemetry_proxy 拿 settings.llm_api_key 转发任意 path，
+    原先只校验 Origin 头；请求不带 Origin 时 `if origin and ...` 直接短路放行，
+    于是 curl 一条就能用宿主额度。这里用 AST 静态断言锁住修复，不起 HTTP 服务。
+    """
+    print("[internal proxy token]")
+    import ast as ast_mod
+    import inspect
+    import textwrap as tw
+    from server.assistant import executive_api as api_mod
+
+    source = inspect.getsource(api_mod.create_telemetry_proxy_router)
+    tree = ast_mod.parse(tw.dedent(source))
+
+    reads_token = False
+    checks_header = False
+    for node in ast_mod.walk(tree):
+        # 两种写法都算：settings.internal_token 或 getattr(settings, "internal_token", ...)
+        if isinstance(node, ast_mod.Attribute) and node.attr == "internal_token":
+            reads_token = True
+        if isinstance(node, ast_mod.Call) and isinstance(node.func, ast_mod.Name):
+            if node.func.id == "getattr" and len(node.args) >= 2:
+                arg = node.args[1]
+                if isinstance(arg, ast_mod.Constant) and arg.value == "internal_token":
+                    reads_token = True
+        if isinstance(node, ast_mod.Call) and isinstance(node.func, ast_mod.Attribute):
+            if node.func.attr == "get" and node.args:
+                arg = node.args[0]
+                if isinstance(arg, ast_mod.Constant) and arg.value == "x-internal-token":
+                    checks_header = True
+    check("代理读取 internal_token 配置", reads_token)
+    check("代理校验 x-internal-token 头", checks_header)
+
+    bad_get = []
+    for node in ast_mod.walk(tree):
+        if isinstance(node, ast_mod.Call) and isinstance(node.func, ast_mod.Attribute):
+            if node.func.attr == "get" and isinstance(node.func.value, ast_mod.Name):
+                if node.func.value.id == "settings":
+                    bad_get.append(node.lineno)
+    check("settings 用属性访问而非 .get()", not bad_get, bad_get)
+
+    from server.config import settings as s
+    original = getattr(s, "internal_token", None)
+    try:
+        s.internal_token = ""
+        check("未配置令牌时不拦截", str(getattr(s, "internal_token", "") or "") == "")
+        s.internal_token = "abc123"
+        check("配置令牌后可拦截", str(getattr(s, "internal_token", "") or "") == "abc123")
+    finally:
+        s.internal_token = original
+
+
 def main() -> int:
     for test in (
         test_sanitize,
@@ -327,6 +381,7 @@ def main() -> int:
         test_proactivity_gate,
         test_empty_reply_guard,
         test_circadian_and_mood_reach_the_prompt,
+        test_internal_proxy_requires_token,
     ):
         test()
     print(f"\n=== {passed} passed, {len(failed)} failed ===")
