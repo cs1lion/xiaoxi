@@ -34,7 +34,7 @@
 |---|---|---|
 | 类型检查 | `npm run check` | exit 0 |
 | 纯逻辑单测 | `npm run test:inprocess` | **190/190**，0 fail |
-| 源色审计 | `node scripts/audit-palette.mjs` | 世界 **16** / UI **8** / 共享 **1**（`#e3a13c`）/ 并集 **23** / 越界 0 |
+| 源色审计 | `node scripts/audit-palette.mjs` | 世界 **24** / UI **8** / 共享 **1**（`#e3a13c`）/ 并集 **31** / 越界 0（2026-10-20 基线 `bd2a8a7` 为 16/8/1/23，后经 24 色 ADR 扩为 W17–W24，见 §4 B1） |
 | 严格模式 | `node scripts/audit-palette.mjs --strict` | exit 0 |
 | 整门禁 | `python scripts/test_pixel_world.py`（worktree 根，用主仓 venv 的 python） | **PASS，exit 0** |
 | 浏览器 smoke | `node scripts/smoke.mjs`（114 项）+ `LEDGER=1`（21 项） | **未验证**（ego-browser 就绪前，见 §7） |
@@ -102,7 +102,7 @@ World Builder 脚本 + Chief 代跑 ego-browser；**不是**本轮升级的正�
 
 | # | 检查 | 依据 |
 |---|---|---|
-| B1 | 源色预算不破：audit **16/8/1/23**、`--strict` exit 0；`palette-budget.test.ts` 全绿（含"render/scenes 无 canvas 颜色字面量""token 值等于提案 16 色"两条） | 色数铁律；**加色必须 ADR + 用户批准**，无 ADR 加色 = P1 |
+| B1 | 源色预算不破：audit **24/8/1/31**、`--strict` exit 0；`palette-budget.test.ts` 全绿（含"render/scenes 无 canvas 颜色字面量""token 值等于提案 24 色"两条） | 色数铁律；**加色必须 ADR + 用户批准**，无 ADR 加色 = P1 |
 | B2 | 中文不画进 canvas：`no-cjk-canvas.test.ts` 绿 | D5-A |
 | B3 | 动画纪律：`anim-frames.test.ts` 绿（12fps 采样、姿态偏移整数像素、位置取整、采样是纯函数） | D1-A |
 | B4 | overlay 投影：`labels.test.ts` 绿（100%/200%/400%、非整数 DPR 不抖动、对齐误差 ≤1 逻辑像素） | D5-A |
