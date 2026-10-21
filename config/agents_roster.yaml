@@ -101,8 +101,12 @@ agents:
       AQI_CLAUDE_MODEL: "claude-opus-5-5"
       AQI_CLAUDE_TIMEOUT: "360"
       AQI_WORKSPACE_ROOT: "data/commissions"
-    summary: 真机 Claude Code：读写文件、跑命令、实现与修复；成果落在独立工作目录
-    strengths: [实现, 代码, 文件, 写入, 修改, 脚本, 测试, 重构, 命令, 修复]
+    # 单次 prompt 实测 15.3–23.7 万 tokens（多轮工具调用累积，非系统提示开销），
+    # 长期贴着 120K 质量闸。代码/脚本/测试/重构这类会触发多轮读写的活让给 dsh
+    # （同一任务单次最高仅 2,586 tokens，见 issue #2 诊断）。Claude Code 保留它
+    # 真正不可替代的短操作：单文件改写与跑命令。
+    summary: 真机 Claude Code：单文件改写与跑命令；成果落在独立工作目录
+    strengths: [文件, 写入, 修改, 命令, 修复]
     weaknesses: [不碰记忆与协议契约, 不做无法验证的审美判断]
     cost_tier: high
     max_concurrent: 1
@@ -146,8 +150,10 @@ agents:
       DSH_PERMISSION_MODE: "danger-full-access"
       AQI_DSH_TIMEOUT: "300"
       AQI_WORKSPACE_ROOT: "data/commissions"
-    summary: 真机 DeepSeek Harness：多步任务、长上下文、调研、分析与代码；成果落在独立工作目录
-    strengths: [多步, 长任务, 调研, 分析, 代码, 文件, 汇总, 计划, 检索, 修复]
+    # 自带 session 与 compaction，每轮只发增量：同一代码任务单次 prompt 最高
+    # 2,586 tokens（Claude Code 同一任务 152,976）。长任务默认落这里。
+    summary: 真机 DeepSeek Harness：多步任务、长上下文、代码、调研与分析与实现；成果落在独立工作目录
+    strengths: [多步, 长任务, 调研, 分析, 代码, 脚本, 测试, 实现, 重构, 文件, 汇总, 计划, 检索, 修复]
     weaknesses: [不碰记忆与协议契约, 不做无法验证的审美判断]
     cost_tier: medium
     max_concurrent: 1
