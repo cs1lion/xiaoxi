@@ -261,6 +261,50 @@ def test_roster_selection_and_capacity() -> None:
     check("笔录官满载就换将", best is not None and best["id"] != "scribe")
 
 
+def test_code_tasks_route_to_low_token_worker() -> None:
+    """代码类任务必须落到 dsh，不能落到 claude（issue #2）。
+
+    claude 的 Claude Code 每轮重发全部历史，同一代码任务单次 prompt 实测
+    152,976 tokens（多轮累积，非系统提示开销），贴着 120K 质量闸反复被打回；
+    dsh 自带 session 与 compaction，同一任务单次最高 2,586 tokens。
+
+    这条锁的是「长任务关键词归 dsh、短操作留 claude」的分工，防止有人把
+    代码/脚本/测试/重构加回 claude 的 strengths 而让预算闸重新爆掉。
+    """
+    print("[code task routing]")
+    roster = load_roster()
+    workers = {w["id"]: w for w in roster_agents(roster)}
+    # 真实不变量：claude 不得再持有「会触发多轮工具调用」的长任务关键词。
+    # 只断言「选中 dsh」是假绿——dsh 的 strengths 也含这些词，claude 加回来时
+    # 靠 cost_tier 仍然输，测试照样绿。必须锁 roster 分工本身。
+    long_task_words = {"代码", "脚本", "测试", "实现", "重构"}
+    claude_words = set(workers["claude"].get("strengths") or [])
+    leaked = sorted(claude_words & long_task_words)
+    check("claude 的 strengths 不含长任务关键词（否则预算闸会再爆）",
+          not leaked, f"仍含 {leaked}")
+    dsh_words = set(workers["dsh"].get("strengths") or [])
+    check("dsh 接住全部长任务关键词", long_task_words <= dsh_words,
+          f"缺 {sorted(long_task_words - dsh_words)}")
+    # 行为侧：代码任务确实落到 dsh
+    code_tasks = [
+        "写一个 Python 脚本，统计某个目录下所有 .py 文件的行数",
+        "实现一个登录模块并补单测",
+        "重构这段代码",
+        "跑一下测试看看",
+    ]
+    for text in code_tasks:
+        best, ranked = select_agent(roster, text)
+        picked = best["id"] if best else None
+        check(f"代码任务落到 dsh：{text[:16]}", picked == "dsh", f"实际 {picked}")
+    # 反向：文档/调研类不能被 dsh 抢走
+    doc_best, _ = select_agent(roster, "整理一份周报文档，汇总本周进展")
+    check("文档任务仍走 workbuddy", doc_best is not None and doc_best["id"] == "workbuddy",
+          f"实际 {doc_best["id"] if doc_best else None}")
+    research_best, _ = select_agent(roster, "调研一下最近的像素游戏渲染技术")
+    check("调研任务仍走 scout", research_best is not None and research_best["id"] == "scout",
+          f"实际 {research_best["id"] if research_best else None}")
+
+
 def test_memory_block_is_framed() -> None:
     print("[memory framing]")
     from server.memory.commission_context import gather, render_memory_block
@@ -920,7 +964,7 @@ def main() -> int:
                  test_telemetry_gateway_proxy, test_evaluator_layers,
                  test_evaluator_self_evolution, test_dispatcher_lifecycle,
                  test_dispatcher_retry_cap, test_answer_starts_a_new_attempt,
-                 test_boss_rejection_learns,
+                 test_boss_rejection_learns, test_code_tasks_route_to_low_token_worker,
                  test_delegate_without_worker, test_real_usage_and_partial_failure,
                  test_spinning_alert_lands_in_telemetry, test_front_intents,
                  test_front_samples_and_report, test_orchestrator_route_needs_real_state,
