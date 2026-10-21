@@ -55,6 +55,21 @@
           8px 8px 0 0 color-mix(in srgb, var(--base) 22%, transparent);
       }
       #app canvas { display: block; image-rendering: pixelated; }
+      /* 小地图：叠在舞台右上角，不挡世界主体。点它跳转镜头。 */
+      #minimap {
+        position: absolute;
+        top: 8px;
+        right: 8px;
+        z-index: 5;
+        line-height: 0;
+        border: 1px solid var(--line);
+        background: var(--base);
+        cursor: crosshair;
+        /* 与 #app 同一套硬投影语言，不引入模糊。 */
+        box-shadow:
+          2px 2px 0 0 color-mix(in srgb, var(--base) 55%, transparent);
+      }
+      #minimap canvas { display: block; image-rendering: pixelated; }
       /* 动态中文 DOM overlay（D5-A）：按 canvas 实际位置换算，不遮输入/纸面。 */
       #world-overlay {
         position: absolute;
@@ -303,6 +318,7 @@
     <div id="stage">
       <div id="app"></div>
       <div id="world-overlay"></div>
+      <div id="minimap" role="group" aria-label="世界小地图"></div>
     </div>
 
     <div id="status" role="status">世界正在醒来…</div>

@@ -10,14 +10,12 @@
  */
 
 import Phaser from 'phaser';
-import { GRID_WIDTH, GRID_HEIGHT, TILE_PX } from '../world/setup.ts';
+import { TILE_PX } from '../world/setup.ts';
 import type { WorldSnapshot } from '../world/types.ts';
 import { WORLD } from '../world/palette-data.ts';
 import { propFootY } from './prop-depth.ts';
 import { PHASES, type PhaseId, type PhaseRecipe } from './day-phase.ts';
 
-const WIDTH = GRID_WIDTH * TILE_PX;
-const HEIGHT = GRID_HEIGHT * TILE_PX;
 const DIM_DEPTH = 8009;
 const GLOW_DEPTH = 8010;
 const FIREFLY_DEPTH = 8011;
@@ -75,7 +73,19 @@ function blend(from: PhaseRecipe, to: PhaseRecipe, t: number): Blend {
   };
 }
 
-export function createPhaseView(scene: Phaser.Scene): PhaseView {
+/**
+ * 时相层覆盖**整个世界**，不是画布。
+ *
+ * 单屏时代两者相等，所以写死常量没问题；大世界里画布只是世界的一小块，
+ * 若还用画布尺寸，压暗只覆盖视野、雾带贴在视野底部——走两步就露馅。
+ */
+export function createPhaseView(
+  scene: Phaser.Scene,
+  worldWidth: number,
+  worldHeight: number,
+): PhaseView {
+  const WIDTH = worldWidth;
+  const HEIGHT = worldHeight;
   const dim = scene.add.rectangle(0, 0, WIDTH, HEIGHT, WORLD.deepShade, 0).setOrigin(0, 0);
   dim.setDepth(DIM_DEPTH);
 
@@ -185,15 +195,16 @@ export function createPhaseView(scene: Phaser.Scene): PhaseView {
    * 都失败的原因是雾贴到画布边缘。现在把雾放在画面中下段，上下都留出草地，
    * 读成「雾浮在田地上」，而不是「画面缺了一块」。
    */
-  const drawMist = (view: Blend): void => {
+  const drawMist = (view: Blend, cameraY: number, viewHeight: number): void => {
     mist.clear();
     const band = Math.round(view.mistBand);
     if (band <= 0 || view.mist <= 0.001) return;
 
-    // 雾必须落在街面**以下**：盖到街道会糊住角色和铺子门口，那是最该看清的地方。
-    // 街道底沿约在 0.73 屏高处，雾带从这里往下铺，底端留一点草地收边。
-    const top = Math.round(HEIGHT * 0.74);
-    const bottom = Math.min(HEIGHT - 8, top + band);
+    // 雾跟着**镜头**走，不跟着世界底边：大世界里世界高 960px，视野只有 320px，
+    // 按世界高度算的雾带会永远落在视野之外（实测晨与午只剩 0.8% 差异）。
+    // 雾是"近地面的空气"，镜头看到哪片地，雾就在那片地的下段。
+    const top = Math.round(cameraY + viewHeight * 0.62);
+    const bottom = Math.min(cameraY + viewHeight, top + band);
     const span = Math.max(1, bottom - top);
     for (let y = top; y < bottom; y += 1) {
       // 中间最浓，两端趋零，避免出现硬边。
@@ -249,7 +260,7 @@ export function createPhaseView(scene: Phaser.Scene): PhaseView {
         drawGlows(snapshot, view);
       }
       drawFireflies(snapshot, view);
-      drawMist(view);
+      drawMist(view, scene.cameras.main.scrollY, scene.cameras.main.height / scene.cameras.main.zoom);
     },
   };
 

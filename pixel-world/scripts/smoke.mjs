@@ -253,8 +253,10 @@ async function runSandboxSuite() {
     const villager = snapshot.villagers[0];
     const nameEl = names[0];
     const scale = canvasRect.width / 480;
-    const expectedX = (villager.pos.x + 0.5) * 16 * scale;
-    const expectedY = ((villager.pos.y + 1) * 16 - 30) * scale;
+    // 大世界里画布只是世界的一小块：必须减掉相机偏移，否则期望值会差一整个屏幕。
+    const cam = window.Oracle.camera();
+    const expectedX = ((villager.pos.x + 0.5) * 16 - cam.scrollX) * scale;
+    const expectedY = ((villager.pos.y + 1) * 16 - 30 - cam.scrollY) * scale;
     const actualX = Number.parseFloat(nameEl?.style.left ?? 'NaN');
     const actualY = Number.parseFloat(nameEl?.style.top ?? 'NaN');
     return {

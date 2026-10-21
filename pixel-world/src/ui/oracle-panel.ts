@@ -24,6 +24,10 @@ export interface OracleApi {
   readonly confirmCreation: () => { readonly ok: boolean; readonly message: string };
   readonly cancelCreation: () => { readonly ok: boolean; readonly message: string };
   readonly creation: () => { readonly prefabId: string; readonly ghostAt: unknown } | null;
+  /** 立刻把镜头中心对准世界坐标。 */
+  readonly centerCameraOn: (x: number, y: number) => void;
+  /** 只查询某格能不能建，不改变状态。 */
+  readonly canPlaceAt: (cell: { readonly x: number; readonly y: number }) => boolean;
   readonly feed: (message: {
     readonly type: 'task.assigned';
     readonly taskId: string;

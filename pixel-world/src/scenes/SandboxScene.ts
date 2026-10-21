@@ -18,6 +18,8 @@ import { createAccentEmitter, ensureAccentTextures, type AccentEmitter } from '.
 import { createWeatherView, type WeatherView } from '../render/weather.ts';
 import { createPhaseView, type PhaseView } from '../render/phase-view.ts';
 import { createGhostView, type GhostView } from '../render/ghost.ts';
+import { createCameraController, type CameraController } from '../render/camera-controller.ts';
+import { createMinimapView, type MinimapView } from '../render/minimap.ts';
 import { checkPlacement, hintFor } from '../world/setup.ts';
 import { parsePhaseParam, phaseAt, type PhaseId } from '../render/day-phase.ts';
 import { createDecorView, type DecorView } from '../render/decor.ts';
@@ -72,6 +74,10 @@ export class SandboxScene extends Phaser.Scene {
   /** 造物模式会话。null 表示不在造物模式里。 */
   private creation: { readonly prefabId: string; ghostAt: GridPoint | null } | null = null;
   private ghost!: GhostView;
+  private cameraCtl!: CameraController;
+  private minimap: MinimapView | null = null;
+  /** 拖拽平移的起点（屏幕坐标）；null 表示没在拖。 */
+  private dragFrom: { x: number; y: number } | null = null;
   private lastConstructionKey = '';
   private readonly lastBubbles = new Map<string, string | null>();
   private readonly animalese: Animalese = createLazyAnimalese();
@@ -125,9 +131,61 @@ export class SandboxScene extends Phaser.Scene {
       view: createBuilding(this, building, originX, originY),
       emitter: createAccentEmitter(this, building.accent),
     }));
-    this.weatherView = createWeatherView(this);
-    this.phaseView = createPhaseView(this);
+    // 覆盖层按**世界**尺寸建，不是画布尺寸：大世界里镜头只是世界的一小块。
+    const worldPx = {
+      w: this.world.grid.width * TILE_PX,
+      h: this.world.grid.height * TILE_PX,
+    };
+    this.weatherView = createWeatherView(this, worldPx.w, worldPx.h);
+    this.phaseView = createPhaseView(this, worldPx.w, worldPx.h);
     this.ghost = createGhostView(this);
+
+    // 相机：锁在世界边界内，初始对准祭坛。
+    this.cameraCtl = createCameraController(this, worldPx.w, worldPx.h);
+    // 开局对准祭坛。放在下一帧做：Phaser 在 create() 结束后的首次 preRender
+    // 会用 setBounds 重新夹取镜头，那时 camera.width 才是最终值；
+    // 在 create() 里直接 centerOn 会被这次夹取推回左上角。
+    const focusX = this.world.altar.x * TILE_PX;
+    const focusY = this.world.altar.y * TILE_PX;
+    this.time.delayedCall(0, () => this.cameraCtl.panTo(focusX, focusY, 0));
+    // 自动导播：没活看祭坛，有活看正在忙的人。
+    this.cameraCtl.enableDirector(() => this.directorTargets());
+    this.cameraCtl.disableDirector();
+
+    const minimapHost = document.querySelector<HTMLDivElement>('#minimap');
+    if (minimapHost !== null) {
+      this.minimap = createMinimapView(minimapHost, worldPx.w, worldPx.h);
+      this.minimap.paintTerrain(this.world.grid);
+      minimapHost.addEventListener('pointerdown', (event: PointerEvent) => {
+        const point = this.minimap?.toWorld(event.clientX, event.clientY);
+        if (point === null || point === undefined) return;
+        this.cameraCtl.panTo(point.x, point.y, 300);
+      });
+    }
+
+    // 拖拽平移与滚轮缩放。造物模式优先：那时拖拽不移动镜头。
+    this.input.on('pointerdown', (pointer: Phaser.Input.Pointer) => {
+      if (this.creation !== null) return;
+      this.dragFrom = { x: pointer.x, y: pointer.y };
+    });
+    this.input.on('pointerup', () => {
+      this.dragFrom = null;
+    });
+    this.input.on('pointermove', (pointer: Phaser.Input.Pointer) => {
+      if (this.creation !== null || this.dragFrom === null) return;
+      if (!pointer.isDown) {
+        this.dragFrom = null;
+        return;
+      }
+      const dx = pointer.x - this.dragFrom.x;
+      const dy = pointer.y - this.dragFrom.y;
+      this.dragFrom = { x: pointer.x, y: pointer.y };
+      this.cameraCtl.panBy(dx, dy);
+    });
+    this.input.on('wheel', (_p: unknown, _o: unknown, _dx: number, dy: number) => {
+      if (this.creation !== null) return;
+      this.cameraCtl.zoomStep(dy > 0 ? -1 : 1);
+    });
     // 时相来源：?time= 显式指定（截图与调试用）> ?night=1（旧入口，等价于夜）> 真实本地时间。
     const params = new URLSearchParams(window.location.search);
     const forced = parsePhaseParam(params.get('time'));
@@ -168,10 +226,12 @@ export class SandboxScene extends Phaser.Scene {
     // 做一次无意义的坐标换算。
     this.input.on('pointermove', (pointer: Phaser.Input.Pointer) => {
       if (this.creation === null) return;
-      const world = pointer.positionToCamera(this.cameras.main) as Phaser.Math.Vector2;
+      // 用 worldX/worldY 而不是 positionToCamera：造物模式暂停了 update，
+      // 相机矩阵可能停在上一帧，换算出来的世界坐标会偏。worldX 是事件派发时
+      // 由输入插件按当前相机算好的。
       this.hoverCell({
-        x: Math.floor(world.x / TILE_PX),
-        y: Math.floor(world.y / TILE_PX),
+        x: Math.floor(pointer.worldX / TILE_PX),
+        y: Math.floor(pointer.worldY / TILE_PX),
       });
     });
     // 用 DOM 层的 keydown 而不是 Phaser 的键盘插件：Phaser 只在自己获得焦点时
@@ -389,6 +449,8 @@ export class SandboxScene extends Phaser.Scene {
     }
     this.snapshot = this.sim.snapshot();
     this.renderSnapshot(delta);
+    this.cameraCtl.update(delta);
+    this.minimap?.update(this.snapshot, this.cameraCtl.viewportRect());
     // 只在 update() 返回后写档（命令已结算，ADR_SAVE §4）。
     this.maybeAutoSave();
   }
@@ -495,6 +557,28 @@ export class SandboxScene extends Phaser.Scene {
     this.creation = null;
     this.ghost.hide();
     this.publishCreationHint('');
+  }
+
+  /** 导播要看的地方：有人干活就看工坊，否则看祭坛与正在闲逛的人。 */
+  private directorTargets(): readonly { x: number; y: number }[] {
+    const targets: { x: number; y: number }[] = [];
+    for (const villager of this.snapshot.villagers) {
+      if (villager.mode === 'idle') continue;
+      targets.push({ x: villager.pos.x * TILE_PX, y: villager.pos.y * TILE_PX });
+    }
+    for (const building of this.snapshot.buildings) {
+      const station = this.snapshot.workstations.find(
+        (item) => item.buildingId === building.instanceId,
+      );
+      if (station?.activity.kind !== 'operating') continue;
+      targets.push({
+        x: (building.origin.x + building.footprint.w / 2) * TILE_PX,
+        y: (building.origin.y + building.footprint.h / 2) * TILE_PX,
+      });
+    }
+    // 没活时看祭坛：这是世界的心跳，空镜头也该停在那儿。
+    targets.push({ x: this.world.altar.x * TILE_PX, y: this.world.altar.y * TILE_PX });
+    return targets;
   }
 
   private publishCreationHint(line: string): void {
@@ -647,6 +731,25 @@ export class SandboxScene extends Phaser.Scene {
       confirmCreation: (): CommandResult => this.confirmCreation(),
       cancelCreation: (): CommandResult => this.cancelCreation(),
       creation: () => this.creating(),
+      /** 立刻把镜头中心对准世界坐标（不带动画）。小地图跳转与测试都用它。 */
+      centerCameraOn: (x: number, y: number): void => this.cameraCtl.panTo(x, y, 0),
+      /** 只查询某处能不能建，不改变任何状态。造物模式与测试都用它。 */
+      canPlaceAt: (cell: GridPoint): boolean => {
+        const session = this.creation;
+        if (session === null) return false;
+        const blueprint = this.blueprints.get(session.prefabId);
+        if (blueprint === undefined) return false;
+        return checkPlacement(this.world.grid, blueprint, cell).ok;
+      },
+      camera: () => ({
+        scrollX: this.cameras.main.scrollX,
+        scrollY: this.cameras.main.scrollY,
+        zoom: this.cameras.main.zoom,
+        width: this.cameras.main.width,
+        height: this.cameras.main.height,
+        worldViewX: this.cameras.main.worldView.x,
+        mode: this.cameraCtl.mode(),
+      }),
       miracle: (kind: MiracleKind): void => {
         this.sim.enqueue({ kind: 'miracle', miracle: kind });
       },

@@ -55,22 +55,28 @@ export const LARGE_WORLD_SPEC: GridSpec = {
   height: 60,
   border: BORDER,
   zones: [
-    // 核心：祭坛 + 中心广场 + 市政街
+    // 核心：祭坛 + 中心广场。
+    // 街道只是**路**，不是广场：旧规格里 street 是 4 格宽的十字，
+    // 大世界照抄比例会让整片中心变成铺装，草地被切碎。
     { id: 'altar', x: 37, y: 27, w: 6, h: 6 },
-    { id: 'street', x: 36, y: 20, w: 8, h: 7 },
-    { id: 'street', x: 36, y: 33, w: 8, h: 8 },
-    { id: 'street', x: 29, y: 26, w: 8, h: 8 },
-    { id: 'street', x: 43, y: 26, w: 8, h: 8 },
-    // 工坊环：北工业、东书斋、南农田、西生活
-    { id: 'industry', x: 30, y: 6, w: 20, h: 11 },
-    { id: 'scholarly', x: 54, y: 22, w: 14, h: 16 },
-    { id: 'agriculture', x: 30, y: 44, w: 20, h: 10 },
-    { id: 'living', x: 12, y: 22, w: 14, h: 16 },
-    // 郊野：给外围探索点留出的可建区
-    { id: 'industry', x: 6, y: 6, w: 20, h: 12 },
-    { id: 'scholarly', x: 56, y: 6, w: 18, h: 12 },
-    { id: 'agriculture', x: 6, y: 44, w: 18, h: 10 },
-    { id: 'living', x: 56, y: 44, w: 18, h: 10 },
+    // 十字主干道：3 格宽，从镇中心一直铺到地图边缘，
+    // 这样 A* 才有"先上大路"的落点，玩家也看得出哪里是路。
+    { id: 'street', x: 38, y: 1, w: 4, h: 26 },
+    { id: 'street', x: 38, y: 33, w: 4, h: 26 },
+    { id: 'street', x: 1, y: 28, w: 36, h: 4 },
+    { id: 'street', x: 43, y: 28, w: 36, h: 4 },
+    // 工坊环：北工业、东书斋、南农田、西生活。
+    // 保持旧规格的相对大小（每块约 12×8），不按地图面积等比放大——
+    // 放大会把铺子之间的空地全吃掉，世界看起来像一块工地。
+    { id: 'industry', x: 32, y: 12, w: 16, h: 9 },
+    { id: 'scholarly', x: 53, y: 25, w: 12, h: 10 },
+    { id: 'agriculture', x: 32, y: 40, w: 16, h: 9 },
+    { id: 'living', x: 15, y: 25, w: 12, h: 10 },
+    // 郊野：外围可建区，比镇内小，让草地与林子占主导
+    { id: 'industry', x: 9, y: 9, w: 14, h: 9 },
+    { id: 'scholarly', x: 57, y: 9, w: 14, h: 9 },
+    { id: 'agriculture', x: 9, y: 42, w: 14, h: 9 },
+    { id: 'living', x: 57, y: 42, w: 14, h: 9 },
   ],
 };
 
@@ -193,7 +199,11 @@ export function buildWorld(
   const coverage = validateCoverage(blueprints);
   if (coverage.length > 0) throw new WorldSetupError(coverage.join('；'));
 
-  const grid = new WorldGrid(spec);
+  // 大世界才生成郊野林地：旧规格没有"郊野"，也不该突然长树。
+  const grid = new WorldGrid(
+    spec,
+    spec === LARGE_WORLD_SPEC ? { center: altar } : undefined,
+  );
   const buildings: PlacedBuilding[] = [];
 
   for (const blueprint of blueprints.values()) {
@@ -287,8 +297,11 @@ export function paveFrom(
 }
 
 /** 读档重建网格：只按存档 buildings 顺序重放落位，不存 cells（ADR_SAVE §1.2）。 */
-export function rebuildGridFromPlacements(buildings: readonly PlacedBuilding[]): WorldGrid {
-  const grid = new WorldGrid(WORLD_SPEC);
+export function rebuildGridFromPlacements(
+  buildings: readonly PlacedBuilding[],
+  spec: GridSpec = SMALL_WORLD_SPEC,
+): WorldGrid {
+  const grid = new WorldGrid(spec);
   for (const building of buildings) {
     const placed = grid.place({
       instanceId: building.instanceId,
@@ -324,11 +337,13 @@ function indexBlueprints(blueprints: BlueprintSource): Map<string, PrefabBluepri
 export function buildWorldFromSave(
   buildings: readonly PlacedBuilding[],
   blueprints?: BlueprintSource,
+  spec: GridSpec = SMALL_WORLD_SPEC,
+  altar: GridPoint = ALTAR,
 ): BuiltWorld {
   const resolved = blueprints === undefined ? [...buildings] : rehydratePalettes(buildings, blueprints);
-  const grid = rebuildGridFromPlacements(resolved);
-  assertWorldInvariants(grid, resolved);
-  return { grid, buildings: resolved, altar: ALTAR };
+  const grid = rebuildGridFromPlacements(resolved, spec);
+  assertWorldInvariants(grid, resolved, altar);
+  return { grid, buildings: resolved, altar };
 }
 
 /** 按当前 prefab 表重解每栋楼的 palette；prefab 缺失时保留存档值并告警。 */

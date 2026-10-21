@@ -36,11 +36,52 @@ await page.waitForTimeout(600);
 const box = await page.locator('canvas').first().boundingBox();
 const tile = box.width / 30;
 
-/** 把格坐标换成页面坐标，移动真实鼠标。 */
+/**
+ * 把**世界格坐标**换成页面坐标，移动真实鼠标。
+ *
+ * 大世界里画布只是世界的一小块，必须减掉相机偏移；否则点的是屏幕上那个位置，
+ * 世界坐标却完全在别处（实测建成判定全部失败）。
+ */
 const hover = async (x, y) => {
-  await page.mouse.move(box.x + (x + 0.5) * tile, box.y + (y + 0.5) * tile);
+  // 先把镜头对准目标格：目标可能在视野之外（工业区离祭坛有十几格）。
+  // 不这么做，换算出来的屏幕坐标会是负数，鼠标落在画布外。
+  await page.evaluate(
+    (cell) => window.Oracle.centerCameraOn(cell.x * 16, cell.y * 16),
+    { x, y },
+  );
+  await page.waitForTimeout(120);
+  const cam = await page.evaluate(() => window.Oracle.camera());
+  const worldX = (x + 0.5) * 16 - cam.scrollX;
+  const worldY = (y + 0.5) * 16 - cam.scrollY;
+  await page.mouse.move(box.x + worldX * (box.width / 480), box.y + worldY * (box.height / 320));
   await page.waitForTimeout(180);
 };
+
+/** 祭坛坐标：大世界里它是世界中心 (40,30)，不再是 (15,9)。 */
+const ALTAR = await page.evaluate(() => window.Oracle.view().altar);
+
+/**
+ * 找一个真的能建的位置。
+ *
+ * 大世界里 `workshop_plot` 属于工业区，而工业区不在祭坛旁边——小世界那套
+ * 「往祭坛旁边一放就行」的假设不成立了。这里直接扫描工业区，用真实校验找点。
+ */
+const LEGAL = await page.evaluate(() => {
+  window.Oracle.beginCreation('workshop_plot');
+  let found = null;
+  for (let y = 8; y < 26 && found === null; y += 1) {
+    for (let x = 30; x < 52; x += 1) {
+      // 只查询，不确认：确认会真的建一栋楼，把后面的用例全部污染。
+      if (window.Oracle.canPlaceAt({ x, y })) {
+        found = { x, y };
+        break;
+      }
+    }
+  }
+  window.Oracle.cancelCreation();
+  return found;
+});
+if (LEGAL === null) throw new Error('大世界里找不到合法的造物位置');
 
 // ------------------------------------------------------------------ 进入
 await page.click(`button[data-create="${PREFAB}"]`);
@@ -57,17 +98,17 @@ const t1 = await page.evaluate(() => window.Oracle.view().now);
 check(t0 === t1, '造物模式下世界暂停', `now ${t0} → ${t1}`);
 
 // ------------------------------------------------------------------ 悬停
-await hover(3, 3);
+await hover(ALTAR.x - 1, ALTAR.y - 1);
 const hovered = await page.evaluate(() => window.Oracle.creation());
 check(
   hovered !== null && hovered.ghostAt !== null &&
-    hovered.ghostAt.x === 3 && hovered.ghostAt.y === 3,
+    hovered.ghostAt.x === ALTAR.x - 1 && hovered.ghostAt.y === ALTAR.y - 1,
   '鼠标移动更新幽灵位置',
   JSON.stringify(hovered?.ghostAt),
 );
 
 // ------------------------------------------------------------------ 非法位置
-await hover(15, 8); // 祭坛区
+await hover(ALTAR.x, ALTAR.y); // 祭坛正中：不可建
 const rejected = await page.evaluate(() => window.Oracle.confirmCreation());
 check(rejected.ok === false, '非法位置确认被拒', rejected.message);
 check(
@@ -96,7 +137,7 @@ check(
 // ------------------------------------------------------------------ 回车建成
 await page.click(`button[data-create="${PREFAB}"]`);
 await page.waitForTimeout(300);
-await hover(2, 2);
+await hover(LEGAL.x, LEGAL.y);
 await page.screenshot({ path: `${OUT}/creation-ghost.png` });
 await page.keyboard.press('Enter');
 await page.waitForTimeout(900);
@@ -108,7 +149,7 @@ const built = await page.evaluate(() => ({
 const plot = built.buildings.find((b) => b.id.startsWith(PREFAB));
 check(plot !== undefined, '回车后新楼出现', JSON.stringify(built.buildings.map((b) => b.id)));
 check(
-  plot !== undefined && plot.origin.x === 2 && plot.origin.y === 2,
+  plot !== undefined && plot.origin.x === LEGAL.x && plot.origin.y === LEGAL.y,
   '新楼落在鼠标指定的位置',
   JSON.stringify(plot?.origin),
 );

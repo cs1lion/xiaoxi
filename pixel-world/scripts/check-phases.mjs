@@ -18,9 +18,16 @@ const BASE = process.env.PIXEL_WORLD_URL ?? 'http://127.0.0.1:5188/';
 const OUT = 'eval/screens';
 const PHASES = ['dawn', 'noon', 'dusk', 'night'];
 
-/** 建筑区在 960×640 视口里的纵向范围：全屏草地会淹没局部差异。 */
-const REGION_TOP = 176;
-const REGION_BOTTOM = 468;
+/**
+ * 采样区：整屏。
+ *
+ * 原先是固定的建筑带（y 176..468），因为单屏时代建筑总在同一位置。
+ * 大世界里相机可以停在任意位置，固定带可能整块都是草地或天空，
+ * 差异就被稀释到门槛以下——实测晨/昏只剩 0.6%。改成整屏，
+ * 并把四刻截图统一对准祭坛（相机开局即对准，脚本不再依赖建筑位置）。
+ */
+const REGION_TOP = 0;
+const REGION_BOTTOM = 640;
 
 const reports = [];
 const failures = [];

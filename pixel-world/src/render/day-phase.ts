@@ -67,7 +67,9 @@ export const PHASES: Readonly<Record<PhaseId, PhaseRecipe>> = {
   dusk: {
     label: '黄昏',
     dimColor: WORLD.ink,
-    dim: 0.08,
+    // 0.08 太轻：视野里没有建筑时，黄昏与正午几乎一样（实测 0.6%）。
+    // 提到 0.16 仍明显轻于夜（0.46），但足够让两刻分开。
+    dim: 0.16,
     glow: 1.2,
     litWindows: 2,
     ridge: 0.55,
