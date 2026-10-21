@@ -1,0 +1,31 @@
+# 契约 v2 配置（规范 §3.5）
+#
+# 说明：规范 §3.5 末尾写明「阈值不是常量，不要写死在代码里」，并且要用评测集
+# A 类样本画「补全覆盖率 - 补全准确率」曲线来校准。评测集属于 §8，规范里缺失
+# （见 docs/CONTRACT_V2_SCOPE.md §二），所以下面用的是**规范给的初始默认值**，
+# 不是校准后的结论。
+#
+# 校准完成前不要调低 silent_fill_min：这一档用户看不到，规范要求准确率 ≥ 95%。
+memory:
+  silent_fill_min: 0.85
+  confirm_fill_min: 0.70
+  side_effect_slots_always_show: true
+
+# 追问策略（§3.3）。上限是规范写死的 3 轮，换值需要重新论证追问疲劳。
+clarification:
+  max_rounds: 3
+
+# 目标长度上限（§3.2 goal 约束）
+goal:
+  max_chars: 80
+
+# 验收标准的硬上限（§3.7 L6 / L7）
+lint:
+  max_required_criteria: 8
+  semantic_to_deterministic_ratio: 2.0
+
+# 预算默认值（§3.1 Budget；规范说这些都是配置项）
+budget:
+  max_retries: 3
+  max_step_retries: 2
+  max_wall_s: 900
