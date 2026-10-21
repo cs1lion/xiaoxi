@@ -301,7 +301,7 @@
 | **派单意图只由正则判定，同义改写静默降级（仅 live 路）** | ✅ **已定稿（双路径已区分）** | `pixel-world/src/world/oracle.ts:23-27`（Mock 路）；`server/dialogue/orchestrator.py:60-65`（live 路）；`docs/DEMO_RUN_EVIDENCE.md` §7.7 | **两条路径不同，不能混为一谈。** ① **Mock 路**（`?ledger=off`）：世界自己的关键词路由器 `TASK_RULES` 里 `writing` 规则含「便笺」「整理」（`oracle.ts:23-27`），所以「帮我把便笺整理成三版标题」被**世界本地接住** → 建 Mock 单 → 正常交付（用户 2026-10-20 实跑确认）。② **live 路**（隔离 8001）：由 server 的 `_DELEGATION` 正则判定（`orchestrator.py:60-65`，第一支要求「去(把\|帮我\|替我)…」开头），「帮我把…」**不命中** → 不建单、无任何提示（静默降级）；live 路世界根本收不到这句话，自然什么都看不到。**要演示这个弱点必须走 live 路，Mock 路看不到。** |
 
 **说明**：
-- 除上表外，其余段落（Mock 跑、存档、调试面板、12fps、DOM overlay）均已通过 `test:inprocess` 180/180 与 smoke 逻辑断言覆盖。
+- 除上表外，其余段落（Mock 跑、存档、调试面板、12fps、DOM overlay）均已通过 `test:inprocess` 与 smoke 逻辑断言覆盖（不写死测试数：该数字随测试增长而变，以 `npm run test:inprocess` 输出为准）。
 - 证据文档已回并已复验：QA 独立复验通过（smoke 114/114、P1 关闭），详见 `docs/DEMO_RUN_EVIDENCE.md`；本剧本据此定稿 v1.0。
 
 ---
