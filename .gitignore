@@ -27,9 +27,14 @@ node_modules/
 Thumbs.db
 # Runtime / generated artifacts
 .workbuddy/
+.local/
 assistant-test-*/
 data/
 *.png
+# 精选 README 资产是版本库的一部分；运行时截图仍由上面的 *.png 忽略
+!docs/assets/*.png
+# Review 的 md 是正本；HTML 渲染产物不入库
+docs/REVIEW_ROUND*.html
 config/avatar-eye-calibration*.json
 config/*eye-calibration*.json
 web/avatar/*eye-calibration*.json

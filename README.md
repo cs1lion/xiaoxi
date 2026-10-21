@@ -3,8 +3,7 @@
 **一个采用「台前语音快环 (System 1) + 幕后 Agent 慢环 (System 2)」双系统架构的个人中文语音 Agent。**
 核心解决两个工程痛点：复杂工具调用**阻塞语音流**，长期记忆检索**诱发幻觉编造**。
 
-<!-- GitHub About 建议：Dual-system personal voice agent with confidence-tiered memory and async multi-agent orchestration. -->
-<!-- 视觉锚点待补：Web 工作台截图或 15s 动图（一边语音闲聊、一边抽屉亮呼吸灯汇报后台任务）→ docs/assets/demo.gif -->
+![小溪 Web 工作台：一边语音闲聊，一边在抽屉里看后台任务](docs/assets/demo.png)
 
 ## ✨ 核心特色
 
