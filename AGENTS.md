@@ -47,13 +47,21 @@ worktree 里的 `AGENTS.md` 也可能落后（取决于它检出的提交），�
 **已知残缺**（DSH.md 已认 + 实测补充）：
 
 - 无 per-subagent 模型选择（不要指定 grok / claude 模型）
-- 无 Graphite、Bugbot、`gh stack`
+- **Graphite 不是阻塞项**（2026-10-21 实测更正）：四个相关 playbook 里 `gt` 的直接调用 0 处，
+  本机无 `gt` 也不影响。`gh stack` 是未安装的 `gh` 扩展，同样无人调用。
+  **不要标 `skip: no Graphite in DSH`** —— 这条理由一度写进本文件和 DSH.md，是错的。
 - **无 `deslop` / `create-skill` / `control-cli` / `control-ui` 四个 skill**
   （poteto 要求 commit 前跑 deslop、agent 文案跟 create-skill，这两步只能标
   `skip: skill not installed in DSH`）
-- **`bun` 未安装**：`orchestrate` 与 `autopilot-full` 跑不了（它们要 `bun test`/`bun install`）。
-  `multi-phase-plan` 不受影响（`check-plan.mjs` 走 node）。
-- `claude-code.md` 不存在，被 22 个文件引用；DSH.md 整体替代它，不阻塞。
+- **`bun` 未安装**，但两个 playbook 的阻塞点不同，不要混：
+  `orchestrate` 靠 `bun`（`orch/orch.ts` 与 `watch-pr/watch-pr` 都是 `#!/usr/bin/env bun`），
+  标 `skip: no bun in DSH`；`autopilot-full` / `autopilot-stack` **完全不碰 bun**
+  （四个 playbook 里 bun 提及 0 次），它们卡在第 2 步要 Cursor cloud agent，标 `skip: no cloud agents in DSH`。
+  `babysit` 的 GitHub 路径因 `watch-pr` 是 bun 脚本而跑不了。
+  `multi-phase-plan` 第 6 步能跑（`check-plan.mjs` 走 node）。
+- `claude-code.md` **存在**（`.agents/skills/pstack/docs/harness/claude-code.md`，1805 字节），
+  是个指回 DSH.md 的指针。本文件此前写「不存在」是错的。
+- `/loop` 是 Cursor 内置、盘上无 skill，但 `schedule_create` 的 `every_seconds` 能覆盖。
 
 依赖这些的步骤标 `skip: <reason>`，不要静默跳过，也不要为了跑通而去装。
 
