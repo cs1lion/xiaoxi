@@ -53,13 +53,23 @@ _PROGRESS_SUSPECT = re.compile(
     r'|(?:报|说|讲|同步|查|看|更新)[^，。！？]{0,4}(?:进度|情况|状态))'
 )
 
+# Wording is measured, not guessed. 12 paraphrased delegations x 3 runs each
+# (step-3.7-flash, production prompts):
+#   no constraint           -> 20/36 claimed acceptance (56%)
+#   earlier, shorter phrase -> 1/33
+#   this phrase             -> 0/36
+# The earlier phrase only banned "接单了"; the model routed around it with
+# "我让Worker去跑". This one names the phrasings that actually leaked, and says
+# there is no Worker running either -- the model was inferring one from the
+# persona block ("交给你麾下的 Worker").
 DELEGATION_GUARD = (
-    '这一轮你手上没有真的新建任何工作单，也没有派给谁。'
-    '不许说"接单了"或任何表示已经派下去的话；先把要做什么问清楚。'
+    '这一轮你手上没有真的新建任何工作单，也没有派给谁，更没有任何 Worker 在为你跑东西。'
+    '不许说"接单了"、"我让Worker去跑"、"已经丢给谁"或任何表示已经派下去、已经在跑的话。'
+    '你这一轮只能问清楚要做什么，然后等老板回答。'
 )
 PROGRESS_GUARD = (
-    '这一轮你手上没有正在进行的督办，拿不到任何进度数据。'
-    '不许编造进度或阶段；先问清楚是哪一单，或者说明你现在查不到。'
+    '这一轮你手上没有正在进行的督办，拿不到任何进度数据，也没有任何人替你查过。'
+    '不许编造进度、阶段或数字；只能问清楚是哪一单，或者说明你现在查不到。'
 )
 
 # Trace labels. Kept as constants so the evaluation set can key off them.
