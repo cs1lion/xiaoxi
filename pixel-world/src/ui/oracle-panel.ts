@@ -27,7 +27,16 @@ export interface OracleApi {
   readonly onResult: (listener: (result: { ok: boolean; message: string }) => void) => () => void;
   /** 世界状态一行字。像素画面不画中文，这行归纸面。 */
   readonly onStatus: (listener: (line: string) => void) => () => void;
-  /** 夜景纯渲染开关；不写入世界快照或台账。 */
+  /** 时相：显式指定某一刻（截图/调试），会停止自动推进。 */
+  readonly setPhase: (phase: 'dawn' | 'noon' | 'dusk' | 'night') => void;
+  readonly currentPhase: () => 'dawn' | 'noon' | 'dusk' | 'night';
+  /** 真实时间此刻对应的刻。 */
+  readonly realPhase: () => 'dawn' | 'noon' | 'dusk' | 'night';
+  /** 是否按真实时间自动推进。 */
+  readonly isAutoPhase: () => boolean;
+  /** 恢复按真实本地时间推进。 */
+  readonly setAutoPhase: () => void;
+  /** 旧入口：setNight(true) 等于跳到夜，false 等于回到真实时间。 */
   readonly setNight: (enabled: boolean) => void;
   readonly toggleNight: () => boolean;
   readonly nightEnabled: () => boolean;

@@ -41,9 +41,24 @@ LEDGER=1 node scripts/smoke.mjs     # 台账连通，21 项，需先起 8000
 
 两种模式都靠 `?ledger=off` / `?ledger=on` 切换，默认接台账；离线演示用 `off`。
 
-夜景是纯渲染态：页面按 `N`，或在 URL 加 `?night=1`。它用 `deepShade` 冷暗压住世界，
-再用窗/门/灯/祭坛的 `warmLight` 光晕把暖光提出来；不写世界快照、不写台账，
-也不做自动昼夜循环。
+世界有**一天四刻**：晨雾、正午、黄昏、夜。按本地钟点自动推进（晨 5–9、午 9–17、
+昏 17–20、夜 20–5），切换是渐变的。四刻只改渲染，不写世界快照、不写台账，
+也不驱动任何世界行为——`Simulation` 从不读墙钟。
+
+用 `?time=dawn|noon|dusk|night` 固定某一刻（截图与调试用），固定后停止自动推进。
+页面按 `N` 在夜与昼之间切换；`?night=1` 是旧入口，等价于 `?time=night`。
+
+四刻不是「四档压暗浓度」。只改浓度时晨与昏只差 3.43 luma、1.3% 像素，屏幕上分不出来
+（实测，见 `docs/ADR_WORLD_ALIVE.md` 附录 A）。所以每刻同时改三样：压暗的色与浓、
+亮光的强度、内容态（亮窗数量、屋脊受光、贴地雾带、萤火）。
+
+可辨性有回归门禁，数字不达标就红：
+
+```bash
+cd pixel-world
+npm run dev
+node scripts/check-phases.mjs        # 15 项：逐刻截图并量建筑区像素差
+```
 
 调色板截图（晴 / 雨 / 夜三态，可复现）：
 
@@ -80,6 +95,8 @@ src/world/          纯逻辑，不 import Phaser，可被 node --test 直接加
   bridge.ts         外部 Agent 的双向消息形状与转换
   prefabs.json      蓝图注册表，改世界不用改代码
 src/render/         只读 WorldSnapshot，画地形、建筑、小人、烟、雨、脚手架、摆件
+  day-phase.ts      四刻配方与本地钟点 → 相位的纯函数。不 import Phaser
+  phase-view.ts     把四刻画上去：压暗、暖光、屋脊受光、雾带、萤火
 src/scenes/         唯一的 Phaser 场景：驱动 tick、转输入、转快照
 src/ui/             DOM 神谕面板与报纸。中文永远归 DOM，不画进 canvas
 src/audio/          哇啦哇啦拟音，Web Audio 现场合成，无素材、无 TTS
@@ -119,7 +136,8 @@ scripts/smoke.mjs   浏览器闭环回归
 
 ## 这一版**没有**做的
 
-- 完整的昼夜循环与真实 2D 光照。**夜景已经有了**（纯渲染态：按 `N` 或加 `?night=1`，见上文第 44 行），但那是「夜间配色 + 暖光叠加」，不是按时段推进的光照系统，也没有阴影投射。天气已有（雨/晴）。
+- 真实 2D 光照与阴影投射。**一天四刻已经有了**（纯渲染态，按本地钟点推进），但那仍是
+  「配色 + 压暗 + 暖光叠加」，光源不投影、物体之间不互相遮挡。天气已有（雨/晴）。
 - 真实的工具失败。工坊有 `overheating` 态，但 `shouldOverheat()` 恒为 false：
   没有真实工具时伪造失败就是假动作。
 - 造物主的 LLM 生成。扩建走的是固定样板 + `findBestSlot`，生成层留着没做。

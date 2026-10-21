@@ -18,7 +18,8 @@ import { createVillager, updateVillager, type VillagerView } from '../render/vil
 import { createWorldOverlay, type WorldOverlay } from '../render/world-overlay.ts';
 import { createAccentEmitter, ensureAccentTextures, type AccentEmitter } from '../render/smoke.ts';
 import { createWeatherView, type WeatherView } from '../render/weather.ts';
-import { createNightView, type NightView } from '../render/night.ts';
+import { createPhaseView, type PhaseView } from '../render/phase-view.ts';
+import { parsePhaseParam, phaseAt, type PhaseId } from '../render/day-phase.ts';
 import { createDecorView, type DecorView } from '../render/decor.ts';
 import { composeReport, type DailyReport } from '../world/report.ts';
 import { createLazyAnimalese, type Animalese } from '../audio/animalese.ts';
@@ -55,8 +56,10 @@ export class SandboxScene extends Phaser.Scene {
   private readonly villagerViews = new Map<string, VillagerView>();
   private overlay: WorldOverlay | null = null;
   private weatherView!: WeatherView;
-  private nightView!: NightView;
+  private phaseView!: PhaseView;
   private nightKeyListener: ((event: KeyboardEvent) => void) | null = null;
+  /** 真实时间推进用的定时器；?time= 固定某刻时不启动。 */
+  private phaseTimer: number | null = null;
   private decor!: DecorView;
   private entries: BuildingEntry[] = [];
   private accumulator = 0;
@@ -118,8 +121,22 @@ export class SandboxScene extends Phaser.Scene {
       emitter: createAccentEmitter(this, building.accent),
     }));
     this.weatherView = createWeatherView(this);
-    this.nightView = createNightView(this);
-    this.nightView.setEnabled(new URLSearchParams(window.location.search).get('night') === '1');
+    this.phaseView = createPhaseView(this);
+    // 时相来源：?time= 显式指定（截图与调试用）> ?night=1（旧入口，等价于夜）> 真实本地时间。
+    const params = new URLSearchParams(window.location.search);
+    const forced = parsePhaseParam(params.get('time'));
+    const legacyNight = params.get('night') === '1';
+    const initialPhase: PhaseId = forced ?? (legacyNight ? 'night' : phaseAt(Date.now()));
+    this.phaseView.setPhase(initialPhase);
+    if (forced !== null || legacyNight) {
+      this.phaseView.setAutoAdvance(false);
+    } else {
+      // 每一分钟对一次表：跨过相位边界时自动切换。不读世界时钟，只读墙钟喂渲染。
+      this.phaseTimer = window.setInterval(() => {
+        if (!this.phaseView.isAutoAdvancing()) return;
+        this.phaseView.setPhase(phaseAt(Date.now()));
+      }, 60_000);
+    }
     this.nightKeyListener = (event: KeyboardEvent): void => {
       if (event.key.toLowerCase() !== 'n') return;
       const target = event.target as HTMLElement | null;
@@ -132,7 +149,11 @@ export class SandboxScene extends Phaser.Scene {
       ) {
         return;
       }
-      this.nightView.toggle();
+      // N 键在黄昏/夜之间切换，保留旧的「按 N 看夜景」习惯。
+      this.phaseView.setPhase(
+        this.phaseView.currentPhase() === 'night' ? 'dusk' : 'night',
+      );
+      this.phaseView.setAutoAdvance(false);
     };
     window.addEventListener('keydown', this.nightKeyListener);
 
@@ -198,6 +219,10 @@ export class SandboxScene extends Phaser.Scene {
     if (this.nightKeyListener !== null) {
       window.removeEventListener('keydown', this.nightKeyListener);
       this.nightKeyListener = null;
+    }
+    if (this.phaseTimer !== null) {
+      window.clearInterval(this.phaseTimer);
+      this.phaseTimer = null;
     }
     if (this.onPageHide !== null) {
       window.removeEventListener('pagehide', this.onPageHide);
@@ -431,17 +456,55 @@ export class SandboxScene extends Phaser.Scene {
     };
   }
 
-  /** 夜景是纯渲染态：不写世界、不写台账；页面按 N 或 ?night=1 切换。 */
-  setNight(enabled: boolean): void {
-    this.nightView.setEnabled(enabled);
+  /** 时相是纯渲染态：不写世界、不写台账。 */
+  setPhase(phase: PhaseId): void {
+    this.phaseView.setPhase(phase);
+    this.phaseView.setAutoAdvance(false);
   }
 
+  currentPhase(): PhaseId {
+    return this.phaseView.currentPhase();
+  }
+
+  /** 真实时间此刻对应的刻。用于验证「交还给真实时间」真的落对了。 */
+  realPhase(): PhaseId {
+    return phaseAt(Date.now());
+  }
+
+  /** 是否按真实时间自动推进。 */
+  isAutoPhase(): boolean {
+    return this.phaseView.isAutoAdvancing();
+  }
+
+  /** 恢复按真实时间推进。 */
+  setAutoPhase(): void {
+    this.phaseView.setAutoAdvance(true);
+    this.phaseView.setPhase(phaseAt(Date.now()));
+  }
+
+  /** 旧入口保留语义：setNight(true) 等于跳到夜，false 等于回到真实时间。 */
+  setNight(enabled: boolean): void {
+    if (enabled) this.setPhase('night');
+    else this.setAutoPhase();
+  }
+
+  /**
+   * 在夜与昼之间切换，返回切换后是否为夜。
+   *
+   * 「离开夜」回到的是真实时间那一刻，而不是写死正午——否则早上按一下会跳到中午，
+   * 世界就跟你的作息脱节了。
+   */
   toggleNight(): boolean {
-    return this.nightView.toggle();
+    if (this.phaseView.currentPhase() === 'night') {
+      this.setAutoPhase();
+      return this.phaseView.currentPhase() === 'night';
+    }
+    this.setPhase('night');
+    return true;
   }
 
   nightEnabled(): boolean {
-    return this.nightView.isEnabled();
+    return this.phaseView.currentPhase() === 'night';
   }
 
   private registerOracleApi(): void {
@@ -464,6 +527,11 @@ export class SandboxScene extends Phaser.Scene {
       },
       report: (): DailyReport => composeReport(this.snapshot),
       view: (): WorldSnapshot => this.view(),
+      setPhase: (phase: PhaseId): void => this.setPhase(phase),
+      currentPhase: (): PhaseId => this.currentPhase(),
+      realPhase: (): PhaseId => this.realPhase(),
+      isAutoPhase: (): boolean => this.isAutoPhase(),
+      setAutoPhase: (): void => this.setAutoPhase(),
       setNight: (enabled: boolean): void => this.setNight(enabled),
       toggleNight: (): boolean => this.toggleNight(),
       nightEnabled: (): boolean => this.nightEnabled(),
@@ -522,7 +590,7 @@ export class SandboxScene extends Phaser.Scene {
       updateVillager(view, villager, snapshot.now, 0, 0, ALTITUDE);
     }
     this.weatherView.update(this.sim.weatherIntensity(), delta);
-    this.nightView.update(this.snapshot, delta);
+    this.phaseView.update(this.snapshot, delta);
 
     // 气泡一出现就出声；同一个角色的同一句话不重复念。
     for (const villager of snapshot.villagers) {

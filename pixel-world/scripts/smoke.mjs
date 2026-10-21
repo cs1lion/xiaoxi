@@ -779,8 +779,10 @@ async function runSandboxSuite() {
     '清档后从新世界开始',
   );
 
-  // 夜景是纯渲染态：开关可切换、状态保持，且不写世界/台账。
+  // 时相是纯渲染态：可切到夜、状态保持，且不写世界/台账。
+  // 页面按真实时间开局，所以先显式落到昼，再切夜，断言才与时刻无关。
   const nightWorldBefore = await state();
+  await page.evaluate(() => window.Oracle.setPhase('noon'));
   const nightOn = await page.evaluate(() => window.Oracle.toggleNight());
   check(nightOn === true, '夜景可以打开');
   await page.waitForTimeout(800);
@@ -795,8 +797,18 @@ async function runSandboxSuite() {
       JSON.stringify(nightWorldAfter.faith) === JSON.stringify(nightWorldBefore.faith),
     '夜景不写世界/台账',
   );
-  const nightOff = await page.evaluate(() => window.Oracle.toggleNight());
-  check(nightOff === false, '夜景可以关闭');
+  // 关闭 = 交还给真实时间。真实时间此刻可能就是夜，所以不能断言「不再是夜」；
+  // 断言的是「回到自动推进」，这才是这条开关的契约。
+  await page.evaluate(() => window.Oracle.toggleNight());
+  const afterOff = await page.evaluate(() => ({
+    phase: window.Oracle.currentPhase(),
+    auto: window.Oracle.isAutoPhase(),
+  }));
+  check(afterOff.auto === true, '关闭夜景后交还给真实时间');
+  check(
+    afterOff.phase === (await page.evaluate(() => window.Oracle.realPhase())),
+    '关闭后停在真实时间对应的刻',
+  );
 }
 
 try {
