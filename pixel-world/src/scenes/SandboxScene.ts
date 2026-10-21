@@ -18,6 +18,7 @@ import { createVillager, updateVillager, type VillagerView } from '../render/vil
 import { createWorldOverlay, type WorldOverlay } from '../render/world-overlay.ts';
 import { createAccentEmitter, ensureAccentTextures, type AccentEmitter } from '../render/smoke.ts';
 import { createWeatherView, type WeatherView } from '../render/weather.ts';
+import { createNightView, type NightView } from '../render/night.ts';
 import { createDecorView, type DecorView } from '../render/decor.ts';
 import { composeReport, type DailyReport } from '../world/report.ts';
 import { createLazyAnimalese, type Animalese } from '../audio/animalese.ts';
@@ -54,6 +55,8 @@ export class SandboxScene extends Phaser.Scene {
   private readonly villagerViews = new Map<string, VillagerView>();
   private overlay: WorldOverlay | null = null;
   private weatherView!: WeatherView;
+  private nightView!: NightView;
+  private nightKeyListener: ((event: KeyboardEvent) => void) | null = null;
   private decor!: DecorView;
   private entries: BuildingEntry[] = [];
   private accumulator = 0;
@@ -115,6 +118,23 @@ export class SandboxScene extends Phaser.Scene {
       emitter: createAccentEmitter(this, building.accent),
     }));
     this.weatherView = createWeatherView(this);
+    this.nightView = createNightView(this);
+    this.nightView.setEnabled(new URLSearchParams(window.location.search).get('night') === '1');
+    this.nightKeyListener = (event: KeyboardEvent): void => {
+      if (event.key.toLowerCase() !== 'n') return;
+      const target = event.target as HTMLElement | null;
+      if (
+        target !== null &&
+        (target.tagName === 'INPUT' ||
+          target.tagName === 'TEXTAREA' ||
+          target.tagName === 'SELECT' ||
+          target.isContentEditable)
+      ) {
+        return;
+      }
+      this.nightView.toggle();
+    };
+    window.addEventListener('keydown', this.nightKeyListener);
 
     this.drawAltar(originX, originY);
 
@@ -175,6 +195,10 @@ export class SandboxScene extends Phaser.Scene {
     this.ledger = null;
     this.overlay?.dispose();
     this.overlay = null;
+    if (this.nightKeyListener !== null) {
+      window.removeEventListener('keydown', this.nightKeyListener);
+      this.nightKeyListener = null;
+    }
     if (this.onPageHide !== null) {
       window.removeEventListener('pagehide', this.onPageHide);
       this.onPageHide = null;
@@ -407,6 +431,19 @@ export class SandboxScene extends Phaser.Scene {
     };
   }
 
+  /** 夜景是纯渲染态：不写世界、不写台账；页面按 N 或 ?night=1 切换。 */
+  setNight(enabled: boolean): void {
+    this.nightView.setEnabled(enabled);
+  }
+
+  toggleNight(): boolean {
+    return this.nightView.toggle();
+  }
+
+  nightEnabled(): boolean {
+    return this.nightView.isEnabled();
+  }
+
   private registerOracleApi(): void {
     const api = {
       say: (text: string): CommandResult => this.say(text),
@@ -427,6 +464,9 @@ export class SandboxScene extends Phaser.Scene {
       },
       report: (): DailyReport => composeReport(this.snapshot),
       view: (): WorldSnapshot => this.view(),
+      setNight: (enabled: boolean): void => this.setNight(enabled),
+      toggleNight: (): boolean => this.toggleNight(),
+      nightEnabled: (): boolean => this.nightEnabled(),
       events: (limit = 50) => this.recentEvents(limit),
       saveStatus: () => this.saveStatus(),
       saveNow: (): CommandResult => this.saveNow(),
@@ -482,6 +522,7 @@ export class SandboxScene extends Phaser.Scene {
       updateVillager(view, villager, snapshot.now, 0, 0, ALTITUDE);
     }
     this.weatherView.update(this.sim.weatherIntensity(), delta);
+    this.nightView.update(this.snapshot, delta);
 
     // 气泡一出现就出声；同一个角色的同一句话不重复念。
     for (const villager of snapshot.villagers) {

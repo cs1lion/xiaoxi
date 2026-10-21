@@ -1,6 +1,6 @@
 # ART_STYLE_TARGET — 像素世界视觉升级目标规格（2026-10-20）
 
-> **2026-10-21 更新**：用户批准 24 色 ADR（`docs/ADR_PALETTE_24.md`），新增 W17–W24；本文所有“16 色 / 不加色”表述作为当时约束保留，当前预算以 `ART_SPEC.md` §2.1 为准（世界 24 + UI 8，并集 31）。
+> **2026-10-21 更新**：用户批准 24 色 ADR（`docs/ADR_PALETTE_24.md`），新增 W17–W24；本文所有“16 色 / 不加色”表述作为当时约束保留，当前预算以 `ART_SPEC.md` §2.1 为准（世界 24 + UI 8，并集 31）。**夜景渲染态已落地**（`?night=1`/N）；自动昼夜循环仍未做。
 >
 > 作者：像素美术 II · 状态：**P0 四步已落地**（2026-10-20 18:05 复核，基线 HEAD `7514246`：§1.1 落地 `260ad93`、§1.2 落地 `899611d`、§1.3 落地 `7eade0a`、§1.4 落地 `7514246`；本文 file:line 已按 `7514246` 实测修正）。**注意**：行号随每次施工变动，引用一律以「文件 + 符号名」为准（`tilemap.ts` 在 P0-4 从 127 行涨到 237 行）
 > 依据：`docs/PIXEL_WORLD_RESEARCH.md`（Stardew / AI Town / Generative Agents / Habitica 反面教材）、`docs/ART_SPEC.md` v0.2（已定稿）、`docs/ART_S4_OBJECTIVE_REVIEW.md`（现状实测）、`docs/PIXEL_WORLD_ARCHITECTURE.md`

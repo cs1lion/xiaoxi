@@ -22,7 +22,7 @@ npm run dev        # http://127.0.0.1:5188
 
 ```bash
 cd pixel-world
-npm test           # 纯逻辑，139 项，不需要浏览器
+npm test           # 纯逻辑，221 项，不需要浏览器
 npm run check      # 类型检查
 npm run build      # tsc + vite build
 ```
@@ -31,7 +31,7 @@ npm run build      # tsc + vite build
 
 ```bash
 cd pixel-world
-node scripts/smoke.mjs              # 沙盒闭环，114 项，不依赖本地服务
+node scripts/smoke.mjs              # 沙盒闭环，118 项，不依赖本地服务
 LEDGER=1 node scripts/smoke.mjs     # 台账连通，21 项，需先起 8000
 ```
 
@@ -40,6 +40,10 @@ LEDGER=1 node scripts/smoke.mjs     # 台账连通，21 项，需先起 8000
 "上游派活 → 她动起来"和"上游收工 → 她交付"。
 
 两种模式都靠 `?ledger=off` / `?ledger=on` 切换，默认接台账；离线演示用 `off`。
+
+夜景是纯渲染态：页面按 `N`，或在 URL 加 `?night=1`。它用 `deepShade` 冷暗压住世界，
+再用窗/门/灯/祭坛的 `warmLight` 光晕把暖光提出来；不写世界快照、不写台账，
+也不做自动昼夜循环。
 
 调色板截图（晴 / 雨 / 夜三态，可复现）：
 

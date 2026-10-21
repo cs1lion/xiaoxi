@@ -34,6 +34,14 @@ import process from 'node:process';
 
 const CDP_URL = process.env.CDP_URL ?? 'http://127.0.0.1:9333';
 const PAGE_URL = process.env.PIXEL_WORLD_URL ?? 'http://127.0.0.1:5188/?ledger=off';
+
+/** 夜景走产品渲染态（?night=1），不再用 brightness 滤镜冒充。 */
+function withNight(url, night) {
+  if (!night) return url;
+  const next = new URL(url);
+  next.searchParams.set('night', '1');
+  return next.toString();
+}
 const OUT = 'eval/screens';
 const SEED = Number(process.env.PALETTE_SEED ?? 20261019);
 const FRAME_MS = 1000 / 60;
@@ -113,7 +121,7 @@ async function shoot(context, name, { rain = false, night = false }) {
     rainAt: RAIN_CLICK_AT,
     rain,
   });
-  await page.goto(PAGE_URL, { waitUntil: 'load' });
+  await page.goto(withNight(PAGE_URL, night), { waitUntil: 'load' });
   await page.waitForFunction(() => window.__CAPTURE_STATE__ !== undefined, null, { timeout: TIMEOUT });
   await page.waitForFunction((stop) => window.__CAPTURE_STATE__.frame >= stop, STOP_AT, { timeout: TIMEOUT });
   await page.waitForTimeout(300);
@@ -122,14 +130,6 @@ async function shoot(context, name, { rain = false, night = false }) {
   if (rain !== (weather === 'rain')) {
     await page.close();
     throw new Error(`${name}: 天气状态不符（期望 ${rain ? 'rain' : 'clear'}，实际 ${weather}）`);
-  }
-  if (night) {
-    await page.evaluate(() => {
-      const canvas = document.querySelector('canvas');
-      // 1.0 没有昼夜系统：这里只是只读试验用的整体压暗，截图不参与验收标准。
-      if (canvas !== null) canvas.style.filter = 'brightness(0.55)';
-    });
-    await page.waitForTimeout(120);
   }
 
   const hashes = {};
@@ -397,14 +397,14 @@ async function runAnim(context) {
 
 const SLICE = { buildAt: 500, rainAt: 800, targetNow: 6000 };
 
-async function openSliceWorld(context, { rain = false } = {}) {
+async function openSliceWorld(context, { rain = false, night = false } = {}) {
   const page = await context.newPage();
   await page.setViewportSize({ width: 1010, height: 1400 });
   // 扩建与下雨都按 sim 时间在页面 rAF 内点击，避免 Node 轮询带来的一个模拟步误差。
   const pendingClicks = [{ selector: '[data-build="workshop_plot"]', atNow: SLICE.buildAt }];
   if (rain) pendingClicks.push({ selector: '#rain', atNow: SLICE.rainAt });
   await page.addInitScript(animInitScript, { seed: SEED, pendingClicks });
-  await page.goto(PAGE_URL, { waitUntil: 'load' });
+  await page.goto(withNight(PAGE_URL, night), { waitUntil: 'load' });
   await page.waitForFunction(() => window.Oracle !== undefined, null, { timeout: TIMEOUT });
   return page;
 }
@@ -430,7 +430,7 @@ function readSliceState(page) {
 }
 
 async function shootSlice(context, name, { rain = false, night = false }) {
-  const page = await openSliceWorld(context, { rain });
+  const page = await openSliceWorld(context, { rain, night });
   await page.waitForFunction((t) => window.Oracle.view().now >= t, SLICE.targetNow, {
     timeout: TIMEOUT,
     polling: 16,
@@ -462,12 +462,11 @@ async function shootSlice(context, name, { rain = false, night = false }) {
   }
 
   if (night) {
-    await page.evaluate(() => {
-      const canvas = document.querySelector('canvas');
-      // 1.0 没有昼夜系统：整体压暗只是只读试验，不是产品态。
-      if (canvas !== null) canvas.style.filter = 'brightness(0.55)';
-    });
-    await page.waitForTimeout(120);
+    const nightOn = await page.evaluate(() => window.Oracle.nightEnabled());
+    if (!nightOn) {
+      await page.close();
+      throw new Error(`${name}: ?night=1 没有打开夜景渲染态`);
+    }
   }
 
   const hashes = {};
@@ -548,7 +547,7 @@ if (scenario === 'slice') {
     `# 切片评审 manifest（task-30 / E-16；种子 ${SEED}；页面 ${PAGE_URL}）`,
     `# 冻结：sim now ≥ ${SLICE.targetNow} 后停 rAF；扩建点击 ${SLICE.buildAt}ms，下雨点击 ${SLICE.rainAt}ms`,
     '# 相机：main.ts 固定 Scale.NONE + zoom 2 → canvas 960×640；页面 scroll 必须为 0',
-    '# night = filter(brightness 0.55)：1.0 无昼夜，只读试验，不是产品态',
+    '# night = render mode (?night=1)：deepShade 冷暗 + 窗/门/灯/祭坛暖光，不是 brightness 滤镜',
     '# DOM：100 档保留页头/overlay（给人看窗口实际效果）；其余四档 hide #world-overlay/#debug-panel/#debug-toggle（visibility:hidden，不重排）',
     '# 200pct 与 canvas 等价：canvas=960×640=native×2（Scale.NONE + zoom 2）',
     '# state\train\tnight\ttargetNow\tactualNow\tweather\tbuildingCount\tinstanceIds\tcanvasBox\tscroll\t100\tcanvas\t200pct\tnative-480x320\t400pct',
@@ -558,7 +557,7 @@ if (scenario === 'slice') {
       [
         capture.name,
         capture.rain ? 'rain' : 'dry',
-        capture.night ? 'filter(brightness 0.55)' : 'none',
+        capture.night ? 'render:night' : 'none',
         capture.targetNow,
         capture.now,
         capture.weather,

@@ -27,6 +27,10 @@ export interface OracleApi {
   readonly onResult: (listener: (result: { ok: boolean; message: string }) => void) => () => void;
   /** 世界状态一行字。像素画面不画中文，这行归纸面。 */
   readonly onStatus: (listener: (line: string) => void) => () => void;
+  /** 夜景纯渲染开关；不写入世界快照或台账。 */
+  readonly setNight: (enabled: boolean) => void;
+  readonly toggleNight: () => boolean;
+  readonly nightEnabled: () => boolean;
   readonly report: () => ReportApi;
 }
 

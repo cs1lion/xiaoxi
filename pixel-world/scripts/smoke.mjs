@@ -768,6 +768,25 @@ async function runSandboxSuite() {
     freshWorld.buildings.length === 3 && freshWorld.faith.milestones === 0,
     '清档后从新世界开始',
   );
+
+  // 夜景是纯渲染态：开关可切换、状态保持，且不写世界/台账。
+  const nightWorldBefore = await state();
+  const nightOn = await page.evaluate(() => window.Oracle.toggleNight());
+  check(nightOn === true, '夜景可以打开');
+  await page.waitForTimeout(800);
+  check(
+    (await page.evaluate(() => window.Oracle.nightEnabled())) === true,
+    '夜景状态保持',
+  );
+  const nightWorldAfter = await state();
+  check(
+    JSON.stringify(nightWorldAfter.buildings) === JSON.stringify(nightWorldBefore.buildings) &&
+      nightWorldAfter.weather === nightWorldBefore.weather &&
+      JSON.stringify(nightWorldAfter.faith) === JSON.stringify(nightWorldBefore.faith),
+    '夜景不写世界/台账',
+  );
+  const nightOff = await page.evaluate(() => window.Oracle.toggleNight());
+  check(nightOff === false, '夜景可以关闭');
 }
 
 try {
