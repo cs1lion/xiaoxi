@@ -48,6 +48,25 @@ jobs:
       - name: 回归评测（离线层，evals/cases）
         run: python scripts/run_evals.py
 
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: 'npm'
+
+      # Python 测试里有脚本会 shell out 到 Node：storage archive 的 hold-lock.ts、
+      # worker shim 回归、pixel_world gate。Node 与这些依赖必须在 Python 测试之前就位。
+      - name: Install Node dependencies
+        run: npm ci
+
+      - name: Install agent-runtime dependencies
+        working-directory: agent-runtime
+        run: npm ci
+
+      - name: Install pixel-world dependencies
+        working-directory: pixel-world
+        run: npm ci
+
       - name: Python 测试（逐脚本运行，跳过计通过）
         run: |
           failed=0
@@ -57,15 +76,6 @@ jobs:
             echo "::endgroup::"
           done
           exit $failed
-
-      - name: Set up Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: '22'
-          cache: 'npm'
-
-      - name: Install Node dependencies
-        run: npm ci
 
       - name: Node 单测（无浏览器 / 无模型依赖）
         run: npm test

@@ -124,9 +124,14 @@ class CacheKeyTests(unittest.TestCase):
         from server.config import settings
         self.settings = settings
         self.saved = self.settings.tts_trim_silence
+        self.saved_engine = self.settings.tts_engine
+        # Trimming re-encodes PCM to WAV only on StepAudio; the cache-key contract
+        # is about that wire-format switch, not the Edge path (which never trims).
+        self.settings.tts_engine = "stepaudio"
 
     def tearDown(self):
         self.settings.tts_trim_silence = self.saved
+        self.settings.tts_engine = self.saved_engine
 
     def _key(self):
         from server.speech.tts import TTSEngine
