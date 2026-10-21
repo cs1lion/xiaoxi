@@ -1,6 +1,6 @@
 # 像素世界 S5 服务端接入合同
 
-- **状态**：**服务端已落地**（2026-10-20）；世界端真帧 e2e 待 QA。本文是交接合同，不是新协议。
+- **状态**：**服务端已落地**（2026-10-20）；世界端真帧 e2e 进行中（2026-10-21：A/B/C/E/F/G/H + blocked 可见通过，**D 未达成**，根因是 worker 单次 prompt 421K > 120K，owner=Agent Integration；验收卡见 `docs/S5_D_ACCEPTANCE.md`）。本文是交接合同，不是新协议。
 - **服务端落地**：`server/assistant/executive.py`（`begin_commission` / 公开 `agent_name`，`delegate` 改用 begin+drive）、`server/assistant/service.py`（`world.dispatch` / `world.status`、世界短语路由、`_world_tasks`、并发 2、close 取消）。回归 `scripts/test_world_bridge.py` 71 项全绿。
 - **真实模型探测（2026-10-20，临时库）**：`scripts/probe_world_live.py` 12/12 通过——世界派单句真正选中 `world.dispatch` 并先停在确认门；批准前台账没有新单、批准后恰好一单；回执 `world_visible="unknown"`；状态句选中 `world.status` 并返回指定单；普通提醒请求没有误选世界工具。
 - **日期**：2026-10-20

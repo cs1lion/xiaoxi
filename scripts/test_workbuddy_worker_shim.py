@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import os
 import shutil
 import sys
 import tempfile
@@ -202,6 +203,12 @@ def logs(events: list[dict]) -> list[str]:
 
 
 async def main() -> int:
+    if os.name != "nt":
+        # The fixture launcher is a Windows .cmd (WorkBuddy itself is Windows-only);
+        # on Linux the subprocess cannot start it. Keep the mapping covered on Windows
+        # and skip explicitly instead of reporting a false adapter failure.
+        print("SKIP workbuddy shim: Windows-only .cmd launcher fixture")
+        return 0
     sys.stdout.reconfigure(encoding="utf-8")
     workroot = ROOT / "tmp"
     workroot.mkdir(exist_ok=True)

@@ -1,0 +1,66 @@
+{
+  "captured_at": "2026-10-19T13:05:53+08:00",
+  "source": "GET http://127.0.0.1:8000/api/executive/commissions?limit=100",
+  "note": "字段集合与取值来自真实响应（closed_at/updated_at 是 epoch 秒，前端按 closed_at ?? updated_at 派生 completedAt，task-23）；captured 时台账只有 done。blocked/running 两条的 id/status/step_idx/blocked_question/agent_id/title 按 PROTOCOL.md §19 状态机派生，其余字段沿用真实响应。brief/packet/delivery/audit/blocked_question 里的用户文本已清空，只保留契约字段。",
+  "items": [
+    {
+      "id": "c_3fea3a66ba86",
+      "thread_id": "",
+      "title": "重复触发",
+      "brief": "",
+      "agent_id": "scribe",
+      "status": "done",
+      "step_idx": 0,
+      "retry_count": 0,
+      "blocked_question": "",
+      "delivery": {},
+      "audit": {},
+      "packet": {},
+      "rubric_ids": [],
+      "created_at": 1792377786.7275438,
+      "updated_at": 1792377786.7782023,
+      "closed_at": 1792377786.7782023
+    },
+    {
+      "id": "c_fixture_blocked",
+      "thread_id": "",
+      "title": "把便笺整理成三版标题",
+      "brief": "",
+      "agent_id": "scribe",
+      "status": "blocked",
+      "step_idx": 1,
+      "retry_count": 1,
+      "blocked_question": "先按短句还是完整句式？",
+      "delivery": {},
+      "audit": {},
+      "packet": {},
+      "rubric_ids": [
+        "no_unwired_dry_run"
+      ],
+      "created_at": 1792377786.7275438,
+      "updated_at": 1792377786.7782023,
+      "closed_at": null
+    },
+    {
+      "id": "c_fixture_running",
+      "thread_id": "",
+      "title": "实现一个爬虫脚本",
+      "brief": "",
+      "agent_id": "claude",
+      "status": "running",
+      "step_idx": 2,
+      "retry_count": 0,
+      "blocked_question": "",
+      "delivery": {},
+      "audit": {},
+      "packet": {},
+      "rubric_ids": [
+        "no_topbar_button"
+      ],
+      "created_at": 1792377786.7275438,
+      "updated_at": 1792377786.7782023,
+      "closed_at": null
+    }
+  ]
+}
+

@@ -1,0 +1,127 @@
+# 像素世界门禁：仅在 pixel-world/ 变更时触发。
+#
+# 三层：
+#   1. guard：tsc --noEmit + node --test + 调色板报告（report-only）。
+#   2. palette-strict：美术改动单独跑严格调色板预算，超 24/8/31 直接失败。
+#   3. browser-smoke：Playwright + dev server 跑 smoke.mjs，截图作为 artifact 留存，不入库。
+#
+# 本地默认 strict（`python scripts/test_pixel_world.py`）；CI 的 report-only 只用于
+# 不阻塞非美术改动，美术预算由 palette-strict 单独把关。
+name: Pixel World Guard
+
+on:
+  push:
+    paths:
+      - "pixel-world/**"
+      - "scripts/test_pixel_world.py"
+      - ".github/workflows/pixel-world.yml"
+  pull_request:
+    paths:
+      - "pixel-world/**"
+      - "scripts/test_pixel_world.py"
+      - ".github/workflows/pixel-world.yml"
+
+jobs:
+  guard:
+    name: 像素世界门禁（types + logic tests + palette report）
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: "npm"
+          cache-dependency-path: pixel-world/package-lock.json
+
+      - name: Install dependencies
+        working-directory: pixel-world
+        run: npm ci
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Run pixel-world gate
+        run: python scripts/test_pixel_world.py --report-only
+
+      - name: D acceptance checker self-test
+        working-directory: pixel-world
+        run: node scripts/check-s5-d.mjs --self-test
+
+  palette-strict:
+    name: 像素世界调色板 strict（24/8/31）
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Strict palette audit
+        working-directory: pixel-world
+        run: node scripts/audit-palette.mjs --strict
+
+  browser-smoke:
+    name: 像素世界浏览器 smoke + 截图 artifact
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: "npm"
+          cache-dependency-path: |
+            package-lock.json
+            pixel-world/package-lock.json
+
+      - name: Install root browser deps
+        run: npm ci
+
+      - name: Install pixel-world deps
+        working-directory: pixel-world
+        run: npm ci
+
+      - name: Install Chromium
+        run: npx playwright install --with-deps chromium
+
+      - name: Run browser smoke
+        working-directory: pixel-world
+        run: |
+          npm run dev -- --host 127.0.0.1 --port 5188 > /tmp/pixel-world-vite.log 2>&1 &
+          SERVER_PID=$!
+          trap "kill $SERVER_PID || true" EXIT
+          for i in $(seq 1 60); do
+            if curl -fsS http://127.0.0.1:5188 >/dev/null 2>&1; then
+              break
+            fi
+            sleep 1
+          done
+          curl -fsS http://127.0.0.1:5188 >/dev/null
+          node scripts/smoke.mjs
+
+      - name: Upload smoke screenshots
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: pixel-world-smoke-screens
+          path: pixel-world/eval/screens
+          if-no-files-found: warn
+
+      - name: Upload dev server log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: pixel-world-vite-log
+          path: /tmp/pixel-world-vite.log
+          if-no-files-found: warn

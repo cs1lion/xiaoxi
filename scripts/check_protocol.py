@@ -214,6 +214,11 @@ INTERNAL_ROUTES = (
 
 # 协议 §23 的七种标准积木。契约文档、服务端组装器、前端渲染器三方必须同时
 # 认账：少一边不会报错，只会让积木静默变成空卡（后端不产 / 前端不画）。
+# §23.3 的 cmd 动词。前端必须处理前五个；服务端只接受 dispatch:* 的两个。
+# 两边各一份，这里只做"协议里写了、实现里没有"的比对。
+CMD_VERBS = ("ui", "say", "dispatch", "choice")
+SERVER_CMD_VERBS = ("dispatch",)
+
 AQI_BLOCK_KINDS = ("choice_pills", "spotlight_card", "alert_card", "swimlane_strip",
                    "metric_flame", "note_snippet", "memo_note")
 # 协议 §23.1：layout / gaze / source 的取值域，文档与前后端各写一份，这里钉死。
@@ -286,6 +291,30 @@ def check_ui_nav(problems: list[str]) -> None:
 
 DURABLE_ROUTES_TS = ROOT / "agent-runtime" / "src" / "routes.ts"
 DURABLE_ROUTES_PY = ROOT / "server" / "assistant" / "adapters" / "durable.py"
+
+# 像素世界客户端（pixel-world/）消费的 WS 事件。它不是 web/app.js，所以第四类
+# 检查看不见它——改了事件名，世界会静默收不到督办，而两端都不报错。
+# 与 INTERNAL_ROUTES 同一类处理：显式纳管，契约一改静态检查直接报警。
+WORLD_WS_EVENTS = ("commission_update",)
+PIXEL_WORLD_LEDGER = ROOT / "pixel-world" / "src" / "world" / "ledger.ts"
+
+
+def check_world_events(problems: list[str]) -> None:
+    """§19 变更通知：协议文档、服务端广播、世界客户端三方必须认同一个名字。"""
+    if not PIXEL_WORLD_LEDGER.exists():
+        return
+    protocol_text = (ROOT / "docs" / "PROTOCOL.md").read_text(encoding="utf-8")
+    client_text = PIXEL_WORLD_LEDGER.read_text(encoding="utf-8")
+    emitted = emitted_types()
+    for name in WORLD_WS_EVENTS:
+        if name not in protocol_text:
+            problems.append(f"PROTOCOL.md §19 缺事件 {name!r}（契约文档与实现漂移）")
+        if name not in emitted:
+            problems.append(f"服务端没有任何地方发 {name!r}（世界收不到督办变化）")
+        if f"'{name}'" not in client_text and f'"{name}"' not in client_text:
+            problems.append(
+                f"pixel-world 的 ledger.ts 不认 {name!r}（督办变化会被静默丢弃）"
+            )
 
 
 def check_durable_routes(problems: list[str]) -> None:
@@ -473,10 +502,25 @@ def main() -> int:
                 problems.append(f"PROTOCOL.md §23.1 缺 {group_name} 取值 {value!r}")
             if value not in composer_text:
                 problems.append(f"aqi_blocks.py 不认 {group_name}={value!r}（信封校验会静默纠正它）")
+    # ---- 7b. §23.3 的 cmd 动词：协议、前端、服务端三方认账 ----
+    # `choice:<index>` 曾经只写在协议里：前端没有这个分支，点击落进"未知业务
+    # 动词：忽略"，胶囊点了没反应。动词表是前后端的共同白名单，必须机械比对。
+    app_text = APP_JS.read_text(encoding="utf-8")
+    for verb in CMD_VERBS:
+        if f"`{verb}:" not in protocol_text and f"`{verb}:<" not in protocol_text:
+            problems.append(f"PROTOCOL.md §23.3 缺 cmd 动词 {verb!r}")
+        if f'"{verb}"' not in app_text and f"'{verb}'" not in app_text:
+            problems.append(f"web/app.js 不处理 cmd 动词 {verb!r}（胶囊/按钮点了没反应）")
+    for verb in SERVER_CMD_VERBS:
+        if f"`{verb}:" not in protocol_text:
+            problems.append(f"PROTOCOL.md §23.3 缺服务端业务动词 {verb!r}")
+
     # ---- 8. 协议 §24 ui_nav 领航：前后端取值域同步 ----
     check_ui_nav(problems)
     # ---- 9. 慢环 sidecar 路由：Python 适配器与 Node 侧同步 ----
     check_durable_routes(problems)
+    # ---- 11. 像素世界事件：协议、服务端、世界客户端三方认账 ----
+    check_world_events(problems)
     # ---- 10. 同一 (方法, 路径) 只能注册一次：重复注册会让后一个处理函数永不服务 ----
     for (method, route), where in sorted(duplicate_routes().items()):
         problems.append(

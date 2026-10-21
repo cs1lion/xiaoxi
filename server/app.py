@@ -94,6 +94,13 @@ _scheduler_task: asyncio.Task | None = None
 _reconcile_task: asyncio.Task | None = None
 # 启动期续跑的督办：create_task 的返回值必须有人拿住，否则可能被回收。
 _startup_tasks: set[asyncio.Task] = set()
+# 已连上的 /ws 连接。督办状态变化要推给所有在线连接（协议 §19 变更通知）。
+# 用集合而不是列表：连接断开的清理顺序不确定，重复删也要幂等。
+_connections: set["Connection"] = set()
+# 台账订阅的取消函数。shutdown 时解绑，避免测试里残留订阅者。
+_commission_unsubscribe = None
+# startup 时抓住的主事件循环。台账回调可能来自别的线程，靠它转回事件循环。
+_loop: asyncio.AbstractEventLoop | None = None
 # 慢环执行内核（agent-runtime sidecar）。默认不启用，见 config 的 durable 段。
 _durable_supervisor = None
 
@@ -995,10 +1002,77 @@ async def _executive_finish(commission_id: str, action: str, feedback: str = "")
         return
 
 
+async def _broadcast_commission(commission: dict[str, Any]) -> None:
+    """把一条督办的状态变化推给所有在线连接。
+
+    载荷就是台账里那一条（与 GET /api/executive/commissions 的 items 元素同形），
+    前端不必维护第二套字段映射。没有在线连接时静默丢弃：这是旁路通知，
+    状态永远以 REST 台账为准，漏掉一次推送不该让人以为台账坏了。
+    """
+    if not _connections:
+        return
+    payload = {"type": "commission_update", "commission": commission}
+    for conn in list(_connections):
+        if conn.closed:
+            continue
+        try:
+            await conn.send(payload)
+        except Exception:
+            # 一个连接发送失败不影响其它连接；它的清理走自己的 finally。
+            continue
+
+
+def _commission_changed(commission: dict[str, Any]) -> None:
+    """台账回调是同步的，可能来自任意线程（写库路径），所以不能就地 create_task。
+
+    在 startup 时抓住主事件循环，这里用 call_soon_threadsafe 把它转过去。
+    没抓住循环（比如单元测试里没跑 startup）就静默丢弃：推送是旁路，
+    状态永远以 REST 台账为准。
+    """
+    if _loop is None:
+        return
+    try:
+        _loop.call_soon_threadsafe(_spawn_broadcast, commission)
+    except RuntimeError:
+        # 循环已经关了：服务在关闭途中，丢掉这次推送。
+        return
+
+
+def _spawn_broadcast(commission: dict[str, Any]) -> None:
+    task = asyncio.create_task(_broadcast_commission(commission))
+    _startup_tasks.add(task)
+    task.add_done_callback(_startup_tasks.discard)
+
+
 @app.websocket("/ws")
 async def websocket_endpoint(ws: WebSocket) -> None:
+    # 同源校验：只挡浏览器页面，规则与 Connection.bind_editor_insight 的 netloc 比对一致。
+    # 只比 netloc（host:port），不比较 scheme：TLS 终止在反代上时 scope 里是 ws/http、
+    # 浏览器 Origin 却是 https，比 scheme 会把合法同源页面误拒。
+    # 没有 Origin 头（本地脚本、直连测试、健康检查）或 Origin 为空串时按白名单放行。
+    headers = getattr(ws, "headers", None) or {}
+    host = str(headers.get("host") or "").lower()
+    origin = headers.get("origin")
+    if origin:
+        from urllib.parse import urlsplit
+
+        try:
+            origin_netloc = urlsplit(origin).netloc.lower()
+        except ValueError:
+            # 畸形 Origin（如 "http://["）不是合法来源：按跨源拒绝，不能抛成 500。
+            origin_netloc = ""
+        if origin_netloc == "" or origin_netloc != host:
+            # 拒绝发生在 accept 之前：uvicorn 把它落成 HTTP 403 握手失败，浏览器看不到
+            # 1008/reason（它们只留在 ASGI 关闭帧与服务端日志里），这是预期行为。
+            import logging
+
+            logging.getLogger("server.app").warning(
+                "websocket origin rejected: origin=%r host=%r", origin, headers.get("host"))
+            await ws.close(code=1008, reason="cross_origin_denied")
+            return
     await ws.accept()
     conn = Connection(ws)
+    _connections.add(conn)
     store.start_session(conn.session_id)
     await conn.send(
         {
@@ -1193,6 +1267,7 @@ async def websocket_endpoint(ws: WebSocket) -> None:
     except WebSocketDisconnect:
         pass
     finally:
+        _connections.discard(conn)
         await conn.close()
         store.end_session(conn.session_id)
 
@@ -1377,6 +1452,9 @@ async def _start_durable_if_enabled() -> None:
         node=str(cfg.get("node") or "node"),
         startup_timeout=float(cfg.get("startup_timeout") or 15.0),
         auto_restart=bool(cfg.get("auto_restart", True)),
+        # sidecar 的环境变量由 _durable_extra_env 统一算出（含 XIAOXI_APPROVAL_TOOLS、
+        # lease mode、context window、skills/mcp 路径等），必须随进程一起给出：此前只有
+        # 测试设过它，生产里一个工具都没登记，审批 hook 因此从未生效过。
         extra_env=extra_env,
     )
     try:
@@ -1417,9 +1495,21 @@ async def _start_durable_if_enabled() -> None:
             pass
 
 
+# 注意：`_durable_lookup` 只有上面 :1339 那一个定义（直连查询，签名
+# `(commission_id, attempt=0)`）。合并时曾把本分支的「工厂版」定义一起带进来，
+# 后者在文件里位置更靠后，按 Python 的遮蔽规则会覆盖前者——于是两个调用点
+# （reconcile_durable 与 recover_interrupted）拿到的都是 0 参数工厂，
+# `_adopt_durable` 的 `lookup(id, attempt)` 与回退 `lookup(id)` 都会 TypeError，
+# 且第二次抛在 except TypeError 块内无人接，直接穿透到 startup()：
+# 有在飞单（running/briefing）时服务端重启起不来。已删除工厂版，只留直连版。
+
+
 @app.on_event("startup")
 async def startup() -> None:
-    global _scheduler_task
+    global _scheduler_task, _loop, _commission_unsubscribe
+    _loop = asyncio.get_running_loop()
+    # 督办状态变化是旁路推送：台账写成功后通知所有在线连接（协议 §19）。
+    _commission_unsubscribe = executive.ledger.subscribe(_commission_changed)
     orchestrator.set_proactivity(False)
     # 先把执行内核绑好，再收口续跑；否则重派出去的 durable 单没有端点可用。
     await _start_durable_if_enabled()
@@ -1436,7 +1526,12 @@ async def startup() -> None:
 
 @app.on_event("shutdown")
 async def shutdown() -> None:
-    global _durable_supervisor, _reconcile_task
+    global _durable_supervisor, _commission_unsubscribe, _loop, _reconcile_task
+    # 台账订阅解绑：旁路推送的订阅者必须清掉，否则测试里会残留（协议 §19）。
+    if _commission_unsubscribe is not None:
+        _commission_unsubscribe()
+        _commission_unsubscribe = None
+    _loop = None
     editor_insights.close()
     if _reconcile_task is not None:
         _reconcile_task.cancel()

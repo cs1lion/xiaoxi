@@ -11,6 +11,7 @@ from __future__ import annotations
 import asyncio
 import importlib.util
 import json
+import os
 import shutil
 import sys
 import tempfile
@@ -149,8 +150,24 @@ def check(name: str, condition: bool, detail: str = "") -> None:
 def make_fake(root: Path, name: str, source: str) -> Path:
     script = root / f"{name}.py"
     script.write_text(source, encoding="utf-8")
-    launcher = root / f"{name}.cmd"
-    launcher.write_text(f'@echo off\r\n"{PY}" "{script}" %*\r\n', encoding="utf-8")
+    if os.name == "nt":
+        launcher = root / f"{name}.cmd"
+        launcher.write_text(
+            "@echo off" + chr(13) + chr(10)
+            + f'"{PY}" "{script}" %*' + chr(13) + chr(10),
+            encoding="utf-8", newline="",
+        )
+    else:
+        # CI runs on Linux; a Windows .cmd cannot be exec'd there. The shims
+        # invoke the launcher as a program, so an executable shell wrapper is
+        # the POSIX equivalent and keeps the adapter mapping covered on both OSes.
+        launcher = root / f"{name}.sh"
+        launcher.write_text(
+            "#!/bin/sh" + chr(10)
+            + f'exec "{PY}" "{script}" "$@"' + chr(10),
+            encoding="utf-8", newline="",
+        )
+        launcher.chmod(0o755)
     return launcher
 
 

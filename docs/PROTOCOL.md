@@ -346,6 +346,13 @@ V3 内阁总管的督办台账，与共同事项同库同规约（`server/intera
 - `blocked_question` 非空是 `blocked` 状态的前置条件。问题必须是一句话、二选一或可一句话回答；琐事由总管依花名册 `trivia_policy` 或已有偏好代答，大事才起气泡请示。
 - `blocked_kind` 是结构化的阻塞类型：`clarification`（可被自动编排代答）或 `approval`（必须走确认单 action hash + CAS，模型无权代答）。旧记录该字段为空时，C2 不自动回答；不得用问题文本猜类型。
 - 台账只存公开决定与结果，**不存模型思考过程，不存凭据**。缺失 ID 抛 `KeyError`；事件表 `commission_events` 只追加不改写。
+- **变更通知 `commission_update`**：台账每次落库（开票、迁移、记录步骤）后，向所有在线 `/ws` 连接广播一条
+  `{"type":"commission_update","commission":{…}}`。`commission` 就是 `GET /api/executive/commissions` 的 items 元素本身，
+  不另立一套字段，消费方不必维护第二份映射。
+  - 这是**旁路通知**，不是新的真相源：状态永远以 REST 台账为准，漏掉一次推送不算事故；没有在线连接时静默丢弃。
+  - 订阅回调的异常一律吞掉，**推送坏了不能连累写台账**，也不能连累其它订阅者。
+  - 旧客户端读到未知类型整条忽略（既有约定），因此本事件是纯增量，不构成破坏性变更。
+  - 没有状态变化的推送**不补发**：客户端初次接入用 REST 拉全量，之后靠本事件增量。
 
 ## 二十、观测统计（TelemetrySummary）结构
 
@@ -452,6 +459,7 @@ agents:
 - `POST /api/executive/commissions/{id}/submit`：外部 Worker 交差入口，`artifact` 直接进初审室，与内部链路同一套判据。
 - `POST /api/executive/commissions/{id}/run`：进程内驱动执行体跑完这一单。与自动驱动共用同一把执行权租约，已在跑时返回 `400 commission_already_running`。
 - `GET /api/executive/adapters`：已登记类型 + 每个 Agent 当前绑定（只回类型名，不回配置值）。
+- `GET /api/executive/roster`：花名册只读投影 `{"items":[{"id","name","strengths","adapter"}]}`（D4，供像素世界做能力映射）。新增端点，`/adapters` 的返回结构不变；客户端优先读它，旧服务没有时回退 `/adapters`。
 - `POST /internal/telemetry_proxy`：本地透明代理，见 §20。该路由无前端引用，由 `check_protocol.py` 第六类检查显式纳管。
 
 回归：`python scripts/test_agent_adapter_ext.py`（Mock 适配器验证注册表派发全程）。
