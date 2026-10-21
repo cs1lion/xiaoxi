@@ -447,6 +447,65 @@ def test_contract_layer_wired_into_dispatch() -> None:
     check("序列化后仍带缺口", len(stored.get("contract_gaps") or []) == len(thin))
 
 
+def test_contract_gaps_reach_the_packet_end_to_end() -> None:
+    """契约缺口必须真的走完 dispatch() 到落库，不只是函数本身能算出来。
+
+    背景（QA 2026-10-22 指出）：原测试直接调 _contract_gaps() 和构造 BriefingPacket，
+    中间那段「dispatch 里那一行」没有覆盖。实测确认：把 dispatch 里
+    contract_gaps=_contract_gaps(...) 整行删掉，82 条测试全绿 exit 0——假绿。
+
+    这里跑真实链路：CommissionStore 建单 -> Dispatcher.dispatch() -> 落库 packet。
+    """
+    print("[contract gaps end-to-end]")
+    import sqlite3
+    from server.assistant.dispatcher import Dispatcher
+    from server.assistant.evaluator import load_roster
+    from server.interaction.threads import CommissionStore
+
+    roster = load_roster()
+    agents = roster.get("agents") or []
+    check("roster 有可用 agent", len(agents) > 0)
+    if not agents:
+        return
+
+    db = sqlite3.connect(":memory:", check_same_thread=False)
+    try:
+        store = CommissionStore(":memory:")
+        created = store.create("写一份季度报告", "整理Q3数据", agent_id=str(agents[0]["id"]))
+        cid = created["id"]
+        dispatcher = Dispatcher(commissions=store)
+
+        # 信息不全的单：dispatch 必须跑通，且 packet 带缺口
+        updated, packet = dispatcher.dispatch(cid)
+        check("dispatch 成功（状态进 briefing）", updated["status"] == "briefing")
+        check("packet 带 contract_gaps", isinstance(packet.contract_gaps, tuple))
+        check("缺口非空（这单信息不全）", len(packet.contract_gaps) > 0)
+
+        # 关键：缺口必须落进台账的 packet，否则世界/日报读不到
+        stored = updated.get("packet") or {}
+        gaps_in_db = stored.get("contract_gaps")
+        check("落库 packet 里有 contract_gaps", isinstance(gaps_in_db, list))
+        check("落库缺口条数与 packet 一致",
+              len(gaps_in_db or []) == len(packet.contract_gaps))
+
+        # 缺口结构完整：每条要有 check / key / missing
+        if gaps_in_db:
+            first = gaps_in_db[0]
+            check("缺口含 check 编号", isinstance(first.get("check"), str) and first["check"].startswith("G"))
+            check("缺口含 missing 清单", isinstance(first.get("missing"), list))
+
+        # 契约层坏掉不能把派单带崩：脏输入下 dispatch 仍要跑通
+        cid2 = store.create("测试脏输入", "", agent_id=str(agents[0]["id"]))["id"]
+        try:
+            updated2, packet2 = dispatcher.dispatch(cid2)
+            check("脏输入时 dispatch 不抛异常", updated2["status"] == "briefing")
+            check("脏输入时 contract_gaps 仍是 tuple", isinstance(packet2.contract_gaps, tuple))
+        except Exception as exc:
+            check(f"脏输入时 dispatch 不抛异常（实际抛了 {type(exc).__name__}）", False)
+    finally:
+        db.close()
+
+
 def main() -> int:
     for test in (
         test_sanitize,
@@ -463,6 +522,7 @@ def main() -> int:
         test_internal_proxy_requires_token,
         test_cancel_records_reason,
         test_contract_layer_wired_into_dispatch,
+        test_contract_gaps_reach_the_packet_end_to_end,
     ):
         test()
     print(f"\n=== {passed} passed, {len(failed)} failed ===")
