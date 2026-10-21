@@ -368,6 +368,54 @@ def test_internal_proxy_requires_token() -> None:
         s.internal_token = original
 
 
+def test_cancel_records_reason() -> None:
+    """取消一单必须在 audit 里留痕，否则世界分不清「取消」和「验收通过」。
+
+    背景：台账只有 done 一个终态（threads.py:519 TERMINAL），所以
+    transition(id, "done") 让「老板取消」和「验收通过」在状态列上完全同形。
+    像素世界原先就把取消当成交付、还加信仰点（projection.ts 已单独修）。
+    修法不新增协议字段，用已有 audit JSON 记录 cancelled 标记。
+    """
+    print("[cancel reason]")
+    import sqlite3
+    from server.assistant.dispatcher import Dispatcher
+    from server.interaction.threads import CommissionStore
+
+    db = sqlite3.connect(":memory:", check_same_thread=False)
+    try:
+        commissions = CommissionStore(":memory:")
+        created = commissions.create("测试单", "验证取消留痕", agent_id="writer")
+        cid = created["id"]
+        dispatcher = Dispatcher(commissions=commissions)
+
+        before = commissions.get(cid)
+        check("取消前 audit 无 cancelled", not (before.get("audit") or {}).get("cancelled"))
+
+        after = dispatcher.cancel(cid, reason="老板撤单")
+        audit = after.get("audit") or {}
+        check("取消后状态是 done", after["status"] == "done")
+        check("audit 记了 cancelled 标记", audit.get("cancelled") is True)
+        check("audit 记了取消原因", audit.get("cancel_reason") == "老板撤单")
+        check("audit 记了取消时间", isinstance(audit.get("cancelled_at"), (int, float)))
+
+        # 幂等：重复取消不重复写，也不报错
+        again = dispatcher.cancel(cid, reason="再点一次")
+        check("重复取消幂等", (again.get("audit") or {}).get("cancel_reason") == "老板撤单")
+
+        # 关键：验收通过的单不能被误标成取消
+        other = commissions.create("另一单", "走正常验收", agent_id="writer")
+        oid = other["id"]
+        commissions.transition(oid, "briefing")
+        commissions.transition(oid, "running")
+        commissions.transition(oid, "auditing")
+        commissions.transition(oid, "ready_to_report")
+        done_row = commissions.transition(oid, "done")
+        check("正常验收不留 cancelled 标记",
+              not (done_row.get("audit") or {}).get("cancelled"))
+    finally:
+        db.close()
+
+
 def main() -> int:
     for test in (
         test_sanitize,
@@ -382,6 +430,7 @@ def main() -> int:
         test_empty_reply_guard,
         test_circadian_and_mood_reach_the_prompt,
         test_internal_proxy_requires_token,
+        test_cancel_records_reason,
     ):
         test()
     print(f"\n=== {passed} passed, {len(failed)} failed ===")

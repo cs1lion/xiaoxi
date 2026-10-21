@@ -633,11 +633,32 @@ class Dispatcher:
                                                      "delta": delta.as_dict() if delta else None})
         return updated, (delta.as_dict() if delta is not None else None), audit["boss_reject_count"]
 
-    def cancel(self, commission_id: str) -> dict[str, Any]:
+    def cancel(self, commission_id: str, reason: str = 'cancelled') -> dict[str, Any]:
+        """取消一单：迁到 done，并在 audit 里留一条取消记录。
+
+        为什么不能只做 transition(id, 'done')：台账只有 done 一个终态，
+        「老板取消」和「验收通过」在状态列上完全同形。像素世界的投影
+        原先就把取消当成交付（还加信仰点），根因就在这儿——世界读不到
+        「这单是被撤掉的」这个事实。
+
+        修法不新增协议字段（那要 [PROTOCOL_REQUEST]），用已有的 audit JSON：
+        取消时写入 {"cancelled": True, "cancel_reason": ..., "cancelled_at": ...}。
+        读取方（投影 / 日报）看 audit.cancelled 就能区分。
+
+        reason 允许调用方给具体原因；默认 'cancelled'。
+        """
         commission = self.commissions.get(commission_id)
         if commission["status"] == "done":
             return commission
-        return self.commissions.transition(commission_id, "done")
+        audit = dict(commission.get("audit") or {})
+        if audit.get("cancelled"):
+            return commission  # 已取消过，幂等
+        audit.update({
+            "cancelled": True,
+            "cancel_reason": _clip(str(reason or 'cancelled'), 120),
+            "cancelled_at": time.time(),
+        })
+        return self.commissions.transition(commission_id, "done", audit=audit)
 
     # ---------- 内部 ----------
     def _memory(self, text: str) -> dict[str, Any]:
