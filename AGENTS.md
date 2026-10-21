@@ -121,9 +121,10 @@ worktree 里的 `AGENTS.md` 也可能落后（取决于它检出的提交），�
 
 这三件不做不影响功能，但**第 1 件有时效性**：
 
-1. **`.agents/` 入库** —— 里面有约 12 处实质修正（`DSH.md` 的工具映射、Graphite 六 playbook、
-   bun 归属、计数表、`ask_user`、`run_in_background`、`claude-code.md` 的链接与字节数、
-   三种措辞等），**全部只在本机**。`.gitignore:55` 忽略整目录，重装 pstack 会覆盖它们。
+1. **`.agents/` 入库** —— 里面有本轮全部实质修正（`DSH.md` 与 `docs/harness/claude-code.md`
+   两个文件的工具映射、Graphite 措辞与归属、bun 归属、计数表、死链说明等），**全部只在本机**。
+   `.gitignore:55` 忽略整目录，重装 pstack 会覆盖它们。
+   （不写「N 处」：一处怎么算取决于粒度，这个数没法核，也没人会去重数。）
    入库需要改 `.gitignore` 为 `.agents/*` 加白名单（negation 对整目录忽略无效），
    且要单独定 `DSH.md` 的同步策略 —— 它是本机适配层，不该和上游 bundle 同一策略。
 2. **8 个 Bot 硬绑定** —— 目前「默认 poteto-mode」是通过团队记忆 + 本文件传递的，
