@@ -6,6 +6,7 @@
  */
 
 import type {
+  Critter,
   Facing,
   GridPoint,
   OracleRecord,
@@ -36,7 +37,7 @@ export const SETTLED_WARN_THRESHOLD = 5000;
 /** v1 冻结指纹（ADR_SAVE §1，frozen）。旧档迁移前用它自证，仍然有效。 */
 export const SCHEMA_V1_FINGERPRINT = 'f53a0736d782d657';
 /** v2 冻结指纹（ADR_WORLD_ALIVE §8）。由 docs/save-v2.sample.json 算出，单测核对。 */
-export const SCHEMA_V2_FINGERPRINT = '6ba0205c8e69f6cc';
+export const SCHEMA_V2_FINGERPRINT = 'd6effa804a737b0b';
 
 /** v1 冻结路径全集（99 条，来自 docs/save-v1.sample.json；指纹见上，单测核对）。
  * `assertSaveV1` 做**集合包含**校验：存档出现的每条叶子路径都必须在这个集合里；
@@ -159,6 +160,12 @@ export const SAVE_V1_PATHS: readonly string[] = [
  * （v1 当年补 optional，是因为样例里 path/pendingRoute 是空数组。）
  */
 export const SAVE_V2_ADDED_PATHS: readonly string[] = [
+  'world.critters[]',
+  'world.critters[].at.x',
+  'world.critters[].at.y',
+  'world.critters[].id',
+  'world.critters[].kind',
+  'world.critters[].leavesAt',
   'world.oracle[]',
   'world.oracle[].at',
   'world.oracle[].raw',
@@ -254,6 +261,8 @@ export interface SaveWorld {
   readonly nextPendingNumber: number;
   /** v2 新增：神谕石板。旧档迁移后是空数组，不是缺字段。 */
   readonly oracle: readonly OracleRecord[];
+  /** v2 新增：氛围实体（猫等）。旧档迁移后是空数组。 */
+  readonly critters: readonly Critter[];
 }
 
 export interface SaveMeta {
@@ -594,6 +603,17 @@ function validateWorldFields(raw: Record<string, unknown>, version: 1 | 2): void
   });
 
   if (version >= 2) {
+    // ---- 氛围实体（v2）：只做氛围，不参与结算。
+    const critters = asArray(requireKey(world, 'critters', 'world'), 'world.critters');
+    critters.forEach((item, index) => {
+      const path = `world.critters[${index}]`;
+      const critter = asRecord(item, path);
+      checkString(requireKey(critter, 'id', path), `${path}.id`);
+      checkEnum(requireKey(critter, 'kind', path), ['cat'] as const, `${path}.kind`);
+      checkPoint(requireKey(critter, 'at', path), `${path}.at`);
+      checkNumber(requireKey(critter, 'leavesAt', path), `${path}.leavesAt`, { min: 0 });
+    });
+
     // ---- 神谕石板（v2）：只记改变了世界的话，封顶 ORACLE_SLAB_LIMIT 条。
     const oracle = asArray(requireKey(world, 'oracle', 'world'), 'world.oracle');
     if (oracle.length > ORACLE_SLAB_LIMIT) {
@@ -876,6 +896,7 @@ export const MIGRATIONS: Record<number, Migration> = {
             : prop,
         ),
         oracle: Array.isArray(world.oracle) ? world.oracle : [],
+        critters: Array.isArray(world.critters) ? world.critters : [],
       },
       meta: { ...meta, schemaFingerprint: SCHEMA_V2_FINGERPRINT },
     };

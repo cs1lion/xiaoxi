@@ -228,6 +228,17 @@
         "at": 2400
       }
     ],
+    "critters": [
+      {
+        "id": "miracle-1",
+        "kind": "cat",
+        "at": {
+          "x": 17.5,
+          "y": 11.5
+        },
+        "leavesAt": 45000
+      }
+    ],
     "tasks": [
       {
         "id": "t1",
@@ -336,6 +347,6 @@
   "meta": {
     "savedAtWallClock": 1792500000000,
     "savedReconciled": true,
-    "schemaFingerprint": "6ba0205c8e69f6cc"
+    "schemaFingerprint": "d6effa804a737b0b"
   }
 }

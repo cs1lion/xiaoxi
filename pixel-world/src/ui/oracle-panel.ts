@@ -17,6 +17,8 @@ export interface OracleApi {
   /** 清档：删除单槽。 */
   readonly clearSave: () => { readonly ok: boolean; readonly message: string };
   readonly build: (prefabId: string) => void;
+  /** 神迹：点灯 / 种树 / 召唤猫。不是神谕，不刻石板。 */
+  readonly miracle: (kind: 'light' | 'tree' | 'cat') => void;
   readonly feed: (message: {
     readonly type: 'task.assigned';
     readonly taskId: string;
@@ -193,6 +195,15 @@ export function bindOraclePanel(getApi: () => OracleApi | undefined): void {
   const clear = document.querySelector<HTMLButtonElement>('#clear');
   rain?.addEventListener('click', () => submit('下雨了'));
   clear?.addEventListener('click', () => submit('放晴吧'));
+
+  for (const button of form.querySelectorAll<HTMLButtonElement>('button[data-miracle]')) {
+    button.addEventListener('click', () => {
+      const api = getApi();
+      const kind = button.dataset.miracle;
+      if (api === undefined || kind === undefined) return;
+      api.miracle(kind as 'light' | 'tree' | 'cat');
+    });
+  }
 
   for (const button of form.querySelectorAll<HTMLButtonElement>('button[data-build]')) {
     button.addEventListener('click', () => {

@@ -5,9 +5,9 @@
 
 import Phaser from 'phaser';
 import { TILE_PX } from '../world/setup.ts';
-import type { ConstructionSnapshot, GridPoint, TaskKind, WorldProp } from '../world/types.ts';
+import type { ConstructionSnapshot, Critter, GridPoint, TaskKind, WorldProp } from '../world/types.ts';
 import { WORLD } from '../world/palette-data.ts';
-import { propDepth, propFootY } from './prop-depth.ts';
+import { ACTOR_DEPTH_OFFSET, propDepth, propFootY } from './prop-depth.ts';
 
 /** 场景把 ALTITUDE 传给装饰层，道具 depth 与角色用同一把尺子。 */
 export const DECOR_ALTITUDE = 1000;
@@ -17,6 +17,8 @@ export interface DecorView {
   readonly scaffolds: Map<string, Phaser.GameObjects.Container>;
   readonly redrawRoads: (cells: readonly GridPoint[]) => void;
   readonly syncProps: (props: readonly WorldProp[]) => void;
+  /** 氛围实体（猫）。只做画面，不参与碰撞与结算。 */
+  readonly syncCritters: (critters: readonly Critter[]) => void;
   readonly syncScaffolds: (constructions: readonly ConstructionSnapshot[]) => void;
 }
 
@@ -27,6 +29,7 @@ export function createDecorView(scene: Phaser.Scene, originX: number, originY: n
   // depth 不参与全局排序（见 ContainerWebGLRenderer：直接遍历 container.list）。
   // 所以每个道具都是独立顶层对象，各自 setDepth，才能与角色做 Y-Sort。
   const props = new Map<string, Phaser.GameObjects.Graphics>();
+  const critters = new Map<string, Phaser.GameObjects.Graphics>();
   const scaffolds = new Map<string, Phaser.GameObjects.Container>();
 
   return {
@@ -93,6 +96,25 @@ export function createDecorView(scene: Phaser.Scene, originX: number, originY: n
         props.set(prop.id, drawProp(scene, prop, originX, originY));
       }
     },
+    syncCritters(list) {
+      const alive = new Set(list.map((critter) => critter.id));
+      for (const [id, node] of [...critters.entries()]) {
+        if (alive.has(id)) continue;
+        node.destroy();
+        critters.delete(id);
+      }
+      for (const critter of list) {
+        if (critters.has(critter.id)) continue;
+        const g = scene.add.graphics();
+        drawCat(g);
+        const px = originX + (critter.at.x + 0.5) * TILE_PX;
+        const py = originY + (critter.at.y + 0.8) * TILE_PX;
+        g.setPosition(px, py);
+        // 与角色同一把尺子：猫也参与 Y-Sort，走到角色后面会被挡住。
+        g.setDepth(DECOR_ALTITUDE + py + ACTOR_DEPTH_OFFSET);
+        critters.set(critter.id, g);
+      }
+    },
     syncScaffolds(constructions) {
       const active = new Set(constructions.map((item) => item.buildingId));
       for (const [id, container] of [...scaffolds.entries()]) {
@@ -156,6 +178,28 @@ function accentFor(kind: TaskKind | null): PropAccent {
   if (kind === 'research') return 'book';
   if (kind === 'writing') return 'inkstone';
   return null;
+}
+
+/**
+ * 猫：4×3 的小剪影，只求「有只猫」可读，不求细节。
+ * 用 24 色里的 charcoal 做主体、amber 点眼睛，和摆件区分得开。
+ */
+function drawCat(g: Phaser.GameObjects.Graphics): void {
+  g.fillStyle(WORLD.deepShade, 0.3);
+  g.fillRect(-3, 0, 8, 2);
+
+  g.fillStyle(WORLD.charcoal, 1);
+  g.fillRect(-3, -5, 6, 5); // 身子
+  g.fillRect(2, -7, 3, 4); // 头
+  // 耳朵：两个 1px 尖
+  g.fillRect(2, -8, 1, 1);
+  g.fillRect(4, -8, 1, 1);
+  // 尾巴：向上翘一格
+  g.fillRect(-4, -7, 1, 3);
+  g.fillRect(-5, -8, 1, 1);
+
+  g.fillStyle(WORLD.amber, 1);
+  g.fillRect(3, -6, 1, 1); // 一只眼就够读
 }
 
 /** 稳定的道具哈希：同 id 永远同外观，截图可复现。 */

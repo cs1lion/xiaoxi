@@ -25,6 +25,7 @@ import {
 import type {
   CommandResult,
   ConstructionSnapshot,
+  Critter,
   Facing,
   GridPoint,
   OracleRecord,
@@ -56,6 +57,12 @@ export function ledgerCompletedAtMs(value: number | null | undefined): number | 
   return Math.round(value > 1e12 ? value : value * 1000);
 }
 
+/** 三件神迹。纯世界侧动作，不是你的话。 */
+export type MiracleKind = 'light' | 'tree' | 'cat';
+
+/** 猫在世界里待多久。到点自己走开，不占位。 */
+const CAT_DWELL_MS = 20_000;
+
 export type WorldCommand =
   /**
    * 一句神谕的原文。世界自己解析，解析结果再落到下面的具体命令上。
@@ -69,6 +76,11 @@ export type WorldCommand =
   | { readonly kind: 'cancelPending'; readonly id?: string }
   | { readonly kind: 'setWeather'; readonly weather: Weather }
   | { readonly kind: 'build'; readonly prefabId: string; readonly instanceId: string }
+  /**
+   * 神迹：纯世界侧动作，不是你的话，所以不刻石板。
+   * 三件：点灯、种树、召唤猫（猫只做氛围，会自己走开）。
+   */
+  | { readonly kind: 'miracle'; readonly miracle: MiracleKind }
   /** 台账快照。这是世界接真实工作的唯一入口。 */
   | {
       readonly kind: 'sync';
@@ -183,6 +195,10 @@ export class Simulation {
   private readonly props: WorldProp[] = [];
   /** 神谕石板：只记改变了世界的话。旧在前，封顶 ORACLE_SLAB_LIMIT。 */
   private readonly oracleLog: OracleRecord[] = [];
+  /** 氛围实体（猫等）。只影响渲染，不参与任何结算。 */
+  private critters: Critter[] = [];
+  /** 神迹编号：世界内自增，不用时间戳/随机数，保证可回放。 */
+  private nextMiracleNumber = 1;
   private readonly roads: GridPoint[] = [];
   private readonly constructions = new Map<string, WorkstationState>();
 
@@ -275,6 +291,7 @@ export class Simulation {
     this.stepConstructions(deltaMs);
     for (const villager of this.villagers) this.stepVillager(villager, deltaMs);
     this.stepWorkstations();
+    this.stepCritters();
     for (const villager of this.villagers) this.expireBubble(villager);
     // 固定步长的最后一拍：每个空闲角色先接台账的活，再轮到自己队列里的神谕。
     this.pumpPending();
@@ -320,6 +337,7 @@ export class Simulation {
       pending: this.allPending(),
       props: this.props,
       oracle: this.oracleLog,
+      critters: this.critters,
       roads: this.roads,
       events: this.events.slice(-12),
       weather: this.weather.kind,
@@ -375,10 +393,79 @@ export class Simulation {
         return this.setWeather(command.weather);
       case 'build':
         return this.build(command.prefabId, command.instanceId);
+      case 'miracle':
+        return this.performMiracle(command.miracle);
       case 'sync':
         return this.sync(command.tasks, command.finished, command.connected,
           command.complete ?? true, command.order ?? [], command.finishedAt ?? []);
     }
+  }
+
+  /**
+   * 神迹：直接在世界里多一样东西。不刻石板（这不是你说的那句话），
+   * 也不发货币、没有冷却——那会把神迹变成资源管理。
+   *
+   * 落点规则与信仰摆件一致：祭坛周围的环上找空格，避开已有摆件。
+   */
+  private performMiracle(kind: MiracleKind): CommandResult {
+    const id = `miracle-${this.nextMiracleNumber}`;
+    if (kind === 'cat') {
+      this.nextMiracleNumber += 1;
+      this.critters.push({
+        id,
+        kind: 'cat',
+        at: { x: this.altar.x + 2.5, y: this.altar.y + 2.5 },
+        leavesAt: this.now + CAT_DWELL_MS,
+      });
+      this.log('info', '神迹：一只猫从街角溜达过来。');
+      return { ok: true, message: '一只猫来了，它会自己走开。' };
+    }
+
+    const propKind = kind === 'light' ? 'lamp' : 'tree';
+    const label = kind === 'light' ? '一盏神迹点的灯' : '一棵神迹种的树';
+    const spot = this.miracleSpot();
+    if (spot === null) {
+      return { ok: false, message: '祭坛周围没有空地了。' };
+    }
+    this.nextMiracleNumber += 1;
+    this.props.push({
+      id,
+      kind: propKind,
+      at: spot,
+      label,
+      sourceTaskKind: null,
+      sourceTaskId: null,
+      // 神迹不是任务换来的；摘要写明来源，纸面据此区分"神迹"与"哪一单"。
+      sourceSummary: kind === 'light' ? '神迹：点灯' : '神迹：种树',
+    });
+    this.log('info', `神迹：${label}落在祭坛边。`);
+    return { ok: true, message: `${label}落下了。` };
+  }
+
+  /** 神迹落点：从祭坛外环开始找，避开已占格与已有摆件。 */
+  private miracleSpot(): GridPoint | null {
+    const taken = new Set(this.props.map((prop) => `${prop.at.x},${prop.at.y}`));
+    for (let radius = 2; radius <= 6; radius += 1) {
+      for (let dx = -radius; dx <= radius; dx += 1) {
+        for (const dy of [-radius, radius]) {
+          const p = { x: this.altar.x + dx, y: this.altar.y + dy };
+          if (!this.grid.isWalkable(p)) continue;
+          if (this.grid.zoneOf(p) === 'altar') continue;
+          if (taken.has(`${p.x},${p.y}`)) continue;
+          return p;
+        }
+      }
+      for (let dy = -radius + 1; dy <= radius - 1; dy += 1) {
+        for (const dx of [-radius, radius]) {
+          const p = { x: this.altar.x + dx, y: this.altar.y + dy };
+          if (!this.grid.isWalkable(p)) continue;
+          if (this.grid.zoneOf(p) === 'altar') continue;
+          if (taken.has(`${p.x},${p.y}`)) continue;
+          return p;
+        }
+      }
+    }
+    return null;
   }
 
   /**
@@ -1256,6 +1343,12 @@ export class Simulation {
     this.log('info', `神恩落地：${describePropSource(prop)}。`);
   }
 
+  /** 到点的猫自己走开。猫不参与任何结算，这里只做退场。 */
+  private stepCritters(): void {
+    if (this.critters.length === 0) return;
+    this.critters = this.critters.filter((critter) => critter.leavesAt > this.now);
+  }
+
   private stepConstructions(deltaMs: number): void {
     for (const [id, state] of [...this.constructions.entries()]) {
       const remaining = state.remainingMs - deltaMs;
@@ -1318,6 +1411,7 @@ export class Simulation {
         roads: this.roads.map((cell) => ({ x: cell.x, y: cell.y })),
         props: this.props.map((prop) => ({ ...prop })),
         oracle: this.oracleLog.map((record) => ({ ...record })),
+        critters: this.critters.map((critter) => ({ ...critter, at: { ...critter.at } })),
         // 运行时字段不落盘：ledgerCompletedAt 只服务 settled；v1 schema 已冻结、样例无此键。
         tasks: this.tasks.map((task) => {
           const saved: TaskRecord = { ...task };
@@ -1431,6 +1525,8 @@ export class Simulation {
 
     sim.oracleLog.length = 0;
     for (const record of world.oracle) sim.oracleLog.push({ ...record });
+
+    sim.critters = world.critters.map((critter) => ({ ...critter, at: { ...critter.at } }));
 
     // settled 是分账唯一真相：由它重建私有日志与交付统计（不持久化计数）。
     sim.settledLog.length = 0;

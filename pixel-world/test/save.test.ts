@@ -240,7 +240,7 @@ test('v1→v2 迁移：除新增字段外，世界状态逐字段不变', () => 
   ) as unknown as WorldSave;
   const migrated = migrateSave(v1 as unknown as Record<string, unknown>) as unknown as WorldSave;
 
-  const { oracle: _oracle, props: migratedProps, ...migratedRest } = migrated.world;
+  const { oracle: _oracle, critters: _critters, props: migratedProps, ...migratedRest } = migrated.world;
   const { props: v1Props, ...v1Rest } = v1.world;
   assert.deepEqual(migratedRest, v1Rest, '迁移不能顺手改动别的世界状态');
 

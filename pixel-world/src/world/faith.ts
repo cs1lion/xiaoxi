@@ -95,6 +95,11 @@ export function nextProp(
  * 只取摘要的前 24 个码点：状态行是一行字，长标题会把其余信息挤掉。
  */
 export function describePropSource(prop: WorldProp): string {
+  // 神迹落下的东西没有任务来源，但摘要写明是「神迹：点灯」这类；
+  // 先看摘要，才不会把神迹误报成「来路不明」。
+  if (prop.sourceSummary !== null && prop.sourceSummary.trim().startsWith('神迹')) {
+    return `${prop.label}（${prop.sourceSummary.trim()}）`;
+  }
   if (prop.sourceTaskKind === null) return `${prop.label}（来路不明）`;
   if (prop.sourceSummary === null || prop.sourceSummary.trim() === '') {
     return `${prop.label}（${propLabelFor(prop.sourceTaskKind)}）`;

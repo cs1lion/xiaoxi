@@ -5,7 +5,7 @@
 
 import Phaser from 'phaser';
 import { TILE_PX } from '../world/setup.ts';
-import { Simulation, type NewBuilding } from '../world/simulation.ts';
+import { Simulation, type MiracleKind, type NewBuilding } from '../world/simulation.ts';
 import type { CommandResult, OracleRecord, WorldSnapshot } from '../world/types.ts';
 import { excerptBlockedQuestion } from '../world/types.ts';
 import { placeBlueprint, type BuiltWorld } from '../world/setup.ts';
@@ -502,6 +502,9 @@ export class SandboxScene extends Phaser.Scene {
         this.dispatch(kind, summary),
       finish: (target?: string): void => this.finish(target),
       build: (prefabId: string): void => this.build(prefabId),
+      miracle: (kind: MiracleKind): void => {
+        this.sim.enqueue({ kind: 'miracle', miracle: kind });
+      },
       feed: (message: AgentToWorld): CommandResult => this.feed(message),
       pushLedger: (commission: unknown): void => this.pushLedger(commission),
       onResult: (listener: (result: CommandResult) => void): (() => void) => {
@@ -560,6 +563,7 @@ export class SandboxScene extends Phaser.Scene {
       this.decor.redrawRoads(snapshot.roads);
     }
     this.decor.syncProps(snapshot.props);
+    this.decor.syncCritters(snapshot.critters);
     const constructionKey = snapshot.constructions
       .map((item) => `${item.buildingId}:${Math.ceil(item.remainingMs / 100)}`)
       .join('|');

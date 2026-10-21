@@ -260,6 +260,18 @@ export interface VillagerSnapshot {
 }
 
 /**
+ * 只做氛围的环境实体，不参与任务、不改交付统计。
+ * 猫是第一个：它会自己走开，不永久占位。
+ */
+export interface Critter {
+  readonly id: string;
+  readonly kind: 'cat';
+  readonly at: Vec2;
+  /** 离开世界的逻辑时刻。到点自己走，不需要调用方清理。 */
+  readonly leavesAt: number;
+}
+
+/**
  * 神谕石板上的一条：只记真正改变了世界的那句话，外加世界当时的回执。
  * 认不出的输入不进石板（那是回问，不是世界事件）。封顶见 ORACLE_SLAB_LIMIT。
  */
@@ -290,6 +302,8 @@ export interface WorldSnapshot {
   readonly props: readonly WorldProp[];
   /** 神谕石板：最近 N 条改变了世界的神谕，旧在前。 */
   readonly oracle: readonly OracleRecord[];
+  /** 氛围实体（猫等）。不参与任何世界结算。 */
+  readonly critters: readonly Critter[];
   readonly roads: readonly GridPoint[];
   readonly altar: GridPoint;
   readonly events: readonly WorldEvent[];

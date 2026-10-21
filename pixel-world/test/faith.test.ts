@@ -147,6 +147,14 @@ test('有来源时纸面写得出「那单」的摘要', () => {
   assert.match(line, /路灯/);
 });
 
+test('神迹落下的东西说「神迹」，不冒充任务来源，也不算来路不明', () => {
+  const line = describePropSource(
+    prop({ sourceTaskKind: null, sourceTaskId: null, sourceSummary: '神迹：种树', label: '一棵神迹种的树' }),
+  );
+  assert.match(line, /神迹/);
+  assert.ok(!line.includes('来路不明'), `神迹不该被报成来路不明：${line}`);
+});
+
 test('老摆件如实说「来路不明」，不假装有来源', () => {
   const line = describePropSource(prop());
   assert.match(line, /来路不明/);
