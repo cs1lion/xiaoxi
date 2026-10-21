@@ -8,7 +8,7 @@
  *   4. 变异测试参数化生成（不手写几百条）：每个字段路径做 删除/换错类型/置空 三变异，
  *      断言加载器不抛未捕获异常、返回坏档 reason、先备份再提示、主槽不变；
  *      同时断言合法存档（样例 / fresh / 走路中 / 满数据）全部通过；
- *   5. read() 与 importText() 共用 parseSaveText → validateSaveV1 单一入口。
+ *   5. read() 与 importText() 共用 parseSaveText → validateSaveFields 单一入口。
  *
  * 变异生成方式：从**冻结样例**出发，按 `collectSavePaths` 拿到每条叶子路径，
  * 用通用的「按路径删除 / 按路径改值」两个原语施加变异——路径覆盖自动跟着样例走，
@@ -23,23 +23,23 @@ import { ALTAR, buildWorld, placeBlueprint } from '../src/world/setup.ts';
 import { Simulation } from '../src/world/simulation.ts';
 import {
   ACTIVITY_KINDS,
-  assertSaveV1,
+  assertSave,
   collectSavePaths,
   FACINGS,
   PROP_KINDS,
   SAVE_STORAGE_KEY,
   SAVE_V1_ALLOWED_PATHS,
-  SCHEMA_V1_FINGERPRINT,
+  SCHEMA_V2_FINGERPRINT,
   SILHOUETTES,
   TASK_KINDS,
   TASK_SOURCES,
   TASK_STATUSES,
-  validateSaveV1,
+  validateSaveFields,
   VILLAGER_MODES,
   WEATHER_KINDS,
   WORK_ACCENTS,
   ZONES,
-  type WorldSaveV1,
+  type WorldSave,
 } from '../src/world/save.ts';
 import { parseSaveText, SaveStore, type StorageLike } from '../src/ui/save-store.ts';
 
@@ -47,7 +47,7 @@ const rawPrefabs = JSON.parse(
   readFileSync(new URL('../src/world/prefabs.json', import.meta.url), 'utf8'),
 ) as Record<string, Record<string, unknown>>;
 const blueprints = parseBlueprintTable(rawPrefabs);
-const sampleText = readFileSync(new URL('../../docs/save-v1.sample.json', import.meta.url), 'utf8');
+const sampleText = readFileSync(new URL('../../docs/save-v2.sample.json', import.meta.url), 'utf8');
 
 class FakeStorage implements StorageLike {
   readonly data = new Map<string, string>();
@@ -85,8 +85,8 @@ function makeSim(wallClock: () => number = () => 1000): Simulation {
 }
 
 /** 四种合法存档：样例、fresh 空数组、走路中（path 非空）、满数据（settled+工地）。 */
-function legalSaves(): { label: string; save: WorldSaveV1 }[] {
-  const sample = JSON.parse(sampleText) as WorldSaveV1;
+function legalSaves(): { label: string; save: WorldSave }[] {
+  const sample = JSON.parse(sampleText) as WorldSave;
 
   const fresh = makeSim();
   fresh.update(16);
@@ -182,7 +182,7 @@ function clone<T>(value: T): T {
 }
 
 /** 变异 1：删除该路径（数组元素里的键也删，模拟"字段被拿掉"）。 */
-function deletePath(save: WorldSaveV1, path: string): boolean {
+function deletePath(save: WorldSave, path: string): boolean {
   const targets = locate(save as unknown as Json, path);
   let touched = false;
   for (const { parent, key } of targets) {
@@ -195,7 +195,7 @@ function deletePath(save: WorldSaveV1, path: string): boolean {
 }
 
 /** 变异 2/3：把该路径换成给定值（错类型 / null）。 */
-function setPath(save: WorldSaveV1, path: string, value: unknown): boolean {
+function setPath(save: WorldSave, path: string, value: unknown): boolean {
   const targets = locate(save as unknown as Json, path);
   let touched = false;
   for (const { parent, key } of targets) {
@@ -231,15 +231,17 @@ const NULLABLE_PATHS: ReadonlySet<string> = new Set([
   'world.tasks[].workerId',
   'world.settled[].completedAt',
   'world.weather.remainingMs',
+  'world.props[].sourceTaskKind',
+  'world.props[].sourceTaskId',
 ]);
 
 /* ---------------------------------------------------------------- 用例 */
 
 test('task-32：冻结样例仍能加载（read + importText + parseSaveText 三口一致）', () => {
-  const sample = JSON.parse(sampleText) as WorldSaveV1;
-  assert.doesNotThrow(() => validateSaveV1(sample), '样例必须过字段级校验');
-  assert.doesNotThrow(() => assertSaveV1(sample), '样例必须过完整校验');
-  assert.equal(sample.meta.schemaFingerprint, SCHEMA_V1_FINGERPRINT);
+  const sample = JSON.parse(sampleText) as WorldSave;
+  assert.doesNotThrow(() => validateSaveFields(sample, 2), '样例必须过字段级校验');
+  assert.doesNotThrow(() => assertSave(sample), '样例必须过完整校验');
+  assert.equal(sample.meta.schemaFingerprint, SCHEMA_V2_FINGERPRINT);
 
   const parsed = parseSaveText(sampleText);
   assert.equal(parsed.ok, true);
@@ -256,11 +258,11 @@ test('task-32：冻结样例仍能加载（read + importText + parseSaveText 三
 
 test('task-32：四种合法存档全部通过（样例 / fresh / 走路中 / 满数据）', () => {
   for (const { label, save } of legalSaves()) {
-    assert.doesNotThrow(() => validateSaveV1(save), `${label} 必须过字段级校验`);
-    assert.doesNotThrow(() => assertSaveV1(save), `${label} 必须过完整校验`);
+    assert.doesNotThrow(() => validateSaveFields(save, 2), `${label} 必须过字段级校验`);
+    assert.doesNotThrow(() => assertSave(save), `${label} 必须过完整校验`);
     // 合法档经 JSON 往返（真实读写路径）后仍合法。
-    const roundTrip = JSON.parse(JSON.stringify(save)) as WorldSaveV1;
-    assert.doesNotThrow(() => assertSaveV1(roundTrip), `${label} JSON 往返后必须仍合法`);
+    const roundTrip = JSON.parse(JSON.stringify(save)) as WorldSave;
+    assert.doesNotThrow(() => assertSave(roundTrip), `${label} JSON 往返后必须仍合法`);
   }
 });
 
@@ -279,7 +281,7 @@ test('task-32：枚举常量与 types.ts 联合类型逐项对齐', () => {
 });
 
 test('task-32：字段级拒绝的具体理由（每个字段族各一例）', () => {
-  const sample = JSON.parse(sampleText) as WorldSaveV1;
+  const sample = JSON.parse(sampleText) as WorldSave;
   const cases: [string, (copy: Json) => void, RegExp][] = [
     ['world.now 负数', (c) => { (c.world as Json).now = -1; }, /world\.now 必须 ≥ 0/],
     ['world.now 非数字', (c) => { (c.world as Json).now = '123'; }, /world\.now 必须是有限数字/],
@@ -303,27 +305,27 @@ test('task-32：字段级拒绝的具体理由（每个字段族各一例）', (
   for (const [label, mutate, pattern] of cases) {
     const copy = clone(sample) as unknown as Json;
     mutate(copy);
-    assert.throws(() => validateSaveV1(copy), pattern, `${label} 必须按该理由拒绝`);
+    assert.throws(() => validateSaveFields(copy, 2), pattern, `${label} 必须按该理由拒绝`);
   }
 });
 
 test('task-32：可选嵌套路径（path[]/pendingRoute[]）删一个元素键不误伤合法档', () => {
   // 这两个数组元素是**合法可选**：样例里是空数组，运行中非空也只是 {x,y}。
   // 「删除/置空不得判坏档」指的是这两个字段本身可以为空数组——而不是允许半截元素。
-  const sample = JSON.parse(sampleText) as WorldSaveV1;
+  const sample = JSON.parse(sampleText) as WorldSave;
   for (const villager of sample.world.villagers) {
     assert.deepEqual(villager.path, [], '样例里 path 是空数组');
     assert.deepEqual(villager.pendingRoute, [], '样例里 pendingRoute 是空数组');
   }
-  assert.doesNotThrow(() => assertSaveV1(sample), '空数组必须合法');
+  assert.doesNotThrow(() => assertSave(sample), '空数组必须合法');
 });
 
 test('task-32 变异测试：每条冻结路径 × 删除/错类型/置空 = 全拒且不崩（参数化）', () => {
-  const sample = JSON.parse(sampleText) as WorldSaveV1;
+  const sample = JSON.parse(sampleText) as WorldSave;
   const paths = [...new Set(collectSavePaths(sample))].sort();
   assert.ok(paths.length >= 99, `样例应至少有 99 条路径，实际 ${paths.length}`);
 
-  const mutations: { label: string; apply: (copy: WorldSaveV1, path: string) => boolean }[] = [
+  const mutations: { label: string; apply: (copy: WorldSave, path: string) => boolean }[] = [
     { label: '删除', apply: (copy, path) => deletePath(copy, path) },
     { label: '错类型', apply: (copy, path) => setPath(copy, path, WRONG_TYPE) },
     { label: '置空', apply: (copy, path) => setPath(copy, path, null) },
@@ -345,7 +347,7 @@ test('task-32 变异测试：每条冻结路径 × 删除/错类型/置空 = 全
       }
       // v1 里允许 null 的字段：「置空」是合法值，断言被接受而不是被拒。
       if (mutation.label === '置空' && NULLABLE_PATHS.has(path)) {
-        assert.doesNotThrow(() => assertSaveV1(copy), `${path} 置空是 v1 合法值（| null），不得误判坏档`);
+        assert.doesNotThrow(() => assertSave(copy), `${path} 置空是 v2 合法值（| null），不得误判坏档`);
         nullableAccepted += 1;
         continue;
       }
@@ -354,7 +356,7 @@ test('task-32 变异测试：每条冻结路径 × 删除/错类型/置空 = 全
       let rejected = false;
       let message = '';
       try {
-        assertSaveV1(copy);
+        assertSave(copy);
       } catch (error) {
         rejected = true;
         message = error instanceof Error ? error.message : String(error);
@@ -382,7 +384,7 @@ test('task-32 变异测试：每条冻结路径 × 删除/错类型/置空 = 全
 });
 
 test('task-32 变异测试（加载器口径）：坏档 → 备份 + 提示 + 主槽不变，绝不静默补默认', () => {
-  const sample = JSON.parse(sampleText) as WorldSaveV1;
+  const sample = JSON.parse(sampleText) as WorldSave;
   // 取几条代表性路径：必填数字、枚举、字符串、可选嵌套。
   const probes: [string, string][] = [
     ['world.now', '删除'],
@@ -431,7 +433,7 @@ test('task-32 变异测试（加载器口径）：坏档 → 备份 + 提示 + �
 });
 
 test('task-32 变异测试：数组元素路径（villagers[]/tasks[]/settled[]/props[]/buildings[]）同样全拒', () => {
-  const sample = JSON.parse(sampleText) as WorldSaveV1;
+  const sample = JSON.parse(sampleText) as WorldSave;
   const elementPaths = [...new Set(collectSavePaths(sample))]
     .filter((path) => /\[\]\./.test(path))
     .sort();
@@ -442,9 +444,9 @@ test('task-32 变异测试：数组元素路径（villagers[]/tasks[]/settled[]/
   let skipped = 0;
   for (const path of elementPaths) {
     for (const [kind, apply] of [
-      ['删除', (copy: WorldSaveV1) => deletePath(copy, path)],
-      ['错类型', (copy: WorldSaveV1) => setPath(copy, path, WRONG_TYPE)],
-      ['置空', (copy: WorldSaveV1) => setPath(copy, path, null)],
+      ['删除', (copy: WorldSave) => deletePath(copy, path)],
+      ['错类型', (copy: WorldSave) => setPath(copy, path, WRONG_TYPE)],
+      ['置空', (copy: WorldSave) => setPath(copy, path, null)],
     ] as const) {
       const copy = clone(sample);
       if (!apply(copy)) {
@@ -452,12 +454,12 @@ test('task-32 变异测试：数组元素路径（villagers[]/tasks[]/settled[]/
         continue;
       }
       if (kind === '置空' && NULLABLE_PATHS.has(path)) {
-        assert.doesNotThrow(() => assertSaveV1(copy), `${path} 置空是 v1 合法值，不得误判坏档`);
+        assert.doesNotThrow(() => assertSave(copy), `${path} 置空是 v2 合法值，不得误判坏档`);
         nullableAccepted += 1;
         continue;
       }
       executed += 1;
-      assert.throws(() => assertSaveV1(copy), `${path} ${kind} 必须被拒`);
+      assert.throws(() => assertSave(copy), `${path} ${kind} 必须被拒`);
     }
   }
   const total = elementPaths.length * 3;
@@ -465,13 +467,13 @@ test('task-32 变异测试：数组元素路径（villagers[]/tasks[]/settled[]/
   assert.ok(executed > 150, `元素内变异应覆盖充分，实际 ${executed}`);
   console.log(
     `\n[元素内变异汇总] ${elementPaths.length} 条元素内路径 × 3 变异（删除/错类型/置空）= ${total} 例；` +
-    `拒绝 ${executed} 例（全拒）；接受 ${nullableAccepted} 例（可空字段置空，v1 合法值）；` +
+    `拒绝 ${executed} 例（全拒）；接受 ${nullableAccepted} 例（可空字段置空，v2 合法值）；` +
     `跳过 ${skipped} 例；放行 0 例。`,
   );
 });
 
 test('task-32：字段缺失是坏档，不是「用默认值补上」', () => {
-  const sample = JSON.parse(sampleText) as WorldSaveV1;
+  const sample = JSON.parse(sampleText) as WorldSave;
   // 这几个字段一旦缺失，旧实现会由 `?? default` 静默兜住；task-32 后必须拒绝。
   const fields = [
     'world.villagers[].bubbleUntil',
@@ -486,7 +488,7 @@ test('task-32：字段缺失是坏档，不是「用默认值补上」', () => {
   for (const path of fields) {
     const copy = clone(sample);
     assert.equal(deletePath(copy, path), true, `${path} 应存在可删`);
-    assert.throws(() => assertSaveV1(copy), /缺失（v1 要求该字段存在）/, `${path} 缺失必须拒绝`);
+    assert.throws(() => assertSave(copy), /缺失（当前版要求该字段存在）/, `${path} 缺失必须拒绝`);
   }
 });
 

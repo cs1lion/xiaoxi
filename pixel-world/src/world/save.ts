@@ -8,6 +8,7 @@
 import type {
   Facing,
   GridPoint,
+  OracleRecord,
   PendingDispatch,
   PlacedBuilding,
   PropKind,
@@ -24,14 +25,18 @@ import type {
   WorldProp,
   ZoneId,
 } from './types.ts';
+import { ORACLE_SLAB_LIMIT } from './types.ts';
 import type { WeatherState } from './weather.ts';
 
-export const CURRENT_SCHEMA_VERSION = 1;
+export const CURRENT_SCHEMA_VERSION = 2;
+/** 槽位键沿用 v1：升 schema 不改存储键，老档才读得到、才谈得上迁移。 */
 export const SAVE_STORAGE_KEY = 'xiaoxi.pixel-world.save.v1';
 /** 已结算记录超过这个数就告警一次（每会话一次）。 */
 export const SETTLED_WARN_THRESHOLD = 5000;
-/** 冻结指纹（ADR_SAVE §1，frozen）。样例 meta.schemaFingerprint 同值。 */
+/** v1 冻结指纹（ADR_SAVE §1，frozen）。旧档迁移前用它自证，仍然有效。 */
 export const SCHEMA_V1_FINGERPRINT = 'f53a0736d782d657';
+/** v2 冻结指纹（ADR_WORLD_ALIVE §8）。由 docs/save-v2.sample.json 算出，单测核对。 */
+export const SCHEMA_V2_FINGERPRINT = '2b24e070ebaadaa5';
 
 /** v1 冻结路径全集（99 条，来自 docs/save-v1.sample.json；指纹见上，单测核对）。
  * `assertSaveV1` 做**集合包含**校验：存档出现的每条叶子路径都必须在这个集合里；
@@ -145,6 +150,24 @@ export const SAVE_V1_PATHS: readonly string[] = [
 ];
 
 /**
+ * v2 在 v1 之上新增的叶子路径。
+ *
+ * v1 的 99 条保持冻结不动：旧档迁移前要先按 v1 形状自证，改它等于改历史。
+ * 新增只加在这里，`assertSave` 用 v1 ∪ optional ∪ 本表做集合包含校验。
+ *
+ * 石板数组在样例里非空，所以元素键也在样例里出现，不需要额外补可选路径。
+ * （v1 当年补 optional，是因为样例里 path/pendingRoute 是空数组。）
+ */
+export const SAVE_V2_ADDED_PATHS: readonly string[] = [
+  'world.oracle[]',
+  'world.oracle[].at',
+  'world.oracle[].raw',
+  'world.oracle[].receipt',
+  'world.props[].sourceTaskId',
+  'world.props[].sourceTaskKind',
+];
+
+/**
  * v1 冻结的 `world.tasks[]` 键集合（必须与 docs/save-v1.sample.json 逐键一致）。
  * 运行时字段（如 ledgerCompletedAt）不得落盘；字段漂移必须升版本，不能裸加。
  */
@@ -228,20 +251,33 @@ export interface SaveWorld {
   readonly settled: readonly SettledRecord[];
   readonly nextTaskNumber: number;
   readonly nextPendingNumber: number;
+  /** v2 新增：神谕石板。旧档迁移后是空数组，不是缺字段。 */
+  readonly oracle: readonly OracleRecord[];
+}
+
+export interface SaveMeta {
+  /** 仅诊断，永不喂逻辑（ADR_SAVE §5）。 */
+  readonly savedAtWallClock: number;
+  /** 写档时是否已与台账对账（仅诊断）。 */
+  readonly savedReconciled: boolean;
+  /** 冻结指纹；加载时存在且不符 → 按坏档处理。 */
+  readonly schemaFingerprint: string;
 }
 
 export interface WorldSaveV1 {
   readonly schemaVersion: 1;
   readonly world: SaveWorld;
-  readonly meta: {
-    /** 仅诊断，永不喂逻辑（ADR_SAVE §5）。 */
-    readonly savedAtWallClock: number;
-    /** 写档时是否已与台账对账（仅诊断）。 */
-    readonly savedReconciled: boolean;
-    /** 冻结指纹；加载时存在且不符 → 按坏档处理。 */
-    readonly schemaFingerprint: string;
-  };
+  readonly meta: SaveMeta;
 }
+
+export interface WorldSaveV2 {
+  readonly schemaVersion: 2;
+  readonly world: SaveWorld;
+  readonly meta: SaveMeta;
+}
+
+/** 运行期只认当前版本。v1 只在迁移入口出现，不流进 Simulation。 */
+export type WorldSave = WorldSaveV2;
 
 export type RawSave = Record<string, unknown>;
 
@@ -305,13 +341,20 @@ export const SAVE_V1_OPTIONAL_PATHS: readonly string[] = [
   'world.villagers[].pendingRoute[].y',
 ];
 
-/** 合法存档允许出现的路径全集 = 冻结样例 99 条 + 上面这些可选嵌套路径。 */
+/** 合法存档允许出现的路径全集 = 冻结样例 99 条 + 可选嵌套路径。 */
 export const SAVE_V1_ALLOWED_PATHS: readonly string[] = [
   ...SAVE_V1_PATHS,
   ...SAVE_V1_OPTIONAL_PATHS,
 ];
 
+/** v2 允许全集 = v1 全集 + v2 新增。 */
+export const SAVE_V2_ALLOWED_PATHS: readonly string[] = [
+  ...SAVE_V1_ALLOWED_PATHS,
+  ...SAVE_V2_ADDED_PATHS,
+];
+
 const SAVE_V1_PATH_SET = new Set(SAVE_V1_ALLOWED_PATHS);
+const SAVE_V2_PATH_SET = new Set(SAVE_V2_ALLOWED_PATHS);
 
 /** 对任意存档对象取指纹（跳过 meta.schemaFingerprint）。 */
 export function saveFingerprint(save: unknown): string {
@@ -386,7 +429,7 @@ function asArray(value: unknown, path: string): readonly unknown[] {
 /** 必须有这个键（值为 undefined 也算缺）：删字段是坏档，不是"用默认值"。 */
 function requireKey(object: Record<string, unknown>, key: string, path: string): unknown {
   if (!Object.prototype.hasOwnProperty.call(object, key) || object[key] === undefined) {
-    fail(`${path}.${key}`, '缺失（v1 要求该字段存在）');
+    fail(`${path}.${key}`, '缺失（当前版要求该字段存在）');
   }
   return object[key];
 }
@@ -446,10 +489,12 @@ function checkPointList(value: unknown, path: string): void {
 }
 
 /**
- * 逐个字段校验 v1 的类型/范围/存在性。
- * 只做「值」层面的检查；路径越界由 `assertSaveV1` 末尾的集合包含校验负责。
+ * 逐个字段校验：类型/范围/存在性。只做「值」层面，路径越界由集合包含校验负责。
+ *
+ * `version` 决定要不要检查 v2 新增字段：v1 旧档在迁移前必须能过这一层，
+ * 所以 v1 不查 `props[].sourceTaskKind` 与 `world.oracle`。
  */
-function validateWorldFields(raw: Record<string, unknown>): void {
+function validateWorldFields(raw: Record<string, unknown>, version: 1 | 2): void {
   const world = asRecord(raw.world, 'world');
 
   checkNumber(requireKey(world, 'now', 'world'), 'world.now', { min: 0 });
@@ -534,7 +579,30 @@ function validateWorldFields(raw: Record<string, unknown>): void {
     checkEnum(requireKey(prop, 'kind', path), PROP_KINDS, `${path}.kind`);
     checkPoint(requireKey(prop, 'at', path), `${path}.at`, { integer: true });
     checkString(requireKey(prop, 'label', path), `${path}.label`, { allowEmpty: true });
+    if (version >= 2) {
+      // v2：来源可以为 null（老摆件来路不明），但不能是空串或未知类型。
+      const sourceKind = requireKey(prop, 'sourceTaskKind', path);
+      if (sourceKind !== null) checkEnum(sourceKind, TASK_KINDS, `${path}.sourceTaskKind`);
+      checkStringOrNull(requireKey(prop, 'sourceTaskId', path), `${path}.sourceTaskId`, {
+        allowEmpty: true,
+      });
+    }
   });
+
+  if (version >= 2) {
+    // ---- 神谕石板（v2）：只记改变了世界的话，封顶 ORACLE_SLAB_LIMIT 条。
+    const oracle = asArray(requireKey(world, 'oracle', 'world'), 'world.oracle');
+    if (oracle.length > ORACLE_SLAB_LIMIT) {
+      fail('world.oracle', `最多 ${ORACLE_SLAB_LIMIT} 条，实际 ${oracle.length}`);
+    }
+    oracle.forEach((item, index) => {
+      const path = `world.oracle[${index}]`;
+      const record = asRecord(item, path);
+      checkString(requireKey(record, 'raw', path), `${path}.raw`, { allowEmpty: true });
+      checkString(requireKey(record, 'receipt', path), `${path}.receipt`, { allowEmpty: true });
+      checkNumber(requireKey(record, 'at', path), `${path}.at`, { min: 0 });
+    });
+  }
 
   // ---- 任务
   const tasks = asArray(requireKey(world, 'tasks', 'world'), 'world.tasks');
@@ -669,31 +737,39 @@ function validateMetaFields(raw: Record<string, unknown>): void {
 }
 
 /**
- * 校验 v1 单一入口（task-32）：字段级类型/范围/存在性 → 形状/嵌套键集合 → 路径集合包含。
- * 失败一律抛错，由调用方按坏档处理；**绝不静默补默认值**。
+ * 字段级校验：类型/范围/存在性。防「删字段」「换错类型」「值越界」。
+ * 路径集合会因删字段而合法缩小，所以这一半必须逐字段点名检查。
+ *
+ * v1 档在迁移前走这一层，所以 v2 新增字段按版本跳过。
  */
-export function validateSaveV1(raw: unknown): asserts raw is WorldSaveV1 {
+export function validateSaveFields(
+  raw: unknown,
+  version: 1 | 2 = 2,
+): asserts raw is WorldSaveV1 | WorldSaveV2 {
   if (!isObject(raw)) fail('存档', '不是对象');
   validateMetaFields(raw);
-  validateWorldFields(raw);
+  validateWorldFields(raw, version);
 }
 
 /**
- * 校验 v1 的**唯一入口**（task-32）：三层串联，逐层防不同的东西。
+ * 当前版本存档的**唯一校验入口**。三层串联，逐层防不同的东西。
  *
- * 1. **字段级类型/范围/存在性**（`validateSaveV1`）：防「删字段」「换错类型」「值越界」。
+ * 1. **字段级类型/范围/存在性**（`validateSaveFields`）：防「删字段」「换错类型」「值越界」。
  *    路径集合会因删字段而合法缩小，所以这一半必须逐字段点名检查；缺失即拒，
  *    绝不静默补默认值。
  * 2. **形状/嵌套键集合**：`world.tasks[]` / `world.settled[]` 键集合必须与冻结常量逐键一致。
- * 3. **路径集合包含**：存档里出现的每条叶子路径都必须落在允许全集
- *    （冻结 99 条 + 4 条可选）里，越界即拒并指名越界路径——只防「新增字段」。
+ * 3. **路径集合包含**：存档里出现的每条叶子路径都必须落在允许全集里，越界即拒并指名
+ *    越界路径——只防「新增字段」。v1 用 v1 全集，v2 用 v1 ∪ v2 新增。
  *
- * 三层各管一段，合起来才等价于"v1 形状完全没动"；任何一层失败都按坏档处理。
+ * 三层各管一段，合起来才等价于"形状完全没变"；任何一层失败都按坏档处理。
+ *
+ * v1 仍被接受，是因为迁移前的旧档要先按 v1 形状自证一次（`MIGRATIONS[1]`）。
+ * 迁移完成后到这里的存档一律是 v2。
  */
-export function assertSaveV1(raw: unknown): asserts raw is WorldSaveV1 {
+export function assertSave(raw: unknown): asserts raw is WorldSaveV2 {
   if (!isObject(raw)) throw new Error('存档不是对象');
   if (raw.schemaVersion !== CURRENT_SCHEMA_VERSION) {
-    throw new Error(`schemaVersion 不是 ${CURRENT_SCHEMA_VERSION}`);
+    throw new Error(`schemaVersion 不是 ${CURRENT_SCHEMA_VERSION}（迁移没跑？）`);
   }
   const world = raw.world;
   if (!isObject(world)) throw new Error('存档缺 world');
@@ -702,13 +778,13 @@ export function assertSaveV1(raw: unknown): asserts raw is WorldSaveV1 {
   // meta.schemaFingerprint 是冻结产物的自证字段：缺失/不是字符串一律拒绝，避免
   // 「删掉它就能绕过旧检查」；存在但与常量不等也拒绝（被改过或字段漂移）。
   if (typeof meta.schemaFingerprint !== 'string') {
-    throw new Error('存档缺 meta.schemaFingerprint（v1 要求该字段存在）');
+    throw new Error('存档缺 meta.schemaFingerprint（v2 要求该字段存在）');
   }
-  if (meta.schemaFingerprint !== SCHEMA_V1_FINGERPRINT) {
+  if (meta.schemaFingerprint !== SCHEMA_V2_FINGERPRINT) {
     throw new Error('存档指纹不符（字段变了但版本没升，或存档损坏）');
   }
   // 第 1 层：字段级类型/范围/存在性（含 weather/faith、各数组元素、done⊆settled）。
-  validateSaveV1(raw);
+  validateSaveFields(raw, 2);
   // 第 2 层：嵌套键集合冻结（多一个运行时字段就是漂移）。
   for (const record of world.settled as unknown[]) {
     assertKeys(record as Record<string, unknown>, SAVE_SETTLED_KEYS, 'world.settled[]');
@@ -717,6 +793,38 @@ export function assertSaveV1(raw: unknown): asserts raw is WorldSaveV1 {
     assertKeys(task as Record<string, unknown>, SAVE_TASK_KEYS, 'world.tasks[]');
   }
   // 第 3 层：路径集合包含校验——只防「新增路径」（顶层/world/meta/数组元素里多字段）。
+  const outside = collectSavePaths(raw).filter((path) => !SAVE_V2_PATH_SET.has(path));
+  if (outside.length > 0) {
+    throw new Error(
+      `存档字段漂移：出现 v2 允许集合之外的路径：${outside.join(', ')}（字段变了但版本没升）`,
+    );
+  }
+}
+
+/**
+ * 只认 v1 形状的自证校验。迁移链在改写存档前先跑它，确保「旧档确实是旧档」，
+ * 而不是被改过的、或已经混进 v2 字段的假旧档。
+ */
+export function assertSaveV1(raw: unknown): asserts raw is WorldSaveV1 {
+  if (!isObject(raw)) throw new Error('存档不是对象');
+  if (raw.schemaVersion !== 1) throw new Error(`schemaVersion 不是 1（实际 ${String(raw.schemaVersion)}）`);
+  const world = raw.world;
+  if (!isObject(world)) throw new Error('存档缺 world');
+  const meta = raw.meta;
+  if (!isObject(meta)) throw new Error('存档缺 meta');
+  if (typeof meta.schemaFingerprint !== 'string') {
+    throw new Error('存档缺 meta.schemaFingerprint（v1 要求该字段存在）');
+  }
+  if (meta.schemaFingerprint !== SCHEMA_V1_FINGERPRINT) {
+    throw new Error('存档指纹不符（字段变了但版本没升，或存档损坏）');
+  }
+  validateSaveFields(raw, 1);
+  for (const record of world.settled as unknown[]) {
+    assertKeys(record as Record<string, unknown>, SAVE_SETTLED_KEYS, 'world.settled[]');
+  }
+  for (const task of world.tasks as unknown[]) {
+    assertKeys(task as Record<string, unknown>, SAVE_TASK_KEYS, 'world.tasks[]');
+  }
   const outside = collectSavePaths(raw).filter((path) => !SAVE_V1_PATH_SET.has(path));
   if (outside.length > 0) {
     throw new Error(
@@ -729,10 +837,22 @@ export function assertSaveV1(raw: unknown): asserts raw is WorldSaveV1 {
 export type Migration = (raw: RawSave) => RawSave;
 
 export const MIGRATIONS: Record<number, Migration> = {
-  // v1→v2 样例：settled 记录补 completedAtClock（历史记录按 local，不伪造时间）。
+  /**
+   * v1 → v2：世界变活（ADR_WORLD_ALIVE §8）。
+   *
+   * 只补 v2 真正新增的两处，不猜别的：
+   *   - `world.oracle`：v1 没有石板，迁移后是空数组；
+   *   - `props[].sourceTaskKind` / `sourceTaskId`：v1 的摆件没有来源，记 null。
+   *
+   * 历史摆件不编造来源。`null` 在世界里读作「来路不明」，这是诚实的默认值。
+   * `completedAtClock` 曾在这条迁移里补过（旧样例），v1 冻结后它已必填，
+   * 这里保留兜底以防极早的非样例档；对合法 v1 档是无操作。
+   */
   1: (raw) => {
     const world = isObject(raw.world) ? raw.world : {};
     const settled = Array.isArray(world.settled) ? world.settled : [];
+    const props = Array.isArray(world.props) ? world.props : [];
+    const meta = isObject(raw.meta) ? raw.meta : {};
     return {
       ...raw,
       schemaVersion: 2,
@@ -741,13 +861,26 @@ export const MIGRATIONS: Record<number, Migration> = {
         settled: settled.map((record) =>
           isObject(record) ? { ...record, completedAtClock: record.completedAtClock ?? 'local' } : record,
         ),
+        props: props.map((prop) =>
+          isObject(prop)
+            ? {
+                ...prop,
+                sourceTaskKind: prop.sourceTaskKind ?? null,
+                sourceTaskId: prop.sourceTaskId ?? null,
+              }
+            : prop,
+        ),
+        oracle: Array.isArray(world.oracle) ? world.oracle : [],
       },
+      meta: { ...meta, schemaFingerprint: SCHEMA_V2_FINGERPRINT },
     };
   },
 };
 
 export function migrateSave(raw: RawSave): RawSave {
   const version = typeof raw.schemaVersion === 'number' ? raw.schemaVersion : 0;
+  // 迁移前先按起点版本自证：被改过的旧档不能靠迁移「洗白」成合法档。
+  if (version === 1) assertSaveV1(raw);
   let current = raw;
   let cursor = version;
   while (cursor < CURRENT_SCHEMA_VERSION) {

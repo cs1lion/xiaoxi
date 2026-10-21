@@ -7,12 +7,12 @@ import { parseBlueprintTable } from '../src/world/blueprints.ts';
 import { ALTAR, buildWorld, buildWorldFromSave } from '../src/world/setup.ts';
 import { Simulation } from '../src/world/simulation.ts';
 import {
-  assertSaveV1,
+  assertSave,
   collectSavePaths,
   SAVE_STORAGE_KEY,
   SAVE_TASK_KEYS,
-  SCHEMA_V1_FINGERPRINT,
-  type WorldSaveV1,
+  SCHEMA_V2_FINGERPRINT,
+  type WorldSave,
 } from '../src/world/save.ts';
 import {
   exportFileName,
@@ -27,7 +27,7 @@ const rawPrefabs = JSON.parse(
 ) as Record<string, Record<string, unknown>>;
 const blueprints = parseBlueprintTable(rawPrefabs);
 
-const sampleText = readFileSync(new URL('../../docs/save-v1.sample.json', import.meta.url), 'utf8');
+const sampleText = readFileSync(new URL('../../docs/save-v2.sample.json', import.meta.url), 'utf8');
 
 class FakeStorage implements StorageLike {
   readonly data = new Map<string, string>();
@@ -59,7 +59,7 @@ class FakeStorage implements StorageLike {
   }
 }
 
-function makeSave(wallClock: () => number = () => 1000): WorldSaveV1 {
+function makeSave(wallClock: () => number = () => 1000): WorldSave {
   const world = buildWorld(blueprints);
   const sim = new Simulation({
     grid: world.grid,
@@ -83,7 +83,7 @@ function withoutWallClock(text: string): {
   return { parsed, clone };
 }
 
-test('导出内容就是 v1 存档：通过校验、字段不超出冻结样例、无运行时字段', () => {
+test('导出内容就是当前版存档：通过校验、字段不超出冻结样例、无运行时字段', () => {
   const storage = new FakeStorage();
   const store = new SaveStore({ storage });
   const save = makeSave();
@@ -91,9 +91,9 @@ test('导出内容就是 v1 存档：通过校验、字段不超出冻结样例�
 
   const text = store.readRawText();
   assert.ok(text !== null, '写完后应能读到单槽原文');
-  const parsed = JSON.parse(text) as WorldSaveV1;
-  assert.doesNotThrow(() => assertSaveV1(parsed));
-  assert.equal(parsed.meta.schemaFingerprint, SCHEMA_V1_FINGERPRINT);
+  const parsed = JSON.parse(text) as WorldSave;
+  assert.doesNotThrow(() => assertSave(parsed));
+  assert.equal(parsed.meta.schemaFingerprint, SCHEMA_V2_FINGERPRINT);
   // 指纹是按“实际数据叶子路径”算的，空数组/空对象会让路径集合缩水，
   // 所以这里比的是「导出路径必须全部落在冻结样例的路径集合里」——多一个字段就红。
   const samplePaths = new Set(collectSavePaths(JSON.parse(sampleText)));
@@ -130,21 +130,21 @@ test('导出文件名带时间戳，且同秒同格式', () => {
   assert.match(exportFileName(Date.now()), /^xiaoxi-pixel-world-save-\d{8}-\d{6}\.json$/);
 });
 
-test('导入合法 v1：写入单槽、可读回、能重建世界（刷新恢复路径）', () => {
+test('导入合法档：写入单槽、可读回、能重建世界（刷新恢复路径）', () => {
   const storage = new FakeStorage();
   const store = new SaveStore({ storage });
   const result = store.importText(sampleText);
   assert.equal(result.ok, true, result.message);
   const text = store.readRawText();
   assert.ok(text !== null);
-  assert.doesNotThrow(() => assertSaveV1(JSON.parse(text)), '导入后槽里必须是合法 v1');
+  assert.doesNotThrow(() => assertSave(JSON.parse(text)), '导入后槽里必须是当前版合法档');
 
   const read = store.read();
   assert.equal(read.ok, true);
   if (!read.ok) return;
   const world = buildWorldFromSave(read.save.world.buildings, blueprints);
   assert.equal(world.buildings.length, read.save.world.buildings.length);
-  assert.equal(read.save.meta.schemaFingerprint, SCHEMA_V1_FINGERPRINT);
+  assert.equal(read.save.meta.schemaFingerprint, SCHEMA_V2_FINGERPRINT);
 });
 
 test('导入坏档：拒绝、原文件按现有机制备份、不写主槽', () => {

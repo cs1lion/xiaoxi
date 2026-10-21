@@ -730,9 +730,19 @@ async function runSandboxSuite() {
   const savedRaw = await page.evaluate(() =>
     localStorage.getItem('xiaoxi.pixel-world.save.v1'),
   );
+  const savedParsed = typeof savedRaw === 'string' ? JSON.parse(savedRaw) : null;
   check(
-    typeof savedRaw === 'string' && savedRaw.includes('"schemaVersion":1'),
-    '单槽里是 v1 JSON',
+    savedParsed !== null && savedParsed.schemaVersion === 2,
+    '单槽里是 v2 JSON',
+  );
+  // 石板与摆件来源是 v2 新增字段，写档必须带上；缺了就是字段漂移。
+  check(
+    savedParsed !== null &&
+      Array.isArray(savedParsed.world?.oracle) &&
+      savedParsed.world.props.every(
+        (prop) => 'sourceTaskKind' in prop && 'sourceTaskId' in prop,
+      ),
+    'v2 存档带石板与摆件来源',
   );
 
   await page.reload({ waitUntil: 'load' });

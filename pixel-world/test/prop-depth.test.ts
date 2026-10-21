@@ -2,15 +2,18 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { TILE_PX } from '../src/world/setup.ts';
 import { ACTOR_DEPTH_OFFSET, propDepth, propFootY } from '../src/render/prop-depth.ts';
+import type { WorldProp } from '../src/world/types.ts';
 
 /** §1.5 D5：道具必须有 depth，且与角色同一把尺子，否则 Y-Sort 无效。 */
 
 const ALT = 1000;
-const prop = (y: number): { id: string; kind: 'tree'; at: { x: number; y: number }; label: string } => ({
+const prop = (y: number): WorldProp => ({
   id: 'p',
   kind: 'tree',
   at: { x: 3, y },
   label: '树',
+  sourceTaskKind: null,
+  sourceTaskId: null,
 });
 
 /** 角色 depth：villager.ts 的 `altitude + py + 8`，py = (pos.y + 1) * TILE_PX。 */

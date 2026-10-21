@@ -11,7 +11,7 @@ import { parseBlueprintTable } from '../src/world/blueprints.ts';
 import { ALTAR, buildWorld, placeBlueprint } from '../src/world/setup.ts';
 import { Simulation, ledgerCompletedAtMs } from '../src/world/simulation.ts';
 import type { SimulationDeps } from '../src/world/simulation.ts';
-import { assertSaveV1 } from '../src/world/save.ts';
+import { assertSave } from '../src/world/save.ts';
 import {
   LedgerClient,
   reconnectDelay,
@@ -944,7 +944,7 @@ test('ledger 交付的 settled.completedAt 取台账时间 ×1000，clock=ledger
   assert.equal(settled?.source, 'ledger');
   assert.equal(settled?.completedAt, 1_792_377_786_000, 'closed_at(秒) ×1000');
   assert.equal(settled?.completedAtClock, 'ledger');
-  assert.doesNotThrow(() => assertSaveV1(sim.toSave()), '格式层接受非空 ledger 时间');
+  assert.doesNotThrow(() => assertSave(sim.toSave()), '格式层接受非空 ledger 时间');
 });
 
 test('finishedAt 缺失时退回已见到的 updated_at，仍不用本地时间', () => {

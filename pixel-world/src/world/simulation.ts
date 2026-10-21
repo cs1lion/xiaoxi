@@ -26,6 +26,7 @@ import type {
   ConstructionSnapshot,
   Facing,
   GridPoint,
+  OracleRecord,
   PendingDispatch,
   PlacedBuilding,
   TaskRecord,
@@ -41,8 +42,8 @@ import type {
   WorldSnapshot,
 } from './types.ts';
 import { excerptBlockedQuestion } from './types.ts';
-import type { SavedVillager, SettledRecord, WorldSaveV1 } from './save.ts';
-import { SCHEMA_V1_FINGERPRINT } from './save.ts';
+import type { SavedVillager, SettledRecord, WorldSave } from './save.ts';
+import { SCHEMA_V2_FINGERPRINT } from './save.ts';
 
 /**
  * 台账事件时间 → settled 用的 epoch 毫秒。协议 §19 给的是秒（×1000）；
@@ -172,6 +173,8 @@ export class Simulation {
   private readonly queue: WorldCommand[] = [];
   private readonly lastResults: CommandResult[] = [];
   private readonly props: WorldProp[] = [];
+  /** 神谕石板：只记改变了世界的话。旧在前，封顶 ORACLE_SLAB_LIMIT。 */
+  private readonly oracleLog: OracleRecord[] = [];
   private readonly roads: GridPoint[] = [];
   private readonly constructions = new Map<string, WorkstationState>();
 
@@ -308,6 +311,7 @@ export class Simulation {
       tasks: this.tasks.map((task) => ({ ...task })),
       pending: this.allPending(),
       props: this.props,
+      oracle: this.oracleLog,
       roads: this.roads,
       events: this.events.slice(-12),
       weather: this.weather.kind,
@@ -999,7 +1003,7 @@ export class Simulation {
     villager.bubbleUntil = this.now + QUICK_DONE_MS;
     villager.nextRoutineAt = this.now + 1800;
     villager.routineLabel = null;
-    this.accrueFaith();
+    this.accrueFaith(task);
     this.log('done', `${task.summary} 办完了（${villager.name}）。`);
   }
 
@@ -1146,7 +1150,7 @@ export class Simulation {
     villager.bubbleUntil = this.now + DELIVER_MS;
     villager.deliverUntil = this.now + DELIVER_MS;
     villager.path = [];
-    this.accrueFaith();
+    this.accrueFaith(task);
     this.log('done', `${task.summary} 已交付（${villager.name}）。`);
   }
 
@@ -1176,12 +1180,19 @@ export class Simulation {
     return this.settledLog.some((record) => record.id === taskId);
   }
 
-  /** 攒够一个里程碑，世界多一件东西；不够就只是点数。 */
-  private accrueFaith(): void {
+  /** 攒够一个里程碑，世界多一件东西；不够就只是点数。
+   *
+   * `task` 是刚刚交付、把点数推过线的那一单：摆件的来源就记它。
+   * 落不下（周围没空地）时点数保留，不吞掉。
+   */
+  private accrueFaith(task: TaskRecord): void {
     this.faithPoints += POINTS_PER_TASK;
     if (this.faithPoints < FAITH_MILESTONE) return;
     this.faithPoints -= FAITH_MILESTONE;
-    const prop = nextProp(this.milestones, this.altar, (p) => this.grid.isWalkable(p));
+    const prop = nextProp(this.milestones, this.altar, (p) => this.grid.isWalkable(p), {
+      kind: task.kind,
+      taskId: task.id,
+    });
     if (prop === null) return;
     this.props.push(prop);
     this.milestones += 1;
@@ -1221,7 +1232,7 @@ export class Simulation {
   // ---------------------------------------------------------------- save
 
   /** 序列化世界自有事实；台账链接态与派生计数不入档（ADR_SAVE §1）。 */
-  toSave(): WorldSaveV1 {
+  toSave(): WorldSave {
     const villagers: SavedVillager[] = this.villagers.map((villager) => ({
       id: villager.id,
       name: villager.name,
@@ -1243,13 +1254,14 @@ export class Simulation {
       pendingBuildingId: villager.pendingBuilding?.instanceId ?? null,
     }));
     return {
-      schemaVersion: 1,
+      schemaVersion: 2,
       world: {
         now: this.now,
         villagers,
         buildings: this.buildings.map((building) => ({ ...building })),
         roads: this.roads.map((cell) => ({ x: cell.x, y: cell.y })),
         props: this.props.map((prop) => ({ ...prop })),
+        oracle: this.oracleLog.map((record) => ({ ...record })),
         // 运行时字段不落盘：ledgerCompletedAt 只服务 settled；v1 schema 已冻结、样例无此键。
         tasks: this.tasks.map((task) => {
           const saved: TaskRecord = { ...task };
@@ -1275,7 +1287,7 @@ export class Simulation {
       meta: {
         savedAtWallClock: this.wallClock(),
         savedReconciled: this.ledgerReconciled,
-        schemaFingerprint: SCHEMA_V1_FINGERPRINT,
+        schemaFingerprint: SCHEMA_V2_FINGERPRINT,
       },
     };
   }
@@ -1285,7 +1297,7 @@ export class Simulation {
    * （`rebuildGridFromPlacements`），deps.buildings 用存档里的那批。
    * 读档后台账一律标记未对账，等首个成功 sync 走 reconcile。
    */
-  static fromSave(save: WorldSaveV1, deps: SimulationDeps): Simulation {
+  static fromSave(save: WorldSave, deps: SimulationDeps): Simulation {
     const names = save.world.villagers.map((villager) => villager.name);
     const sim = new Simulation({
       ...deps,
@@ -1360,6 +1372,9 @@ export class Simulation {
     sim.weather = { ...world.weather };
     sim.faithPoints = world.faith.points;
     sim.milestones = world.faith.milestones;
+
+    sim.oracleLog.length = 0;
+    for (const record of world.oracle) sim.oracleLog.push({ ...record });
 
     // settled 是分账唯一真相：由它重建私有日志与交付统计（不持久化计数）。
     sim.settledLog.length = 0;

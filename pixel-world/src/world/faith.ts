@@ -4,8 +4,7 @@
  * 每交付一单攒一点，攒满就在世界里落一个摆件。
  */
 
-import type { PropKind, WorldProp } from './types.ts';
-import type { GridPoint } from './types.ts';
+import type { GridPoint, PropKind, TaskKind, WorldProp } from './types.ts';
 
 export const POINTS_PER_TASK = 1;
 export const MILESTONE_POINTS = 3;
@@ -21,11 +20,16 @@ export function milestoneFor(milestoneIndex: number): { kind: PropKind; label: s
   return MILESTONE_CYCLE[milestoneIndex % MILESTONE_CYCLE.length];
 }
 
-/** 世界记忆落在祭坛周围，位置由落点决定，不由调用方指定。 */
+/** 世界记忆落在祭坛周围，位置由落点决定，不由调用方指定。
+ *
+ * `source` 记下换来这件东西的那条活，纸面据此写「哪一单换的」。
+ * 老档迁移来的摆件没有来源，两个字段都是 null，绘制层与纸面必须容忍。
+ */
 export function nextProp(
   milestoneIndex: number,
   anchor: GridPoint,
   walkable: (p: GridPoint) => boolean,
+  source: { readonly kind: TaskKind; readonly taskId: string } | null = null,
 ): WorldProp | null {
   const { kind, label } = milestoneFor(milestoneIndex);
   const ring = Math.floor(milestoneIndex / 8) + 2;
@@ -37,6 +41,8 @@ export function nextProp(
     kind,
     at: spot,
     label,
+    sourceTaskKind: source?.kind ?? null,
+    sourceTaskId: source?.taskId ?? null,
   };
 }
 

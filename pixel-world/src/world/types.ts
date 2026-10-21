@@ -226,6 +226,13 @@ export interface WorldProp {
   readonly kind: PropKind;
   readonly at: GridPoint;
   readonly label: string;
+  /**
+   * 这个摆件从哪种活换来的。v1 存档迁移过来的老摆件没有来源，记 null；
+   * 绘制层据此换外观，纸面据此写「这盏灯是哪一单换来的」。
+   */
+  readonly sourceTaskKind: TaskKind | null;
+  /** 换来摆件的那条活的 id，没有来源时记 null。 */
+  readonly sourceTaskId: string | null;
 }
 
 export interface VillagerSnapshot {
@@ -244,6 +251,22 @@ export interface VillagerSnapshot {
   readonly umbrella: boolean;
 }
 
+/**
+ * 神谕石板上的一条：只记真正改变了世界的那句话，外加世界当时的回执。
+ * 认不出的输入不进石板（那是回问，不是世界事件）。封顶见 ORACLE_SLAB_LIMIT。
+ */
+export interface OracleRecord {
+  /** 玩家原话。 */
+  readonly raw: string;
+  /** 世界执行后的回执原文。 */
+  readonly receipt: string;
+  /** 逻辑时刻（sim.now），不是墙钟：石板要能确定性回放。 */
+  readonly at: number;
+}
+
+/** 石板最多留多少条。超出丢最旧：再多就没人读了。 */
+export const ORACLE_SLAB_LIMIT = 20;
+
 export interface WorldSnapshot {
   readonly now: number;
   /** 兼容旧调用方：等于 villagers[0]（主角色）。 */
@@ -257,6 +280,8 @@ export interface WorldSnapshot {
   /** 排队等待派发的神谕（FIFO）。只展示/可撤销，不影响台账完成权。 */
   readonly pending: readonly PendingDispatch[];
   readonly props: readonly WorldProp[];
+  /** 神谕石板：最近 N 条改变了世界的神谕，旧在前。 */
+  readonly oracle: readonly OracleRecord[];
   readonly roads: readonly GridPoint[];
   readonly altar: GridPoint;
   readonly events: readonly WorldEvent[];

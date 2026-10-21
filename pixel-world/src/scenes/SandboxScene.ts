@@ -25,7 +25,7 @@ import { createLazyAnimalese, type Animalese } from '../audio/animalese.ts';
 import { toWorldCommand, type AgentToWorld } from '../world/bridge.ts';
 import { LedgerClient } from '../world/ledger.ts';
 import { SaveStore } from '../ui/save-store.ts';
-import type { WorldSaveV1 } from '../world/save.ts';
+import type { WorldSave } from '../world/save.ts';
 import { CURRENT_SCHEMA_VERSION } from '../world/save.ts';
 
 export interface ScenePayload {
@@ -33,7 +33,7 @@ export interface ScenePayload {
   readonly blueprints: ReadonlyMap<string, PrefabBlueprint>;
   readonly villagerName: string;
   readonly saveStore?: SaveStore;
-  readonly save?: WorldSaveV1 | null;
+  readonly save?: WorldSave | null;
   readonly saveNotice?: string | null;
 }
 
@@ -69,7 +69,7 @@ export class SandboxScene extends Phaser.Scene {
   private readonly animalese: Animalese = createLazyAnimalese();
   private ledger: LedgerClient | null = null;
   private saveStore!: SaveStore;
-  private loadedSave: WorldSaveV1 | null = null;
+  private loadedSave: WorldSave | null = null;
   private saveNotice: string | null = null;
   private lastSaveKey = '';
   private lastSaveAt = Number.NEGATIVE_INFINITY;
