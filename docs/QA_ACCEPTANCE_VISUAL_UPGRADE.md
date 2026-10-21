@@ -1286,3 +1286,68 @@ master 的直连版同时服务两个调用点，且重启路径的失败语义�
 修复 + QA 复验通过后，合并结论可改「通过」。
 
 ---
+
+---
+
+## 26. P1 修复复验 + 合并结论改判（2026-10-21，HEAD `dc7aa95`）
+
+### 26.1 修复内容核实
+
+`dc7aa95` 删掉了遮蔽的工厂定义（原 `:1498-1528`），只留 master 直连版（`:1339`，
+签名 `(commission_id: str, attempt: int = 0)`）。QA 独立核实：
+
+- **AST 核**：模块级 `_durable_lookup` 定义数 = **1**（行 1339），参数
+  `[commission_id, attempt]`、默认值 1 个
+- **两个调用点都拿到直连版**：`:1375` `reconcile_durable, _durable_lookup`、
+  `:1518` `recover_interrupted(durable_lookup=_durable_lookup)`
+- **修复处留有说明注释**（`:1498-1504`）：准确记录了缺陷形态（工厂遮蔽、
+  TypeError 抛在 except 块内无人接、穿透 startup）——与 QA §25.3 的描述一致
+
+### 26.2 §25 实证重跑（P1 与 P2 一并消失）
+
+把 `:1339` 的定义原样提取 exec，模拟 `_adopt_durable` 的调用模式：
+
+- 运行时参数数 = **2**（直连版，不再是 0 参数工厂）
+- `lookup(id, attempt)` → 内核未起时抛 `RuntimeError`（master 版语义）→ 被
+  `except Exception: return False` 接住 → 走「转 BLOCKED」——**不再抛
+  TypeError、不再穿透 startup**
+- **P2 确认消失**：`:1375` 的 `reconcile_durable` 现在同样拿到直连版，周期对账
+  不再被 TypeError 静默吞掉
+
+### 26.3 新增回归锁的独立复验
+
+`scripts/test_executive_v3.py::test_durable_lookup_single_definition`（AST 静态锁：
+同名模块级函数只能有一个定义 + 签名收 `(commission_id, attempt)`）。
+**QA 自己的变异探针**：在 app.py 末尾追加同名 `def _durable_lookup(): return None` →
+该测试**变红**（「实际 2 个：行号 [1339, 1556]」，231 passed / 1 failed）→ 还原 →
+**234 passed, 0 failed**、文件与原始**逐字节一致**。锁有效。
+
+### 26.4 修复后门禁（QA 独立实跑）
+
+| 层 | 命令 | 实测 |
+|---|---|---|
+| 主产品 | check_protocol | exit 0 |
+| 主产品 | test_core | 64/64 |
+| 主产品 | test_world_bridge | 75/75 |
+| 主产品 | test_executive_v3 | **234/234**（231 + 新锁 3 条断言） |
+| 像素世界 | check | exit 0 |
+| 像素世界 | test:inprocess | 221/221 |
+| 像素世界 | audit --strict | exit 0，16/8/23 越界 0 |
+| 像素世界 | 整门禁 | PASS |
+
+### 26.5 「在飞单 + 重启」端到端实证的判断
+
+**QA 判断：AST 锁 + 调用模式实证 + 门禁已足够，不另起隔离环境造端到端场景。**
+理由：该缺陷是纯 Python 的「同名函数遮蔽 + 签名不匹配」问题，与 durable 内核
+是否在线无关；AST 锁从结构上杜绝复发（变异探针已验证），调用模式实证确认了
+`_adopt_durable` 的调用不再抛异常，门禁全绿。端到端重启场景还需要隔离环境 +
+真实 supervisor + 在飞单，成本与收益不成比例。若后续要做 durable 重启的端到端
+验收，应作为独立卡立项，不作为本修复的复验条件。
+
+### 26.6 合并复验结论改判
+
+**§25 的「不通过（1 条 P1）」→ 改判「通过」**：P1 已修复并经 QA 独立复验
+（AST 单定义、调用模式不再抛异常、P2 一并消失、回归锁变异探针有效、两层门禁
+全绿）。合并 `ccde463` + 修复 `dc7aa95` 的最终状态：**通过**。
+
+---
