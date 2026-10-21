@@ -111,6 +111,10 @@ def load_ws():
               # V3 内阁总管接缝：隔离环境不装配 ExecutiveService，路由函数返回 None，
               # _run_turn 的总管分支因此整段跳过，既有语音路径逐字节不变。
               executive=None,
+               # websocket_endpoint 会在 accept 后 _connections.add(conn)。生产模块在
+               # app.py 顶层定义了该集合，但 AST 隔离装载只编译函数、不执行模块级赋值；
+               # 不注入的话所有 WebSocket 测试都会在这里 NameError。
+               _connections=set(),
                tts=SimpleNamespace(engine='silent'), deliver_reply=module.deliver_reply,
                aqi_blocks_message=blocks_module.aqi_blocks_message,
                note_snippet=blocks_module.note_snippet,
