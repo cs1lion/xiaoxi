@@ -28,9 +28,9 @@ import process from 'node:process';
 import { fileURLToPath } from 'node:url';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
-const BUDGET = { world: 16, ui: 8 };
+const BUDGET = { world: 24, ui: 8 };
 
-/** 提案：16 色世界调色板。全部取自现有画布源色，不引入新色；语义见 role。 */
+/** 提案：24 色世界调色板。前 16 色为原材料表，W17–W24 为 2026-10-21 ADR 新增材料/光色。 */
 const PROPOSED_WORLD = [
   { hex: '#14110d', role: '最暗/轮廓/阴影/眼睛（合并 ink、shadow、sky）' },
   { hex: '#1b211c', role: '深土/树冠暗部/街巷暗（当前 soil 定义未引用，保留槽）' },
@@ -48,6 +48,14 @@ const PROPOSED_WORLD = [
   { hex: '#223a4d', role: '斗篷暗部' },
   { hex: '#c06a3e', role: '围巾/强调橙（同时给故障与暖色点缀）' },
   { hex: '#d8dad3', role: '烟/纸片/雨/高光浅色' },
+  { hex: '#c2b39a', role: '灰泥墙/浅色纸面（书阁主体）' },
+  { hex: '#9c4f3c', role: '陶瓦/砖（工坊屋顶、干草垛）' },
+  { hex: '#5f8a74', role: '铜绿屋顶（书阁塔楼）' },
+  { hex: '#3d6b7a', role: '水（水洼、雾、冷反光）' },
+  { hex: '#4e6241', role: '苔（石缝、树冠、绿化带）' },
+  { hex: '#18242b', role: '冷影（檐下、底部、雾的冷暗层）' },
+  { hex: '#f2c879', role: '暖高光（窗芯、灯芯、祭坛符文）' },
+  { hex: '#5a463e', role: '炭黑（暗瓦、烟囱、铁器）' },
 ];
 
 /** 提案：8 色 UI 调色板。 */
@@ -227,7 +235,7 @@ function scanCssColorSites(text, file, offsetLine = 0) {
 function parsePaletteTokens() {
   const source = stripLineComments(stripBlockComments(read(PALETTE_FILE)));
   const tokens = [];
-  // D6-A 之后 token 定义在 WORLD（世界 16 色）；TERRAIN_COLORS/TERRAIN_SPECK 是指向 WORLD 的别名表。
+  // D6-A 之后 token 定义在 WORLD（世界 24 色）；TERRAIN_COLORS/TERRAIN_SPECK 是指向 WORLD 的别名表。
   for (const objectName of ['WORLD', 'TERRAIN_COLORS', 'TERRAIN_SPECK']) {
     const startMatch = new RegExp(`export const ${objectName}\\s*=\\s*\\{`).exec(source);
     if (startMatch === null) continue;
@@ -584,7 +592,7 @@ const report = {
     overBudgetUi: Math.max(0, uiColors.length - BUDGET.ui),
   },
   shared: sharedColors.map((color) => color.hex).sort(),
-  topWorld: sortByRefs(worldColors, 'world').slice(0, 16).map((color) => ({
+  topWorld: sortByRefs(worldColors, 'world').slice(0, 24).map((color) => ({
     hex: color.hex,
     refs: color.world.refs.length,
     sites: color.world.refs.slice(0, 4),
@@ -678,7 +686,7 @@ function renderMarkdown(data) {
     lines.push(`| ${index + 1} | ${item.hex} | ${item.refs} | ${item.vars.join('/')} | ${siteList(item.sites)} |`);
   });
   lines.push('');
-  lines.push('## 越界色：世界层（不在提案 16 色内）');
+  lines.push('## 越界色：世界层（不在提案 24 色内）');
   lines.push('');
   lines.push('| 色值 | 使用 | L | 最近提案色 | ΔE76 | 建议 | 文件:行号 |');
   lines.push('|---|---:|---:|---|---:|---|---|');
@@ -694,7 +702,7 @@ function renderMarkdown(data) {
     lines.push(`| ${item.hex} | ${item.refs} | ${(item.luminance * 100).toFixed(1)}% | ${item.nearest.hex} | ${item.nearest.distance.toFixed(1)} | ${item.suggestion} | ${siteList(item.sites)} |`);
   }
   lines.push('');
-  lines.push('## 提案 16 色世界');
+  lines.push('## 提案 24 色世界');
   lines.push('');
   lines.push('| 色值 | 语义 | 当前使用 | L | 备注 |');
   lines.push('|---|---|---:|---:|---|');
@@ -765,7 +773,7 @@ if (useJson) {
     for (const site of item.sites) console.log(`    ${fmtSite(site)}`);
   }
   console.log('');
-  console.log('## 世界层越界色（不在提案 16 色内）');
+  console.log('## 世界层越界色（不在提案 24 色内）');
   for (const item of report.outWorld) {
     console.log(`${item.hex}  refs=${item.refs}  → 最近 ${item.nearest.hex} ΔE=${item.nearest.distance.toFixed(1)}  ${item.suggestion}`);
     for (const site of item.sites) console.log(`    ${fmtSite(site)}`);
@@ -777,7 +785,7 @@ if (useJson) {
     for (const site of item.sites) console.log(`    ${fmtSite(site)}`);
   }
   console.log('');
-  console.log('## 提案 16 色世界');
+  console.log('## 提案 24 色世界');
   for (const item of report.proposedWorld) {
     console.log(`${item.hex}  refs=${item.refs}  L=${(item.luminance * 100).toFixed(1)}%  ${item.role}${item.shared ? ' [与 UI 共享]' : ''}${item.reserved ? ' [当前未引用，保留槽]' : ''}`);
   }

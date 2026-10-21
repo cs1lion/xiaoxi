@@ -2,7 +2,7 @@
  *
  * 世界的事实全在 WorldGrid 里；这里不判断能不能走，只照着画。
  *
- * 2026-10-20 视觉语法重做（16 色内，不加色）：
+ * 2026-10-20 视觉语法重做（24 色内）：
  * - 先铺底色、再铺纹理、最后画拼接边。纹理可以跨格连续，不会被后画的底色盖住。
  * - 草地不再每格撒 2×2 噪点：用 4×4 格的低频草甸掩码，只在部分区域长草簇/花。
  * - 石/广场改成不规则板岩：每格 3–4 块，缝不必对齐 8px，避免读成砖墙。
@@ -102,7 +102,7 @@ function drawBush(g: Phaser.GameObjects.Graphics, px: number, py: number): void 
   g.fillStyle(WORLD.grass, 1);
   g.fillRect(px + 5, py + 8, 7, 2);
   g.fillRect(px + 6, py + 7, 5, 1);
-  g.fillStyle(WORLD.grassLit, 1);
+  g.fillStyle(WORLD.moss, 1);
   g.fillRect(px + 5, py + 7, 4, 1);
   g.fillStyle(WORLD.trim, 1);
   g.fillRect(px + 6, py + 6, 1, 1);
@@ -210,7 +210,7 @@ function drawFlagstones(
 
     // 苔：缝里长一点，不铺满。用 grass 而不是 grassLit，避免和石材亮度打架。
     if ((h + i * 7) % 5 === 0) {
-      g.fillStyle(WORLD.grass, 1);
+      g.fillStyle(WORLD.moss, 1);
       g.fillRect(px + sx + 1, py + sy + sh - 2, 2, 1);
     }
   }
@@ -253,7 +253,7 @@ function drawMeadow(
     g.fillRect(cx + 2, cy + 1, 1, 2);
     g.fillRect(cx + 1, cy + 2, 2, 1);
     if (ch % 3 === 0) {
-      g.fillStyle(WORLD.plaza, 1);
+      g.fillStyle(WORLD.moss, 1);
       g.fillRect(cx + 2, cy, 1, 1);
     }
   }
@@ -289,13 +289,13 @@ function drawCanopy(
     const by = py + 2 + ((h >>> 16) % (TILE_PX - hh - 2));
     g.fillStyle(WORLD.grass, 1);
     g.fillRect(bx, by, w, hh);
-    g.fillStyle(WORLD.grassLit, 1);
+    g.fillStyle(WORLD.moss, 1);
     g.fillRect(bx, by, Math.max(2, w - 2), 1);
   }
   // 树篱的暗缝：只在部分格出现，避免每格同形。
   const h = hash2(x, y);
   if (h % 3 === 0) {
-    g.fillStyle(WORLD.ink, 1);
+    g.fillStyle(WORLD.deepShade, 1);
     g.fillRect(px + 2 + (h % 10), py + 3 + ((h >>> 8) % 9), 1, 2);
   }
 }
@@ -317,7 +317,7 @@ function drawFarmRows(
   for (const rowY of [3, 7, 11, 15] as const) {
     for (let sx = 1; sx < TILE_PX; sx += 3) {
       if ((hash2(x * 16 + sx, y * 16 + rowY) & 3) !== 0) continue;
-      g.fillStyle(WORLD.grass, 1);
+      g.fillStyle(WORLD.moss, 1);
       g.fillRect(px + sx, py + rowY - 1, 1, 2);
       g.fillStyle(WORLD.grassLit, 1);
       g.fillRect(px + sx + 1, py + rowY, 1, 1);
@@ -452,7 +452,7 @@ function drawFarmFence(
         g.fillRect(px + 4, py + 5, 7, 5);
         g.fillStyle(WORLD.trim, 1);
         g.fillRect(px + 5, py + 6, 5, 3);
-        g.fillStyle(WORLD.ember, 1);
+        g.fillStyle(WORLD.terracotta, 1);
         g.fillRect(px + 5, py + 7, 5, 1);
       }
     }

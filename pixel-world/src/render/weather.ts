@@ -70,7 +70,7 @@ export function createWeatherView(scene: Phaser.Scene): WeatherView {
   mist.setDepth(7999);
   mist.setVisible(false);
   for (let y = HEIGHT - 30; y < HEIGHT; y += 3) {
-    mist.fillStyle(WORLD.cloakDark, 0.08);
+    mist.fillStyle(WORLD.water, 0.09);
     mist.fillRect(0, y, WIDTH, 1);
   }
   for (let y = HEIGHT - 18; y < HEIGHT; y += 4) {
@@ -146,9 +146,9 @@ export function createWeatherView(scene: Phaser.Scene): WeatherView {
       puddles.clear();
       for (let i = 0; i < PUDDLES.length; i += 1) {
         const p = PUDDLES[i]!;
-        puddles.fillStyle(WORLD.cloakDark, 1);
+        puddles.fillStyle(WORLD.water, 1);
         puddles.fillRect(p.x, p.y, p.w, 2);
-        puddles.fillStyle(WORLD.stone, 1);
+        puddles.fillStyle(WORLD.deepShade, 1);
         puddles.fillRect(p.x + 1, p.y + 2, p.w - 2, 1);
         puddles.fillStyle(WORLD.pale, 0.5 + intensity * 0.3);
         puddles.fillRect(p.x + 2, p.y, Math.max(2, p.w - 5), 1);
@@ -159,7 +159,7 @@ export function createWeatherView(scene: Phaser.Scene): WeatherView {
           puddles.fillRect(p.x + 3 + phase, p.y + 1, Math.max(1, 3 - phase), 1);
         }
         if (i % 2 === 0) {
-          puddles.fillStyle(WORLD.amber, 0.35);
+          puddles.fillStyle(WORLD.warmLight, 0.4);
           puddles.fillRect(p.x + p.w - 4, p.y, 2, 1);
         }
       }

@@ -3,7 +3,7 @@
  * 动画采样在 `villager-frames.ts`（纯函数、可单测）：帧号由 simulation 时间决定，
  * 这里只按帧号画，并且所有坐标取整到整数像素。
  *
- * 16 色收敛后不再有“斗篷亮部”这种单独色：亮部靠 1px 暗轮廓 + 围巾/皮肤的面积撑起来。
+ * 24 色收敛后不再有“斗篷亮部”这种单独色：亮部靠 1px 暗轮廓 + 围巾/皮肤的面积撑起来。
  * 审计 §6.2：轮廓/草地只有 1.59:1，所以先补轮廓，再谈换色。
  */
 
@@ -36,14 +36,14 @@ const MAIN_STYLE: VillagerStyle = {
   satchelLit: WORLD.trim,
 };
 
-/** 阿雾：暖木斗篷 + 浅金围巾，和莞尔的蓝斗篷/橙围巾分开；仍是 16 色内。 */
+/** 阿雾：暖木斗篷 + 浅金围巾，和莞尔的蓝斗篷/橙围巾分开；仍在 24 色内。 */
 const ALT_STYLE: VillagerStyle = {
   hair: WORLD.timberDark,
   cloak: WORLD.timber,
   cloakDark: WORLD.timberDark,
   scarf: WORLD.trim,
   scarfLit: WORLD.pale,
-  satchel: WORLD.ember,
+  satchel: WORLD.terracotta,
   satchelLit: WORLD.trim,
 };
 
@@ -66,7 +66,7 @@ export function createVillager(
   // 走起来会像浮着。这里用阶梯像素块代替矢量椭圆，再加一条 1px 接触线压在脚底。
   // alpha 纪律（ART_SPEC §2.4）：阴影只允许 ink，且不超过既有档位（0.55 是现值上限）。
   const shadow = scene.add.graphics();
-  shadow.fillStyle(WORLD.ink, 0.28);
+  shadow.fillStyle(WORLD.deepShade, 0.3);
   shadow.fillRect(-6, 0, 12, 2);
   shadow.fillRect(-4, 2, 8, 1);
   shadow.fillStyle(WORLD.ink, 0.55);
@@ -156,7 +156,7 @@ function drawBody(
   g.fillStyle(WORLD.skin, 1);
   g.fillRect(-4, y + 3, 8, 6);
 
-  // 发：顶 2px + 两侧，另加马尾/后发。发色与靴子同源，保持 16 色。
+  // 发：顶 2px + 两侧，另加马尾/后发。发色与靴子同源，保持 24 色。
   g.fillStyle(style.hair, 1);
   g.fillRect(-4, y + 1, 8, 2);
   g.fillRect(-5, y + 1, 1, 6);

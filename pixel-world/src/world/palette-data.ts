@@ -1,13 +1,15 @@
-/** 世界 16 色调色板：纯数据，零渲染依赖。
+/** 世界 24 色调色板：纯数据，零渲染依赖。
  *
  * 为什么单独一个文件：世界逻辑（蓝图解析、读档）也要知道 token 名 → 颜色，
  * 但 `src/world/` 不能反向 import `src/render/`。渲染层直接从这里取，不再转一手。
  *
- * 依据 docs/ART_PALETTE_AUDIT.md §4.1（D6-A）。这 16 个值是 canvas 上唯一允许出现的
- * 世界源色；UI 8 色在 index.html 的 CSS 变量里。加色之前先改审计报告，`--strict` 会挡住。
+ * 2026-10-21 用户批准 24 色 ADR：在 16 色材料表上新增 8 个材料/光色（W17–W24），
+ * 用于灰泥墙、陶瓦、铜绿屋顶、水洼、苔、冷影、暖高光与炭黑。颜色仍是 canvas 上
+ * 唯一允许出现的世界源色；UI 仍 8 色（共享 amber），并集 31。加第 25 色必须再走 ADR。
+ * 依据 docs/ADR_PALETTE_24.md 与 ART_PALETTE_AUDIT §5.3。
  *
- * 亮度分布：暗部 10（W01–W09、W13、W14）、中间调 2（W08/W15）、亮部 4（W10–W12、W16）。
- * 画面能不能读，取决于亮部这 4 个色和 1px 轮廓，不取决于色数。
+ * 亮度分布：暗部 11（W01–W09、W13、W14、W22）、中间调 7（W08、W15、W17–W21、W24）、
+ * 亮部 6（W10–W12、W16、W23）。画面能不能读，取决于亮部与 1px 轮廓，不取决于色数。
  */
 
 export const WORLD = {
@@ -49,6 +51,22 @@ export const WORLD = {
   ember: 0xc06a3e,
   /** W16 烟 / 纸片 / 雨 / 高光浅色 */
   pale: 0xd8dad3,
+  /** W17 灰泥墙 / 浅色纸面（书阁主体；比 trim 更中性） */
+  plaster: 0xc2b39a,
+  /** W18 陶瓦 / 砖（工坊屋顶；比 timber 更红、更暗一档） */
+  terracotta: 0x9c4f3c,
+  /** W19 铜绿屋顶（书阁塔楼；与草地/木色都拉开） */
+  copper: 0x5f8a74,
+  /** W20 水（水洼、雾、冷反光） */
+  water: 0x3d6b7a,
+  /** W21 苔（石缝、树冠、绿化带；比 grassLit 亮且更黄） */
+  moss: 0x4e6241,
+  /** W22 冷影（檐下、底部、雾的冷暗层；比 ink 更蓝） */
+  deepShade: 0x18242b,
+  /** W23 暖高光（窗芯、灯芯、祭坛符文；比 amber 更亮） */
+  warmLight: 0xf2c879,
+  /** W24 炭黑（炭化木、暗瓦、铁器；暖灰而非纯黑） */
+  charcoal: 0x5a463e,
 } as const;
 
 export type WorldColor = keyof typeof WORLD;

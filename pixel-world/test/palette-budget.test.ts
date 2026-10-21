@@ -1,6 +1,7 @@
 /** D6-A 调色板预算的回归门禁。
  *
- * 目标（ART_PALETTE_AUDIT §5.3 第 6 步）：世界 16 色、UI 8 色、共享 1、并集 23。
+ * 目标（ART_PALETTE_AUDIT §5.3 第 6 步）：世界 24 色、UI 8 色、共享 1、并集 31。
+ * 2026-10-21 用户批准 24 色 ADR（docs/ADR_PALETTE_24.md），新增 W17–W24。
  * 这里用纯逻辑断言锁住，不依赖 `npm test` 的默认子进程隔离（沙箱里会 spawn EPERM）。
  */
 
@@ -11,10 +12,10 @@ import { WORLD } from '../src/world/palette-data.ts';
 import { parseBlueprint, parseBlueprintTable, BlueprintError } from '../src/world/blueprints.ts';
 import { buildWorld, buildWorldFromSave } from '../src/world/setup.ts';
 
-const WORLD_BUDGET = 16;
+const WORLD_BUDGET = 24;
 const UI_BUDGET = 8;
-/** 世界 16 + UI 8 − 共享 1（#e3a13c）= 23。 */
-const UNION_BUDGET = 23;
+/** 世界 24 + UI 8 − 共享 1（#e3a13c）= 31。 */
+const UNION_BUDGET = 31;
 
 const readText = (rel: string): string => readFileSync(new URL(rel, import.meta.url), 'utf8');
 
@@ -45,10 +46,10 @@ function uiSourceColors(): string[] {
   return [...new Set(found)];
 }
 
-test('世界层正好 16 个源色，且没有重复值', () => {
+test('世界层正好 24 个源色，且没有重复值', () => {
   const values = Object.values(WORLD);
-  assert.equal(values.length, WORLD_BUDGET, `世界 16 色，实际 ${values.length} 个 token`);
-  assert.equal(new Set(values).size, WORLD_BUDGET, '世界 16 色里有重复值');
+  assert.equal(values.length, WORLD_BUDGET, `世界 24 色，实际 ${values.length} 个 token`);
+  assert.equal(new Set(values).size, WORLD_BUDGET, '世界 24 色里有重复值');
 });
 
 test('UI 层正好 8 个源色', () => {
@@ -76,6 +77,14 @@ const PROPOSED_WORLD: Record<string, string> = {
   cloakDark: '#223a4d',
   ember: '#c06a3e',
   pale: '#d8dad3',
+  plaster: '#c2b39a',
+  terracotta: '#9c4f3c',
+  copper: '#5f8a74',
+  water: '#3d6b7a',
+  moss: '#4e6241',
+  deepShade: '#18242b',
+  warmLight: '#f2c879',
+  charcoal: '#5a463e',
 };
 const PROPOSED_UI = [
   '#e8e2d2',
@@ -88,21 +97,21 @@ const PROPOSED_UI = [
   '#c8876a',
 ];
 
-test('WORLD 的每个 token 值都等于提案 16 色（换值必须变红）', () => {
+test('WORLD 的每个 token 值都等于提案 24 色（换值必须变红）', () => {
   const actual = Object.fromEntries(Object.entries(WORLD).map(([name, value]) => [name, hex(value)]));
-  assert.deepEqual(actual, PROPOSED_WORLD, 'WORLD 的 token 名或色值偏离了提案 16 色');
+  assert.deepEqual(actual, PROPOSED_WORLD, 'WORLD 的 token 名或色值偏离了提案 24 色');
 });
 
 test('UI 的源色集合等于提案 8 色（换值必须变红）', () => {
   assert.deepEqual([...uiSourceColors()].sort(), [...PROPOSED_UI].sort(), 'UI 色值偏离了提案 8 色');
 });
 
-test('世界与 UI 只共享 #e3a13c，并集 23', () => {
+test('世界与 UI 只共享 #e3a13c，并集 31', () => {
   const world = new Set(Object.values(WORLD).map(hex));
   const ui = new Set(uiSourceColors());
   const shared = [...ui].filter((color) => world.has(color));
   assert.deepEqual(shared, [hex(WORLD.amber)], `共享色只能是琥珀，实际 ${shared.join(', ')}`);
-  assert.equal(new Set([...world, ...ui]).size, UNION_BUDGET, '并集应为 16 + 8 − 1 = 23');
+  assert.equal(new Set([...world, ...ui]).size, UNION_BUDGET, '并集应为 24 + 8 − 1 = 31');
 });
 
 test('render/scenes 里不再有 canvas 颜色字面量（只许引用 WORLD）', () => {
@@ -142,11 +151,11 @@ test('解析器兼容旧值：整数与 "#rrggbb" 都解析回同一个数', () 
   const fromTokens = parseBlueprint('code_forge', raw.code_forge).palette;
 
   const numeric = structuredClone(raw.code_forge) as { palette: Record<string, unknown> };
-  numeric.palette = { body: WORLD.timber, roof: WORLD.timberDark, trim: WORLD.trim, window: WORLD.amber };
+  numeric.palette = { body: WORLD.timber, roof: WORLD.terracotta, trim: WORLD.trim, window: WORLD.amber };
   assert.deepEqual(parseBlueprint('code_forge', numeric).palette, fromTokens);
 
   const asHex = structuredClone(raw.code_forge) as { palette: Record<string, unknown> };
-  asHex.palette = { body: '#8a5a44', roof: '#4a3f39', trim: '#c9a86a', window: '#e3a13c' };
+  asHex.palette = { body: '#8a5a44', roof: '#9c4f3c', trim: '#c9a86a', window: '#e3a13c' };
   assert.deepEqual(parseBlueprint('code_forge', asHex).palette, fromTokens);
 });
 

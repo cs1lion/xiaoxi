@@ -203,12 +203,12 @@ function warnLegacy(slot: string, raw: unknown): void {
   if (legacyWarned.has(key)) return;
   legacyWarned.add(key);
   console.warn(
-    `[blueprints] 调色板槽 ${slot} 用的是旧值 ${String(raw)}；已按原值生效，建议改成世界 16 色的名字（${WORLD_COLOR_NAMES.join(', ')}）。`,
+    `[blueprints] 调色板槽 ${slot} 用的是旧值 ${String(raw)}；已按原值生效，建议改成世界 24 色的名字（${WORLD_COLOR_NAMES.join(', ')}）。`,
   );
 }
 
 /**
- * 调色板槽位：优先用世界 16 色的 token 名（D6-A 后的写法），
+ * 调色板槽位：优先用世界 24 色的 token 名（D6-A 后的写法），
  * 同时保留旧值兼容——`0..0xffffff` 整数与 `"#rrggbb"` 字符串仍然能用。
  * 这样做是为了让旧 JSON（以及将来可能导入的外部蓝图）不会因为一次改值就整份失效。
  */
@@ -228,13 +228,13 @@ function readPaletteSlot(value: Record<string, unknown>, name: string, fail: Fai
       return WORLD[token as keyof typeof WORLD];
     }
     return fail(
-      `调色板槽 ${name} 的颜色名 "${token}" 不在世界 16 色里；` +
+      `调色板槽 ${name} 的颜色名 "${token}" 不在世界 24 色里；` +
         `可用：${WORLD_COLOR_NAMES.join(', ')}；也可以直接写旧值（0..0xffffff 整数或 "#rrggbb"）`,
     );
   }
   if (!Number.isInteger(raw) || (raw as number) < 0 || (raw as number) > 0xffffff) {
     return fail(
-      `调色板槽 ${name} 必须是世界 16 色的名字（${WORLD_COLOR_NAMES.join(', ')}），` +
+      `调色板槽 ${name} 必须是世界 24 色的名字（${WORLD_COLOR_NAMES.join(', ')}），` +
         `或旧值 0..0xffffff 整数 / "#rrggbb"`,
     );
   }

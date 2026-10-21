@@ -67,7 +67,7 @@ export function createBuilding(
   drawChimney(g, w, roof, trim);
 
   const chimney = scene.add.graphics();
-  chimney.fillStyle(WORLD.timberDark, 1);
+  chimney.fillStyle(WORLD.charcoal, 1);
   chimney.fillRect(w - 16, -10, 9, 14);
   chimney.fillStyle(WORLD.soil, 1);
   chimney.fillRect(w - 15, -10, 7, 2);
@@ -77,6 +77,8 @@ export function createBuilding(
   chimney.fillRect(w - 14, -9, 3, 2);
   chimney.fillStyle(WORLD.ember, 0.7);
   chimney.fillRect(w - 13, -8, 1, 1);
+  chimney.fillStyle(WORLD.warmLight, 0.8);
+  chimney.fillRect(w - 12, -8, 1, 1);
 
   const windowG = scene.add.graphics();
   drawWindows(windowG, building, w, h, roofH, windowColor);
@@ -136,9 +138,9 @@ function drawGroundShadow(
   // 最贴地的一步最深、最窄；往外两层逐级变淡变宽，整体向右下错开 2px。
   g.fillStyle(WORLD.ink, 0.55);
   g.fillRect(2, h - 2, w - 2, 2);
-  g.fillStyle(WORLD.ink, 0.32);
+  g.fillStyle(WORLD.deepShade, 0.32);
   g.fillRect(3, h, w - 1, 2);
-  g.fillStyle(WORLD.ink, 0.16);
+  g.fillStyle(WORLD.deepShade, 0.16);
   g.fillRect(4, h + 2, w, 2);
 
   // 门口光池：屋里有灯，光落在门前。两层 ── 外圈铺开、内芯更亮，都是琥珀的低透明度。
@@ -183,8 +185,8 @@ function drawWall(
   for (let x = 6; x < w - 4; x += 14) {
     g.fillRect(x, roofH + 2, 2, h - roofH - 8);
   }
-  // 左上受光：只在最左一列加 1px 亮木，不做渐变。
-  g.fillStyle(WORLD.trim, 1);
+  // 左上受光：只在最左一列加 1px 暖高光，不做渐变。
+  g.fillStyle(WORLD.warmLight, 1);
   g.fillRect(0, roofH + 2, 1, h - roofH - 8);
 
   drawFacade(g, building, w, h, roofH, doorX);
@@ -205,18 +207,22 @@ function drawFacade(
     const fy = h - 22;
     g.fillStyle(WORLD.ink, 1);
     g.fillRect(fx - 1, fy - 1, 13, 15);
-    g.fillStyle(WORLD.timberDark, 1);
+    g.fillStyle(WORLD.charcoal, 1);
     g.fillRect(fx, fy, 11, 13);
     g.fillStyle(WORLD.ember, 1);
     g.fillRect(fx + 2, fy + 7, 7, 4);
     g.fillStyle(WORLD.amber, 1);
     g.fillRect(fx + 3, fy + 8, 5, 2);
+    g.fillStyle(WORLD.warmLight, 1);
+    g.fillRect(fx + 3, fy + 8, 2, 1);
     g.fillStyle(WORLD.ink, 1);
     g.fillRect(fx + 5, fy + 3, 1, 4);
     // 铁砧：两块叠起来的暗铁。
     g.fillStyle(WORLD.ink, 1);
     g.fillRect(w - 20, h - 10, 10, 3);
     g.fillRect(w - 18, h - 7, 6, 2);
+    g.fillStyle(WORLD.charcoal, 1);
+    g.fillRect(w - 19, h - 9, 8, 2);
     g.fillStyle(WORLD.plaza, 1);
     g.fillRect(w - 20, h - 10, 10, 1);
     return;
@@ -224,9 +230,9 @@ function drawFacade(
 
   if (building.prefabId === 'star_archive') {
     // 灰泥高窗 + 书堆 + 星形徽记。塔楼的识别靠高度，细节靠“书”。
-    g.fillStyle(WORLD.plaza, 1);
+    g.fillStyle(WORLD.charcoal, 1);
     g.fillRect(4, roofH + 6, w - 8, 4);
-    g.fillStyle(WORLD.stone, 1);
+    g.fillStyle(WORLD.copper, 1);
     g.fillRect(4, roofH + 10, w - 8, 1);
     g.fillStyle(WORLD.trim, 1);
     for (let i = 0; i < 5; i += 1) {
@@ -240,7 +246,7 @@ function drawFacade(
       g.fillRect(bx - 1, by - 1, 6, 8);
       g.fillStyle(WORLD.timberDark, 1);
       g.fillRect(bx, by, 4, 6);
-      g.fillStyle(stack === 1 ? WORLD.trim : WORLD.pale, 1);
+      g.fillStyle(stack === 0 ? WORLD.plaster : stack === 1 ? WORLD.trim : WORLD.pale, 1);
       g.fillRect(bx, by + 1, 4, 1);
       g.fillRect(bx, by + 4, 4, 1);
     }
@@ -266,6 +272,11 @@ function drawFacade(
     g.fillRect(w - 19, h - 19, 13, 1);
     g.fillStyle(WORLD.pale, 1);
     for (let i = 0; i < 3; i += 1) g.fillRect(w - 17 + i * 4, h - 17, 3, 7);
+    // 门边陶罐：terracotta 的小面积材料点缀。
+    g.fillStyle(WORLD.charcoal, 1);
+    g.fillRect(w - 19, h - 7, 5, 5);
+    g.fillStyle(WORLD.terracotta, 1);
+    g.fillRect(w - 18, h - 6, 3, 3);
     return;
   }
 
@@ -302,17 +313,19 @@ function drawRoof(
       const rh = Math.round(roofH / rows) + 1;
       g.fillStyle(roof, 1);
       g.fillRect(x, y, rw, rh);
-      // 瓦垄：每行下缘 1px 深土色（对 timberDark / grass 都可辨），隔行加一段苔。
+      // 瓦垄：每行下缘 1px 深土色（对 terracotta/copper/charcoal 都可辨），隔行加一段苔。
       g.fillStyle(WORLD.soil, 1);
       g.fillRect(x, y + rh - 1, rw, 1);
       if (row % 2 === 0) {
-        g.fillStyle(WORLD.grass, 1);
+        g.fillStyle(WORLD.moss, 1);
         g.fillRect(x + 2 + ((row * 7) % Math.max(2, rw - 4)), y + rh - 1, 2, 1);
       }
     }
-    // 屋脊：2px trim 从尖顶压到檐口。
+    // 屋脊：2px trim 从尖顶压到檐口，左缘加 1px 暖高光。
     g.fillStyle(trim, 1);
     g.fillRect(Math.round(w / 2) - 1, 0, 2, roofH);
+    g.fillStyle(WORLD.warmLight, 1);
+    g.fillRect(Math.round(w / 2) - 1, 0, 1, roofH);
     g.fillStyle(WORLD.timberDark, 1);
     g.fillRect(Math.round(w / 2) + 1, 0, 1, roofH);
     // 檐口：3px 出檐 + 1px 檐底阴影。
@@ -330,26 +343,35 @@ function drawRoof(
     const towerX = Math.round(w * 0.32);
     const towerW = Math.round(w * 0.36);
     g.fillRect(towerX, -12, towerW, Math.round(roofH * 0.55) + 12);
-    // 瓦垄：横线用 soil，和屋顶底色拉开；塔身与屋面同一套。
+    // 瓦垄：横线用冷影，和铜绿屋顶拉开；塔身与屋面同一套。
     for (let y = -9; y < roofH; y += 3) {
-      g.fillStyle(WORLD.soil, 1);
+      g.fillStyle(WORLD.deepShade, 1);
       if (y >= Math.round(roofH * 0.45)) {
         g.fillRect(-3, y, w + 6, 1);
       } else {
         g.fillRect(towerX + 1, y, towerW - 2, 1);
       }
+      if (y % 6 === 0) {
+        g.fillStyle(WORLD.moss, 1);
+        g.fillRect(towerX + 2, y, 3, 1);
+      }
     }
     g.fillStyle(trim, 1);
     g.fillRect(towerX - 1, Math.round(roofH * 0.45), towerW + 2, 2);
+    g.fillStyle(WORLD.warmLight, 1);
+    g.fillRect(towerX - 1, Math.round(roofH * 0.45), towerW + 2, 1);
     // 塔顶小尖顶 + 星窗。
+    g.fillStyle(trim, 1);
     g.fillRect(Math.round(w * 0.5) - 1, -18, 2, 6);
+    g.fillStyle(WORLD.warmLight, 1);
+    g.fillRect(Math.round(w * 0.5) - 1, -18, 1, 6);
     g.fillStyle(roof, 1);
     g.fillRect(Math.round(w * 0.5) - 3, -13, 6, 2);
     g.fillStyle(WORLD.ink, 1);
     g.fillRect(Math.round(w * 0.5) - 3, Math.round(roofH * 0.22), 7, 8);
     g.fillStyle(WORLD.amber, 1);
     g.fillRect(Math.round(w * 0.5) - 2, Math.round(roofH * 0.23), 5, 6);
-    g.fillStyle(WORLD.pale, 1);
+    g.fillStyle(WORLD.warmLight, 1);
     g.fillRect(Math.round(w * 0.5), Math.round(roofH * 0.23), 1, 5);
     g.fillRect(Math.round(w * 0.5) - 2, Math.round(roofH * 0.25), 5, 1);
     return;
@@ -360,9 +382,18 @@ function drawRoof(
   g.fillRect(-3, 0, w + 6, roofH);
   g.fillStyle(WORLD.soil, 1);
   for (let x = 1; x < w + 4; x += 4) g.fillRect(x - 3, 2, 1, roofH - 4);
-  for (let y = 3; y < roofH - 2; y += 3) g.fillRect(-3, y, w + 6, 1);
+  for (let y = 3; y < roofH - 2; y += 3) {
+    g.fillStyle(WORLD.deepShade, 1);
+    g.fillRect(-3, y, w + 6, 1);
+    if (y % 6 === 0) {
+      g.fillStyle(WORLD.moss, 1);
+      g.fillRect(4, y, 3, 1);
+    }
+  }
   g.fillStyle(trim, 1);
   g.fillRect(-3, roofH - 2, w + 6, 2);
+  g.fillStyle(WORLD.warmLight, 1);
+  g.fillRect(-3, roofH - 2, w + 6, 1);
   g.fillStyle(WORLD.timberDark, 1);
   g.fillRect(-3, roofH, w + 6, 1);
 }
@@ -376,11 +407,13 @@ function drawChimney(
 ): void {
   g.fillStyle(roof, 1);
   g.fillRect(w - 18, -8, 12, 12);
-  g.fillStyle(WORLD.timberDark, 1);
+  g.fillStyle(WORLD.charcoal, 1);
   g.fillRect(w - 18, -8, 12, 2);
   g.fillRect(w - 18, -2, 12, 2);
   g.fillStyle(trim, 1);
   g.fillRect(w - 19, -10, 14, 2);
+  g.fillStyle(WORLD.warmLight, 1);
+  g.fillRect(w - 19, -10, 14, 1);
   g.fillStyle(WORLD.ink, 1);
   g.fillRect(w - 15, -9, 6, 2);
 }
@@ -403,10 +436,10 @@ function drawWindows(
     g.fillRect(x - 1, y - 1, 10, 9);
     g.fillStyle(WORLD.trim, 1);
     g.fillRect(x, y, 8, 7);
-    g.fillStyle(lit ? windowColor : WORLD.cloakDark, 1);
+    g.fillStyle(lit ? windowColor : WORLD.deepShade, 1);
     g.fillRect(x + 1, y + 1, 6, 5);
     if (lit) {
-      g.fillStyle(WORLD.pale, 1);
+      g.fillStyle(WORLD.warmLight, 1);
       g.fillRect(x + 1, y + 1, 3, 1);
     }
     g.fillStyle(WORLD.timberDark, 1);
@@ -436,7 +469,7 @@ function drawDoor(
   const y = h - dh;
   g.fillStyle(WORLD.ink, 1);
   g.fillRect(x - 1, y - 1, dw + 2, dh + 1);
-  g.fillStyle(WORLD.timberDark, 1);
+  g.fillStyle(WORLD.charcoal, 1);
   g.fillRect(x, y, dw, dh);
   g.fillStyle(WORLD.trim, 1);
   g.fillRect(x, y, 1, dh);
@@ -445,7 +478,7 @@ function drawDoor(
   // 门内暖光：2×4 + 门缝 1px，读成“里面有人”。
   g.fillStyle(windowColor, 1);
   g.fillRect(x + dw - 5, y + 3, 3, 4);
-  g.fillStyle(WORLD.pale, 1);
+  g.fillStyle(WORLD.warmLight, 1);
   g.fillRect(x + dw - 5, y + 3, 1, 1);
   g.fillStyle(WORLD.amber, 1);
   g.fillRect(x + 1, h - 1, dw - 1, 1);
@@ -472,6 +505,8 @@ function drawFrontLayer(
   // 前檐：楼体底边最后 3px，左右各出 3px（出檐），读成压在墙前的一道檐。
   g.fillStyle(roof, 1);
   g.fillRect(-3, h - 3, w + 6, 3);
+  g.fillStyle(WORLD.warmLight, 1);
+  g.fillRect(-3, h - 3, w + 6, 1);
   g.fillStyle(WORLD.timberDark, 1);
   g.fillRect(-3, h - 1, w + 6, 1);
 

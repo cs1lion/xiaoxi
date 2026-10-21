@@ -17,7 +17,7 @@
  * 2. **亮边在上/左，暗边在下/右**。世界的光统一从左上打（与 ART_STYLE_TARGET §1.3 的
  *    建筑投影、§1.5 的角色接触阴影同向）。高台朝上/朝左的立面受光 → 用该材质**亮一档**
  *    的 token；朝下/朝右的立面背光 → 用 `soil`（W02，全场最深的土色，兼作阴影色）。
- * 3. **不加色**。只用 `soil / plaza / grassLit` 三个现有 token，16 色预算不变。
+ * 3. **不加色**。只用 `soil / plaza / grassLit` 三个现有 token，24 色预算不变。
  *
  * 内凹角修正是干什么的
  * --------------------
@@ -40,7 +40,7 @@ export const TERRAIN_HEIGHT: Readonly<Record<TerrainId, number>> = {
   plaza: 0,
 };
 
-/** 亮一档 token：只用现有 16 色里的 `grassLit` / `plaza`（§1.2「不加色」）。 */
+/** 亮一档 token：只用现有 24 色里的 `grassLit` / `plaza`（§1.2「不加色」）。 */
 export const BRIGHT: Readonly<Record<TerrainId, number>> = {
   tree: WORLD.grassLit,
   // grass 亮边用 plaza（ΔL* 9.5）；原 grassLit 对 grass 只有 3.0，18 条边不可见。
@@ -63,7 +63,7 @@ export const BRIGHT: Readonly<Record<TerrainId, number>> = {
  *
  * 这不是风格选择，是 §1.2「暗边比底色更深」这条规则在 tree 上的漏洞：它的底色
  * 已经是最深的土色，没有更深的同色可用。修法是 tree 的暗边改用 ink（W01，比 soil
- * 再深一档），落差 14.0 —— 可辨，且仍在 16 色预算内，不新增颜色。
+ * 再深一档），落差 14.0 —— 可辨，且仍在 24 色预算内，不新增颜色。
  *
  * 为什么其他材质不动：grass / farm / stone / plaza 的底色都比 soil 亮，落差
  * 20.9–45.6，本来就清楚。只补 tree 这一处漏洞，不顺手改已有正确的东西。

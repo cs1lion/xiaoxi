@@ -194,7 +194,7 @@ export class SandboxScene extends Phaser.Scene {
     pool.fillRect(cx - 24, ay + 12, 48, 10);
     pool.fillStyle(WORLD.amber, 0.1);
     pool.fillRect(cx - 18, ay + 14, 36, 6);
-    pool.fillStyle(WORLD.amber, 0.14);
+    pool.fillStyle(WORLD.warmLight, 0.14);
     pool.fillRect(cx - 12, ay + 16, 24, 3);
 
     // 石龛：26×26，比旧的 44×44 小一半；底座两级、四柱、小屋顶、蜡烛与供品。
@@ -243,13 +243,13 @@ export class SandboxScene extends Phaser.Scene {
       altar.fillRect(sx - 3 + step, ay + 11 - step, 1, 1);
       altar.fillRect(sx + 2 - step, ay + 11 - step, 1, 1);
     }
-    altar.fillStyle(WORLD.pale, 1);
+    altar.fillStyle(WORLD.warmLight, 1);
     altar.fillRect(sx, ay + 8, 1, 1);
     // 两支蜡烛：pale 烛身 + amber 火焰。
     for (const px of [sx - 12, sx + 11] as const) {
       altar.fillStyle(WORLD.pale, 1);
       altar.fillRect(px, ay + 12, 1, 3);
-      altar.fillStyle(WORLD.amber, 1);
+      altar.fillStyle(WORLD.warmLight, 1);
       altar.fillRect(px, ay + 10, 1, 1);
       altar.fillStyle(WORLD.ember, 1);
       altar.fillRect(px, ay + 11, 1, 1);
@@ -259,7 +259,7 @@ export class SandboxScene extends Phaser.Scene {
     altar.fillRect(sx - 6, ay + 18, 3, 2);
     altar.fillStyle(WORLD.ember, 1);
     altar.fillRect(sx + 3, ay + 18, 3, 2);
-    altar.fillStyle(WORLD.grass, 1);
+    altar.fillStyle(WORLD.moss, 1);
     for (let i = 0; i < 6; i += 1) {
       altar.fillRect(sx - 12 + i * 5, ay + 22, 2, 1);
     }

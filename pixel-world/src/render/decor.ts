@@ -157,15 +157,15 @@ function propHash(id: string): number {
 /** 路灯：柱 + 灯笼 + 1px 硬光池。不用 fillCircle，避免矢量圆和像素块混用。 */
 function drawLamp(g: Phaser.GameObjects.Graphics, seed: number): void {
   // 接触阴影：两级实心块，读成“灯柱踩在地上”。
-  g.fillStyle(WORLD.ink, 0.24);
+  g.fillStyle(WORLD.deepShade, 0.28);
   g.fillRect(-4, -1, 9, 2);
-  g.fillStyle(WORLD.ink, 0.16);
+  g.fillStyle(WORLD.deepShade, 0.16);
   g.fillRect(-6, 1, 13, 1);
 
   g.fillStyle(WORLD.ink, 1);
   g.fillRect(-1, -14, 2, 14);
   g.fillRect(-3, -1, 6, 1);
-  g.fillStyle(WORLD.timberDark, 1);
+  g.fillStyle(WORLD.charcoal, 1);
   g.fillRect(0, -13, 1, 12);
 
   // 灯笼：黑框 + 暗木芯 + amber 光；pale 高光在左上。
@@ -175,6 +175,8 @@ function drawLamp(g: Phaser.GameObjects.Graphics, seed: number): void {
   g.fillRect(-3, -20, 7, 6);
   g.fillStyle(WORLD.amber, 0.95);
   g.fillRect(-2, -19, 5, 4);
+  g.fillStyle(WORLD.warmLight, 1);
+  g.fillRect(-1, -18, 3, 2);
   g.fillStyle(WORLD.pale, 1);
   g.fillRect(-2, -19, 1, 1);
   g.fillStyle(WORLD.trim, 1);
@@ -188,7 +190,7 @@ function drawLamp(g: Phaser.GameObjects.Graphics, seed: number): void {
   g.fillRect(-7, 2, 15, 2);
   g.fillStyle(WORLD.amber, 0.16);
   g.fillRect(-6, -1, 13, 2);
-  g.fillStyle(WORLD.amber, 0.22);
+  g.fillStyle(WORLD.warmLight, 0.24);
   g.fillRect(-4 + flicker, -1, 8, 1);
 }
 
@@ -200,7 +202,7 @@ function drawTree(g: Phaser.GameObjects.Graphics, seed: number): void {
   const ch = 11 + size * 2;
 
   // 地面阴影：向右下错开的硬边块。
-  g.fillStyle(WORLD.ink, 0.2);
+  g.fillStyle(WORLD.deepShade, 0.24);
   g.fillRect(-5, -1, 12, 2);
   g.fillRect(-3, 1, 8, 1);
 
@@ -224,7 +226,7 @@ function drawTree(g: Phaser.GameObjects.Graphics, seed: number): void {
   g.fillRect(-Math.floor(cw / 2), top, cw, ch);
   g.fillStyle(WORLD.grass, 1);
   g.fillRect(-Math.floor(cw / 2) + 1, top + 1, cw - 2, ch - 2);
-  g.fillStyle(WORLD.grassLit, 1);
+  g.fillStyle(WORLD.moss, 1);
   g.fillRect(-Math.floor(cw / 2) + 2, top + 1, Math.floor(cw / 2), 2);
   g.fillRect(-Math.floor(cw / 2) + 2, top + 3, 2, ch - 4);
   g.fillRect(-Math.floor(cw / 2) + 2, top - 2, Math.floor(cw / 2), 2);
@@ -243,7 +245,7 @@ function drawBanner(g: Phaser.GameObjects.Graphics, seed: number): void {
   g.fillStyle(WORLD.ink, 1);
   g.fillRect(-1, -19, 2, 19);
   g.fillRect(-2, -1, 4, 1);
-  g.fillStyle(WORLD.timberDark, 1);
+  g.fillStyle(WORLD.charcoal, 1);
   g.fillRect(0, -18, 1, 17);
   g.fillStyle(WORLD.ink, 1);
   g.fillRect(1, -18, 9, 8);
