@@ -262,14 +262,15 @@ function drawTree(g: Phaser.GameObjects.Graphics, seed: number, accent: PropAcce
   if (size > 0) g.fillRect(-Math.floor(cw / 2) + 3, top + 8, 1, 2);
 
   if (accent === 'book') {
-    // 书：树脚一块斜靠的石板 + 两页浅色书页，读成「这里查过资料」。
+    // 书放在树干**左侧**：右侧是角色站立与走动的热点，放那边会被小人挡掉。
+    // 一块斜靠的石板 + 两页浅色书页，读成「这里查过资料」。
     g.fillStyle(WORLD.stone, 1);
-    g.fillRect(4, -6, 6, 5);
+    g.fillRect(-10, -6, 6, 5);
     g.fillStyle(WORLD.plaster, 1);
-    g.fillRect(5, -5, 4, 3);
+    g.fillRect(-9, -5, 4, 3);
     g.fillStyle(WORLD.ink, 1);
-    g.fillRect(6, -5, 1, 3);
-    g.fillRect(4, -1, 6, 1);
+    g.fillRect(-8, -5, 1, 3);
+    g.fillRect(-10, -1, 6, 1);
   }
 }
 

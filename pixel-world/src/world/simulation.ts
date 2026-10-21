@@ -8,6 +8,7 @@
 
 import type { WorldGrid } from './grid.ts';
 import { TASK_PROFILES } from './tasks.ts';
+import { parseOracle } from './oracle.ts';
 import {
   nextProp,
   MILESTONE_POINTS,
@@ -41,7 +42,7 @@ import type {
   WorldProp,
   WorldSnapshot,
 } from './types.ts';
-import { excerptBlockedQuestion } from './types.ts';
+import { excerptBlockedQuestion, ORACLE_SLAB_LIMIT } from './types.ts';
 import type { SavedVillager, SettledRecord, WorldSave } from './save.ts';
 import { SCHEMA_V2_FINGERPRINT } from './save.ts';
 
@@ -56,6 +57,13 @@ export function ledgerCompletedAtMs(value: number | null | undefined): number | 
 }
 
 export type WorldCommand =
+  /**
+   * 一句神谕的原文。世界自己解析，解析结果再落到下面的具体命令上。
+   *
+   * 只有走这条入口才会进石板：外部 Agent 的 `feed`、台账的 `sync` 都不是
+   * 「你对世界说的话」，不该被记成神谕。
+   */
+  | { readonly kind: 'oracle'; readonly raw: string }
   | { readonly kind: 'dispatch'; readonly taskKind: TaskKind; readonly summary: string }
   | { readonly kind: 'complete'; readonly target?: string }
   | { readonly kind: 'cancelPending'; readonly id?: string }
@@ -355,6 +363,8 @@ export class Simulation {
 
   private apply(command: WorldCommand): CommandResult {
     switch (command.kind) {
+      case 'oracle':
+        return this.speak(command.raw);
       case 'dispatch':
         return this.dispatch(command.taskKind, command.summary);
       case 'complete':
@@ -368,6 +378,48 @@ export class Simulation {
       case 'sync':
         return this.sync(command.tasks, command.finished, command.connected,
           command.complete ?? true, command.order ?? [], command.finishedAt ?? []);
+    }
+  }
+
+  /**
+   * 一句神谕：解析 → 落到具体命令 → **只有世界真的变了才刻上石板**。
+   *
+   * 判据是「回执说成功」，而不是「认出了意图」。认得出但没改变世界的
+   * （撤销时没有排队单、本来就在下雨）不算世界事件，记下来就是噪音。
+   *
+   * 认不出的输入不落石板，回执里明说没听懂：石板不是聊天记录。
+   */
+  private speak(raw: string): CommandResult {
+    const intent = parseOracle(raw);
+    if (intent.kind === 'unknown') {
+      const message = '没听懂这句，世界没有动。';
+      this.log('warn', message);
+      return { ok: false, message };
+    }
+    let command: WorldCommand;
+    switch (intent.kind) {
+      case 'dispatch':
+        command = { kind: 'dispatch', taskKind: intent.taskKind, summary: intent.summary };
+        break;
+      case 'weather':
+        command = { kind: 'setWeather', weather: intent.weather };
+        break;
+      case 'cancelPending':
+        command = { kind: 'cancelPending' };
+        break;
+      default:
+        command = { kind: 'complete' };
+    }
+    const result = this.apply(command);
+    if (result.ok) this.inscribe(raw, result.message);
+    return result;
+  }
+
+  /** 刻石板。只记真正改变了世界的那句话；超出上限丢最旧。 */
+  private inscribe(raw: string, receipt: string): void {
+    this.oracleLog.push({ raw, receipt, at: this.now });
+    if (this.oracleLog.length > ORACLE_SLAB_LIMIT) {
+      this.oracleLog.splice(0, this.oracleLog.length - ORACLE_SLAB_LIMIT);
     }
   }
 
@@ -596,7 +648,8 @@ export class Simulation {
 
   private setWeather(weather: Weather): CommandResult {
     if (weather === this.weather.kind && this.weather.remainingMs !== null) {
-      return { ok: true, message: '天已经在下雨了。' };
+      // `ok: false` 表示"世界没变"，与"命令被拒"是两回事；调用方只把 ok 当"变了"用。
+      return { ok: false, message: '天已经在下雨了。' };
     }
     if (weather === 'rain') {
       this.weather = rainWeather(this.now);

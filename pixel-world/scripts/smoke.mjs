@@ -287,9 +287,20 @@ async function runSandboxSuite() {
 
 
   // 认不出的句子不让世界动。
-  const unknown = await page.evaluate(() => window.Oracle.say('今天天气不错'));
-  check(unknown.ok === false, '认不出的输入被拒');
-  check((await state()).villager.mode !== 'saluting', '认不出的输入没有触发神谕');
+  // `say()` 现在只表示"已投递"：解析在下一拍结算，所以这里等一拍再校验结果。
+  const beforeUnknown = await state();
+  await page.evaluate(() => window.Oracle.say('今天天气不错'));
+  await page.waitForTimeout(600);
+  const afterUnknown = await state();
+  check(
+    afterUnknown.tasks.length === beforeUnknown.tasks.length &&
+      afterUnknown.villager.mode === beforeUnknown.villager.mode,
+    '认不出的输入没有改变世界',
+  );
+  check(
+    afterUnknown.oracle.length === beforeUnknown.oracle.length,
+    '认不出的输入没有刻上石板',
+  );
 
   // 一句代码活：行礼 → 赶路 → 开工。派活只叫一个人。
   await page.fill('#utterance', '帮我写个爬虫脚本');

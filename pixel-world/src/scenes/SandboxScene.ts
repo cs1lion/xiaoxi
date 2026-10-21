@@ -5,10 +5,9 @@
 
 import Phaser from 'phaser';
 import { TILE_PX } from '../world/setup.ts';
-import { Simulation, type NewBuilding, type WorldCommand } from '../world/simulation.ts';
-import type { CommandResult, WorldSnapshot } from '../world/types.ts';
+import { Simulation, type NewBuilding } from '../world/simulation.ts';
+import type { CommandResult, OracleRecord, WorldSnapshot } from '../world/types.ts';
 import { excerptBlockedQuestion } from '../world/types.ts';
-import { parseOracle } from '../world/oracle.ts';
 import { placeBlueprint, type BuiltWorld } from '../world/setup.ts';
 import type { PrefabBlueprint } from '../world/types.ts';
 import { WORLD } from '../world/palette-data.ts';
@@ -336,28 +335,16 @@ export class SandboxScene extends Phaser.Scene {
 
   // ------------------------------------------------------------------ input
 
-  /** 网页与终端共用这一个口子。文本 → 意图 → 命令，全部在这里收敛。 */
+  /**
+   * 网页与终端共用这一个口子。原话整句交给世界，解析与刻石板都在 `Simulation` 里。
+   *
+   * 这里只负责投递：认不认得出要等下一拍结算，所以本地只挡空句子，
+   * 其余一律投递并返回"已投递"。真正的回执走 `onResult`。
+   */
   say(text: string): CommandResult {
-    const intent = parseOracle(text);
-    if (intent.kind === 'unknown') {
-      return { ok: false, message: '没听懂这句，世界没有动。' };
-    }
-    let command: WorldCommand;
-    switch (intent.kind) {
-      case 'dispatch':
-        command = { kind: 'dispatch', taskKind: intent.taskKind, summary: intent.summary };
-        break;
-      case 'weather':
-        command = { kind: 'setWeather', weather: intent.weather };
-        break;
-      case 'cancelPending':
-        command = { kind: 'cancelPending' };
-        break;
-      default:
-        command = { kind: 'complete' };
-    }
+    if (text.trim() === '') return { ok: false, message: '说点什么吧。' };
     // 命令不直接改世界，排进队列，由下一个逻辑步统一结算。
-    this.sim.enqueue(command);
+    this.sim.enqueue({ kind: 'oracle', raw: text });
     return { ok: true, message: '神谕已投递，随下一拍生效。' };
   }
 
@@ -527,6 +514,7 @@ export class SandboxScene extends Phaser.Scene {
         return () => this.statusListeners.delete(listener);
       },
       report: (): DailyReport => composeReport(this.snapshot),
+      slab: (): readonly OracleRecord[] => this.snapshot.oracle,
       view: (): WorldSnapshot => this.view(),
       setPhase: (phase: PhaseId): void => this.setPhase(phase),
       currentPhase: (): PhaseId => this.currentPhase(),

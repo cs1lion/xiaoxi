@@ -41,6 +41,8 @@ export interface OracleApi {
   readonly toggleNight: () => boolean;
   readonly nightEnabled: () => boolean;
   readonly report: () => ReportApi;
+  /** 神谕石板：只含真正改变过世界的话，旧在前。 */
+  readonly slab: () => readonly { readonly raw: string; readonly receipt: string; readonly at: number }[];
 }
 
 export interface ReportApi {
@@ -65,6 +67,8 @@ export function bindOraclePanel(getApi: () => OracleApi | undefined): void {
   const paperHeadline = document.querySelector<HTMLHeadingElement>('#paper-headline');
   const paperLines = document.querySelector<HTMLUListElement>('#paper-lines');
   const paperDate = document.querySelector<HTMLSpanElement>('#paper-date');
+  const slabCount = document.querySelector<HTMLSpanElement>('#slab-count');
+  const slabLines = document.querySelector<HTMLOListElement>('#slab-lines');
   if (
     form === null ||
     input === null ||
@@ -73,7 +77,9 @@ export function bindOraclePanel(getApi: () => OracleApi | undefined): void {
     finish === null ||
     paperHeadline === null ||
     paperLines === null ||
-    paperDate === null
+    paperDate === null ||
+    slabCount === null ||
+    slabLines === null
   ) {
     return;
   }
@@ -86,6 +92,30 @@ export function bindOraclePanel(getApi: () => OracleApi | undefined): void {
       ...report.lines.map((line) => {
         const item = document.createElement('li');
         item.textContent = line;
+        return item;
+      }),
+    );
+  };
+
+  /** 石板：最新的一条最显眼（放最上面），旧的往下压。 */
+  const paintSlab = (api: OracleApi): void => {
+    const records = [...api.slab()].reverse();
+    slabCount.textContent = records.length === 0 ? '' : `${records.length} 条`;
+    if (records.length === 0) {
+      const empty = document.createElement('li');
+      empty.className = 'empty';
+      empty.textContent = '还没有刻过。说一句会让世界动的话。';
+      slabLines.replaceChildren(empty);
+      return;
+    }
+    slabLines.replaceChildren(
+      ...records.map((record) => {
+        const item = document.createElement('li');
+        item.textContent = record.raw;
+        const receipt = document.createElement('span');
+        receipt.className = 'receipt';
+        receipt.textContent = `　→ ${record.receipt}`;
+        item.appendChild(receipt);
         return item;
       }),
     );
@@ -110,8 +140,10 @@ export function bindOraclePanel(getApi: () => OracleApi | undefined): void {
     api.onStatus((line) => {
       status.textContent = line;
       paintPaper(api);
+      paintSlab(api);
     });
     paintPaper(api);
+    paintSlab(api);
   };
   subscribe();
 
