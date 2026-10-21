@@ -10,14 +10,22 @@ import { WORKSHOP_TASKS } from './tasks.ts';
 import type { GridPoint, PlacedBuilding, PrefabBlueprint } from './types.ts';
 
 export const TILE_PX = 16;
-export const GRID_WIDTH = 30;
-export const GRID_HEIGHT = 20;
 export const BORDER = 1;
 
-/** 世界尺寸与分区。改这里等于改世界规格，测试会跟着报警。 */
-export const WORLD_SPEC: GridSpec = {
-  width: GRID_WIDTH,
-  height: GRID_HEIGHT,
+/**
+ * 图块尺寸不动，只扩大地图。
+ *
+ * 「把图块放大到 32px」与「扩大世界」互相抵消：同样一块屏幕，图块翻倍就只看得到
+ * 一半的地图内容，还得重画全部地形纹理。所以大世界靠更多格子，不靠更大的格子。
+ */
+
+/**
+ * 旧规格：30×20。**保留为测试夹具**——20 处既有单测依赖它，
+ * 换掉等于把已有验收数字全部作废。生产入口用 `LARGE_WORLD_SPEC`。
+ */
+export const SMALL_WORLD_SPEC: GridSpec = {
+  width: 30,
+  height: 20,
   border: BORDER,
   zones: [
     { id: 'industry', x: 1, y: 1, w: 12, h: 8 },
@@ -29,6 +37,45 @@ export const WORLD_SPEC: GridSpec = {
     { id: 'agriculture', x: 17, y: 13, w: 12, h: 6 },
   ],
 };
+
+/** 兼容旧调用点与旧测试：默认规格仍是 30×20。 */
+export const WORLD_SPEC: GridSpec = SMALL_WORLD_SPEC;
+export const GRID_WIDTH = SMALL_WORLD_SPEC.width;
+export const GRID_HEIGHT = SMALL_WORLD_SPEC.height;
+
+/**
+ * 大世界：80×60 格，1280×960 像素，面积是旧世界的 8 倍。
+ *
+ * 分区是同心圆的近似：中心是祭坛，四角方向各留一条通向郊野的路。
+ * 这里只给矩形分区，群落（离中心多远）由 `biomes.ts` 单独判定——
+ * 两者职责不同：分区决定能建什么，群落决定看起来像哪一带。
+ */
+export const LARGE_WORLD_SPEC: GridSpec = {
+  width: 80,
+  height: 60,
+  border: BORDER,
+  zones: [
+    // 核心：祭坛 + 中心广场 + 市政街
+    { id: 'altar', x: 37, y: 27, w: 6, h: 6 },
+    { id: 'street', x: 36, y: 20, w: 8, h: 7 },
+    { id: 'street', x: 36, y: 33, w: 8, h: 8 },
+    { id: 'street', x: 29, y: 26, w: 8, h: 8 },
+    { id: 'street', x: 43, y: 26, w: 8, h: 8 },
+    // 工坊环：北工业、东书斋、南农田、西生活
+    { id: 'industry', x: 30, y: 6, w: 20, h: 11 },
+    { id: 'scholarly', x: 54, y: 22, w: 14, h: 16 },
+    { id: 'agriculture', x: 30, y: 44, w: 20, h: 10 },
+    { id: 'living', x: 12, y: 22, w: 14, h: 16 },
+    // 郊野：给外围探索点留出的可建区
+    { id: 'industry', x: 6, y: 6, w: 20, h: 12 },
+    { id: 'scholarly', x: 56, y: 6, w: 18, h: 12 },
+    { id: 'agriculture', x: 6, y: 44, w: 18, h: 10 },
+    { id: 'living', x: 56, y: 44, w: 18, h: 10 },
+  ],
+};
+
+/** 大世界的祭坛：规格正中心。 */
+export const LARGE_ALTAR: GridPoint = { x: 40, y: 30 };
 
 export const ALTAR: GridPoint = { x: 15, y: 9 };
 
@@ -132,26 +179,41 @@ export function checkPlacement(
 }
 
 /** 常驻铺子开局落位。扩建样板不在这里出现。 */
+/**
+ * 建一个世界。
+ *
+ * `spec` 与 `altar` 都省略时用旧规格 30×20——20 处既有测试依赖这个默认值，
+ * 不改它们。生产入口传 `LARGE_WORLD_SPEC` + `LARGE_ALTAR`（见 `buildLargeWorld`）。
+ */
 export function buildWorld(
   blueprints: ReadonlyMap<string, PrefabBlueprint>,
+  spec: GridSpec = SMALL_WORLD_SPEC,
+  altar: GridPoint = ALTAR,
 ): BuiltWorld {
   const coverage = validateCoverage(blueprints);
   if (coverage.length > 0) throw new WorldSetupError(coverage.join('；'));
 
-  const grid = new WorldGrid(WORLD_SPEC);
+  const grid = new WorldGrid(spec);
   const buildings: PlacedBuilding[] = [];
 
   for (const blueprint of blueprints.values()) {
     if (!RESIDENT_PREFABS.has(blueprint.id)) continue;
-    const placed = placeBlueprint(grid, blueprint, `${blueprint.id}#1`, ALTAR);
+    const placed = placeBlueprint(grid, blueprint, `${blueprint.id}#1`, altar);
     if (placed === null) {
       throw new WorldSetupError(`${blueprint.displayName} 在 ${blueprint.zone} 找不到合规空地`);
     }
     buildings.push(placed.building);
   }
 
-  assertWorldInvariants(grid, buildings);
-  return { grid, buildings, altar: ALTAR };
+  assertWorldInvariants(grid, buildings, altar);
+  return { grid, buildings, altar };
+}
+
+/** 生产用的大世界：80×60，常驻铺子按郊野锚点重新落位。 */
+export function buildLargeWorld(
+  blueprints: ReadonlyMap<string, PrefabBlueprint>,
+): BuiltWorld {
+  return buildWorld(blueprints, LARGE_WORLD_SPEC, LARGE_ALTAR);
 }
 
 /**
@@ -295,6 +357,7 @@ export function rehydratePalettes(
 export function assertWorldInvariants(
   grid: WorldGrid,
   buildings: readonly PlacedBuilding[],
+  altar: GridPoint = ALTAR,
 ): void {
   const problems: string[] = [];
   const workshops = buildings.filter((item) => item.boundTask !== null);
@@ -311,7 +374,7 @@ export function assertWorldInvariants(
     if (!grid.isWalkable(building.door)) {
       problems.push(`${building.displayName} 的门口不可通行`);
     }
-    const reachable = grid.path(ALTAR, building.door);
+    const reachable = grid.path(altar, building.door);
     if (reachable.length === 0) {
       problems.push(`${building.displayName} 与祭坛之间没有通路`);
     }

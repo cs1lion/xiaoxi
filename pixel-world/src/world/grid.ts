@@ -5,6 +5,7 @@
  */
 
 import type { GridPoint, PrefabBlueprint, TileCell, ZoneId } from './types.ts';
+import { WALK_COST, walkCostOf } from './terrain-cost.ts';
 
 const ZONE_DEFAULT: ZoneId = 'street';
 
@@ -183,30 +184,39 @@ export class WorldGrid {
     const startIndex = index(start);
     const goalIndex = index(target);
     gScore[startIndex] = 0;
-    const open: { point: GridPoint; f: number }[] = [
-      { point: start, f: heuristic(start, target) },
-    ];
 
-    while (open.length > 0) {
-      let bestIndex = 0;
-      for (let i = 1; i < open.length; i += 1) {
-        if (open[i].f < open[bestIndex].f) bestIndex = i;
-      }
-      const current = open.splice(bestIndex, 1)[0].point;
-      const currentIndex = index(current);
-      if (currentIndex === goalIndex) return rebuild(cameFrom, currentIndex, this.width);
+    /**
+     * 二叉堆取代原来的"每轮线性扫描最小值"。
+     *
+     * 单屏 30×20 时线性扫描够用；大世界 80×60 有 4800 格，每轮扫描整个 open
+     * 列表会让跨图寻路明显变慢。堆的键是 f，同 f 不比较别的，保持确定性。
+     */
+    const heap = new MinHeap();
+    heap.push(startIndex, heuristic(start, target), 0);
+
+    while (heap.size > 0) {
+      const { value: currentIndex, g: poppedG } = heap.pop();
+      // 陈旧条目：这个格子后来被以更小的代价重新入堆过，旧条目要丢掉。
+      // 少了这一步，堆里过期的 f 会把正确路线挤到后面，A* 给出非最优解。
+      if (poppedG > gScore[currentIndex]) continue;
       if (closed[currentIndex]) continue;
+      if (currentIndex === goalIndex) return rebuild(cameFrom, currentIndex, this.width);
       closed[currentIndex] = 1;
+
+      const current = { x: currentIndex % this.width, y: Math.floor(currentIndex / this.width) };
       for (const step of ORTHOGONAL) {
         const next = { x: current.x + step.x, y: current.y + step.y };
-        if (!this.isWalkable(next)) continue;
+        const cell = this.at(next);
+        if (cell === undefined || !cell.walkable) continue;
         const nextIndex = index(next);
         if (closed[nextIndex]) continue;
-        const tentative = gScore[currentIndex] + 1;
+
+        // 代价来自地形：石板路便宜、密林贵，路线自己会先上大路。
+        const tentative = gScore[currentIndex] + walkCostOf(cell.terrain);
         if (tentative < gScore[nextIndex]) {
           gScore[nextIndex] = tentative;
           cameFrom[nextIndex] = currentIndex;
-          open.push({ point: next, f: tentative + heuristic(next, target) });
+          heap.push(nextIndex, tentative + heuristic(next, target), tentative);
         }
       }
     }
@@ -257,8 +267,83 @@ const ORTHOGONAL: readonly GridPoint[] = [
   { x: -1, y: 0 },
 ];
 
+/**
+ * 启发式：曼哈顿距离 × 最小通行代价。
+ *
+ * 必须乘最小代价，否则它就不再是「低估剩余成本」。旧实现用裸曼哈顿距离，
+ * 在引入代价后会把 2.5 的密林估成 1，A* 可能给出非最优路线（绕远却不自知）。
+ * 用全场最小代价做尺度，保证可采纳，同时仍是有信息的。
+ */
+const MIN_WALK_COST = Math.min(...Object.values(WALK_COST));
+
 function heuristic(a: GridPoint, b: GridPoint): number {
-  return Math.abs(a.x - b.x) + Math.abs(a.y - b.y);
+  return (Math.abs(a.x - b.x) + Math.abs(a.y - b.y)) * MIN_WALK_COST;
+}
+
+/**
+ * 二叉最小堆，键是 f 值。
+ *
+ * 不追求通用：只服务 A* 的 open 列表，没有 decrease-key（A* 用重复入堆代替）。
+ */
+class MinHeap {
+  private readonly keys: number[] = [];
+  private readonly values: number[] = [];
+  /** 入堆时的 g 值，用来识别陈旧条目。 */
+  private readonly gs: number[] = [];
+
+  get size(): number {
+    return this.keys.length;
+  }
+
+  push(value: number, key: number, g: number): void {
+    this.keys.push(key);
+    this.values.push(value);
+    this.gs.push(g);
+    let i = this.keys.length - 1;
+    while (i > 0) {
+      const parent = (i - 1) >> 1;
+      if (this.keys[parent]! <= this.keys[i]!) break;
+      this.swap(i, parent);
+      i = parent;
+    }
+  }
+
+  pop(): { value: number; g: number } {
+    const topValue = this.values[0]!;
+    const topG = this.gs[0]!;
+    const lastKey = this.keys.pop()!;
+    const lastValue = this.values.pop()!;
+    const lastG = this.gs.pop()!;
+    if (this.keys.length > 0) {
+      this.keys[0] = lastKey;
+      this.values[0] = lastValue;
+      this.gs[0] = lastG;
+      let i = 0;
+      for (;;) {
+        const left = i * 2 + 1;
+        const right = left + 1;
+        let smallest = i;
+        if (left < this.keys.length && this.keys[left]! < this.keys[smallest]!) smallest = left;
+        if (right < this.keys.length && this.keys[right]! < this.keys[smallest]!) smallest = right;
+        if (smallest === i) break;
+        this.swap(i, smallest);
+        i = smallest;
+      }
+    }
+    return { value: topValue, g: topG };
+  }
+
+  private swap(a: number, b: number): void {
+    const key = this.keys[a]!;
+    this.keys[a] = this.keys[b]!;
+    this.keys[b] = key;
+    const value = this.values[a]!;
+    this.values[a] = this.values[b]!;
+    this.values[b] = value;
+    const g = this.gs[a]!;
+    this.gs[a] = this.gs[b]!;
+    this.gs[b] = g;
+  }
 }
 
 function rebuild(cameFrom: Int32Array, goalIndex: number, width: number): GridPoint[] {

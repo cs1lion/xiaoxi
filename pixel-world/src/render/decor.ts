@@ -185,21 +185,41 @@ function accentFor(kind: TaskKind | null): PropAccent {
  * 用 24 色里的 charcoal 做主体、amber 点眼睛，和摆件区分得开。
  */
 function drawCat(g: Phaser.GameObjects.Graphics): void {
+  // 9×11 的小剪影。早先的 6×7 在祭坛旁读不出来，所以放大一档并加黑轮廓：
+  // 24 色里没有专门的"深色描边"，用 ink 就是它。
   g.fillStyle(WORLD.deepShade, 0.3);
-  g.fillRect(-3, 0, 8, 2);
+  g.fillRect(-5, 0, 11, 2);
+
+  // 轮廓层：先铺一层 ink，再把主体画进去，边缘就有了 1px 黑边。
+  g.fillStyle(WORLD.ink, 1);
+  g.fillRect(-5, -8, 9, 8); // 身子（含轮廓）
+  g.fillRect(3, -11, 5, 6); // 头
 
   g.fillStyle(WORLD.charcoal, 1);
-  g.fillRect(-3, -5, 6, 5); // 身子
-  g.fillRect(2, -7, 3, 4); // 头
-  // 耳朵：两个 1px 尖
-  g.fillRect(2, -8, 1, 1);
-  g.fillRect(4, -8, 1, 1);
-  // 尾巴：向上翘一格
-  g.fillRect(-4, -7, 1, 3);
-  g.fillRect(-5, -8, 1, 1);
+  g.fillRect(-4, -7, 7, 6); // 身子内芯
+  g.fillRect(4, -10, 3, 4); // 头内芯
 
+  // 耳朵：两个清楚的三角尖。
+  g.fillStyle(WORLD.ink, 1);
+  g.fillRect(3, -12, 1, 2);
+  g.fillRect(7, -12, 1, 2);
+  g.fillStyle(WORLD.charcoal, 1);
+  g.fillRect(4, -12, 1, 1);
+  g.fillRect(6, -12, 1, 1);
+
+  // 尾巴：向上翘两格，末端加深。
+  g.fillStyle(WORLD.ink, 1);
+  g.fillRect(-6, -9, 2, 6);
+  g.fillRect(-7, -11, 2, 3);
+  g.fillStyle(WORLD.charcoal, 1);
+  g.fillRect(-6, -8, 1, 4);
   g.fillStyle(WORLD.amber, 1);
-  g.fillRect(3, -6, 1, 1); // 一只眼就够读
+  g.fillRect(-7, -11, 1, 1);
+
+  // 眼睛：两只，比一只更好认成"脸"。
+  g.fillStyle(WORLD.warmLight, 1);
+  g.fillRect(4, -9, 1, 1);
+  g.fillRect(6, -9, 1, 1);
 }
 
 /** 稳定的道具哈希：同 id 永远同外观，截图可复现。 */
@@ -242,13 +262,21 @@ function drawLamp(g: Phaser.GameObjects.Graphics, seed: number, accent: PropAcce
   g.fillRect(-1, -23, 3, 1);
 
   if (accent === 'gear') {
-    // 齿轮：灯罩下沿一枚 5×5 的小记号，四角留缺口读成齿。
+    // 齿轮：灯罩下沿一枚 7×7 的记号。5×5 在 2 倍显示下只有 10px，读不出来。
+    g.fillStyle(WORLD.ink, 1);
+    g.fillRect(-4, -17, 9, 9);
     g.fillStyle(WORLD.trim, 1);
-    g.fillRect(-2, -15, 5, 5);
+    g.fillRect(-3, -16, 7, 7);
+    // 四个齿：四边各凸出一格。
+    g.fillRect(-1, -18, 3, 1);
+    g.fillRect(-1, -9, 3, 1);
+    g.fillRect(-5, -14, 1, 3);
+    g.fillRect(3, -14, 1, 3);
+    // 轴心留空，读成轮子而不是方块。
     g.fillStyle(WORLD.ink, 1);
     g.fillRect(-1, -14, 3, 3);
-    g.fillStyle(WORLD.trim, 1);
-    g.fillRect(0, -14, 1, 1);
+    g.fillStyle(WORLD.timberDark, 1);
+    g.fillRect(0, -13, 1, 1);
   }
 
   // 灯下光池：两层硬边矩形 + 抖动缺口，不用大 alpha 圆。
@@ -307,14 +335,17 @@ function drawTree(g: Phaser.GameObjects.Graphics, seed: number, accent: PropAcce
 
   if (accent === 'book') {
     // 书放在树干**左侧**：右侧是角色站立与走动的热点，放那边会被小人挡掉。
-    // 一块斜靠的石板 + 两页浅色书页，读成「这里查过资料」。
-    g.fillStyle(WORLD.stone, 1);
-    g.fillRect(-10, -6, 6, 5);
-    g.fillStyle(WORLD.plaster, 1);
-    g.fillRect(-9, -5, 4, 3);
+    // 8×6：一块斜靠的石板 + 摊开的书页，读成「这里查过资料」。
     g.fillStyle(WORLD.ink, 1);
-    g.fillRect(-8, -5, 1, 3);
-    g.fillRect(-10, -1, 6, 1);
+    g.fillRect(-13, -8, 10, 8);
+    g.fillStyle(WORLD.stone, 1);
+    g.fillRect(-12, -7, 8, 6);
+    g.fillStyle(WORLD.plaster, 1);
+    g.fillRect(-11, -6, 3, 4);
+    g.fillRect(-7, -6, 2, 4);
+    g.fillStyle(WORLD.ink, 1);
+    g.fillRect(-8, -6, 1, 4);
+    g.fillRect(-12, -1, 8, 1);
   }
 }
 
@@ -338,12 +369,16 @@ function drawBanner(g: Phaser.GameObjects.Graphics, seed: number, accent: PropAc
   g.fillRect(8, -15 + (seed % 2), 1, 2);
 
   if (accent === 'inkstone') {
-    // 砚台：旗杆底一方浅石台，中央一点墨。
-    g.fillStyle(WORLD.plaster, 1);
-    g.fillRect(-4, -3, 9, 3);
-    g.fillStyle(WORLD.stone, 1);
-    g.fillRect(-4, -1, 9, 1);
+    // 砚台：旗杆底一方浅石台，中央一点墨。放大到 11×5 才看得出来。
     g.fillStyle(WORLD.ink, 1);
-    g.fillRect(-1, -3, 3, 1);
+    g.fillRect(-6, -5, 11, 5);
+    g.fillStyle(WORLD.plaster, 1);
+    g.fillRect(-5, -4, 9, 3);
+    g.fillStyle(WORLD.stone, 1);
+    g.fillRect(-5, -1, 9, 1);
+    g.fillStyle(WORLD.ink, 1);
+    g.fillRect(-2, -4, 4, 2);
+    g.fillStyle(WORLD.pale, 1);
+    g.fillRect(-1, -4, 1, 1);
   }
 }
