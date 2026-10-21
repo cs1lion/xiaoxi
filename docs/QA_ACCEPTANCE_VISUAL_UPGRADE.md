@@ -1124,3 +1124,75 @@ D-1 两条缺陷路径（live-sync 撤单走 `abandonActiveTask`、读档后首�
 e2e 缺陷清单：P2 清零；剩 2 条 P3（驱动采样全部角色、E 的 found=false 分支未跑）。
 
 ---
+
+---
+
+## 24. 合并收尾后的独立复验准备（2026-10-21，合并待用户批准）
+
+**背景**：`feat/pixel-world-oracle-world` 领先 origin 88 提交；master 有 11 个我们没有的
+提交（含 S5 桥接 fdacd41、durable C1–C4 c60c374、预算分离 c9ef30a、outbox 2c83cd4、
+**world.dispatch 幂等去重 a643cf7**）。merge-base `df36bed`，双方都改过的 6 个文件：
+`docs/PROTOCOL.md`、`scripts/check_protocol.py`、`scripts/test_executive_v3.py`、
+`server/app.py`、`server/assistant/executive_api.py`、`server/interaction/threads.py`。
+
+### 24.1 合并后复验协议（两层 + 一条专项）
+
+**第一层 · 主产品门禁**（合并后 master 侧不能红）：
+
+| 命令 | 口径 |
+|---|---|
+| `python scripts/check_protocol.py` | 必须用 `.venv\Scripts\python.exe`（系统 anaconda 会 numpy ImportError） |
+| `python scripts/test_core.py` | 同上，离线无需 Key |
+| `npm test` | 主产品前端测试 |
+| `python scripts/run_gates.py` | 总门禁 |
+
+**第二层 · 像素世界门禁**（我们这条不能红，基线见 24.3）：
+
+| 命令 | 基线（合并前 HEAD） |
+|---|---|
+| `npm run check` | exit 0 |
+| `npm run test:inprocess` | **221/221** |
+| `node scripts/audit-palette.mjs --strict` | 世界 16（引用 110）/ UI 8（51）/ 并集 23 / 越界 0 |
+| smoke-ego | 116/116（Chief 代跑浏览器，QA 核映射与断言） |
+
+**第三层 · 专项**：a643cf7 幂等去重对 e2e 断言的影响（QA 已预分析，结论：现有断言
+不受影响，见 24.2）。
+
+### 24.2 去重语义预分析（QA 读 a643cf7 独立完成）
+
+**机制**：`world.dispatch` 注册 `idempotency_key='request_id'`；loop 在 mutation
+调用时注入 `operation_id = runtime.operation_id(run_id, action_seq)`（loop.py:495-498）
+——**由轮次 id + 轮内变异序号派生，与参数无关**。`_world_dispatch` 先按 request_id
+反查台账：有非 drafting 的既有单 → 直接返回既有回执（不建新单、**不走 busy**）；
+busy 检查加了 `existing is None` 守卫；drafting 重放允许通过（补完崩溃的
+open→dispatch 窗口）。台账层还有第二层：同 request_id 返同一单、同 request_id
+换参数被拒（test_world_bridge.py 新增断言覆盖）。
+
+**对 e2e 各断言的影响判定**：
+
+| 断言 | 合并后是否仍有效 | 理由 |
+|---|---|---|
+| A/B/C/F/G | **有效** | 全新派单（新 run_id → 新 operation_id → 无既有单）行为不变 |
+| H 并发 busy | **有效** | 三条并行派单是三个独立轮次 → 三个新 operation_id → `existing is None` → busy 检查照常生效 |
+| D 完成/交付 | 有效（根因未变） | worker token 预算问题与去重无关 |
+| E world.status | 有效 | 只读，不受影响 |
+
+**去重路径本身**：只挡**同一 (run_id, action_seq) 的重放**（崩溃/重试场景），e2e
+自然流程不会触发（每条 WS 文本都是新轮次）。该路径由服务端单测
+（test_world_bridge.py 的同 request_id 返同一单、换参数被拒）覆盖，e2e 层记为
+「单测覆盖、e2e 不自然触发」。
+
+**合并后若重跑 e2e 的一条注意**：H 的三条派单必须用**不同的文本/轮次**（本来
+就是）；同轮内重发同一动作会因 action_seq 不同仍算新单，但若复现的是同一 run 的
+重放则会被去重挡回既有单。
+
+### 24.3 合并前基线（QA 实跑，HEAD 8acac73）
+
+像素世界：check 0 / **221/221** / audit 16-8-23 越界 0 / strict exit 0 / 整门禁 PASS。
+主产品侧基线合并时建立（不在 master 上预跑，避免碰用户线）。
+
+**复验执行时机**：合并落地、Chief 通知后；两门禁层 QA 自己跑，smoke 浏览器部分
+Chief 代跑。冲突 6 文件若合并后有语义损失（不是文本冲突而是功能被覆盖），按 §6
+记 P1（关键集成链路断裂）。
+
+---
