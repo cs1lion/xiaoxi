@@ -17,7 +17,7 @@
 ### 门禁报告（一条命令确认"每道门都真的跑过"）
 
 ```bash
-.\.venv\Scripts\python.exe scripts\run_gates.py                 # 59 道门全跑，跳过即失败
+.\.venv\Scripts\python.exe scripts\run_gates.py                 # 60 道门全跑，跳过即失败
 .\.venv\Scripts\python.exe scripts\run_gates.py --allow-skip    # 跳过只告警（兼容旧口径）
 .\.venv\Scripts\python.exe scripts\run_gates.py --only protocol,core,evals
 ```
@@ -43,6 +43,10 @@
 - **live 层的装配口径（重要）**：live 用例走 `build_messages` + `EMOTION_INSTRUCTION` + 真实检索的"装配级"调用（`complete_raw`），**不是**生产全链路 `Orchestrator.respond()`（少了 `_render_turn_context` 动态段、pacing 后处理、历史裁剪）。它只多了一步与生产同款的截断救援：`finish_reason=length` 且正文过短时，用 `reasoning_effort="minimal"` 再要一次短回复；`finish_reason / rescued / completion_tokens` 会随结果落盘。live 结果代表"Prompt 装配与截断救援没坏"，不代表端到端行为；要验全链路需另起浏览器回归。**2026-10-17 复核**：此前记录的"emotion-tag-retention-live 10 次中 3 次缺标签"根因不是多轮指令遗忘，而是推理占满 token 预算（`finish_reason=length`、正文 0 字），修前 2/3 轮通过。`LLM_REPLY_TOKENS` 900→1200、救援改为 minimal 推理、生产空回复兜底后，连续 12 次运行 / 72 轮全绿；这是 R2 抽样，不是稳定性结论。
 - **2026-10-20 live 实跑**：`emotion-tag-retention-live` 3/3、`accuracy-over-persona-live` 3/3、`hallu-empty-retrieval-live` 3/3；原始回复与判定按上面的规则落在 `evals/results/`，仍是装配级，不是生产全链路。
 - **xfail**：`status: xfail` 的用例照常运行并在汇报中列出，但不计入失败（必须写 `reason`）。
+
+### 写动作崩溃矩阵（2026-10-20）
+
+`scripts/probe_outbox_crash.py` 用两个子进程分别在“副作用后、回执前”和“回执已落盘、事项投影前”硬退出，再由父进程走真实 `AssistantService` 启动路径验收：前者转 `unknown` 并阻断 resume，后者只补投一次且不重复副作用。它不碰生产数据，已纳入 `run_gates`。
 
 ### 退役/不在门禁内的评测夹具（2026-10-20）
 

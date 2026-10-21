@@ -76,6 +76,10 @@ GATES: dict[str, dict[str, object]] = {
         "cmd": [str(PY), "scripts/test_operation_outbox.py"],
         "skip_regex": r"^\s*SKIP",
     },
+    "outbox_crash": {
+        "cmd": [str(PY), "scripts/probe_outbox_crash.py"],
+        "skip_regex": r"^\s*SKIP",
+    },
     "mood_writer": {
         "cmd": [str(PY), "scripts/test_mood_writer.py"],
         "skip_regex": r"^\s*SKIP",
@@ -323,7 +327,7 @@ GATES: dict[str, dict[str, object]] = {
 }
 
 # 这些门禁的本体是纯逻辑单测，不需要本地服务，永远必须真跑。
-ALWAYS_REQUIRED = ("protocol", "core", "scheduler_health", "budget_scope", "backup_restore", "operation_outbox", "mood_writer", "evals", "npm", "executive_v3", "adapter_ext",
+ALWAYS_REQUIRED = ("protocol", "core", "scheduler_health", "budget_scope", "backup_restore", "operation_outbox", "outbox_crash", "mood_writer", "evals", "npm", "executive_v3", "adapter_ext",
                    "codex_shim", "claude_shim", "gateway", "task_planning", "cross_day",
                    "thread_conversation", "self_evolution", "agent_loop", "llm_client",
                    "self_evolution_send", "config_hot", "evolution_quality_report",
