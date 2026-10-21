@@ -633,8 +633,17 @@ def test_f_lint():
     with_human = only_semantic + (mk_criterion(cid="H1", kind="human", required=True,
                                                check={"type": "ask_user", "question": "这样行吗",
                                                       "options": ["行", "不行"]}),)
-    check("L4 例外·纯语义任务有 required human 就放行",
-          "L4" not in lint_acceptance(with_human).rules())
+    # §3.8 R2：纯语义例外不再只看 human，还要 artifact.kind 在名单里。
+    check("L4 拦下·未给 artifact.kind 时 human 不放行（R2）",
+          "L4" in lint_acceptance(with_human).rules())
+    check("L4 例外·report_md + required human 放行（R2）",
+          "L4" not in lint_acceptance(with_human, artifact_kind="report_md").rules())
+    check("L4 例外·message + required human 放行（R2）",
+          "L4" not in lint_acceptance(with_human, artifact_kind="message").rules())
+    check("L4 拦下·file 类产物 + human 不放行（R2）",
+          "L4" in lint_acceptance(with_human, artifact_kind="file").rules())
+    check("L4 拦下·code_patch + human 不放行（R2）",
+          "L4" in lint_acceptance(with_human, artifact_kind="code_patch").rules())
     with_det = only_semantic + (mk_criterion(cid="D1", required=True),)
     check("L4 通过·有 required deterministic", "L4" not in lint_acceptance(with_det).rules())
 

@@ -255,16 +255,32 @@ def _check_l3(criterion: Criterion, problems: list[LintProblem]) -> None:
                 f"rubric[{index}] 是无证据陈述「{bare}」，须改成可核对的条件"))
 
 
-def _check_l4(criteria: tuple[Criterion, ...], problems: list[LintProblem]) -> None:
+# §3.8 R2 把「纯语义任务」钉死：只有这几种产物形态才允许走 human 分支。
+# 原先「只要有 human 标准就放行」——写一条 human 就能绕过，等于没有闸门。
+SEMANTIC_ONLY_ARTIFACT_KINDS = frozenset(("report_md", "message", "chart"))
+
+
+def _check_l4(criteria: tuple[Criterion, ...], problems: list[LintProblem],
+              artifact_kind: str = "") -> None:
     required = [item for item in criteria if item.required]
-    has_required_deterministic = any(
-        item.kind == "deterministic" for item in required)
-    if has_required_deterministic:
+    if any(item.kind == "deterministic" for item in required):
         return
-    # 例外：纯语义任务必须有至少 1 条 human 标准。
+
+    # 纯语义任务例外（§3.8 R2）：artifact.kind 必须在白名单里，且没有
+    # deterministic 标准可落文件（上一行已保证）。两个条件都满足才放行。
     has_human = any(item.kind == "human" for item in required)
-    if has_human:
+    kind = str(artifact_kind or "").strip()
+    if has_human and kind in SEMANTIC_ONLY_ARTIFACT_KINDS:
         return
+
+    if has_human:
+        problems.append(LintProblem(
+            "L4", "<contract>",
+            f"artifact.kind={kind or chr(40) + chr(26410) + chr(32473) + chr(41)}"
+            " 不属于纯语义产物，不能只靠 human 标准；"
+            "至少要 1 条 required 的 deterministic 标准"))
+        return
+
     problems.append(LintProblem(
         "L4", "<contract>",
         "至少要有 1 条 required 的 deterministic 标准；纯语义任务则至少 1 条 human 标准"))
@@ -339,7 +355,8 @@ def _cmd_allowed(cmd: str, allowed: tuple[str, ...]) -> bool:
 
 
 def lint_acceptance(criteria: tuple[Criterion, ...] | list[Criterion],
-                    allowed_commands: tuple[str, ...] = ()) -> LintResult:
+                    allowed_commands: tuple[str, ...] = (),
+                    artifact_kind: str = "") -> LintResult:
     """对验收标准跑 L1–L7。
 
     注意 L4/L6/L7 是**契约级**规则（看整组），L1/L2/L3/L5 是**标准级**规则。
@@ -357,7 +374,7 @@ def lint_acceptance(criteria: tuple[Criterion, ...] | list[Criterion],
         _check_l2(criterion, problems, allowed_commands)
         _check_l3(criterion, problems)
         _check_l5(criterion, problems)
-    _check_l4(items, problems)
+    _check_l4(items, problems, artifact_kind)
     _check_l6(items, problems)
     _check_l7(items, problems)
     return LintResult(problems)
