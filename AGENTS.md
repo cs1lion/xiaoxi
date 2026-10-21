@@ -59,8 +59,12 @@ worktree 里的 `AGENTS.md` 也可能落后（取决于它检出的提交），�
   （四个 playbook 里 bun 提及 0 次），它们卡在第 2 步要 Cursor cloud agent，标 `skip: no cloud agents in DSH`。
   `babysit` 的 GitHub 路径因 `watch-pr` 是 bun 脚本而跑不了。
   `multi-phase-plan` 第 6 步能跑（`check-plan.mjs` 走 node）。
-- `claude-code.md` **存在**（`.agents/skills/pstack/docs/harness/claude-code.md`，1805 字节），
-  是个指回 DSH.md 的指针。本文件此前写「不存在」是错的。
+- `claude-code.md` 的**存在与可解析是两件事**：文件在 `.agents/skills/pstack/docs/harness/claude-code.md`
+  （1805 字节，12 行，指回 DSH.md 的指针），但**22 处引用全是死链**（实测可解析 0/22）。
+  它们写 `../../docs/harness/claude-code.md`，从 `.agents/skills/pstack/<leaf>/` 出发会解析成
+  `.agents/skills/docs/harness/claude-code.md`，多退了一层；实际只需 `../docs/...`。
+  修法两条都碰 bundle 布局（挪文件或改 22 个文件），而 `DSH.md:10` 要求 bundle 只读，所以**不修**。
+  **DSH.md 整体替代它，不依赖这些链接。**
 - `/loop` 是 Cursor 内置、盘上无 skill，但 `schedule_create` 的 `every_seconds` 能覆盖。
 
 依赖这些的步骤标 `skip: <reason>`，不要静默跳过，也不要为了跑通而去装。
