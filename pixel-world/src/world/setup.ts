@@ -49,6 +49,72 @@ export interface SpawnResult {
   readonly road: readonly GridPoint[];
 }
 
+/** 某处为什么不能建。造物模式的幽灵预览要把原因说给玩家听。 */
+export type PlacementProblem =
+  | 'edge'
+  | 'outOfZone'
+  | 'occupied'
+  | 'margin'
+  | 'doorBlocked';
+
+export type PlacementCheck =
+  | { readonly ok: true }
+  | { readonly ok: false; readonly reason: PlacementProblem };
+
+/**
+ * 能不能把这份蓝图落在 `origin`。
+ *
+ * 规则与 `findBestSlot` 内部逐条一致——幽灵预览与真实落位必须用同一套判定，
+ * 否则玩家会看到"显示可以、确认却被拒"。
+ *
+ * 先后顺序按"玩家最容易理解"排：先出界，再分区，再占地，再留白，最后门口。
+ */
+export function checkPlacement(
+  grid: WorldGrid,
+  blueprint: PrefabBlueprint,
+  origin: GridPoint,
+): PlacementCheck {
+  const { w, h } = blueprint.footprint;
+  const margin = blueprint.clearMargin;
+
+  // 出界：占地本身必须完整落在世界里。
+  if (
+    origin.x < 0 ||
+    origin.y < 0 ||
+    origin.x + w > grid.width ||
+    origin.y + h > grid.height
+  ) {
+    return { ok: false, reason: 'edge' };
+  }
+
+  // 分区：整块占地都必须在蓝图声明的分区里。
+  for (let y = origin.y; y < origin.y + h; y += 1) {
+    for (let x = origin.x; x < origin.x + w; x += 1) {
+      if (grid.zoneOf({ x, y }) !== blueprint.zone) {
+        return { ok: false, reason: 'outOfZone' };
+      }
+    }
+  }
+
+  // 占地被占：先单独判一次，好给出比"留白不足"更准确的原因。
+  for (let y = origin.y; y < origin.y + h; y += 1) {
+    for (let x = origin.x; x < origin.x + w; x += 1) {
+      if (!grid.isBuildable({ x, y })) return { ok: false, reason: 'occupied' };
+    }
+  }
+
+  // 留白：四周 margin 圈内也必须空着（含越界，边界外不可建）。
+  if (!grid.canPlace(origin, w, h, margin)) {
+    return { ok: false, reason: 'margin' };
+  }
+
+  // 门口：必须可建，否则人走不进去。
+  const door = { x: origin.x + blueprint.door.x, y: origin.y + blueprint.door.y };
+  if (!grid.isBuildable(door)) return { ok: false, reason: 'doorBlocked' };
+
+  return { ok: true };
+}
+
 /** 常驻铺子开局落位。扩建样板不在这里出现。 */
 export function buildWorld(
   blueprints: ReadonlyMap<string, PrefabBlueprint>,
@@ -72,14 +138,27 @@ export function buildWorld(
   return { grid, buildings, altar: ALTAR };
 }
 
-/** 造物主的一次落位：选址、占格、铺路。空间不足时返回 null，不改账本。 */
+/**
+ * 造物主的一次落位：选址、占格、铺路。空间不足时返回 null，不改账本。
+ *
+ * `at` 省略时走 `findBestSlot`（自动选最靠近锚点的合规空地）；
+ * 给了 `at` 就是玩家指定的位置，先过 `checkPlacement`，不合法直接返回 null。
+ * 两条路径最终都经过同一套判定。
+ */
 export function placeBlueprint(
   grid: WorldGrid,
   blueprint: PrefabBlueprint,
   instanceId: string,
   anchor: GridPoint,
+  at?: GridPoint,
 ): SpawnResult | null {
-  const origin = grid.findBestSlot(blueprint, anchor);
+  let origin: GridPoint | null;
+  if (at === undefined) {
+    origin = grid.findBestSlot(blueprint, anchor);
+  } else {
+    const check = checkPlacement(grid, blueprint, at);
+    origin = check.ok ? at : null;
+  }
   if (origin === null) return null;
 
   const door = { x: origin.x + blueprint.door.x, y: origin.y + blueprint.door.y };
