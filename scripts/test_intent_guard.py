@@ -3,12 +3,25 @@
 
     .\.venv\Scripts\python.exe scripts\test_intent_guard.py
 
-覆盖四类：
+覆盖五类：
   A 召回——同义改写的委托/进度必须被怀疑层抓到
   B 误报——闲聊必须一条都不抓
   C 注入——dynamic_prompt 空串分支逐字节不变；非空时约束在末尾
   D 纯函数——guard_for 无状态、不抛异常（limit_context 会反复调用它）
-  E 第二条静默路径——_DELEGATION 命中但 commission_accept 样本池为空
+  E 命中检测——疑似走第二条静默路径的句子，也被怀疑层抓到
+
+E 的边界（重要，别读多）
+------------------------
+"第二条静默路径"指 executive_route:1480-1483：delegation_intent 命中，
+但 commission_accept_line() 返回空串时 return None 落普通对话。
+
+本组**只证明命中检测**：这类句子同时命中 _DELEGATION 和怀疑层，所以约束
+会注入。它**没有**跑 executive_route 的真实执行面（需要 stub executive 提供
+pending_reports()/open_commissions() 与空样本池）。执行面覆盖另立 P3，不在此处，
+因为本阶段的边界是不动 executive.py 的测试面。
+
+换句话说：本文件证明"该注入的都注入了"，不证明"executive_route 在那条路径上
+确实不建单"。后者是既有行为，不由本改动引入，也不由本改动修复。
 """
 from __future__ import annotations
 
@@ -116,17 +129,21 @@ def main() -> int:
         except Exception as exc:  # noqa: BLE001 - the point is that this never runs
             check(f"非字符串不抛异常 {type(bad).__name__}", False, f"raised {exc!r}")
 
-    print("[E 第二条静默路径·_DELEGATION 命中但样本池为空]")
-    # orchestrator.executive_route:1480-1483 命中 delegation_intent 后，
-    # 若 commission_accept_line() 返回空串则 return None 落普通对话。
-    # 此时路由没建单，但模型仍被 persona 命令说「接单了」——照样虚报。
-    # 这条路径的句子必然命中 _DELEGATION，因此也必须命中怀疑层。
+    print("[E 命中检测·疑似走第二条静默路径的句子]")
+    # 背景：executive_route:1480-1483，delegation_intent 命中但
+    # commission_accept_line() 返回空串时 return None，落普通对话。
+    # 本组只断言这些句子**也进了怀疑层**，因此约束会注入。
+    # 它不跑 executive_route 的执行面（那需要 stub executive + 空样本池），
+    # 执行面覆盖另立 P3 —— 见文件头 E 的边界说明。
     from server.dialogue.orchestrator import delegation_intent
     SILENT_PATH = ["去把这个整理一下", "安排人做个页面", "这件事你盯着，有结论再叫我"]
     for text in SILENT_PATH:
-        check(f"命中 _DELEGATION（样本池空的前提） {text}", delegation_intent(text))
-        check(f"同时命中怀疑层（约束会注入） {text}", classify(text) == SUSPECT_DELEGATION,
+        check(f"命中 _DELEGATION（执行面的前提条件） {text}", delegation_intent(text))
+        check(f"同时进怀疑层→约束会注入 {text}", classify(text) == SUSPECT_DELEGATION,
               repr(classify(text)))
+    # 显式声明本组不覆盖什么，免得后来人误以为执行面已验证。
+    check("E 组不覆盖 executive_route 执行面（本阶段边界）", True,
+          "执行面覆盖另立 P3; 本阶段不覆盖路由执行面")
 
     print()
     print("=" * 72)

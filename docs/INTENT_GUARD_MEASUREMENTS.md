@@ -70,7 +70,7 @@ ZERO DRIFT — 全部 230 个返回值逐条一致
 ## 五、门禁
 
 ```
-scripts/test_intent_guard.py        53/53
+scripts/test_intent_guard.py        54/54
 scripts/test_core.py                64/64
 scripts/test_executive_v3.py        242/242
 scripts/check_protocol.py           exit 0
@@ -83,3 +83,6 @@ scripts/check_protocol.py           exit 0
 2. **纯函数约束**——`guard_for()` 无状态、无 IO、无计数。`_render_turn_context` 同时是 `limit_context` 的 measure 回调，每轮被反复调用；任何有状态的东西都会重复触发。节流若将来要加，必须放在 `_turn_context` 里（每轮一次），不能进 `guard_for`。
 3. **留痕不走 telemetry.db**——`data/intent-guard.jsonl`，对齐 `durable_shadow.py` 先例。`telemetry.py` 的 `summary()` 是全表聚合，喂 L1 预算闸与战况，写进去会污染。
 4. **单模型采样**——只有 `step-3.7-flash`。换模型需重跑本文档的实测。
+5. **本阶段不覆盖路由执行面**——单测 E 组只证明「疑似走第二条静默路径的句子也进了怀疑层，所以约束会注入」，**没有**跑 `executive_route` 的真实执行面（那需要 stub executive 提供 `pending_reports()`/`open_commissions()` 与空样本池）。
+   `executive_route:1483` 在 `commission_accept_line()` 返回空串时 `return None` 是**既有行为**，不由本改动引入，也不由本改动修复。
+   执行面覆盖另立 P3；不动 `executive.py` 的测试面是本阶段自设的边界。
