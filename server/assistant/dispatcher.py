@@ -74,6 +74,10 @@ class BriefingPacket:
     spin_guard: dict[str, Any] = field(default_factory=dict)
     memory_block: str = ""
     telemetry: dict[str, Any] = field(default_factory=dict)
+    # 契约层（server/contract/）对这张单的判断结果。
+    # 只读旁路：不拦派单，只把"这单离一份合格契约还差什么"记下来，
+    # 让台账和世界都能看见。空 tuple = 全项通过（G1-G6 都没缺口）。
+    contract_gaps: tuple[dict[str, Any], ...] = ()
     created_at: float = 0.0
 
     def as_dict(self, *, max_chars: int = 0) -> dict[str, Any]:
@@ -100,6 +104,7 @@ class BriefingPacket:
             "budget": dict(self.budget),
             "spin_guard": dict(self.spin_guard),
             "telemetry": dict(self.telemetry),
+            "contract_gaps": [dict(item) for item in self.contract_gaps],
             "created_at": self.created_at,
         }
         if max_chars and len(json.dumps(data, ensure_ascii=False)) > int(max_chars):
@@ -109,6 +114,64 @@ class BriefingPacket:
     def as_stored(self) -> dict[str, Any]:
         """落库/外发用的密件视图：与 CommissionStore 里那份逐字节一致。"""
         return self.as_dict(max_chars=MAX_PACKET_CHARS)
+
+
+def _contract_gaps(commission: dict[str, Any], acceptance: Any) -> tuple[dict[str, Any], ...]:
+    """用契约层（server/contract/）检查这一单，返回缺口清单。
+
+    这是**只读旁路**：不拦派单、不改状态、不改任何既有行为。
+    目的只有一个——把「这单离一份合格契约还差什么」记进密件，
+    否则 server/contract/ 那 252 条测试覆盖的代码在运行时是死的。
+
+    为什么不拦：派单路径上有 5 个调用方（app.py 的 REST、调度器、重试、
+    超时重派、手工补派），拦一下就是行为变更，得先过用户。这里先做观察，
+    等缺口数据攒出来再决定哪些该硬拦。
+
+    任何异常都吞掉并返回空：契约层坏了不能把派单带崩。
+    """
+    try:
+        from ..contract import Draft, Slot, collect_gaps
+
+        title = str(commission.get("title") or "").strip()
+        brief = str(commission.get("brief") or "").strip()
+        # G1 要「动词 + 对象」且不超过 80 字；这里把标题和摘要合起来当目标。
+        goal_text = (title or brief)[:200]
+        draft = Draft(
+            contract_id=str(commission.get("id") or ""),
+            utterance=goal_text,
+            goal=Slot(value=goal_text, source="user") if goal_text else None,
+            acceptance=tuple(_acceptance_criteria(acceptance)),
+        )
+        gaps = collect_gaps(draft)
+        return tuple(
+            {"check": gap.check, "key": gap.key, "missing": list(gap.missing)}
+            for gap in gaps
+        )
+    except Exception:
+        return ()
+
+
+def _acceptance_criteria(acceptance: Any) -> list[Any]:
+    """把台账里的验收规则转成契约层的 Criterion，转不了的跳过。"""
+    try:
+        from ..contract import Criterion
+    except Exception:
+        return []
+    out: list[Any] = []
+    for item in (acceptance or ()):
+        if not isinstance(item, dict):
+            continue
+        text = str(item.get("text") or item.get("criterion") or "").strip()
+        if not text:
+            continue
+        try:
+            out.append(Criterion(
+                text=text[:400],
+                required=bool(item.get("required", True)),
+            ))
+        except Exception:
+            continue
+    return out
 
 
 def _clip(text: Any, limit: int) -> str:
@@ -285,6 +348,7 @@ class Dispatcher:
                               for ref in memory_refs(memory) if ref.get("type") == "preference"),
             rubrics=rubrics,
             acceptance=_clean_acceptance(acceptance),
+            contract_gaps=_contract_gaps(commission, acceptance),
             budget={"max_steps": int(dispatch_cfg.get("max_steps", 4) or 4),
                     # 单次调用是质量闸；整单累计只做成本告警，不能拿重试次数当上下文膨胀。
                     "max_prompt_tokens_per_call": int(
@@ -633,11 +697,32 @@ class Dispatcher:
                                                      "delta": delta.as_dict() if delta else None})
         return updated, (delta.as_dict() if delta is not None else None), audit["boss_reject_count"]
 
-    def cancel(self, commission_id: str) -> dict[str, Any]:
+    def cancel(self, commission_id: str, reason: str = 'cancelled') -> dict[str, Any]:
+        """取消一单：迁到 done，并在 audit 里留一条取消记录。
+
+        为什么不能只做 transition(id, 'done')：台账只有 done 一个终态，
+        「老板取消」和「验收通过」在状态列上完全同形。像素世界的投影
+        原先就把取消当成交付（还加信仰点），根因就在这儿——世界读不到
+        「这单是被撤掉的」这个事实。
+
+        修法不新增协议字段（那要 [PROTOCOL_REQUEST]），用已有的 audit JSON：
+        取消时写入 {"cancelled": True, "cancel_reason": ..., "cancelled_at": ...}。
+        读取方（投影 / 日报）看 audit.cancelled 就能区分。
+
+        reason 允许调用方给具体原因；默认 'cancelled'。
+        """
         commission = self.commissions.get(commission_id)
         if commission["status"] == "done":
             return commission
-        return self.commissions.transition(commission_id, "done")
+        audit = dict(commission.get("audit") or {})
+        if audit.get("cancelled"):
+            return commission  # 已取消过，幂等
+        audit.update({
+            "cancelled": True,
+            "cancel_reason": _clip(str(reason or 'cancelled'), 120),
+            "cancelled_at": time.time(),
+        })
+        return self.commissions.transition(commission_id, "done", audit=audit)
 
     # ---------- 内部 ----------
     def _memory(self, text: str) -> dict[str, Any]:

@@ -5,6 +5,18 @@
 - 决策人：用户（2026-10-21 20:38，「0-3.7 先开工」）
 - 状态：实施中
 
+> **2026-10-22 凌晨更新（§3.8 已落地）**：
+> - **R1 命令白名单**已做：`config/contract.yaml` 的 `lint.allowed_commands` + `lint.py:_cmd_allowed`，
+>   黑名单保留作第二道。测试在 `test_contract.py` 的 `[K]` 节。
+> - **R2 纯语义任务判定**已做：`SEMANTIC_ONLY_ARTIFACT_KINDS = {report_md, message, chart}`。
+>   原先「只要有 human 标准就放行」是真漏洞——写一条 human 就能绕过 deterministic，已修。
+> - **R3 `promotion_weight` 语义**未做：它要接 §5.6 的 `MEMORY_UPDATE` 事件，而那是新增 WS 事件，
+>   **必须先过 `[PROTOCOL_REQUEST]`**。语义本身由 §3.8 定死（乘 procedural 经验，不乘 stated 事实），
+>   实现等协议放行。
+>
+> 另：契约层同日**接进派单路径**（`dispatcher.dispatch()` → `_contract_gaps()`），只读旁路、不拦派单。
+> 此前 `app.py` 对 `server/contract/` 是 0 处引用，252 条测试覆盖的是死代码。
+
 ## 一、可实施清单（§3 完全可判定）
 
 | 章节 | 内容 | 落点 |

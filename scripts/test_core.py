@@ -314,6 +314,198 @@ def test_circadian_and_mood_reach_the_prompt() -> None:
     store.delete_all()
 
 
+def test_internal_proxy_requires_token() -> None:
+    """内部代理必须能要求令牌，否则本机任意进程可白嫖 llm_api_key。
+
+    背景：/internal/telemetry_proxy 拿 settings.llm_api_key 转发任意 path，
+    原先只校验 Origin 头；请求不带 Origin 时 `if origin and ...` 直接短路放行，
+    于是 curl 一条就能用宿主额度。这里用 AST 静态断言锁住修复，不起 HTTP 服务。
+    """
+    print("[internal proxy token]")
+    import ast as ast_mod
+    import inspect
+    import textwrap as tw
+    from server.assistant import executive_api as api_mod
+
+    source = inspect.getsource(api_mod.create_telemetry_proxy_router)
+    tree = ast_mod.parse(tw.dedent(source))
+
+    reads_token = False
+    checks_header = False
+    for node in ast_mod.walk(tree):
+        # 两种写法都算：settings.internal_token 或 getattr(settings, "internal_token", ...)
+        if isinstance(node, ast_mod.Attribute) and node.attr == "internal_token":
+            reads_token = True
+        if isinstance(node, ast_mod.Call) and isinstance(node.func, ast_mod.Name):
+            if node.func.id == "getattr" and len(node.args) >= 2:
+                arg = node.args[1]
+                if isinstance(arg, ast_mod.Constant) and arg.value == "internal_token":
+                    reads_token = True
+        if isinstance(node, ast_mod.Call) and isinstance(node.func, ast_mod.Attribute):
+            if node.func.attr == "get" and node.args:
+                arg = node.args[0]
+                if isinstance(arg, ast_mod.Constant) and arg.value == "x-internal-token":
+                    checks_header = True
+    check("代理读取 internal_token 配置", reads_token)
+    check("代理校验 x-internal-token 头", checks_header)
+
+    bad_get = []
+    for node in ast_mod.walk(tree):
+        if isinstance(node, ast_mod.Call) and isinstance(node.func, ast_mod.Attribute):
+            if node.func.attr == "get" and isinstance(node.func.value, ast_mod.Name):
+                if node.func.value.id == "settings":
+                    bad_get.append(node.lineno)
+    check("settings 用属性访问而非 .get()", not bad_get, bad_get)
+
+    from server.config import settings as s
+    original = getattr(s, "internal_token", None)
+    try:
+        s.internal_token = ""
+        check("未配置令牌时不拦截", str(getattr(s, "internal_token", "") or "") == "")
+        s.internal_token = "abc123"
+        check("配置令牌后可拦截", str(getattr(s, "internal_token", "") or "") == "abc123")
+    finally:
+        s.internal_token = original
+
+
+def test_cancel_records_reason() -> None:
+    """取消一单必须在 audit 里留痕，否则世界分不清「取消」和「验收通过」。
+
+    背景：台账只有 done 一个终态（threads.py:519 TERMINAL），所以
+    transition(id, "done") 让「老板取消」和「验收通过」在状态列上完全同形。
+    像素世界原先就把取消当成交付、还加信仰点（projection.ts 已单独修）。
+    修法不新增协议字段，用已有 audit JSON 记录 cancelled 标记。
+    """
+    print("[cancel reason]")
+    import sqlite3
+    from server.assistant.dispatcher import Dispatcher
+    from server.interaction.threads import CommissionStore
+
+    db = sqlite3.connect(":memory:", check_same_thread=False)
+    try:
+        commissions = CommissionStore(":memory:")
+        created = commissions.create("测试单", "验证取消留痕", agent_id="writer")
+        cid = created["id"]
+        dispatcher = Dispatcher(commissions=commissions)
+
+        before = commissions.get(cid)
+        check("取消前 audit 无 cancelled", not (before.get("audit") or {}).get("cancelled"))
+
+        after = dispatcher.cancel(cid, reason="老板撤单")
+        audit = after.get("audit") or {}
+        check("取消后状态是 done", after["status"] == "done")
+        check("audit 记了 cancelled 标记", audit.get("cancelled") is True)
+        check("audit 记了取消原因", audit.get("cancel_reason") == "老板撤单")
+        check("audit 记了取消时间", isinstance(audit.get("cancelled_at"), (int, float)))
+
+        # 幂等：重复取消不重复写，也不报错
+        again = dispatcher.cancel(cid, reason="再点一次")
+        check("重复取消幂等", (again.get("audit") or {}).get("cancel_reason") == "老板撤单")
+
+        # 关键：验收通过的单不能被误标成取消
+        other = commissions.create("另一单", "走正常验收", agent_id="writer")
+        oid = other["id"]
+        commissions.transition(oid, "briefing")
+        commissions.transition(oid, "running")
+        commissions.transition(oid, "auditing")
+        commissions.transition(oid, "ready_to_report")
+        done_row = commissions.transition(oid, "done")
+        check("正常验收不留 cancelled 标记",
+              not (done_row.get("audit") or {}).get("cancelled"))
+    finally:
+        db.close()
+
+
+def test_contract_layer_wired_into_dispatch() -> None:
+    """契约层必须真的接进派单路径，否则 252 条测试覆盖的是死代码。
+
+    背景：server/contract/ 有 252 条测试，但 app.py 对它有 0 处引用——
+    契约层写完了、测完了，运行时完全没用到。
+    这里断言 dispatch 的密件里带 contract_gaps，且真的能算出缺口。
+    """
+    print("[contract wired into dispatch]")
+    import dataclasses
+    from server.assistant.dispatcher import BriefingPacket, _contract_gaps
+
+    fields = {f.name for f in dataclasses.fields(BriefingPacket)}
+    check("BriefingPacket 带 contract_gaps 字段", "contract_gaps" in fields)
+
+    thin = _contract_gaps({"id": "c_1", "title": "写一份季度报告", "brief": "整理Q3"}, None)
+    check("信息不全的单报出缺口", len(thin) > 0)
+    checks_hit = {g["check"] for g in thin}
+    check("缺交付物时 G3 报出", "G3" in checks_hit)
+    check("缺验收标准时 G4 报出", "G4" in checks_hit)
+
+    broken = _contract_gaps({"id": None, "title": None, "brief": None}, None)
+    check("脏输入不抛异常", isinstance(broken, tuple))
+
+    packet = BriefingPacket(
+        commission_id="c_1", objective="写报告", deliverable="file",
+        agent_id="writer", agent_name="写手", contract_gaps=thin,
+    )
+    stored = packet.as_stored()
+    check("序列化后仍带缺口", len(stored.get("contract_gaps") or []) == len(thin))
+
+
+def test_contract_gaps_reach_the_packet_end_to_end() -> None:
+    """契约缺口必须真的走完 dispatch() 到落库，不只是函数本身能算出来。
+
+    背景（QA 2026-10-22 指出）：原测试直接调 _contract_gaps() 和构造 BriefingPacket，
+    中间那段「dispatch 里那一行」没有覆盖。实测确认：把 dispatch 里
+    contract_gaps=_contract_gaps(...) 整行删掉，82 条测试全绿 exit 0——假绿。
+
+    这里跑真实链路：CommissionStore 建单 -> Dispatcher.dispatch() -> 落库 packet。
+    """
+    print("[contract gaps end-to-end]")
+    import sqlite3
+    from server.assistant.dispatcher import Dispatcher
+    from server.assistant.evaluator import load_roster
+    from server.interaction.threads import CommissionStore
+
+    roster = load_roster()
+    agents = roster.get("agents") or []
+    check("roster 有可用 agent", len(agents) > 0)
+    if not agents:
+        return
+
+    db = sqlite3.connect(":memory:", check_same_thread=False)
+    try:
+        store = CommissionStore(":memory:")
+        created = store.create("写一份季度报告", "整理Q3数据", agent_id=str(agents[0]["id"]))
+        cid = created["id"]
+        dispatcher = Dispatcher(commissions=store)
+
+        # 信息不全的单：dispatch 必须跑通，且 packet 带缺口
+        updated, packet = dispatcher.dispatch(cid)
+        check("dispatch 成功（状态进 briefing）", updated["status"] == "briefing")
+        check("packet 带 contract_gaps", isinstance(packet.contract_gaps, tuple))
+        check("缺口非空（这单信息不全）", len(packet.contract_gaps) > 0)
+
+        # 关键：缺口必须落进台账的 packet，否则世界/日报读不到
+        stored = updated.get("packet") or {}
+        gaps_in_db = stored.get("contract_gaps")
+        check("落库 packet 里有 contract_gaps", isinstance(gaps_in_db, list))
+        check("落库缺口条数与 packet 一致",
+              len(gaps_in_db or []) == len(packet.contract_gaps))
+
+        # 缺口结构完整：每条要有 check / key / missing
+        if gaps_in_db:
+            first = gaps_in_db[0]
+            check("缺口含 check 编号", isinstance(first.get("check"), str) and first["check"].startswith("G"))
+            check("缺口含 missing 清单", isinstance(first.get("missing"), list))
+
+        # 契约层坏掉不能把派单带崩：脏输入下 dispatch 仍要跑通
+        cid2 = store.create("测试脏输入", "", agent_id=str(agents[0]["id"]))["id"]
+        try:
+            updated2, packet2 = dispatcher.dispatch(cid2)
+            check("脏输入时 dispatch 不抛异常", updated2["status"] == "briefing")
+            check("脏输入时 contract_gaps 仍是 tuple", isinstance(packet2.contract_gaps, tuple))
+        except Exception as exc:
+            check(f"脏输入时 dispatch 不抛异常（实际抛了 {type(exc).__name__}）", False)
+    finally:
+        db.close()
+
+
 def main() -> int:
     for test in (
         test_sanitize,
@@ -327,6 +519,10 @@ def main() -> int:
         test_proactivity_gate,
         test_empty_reply_guard,
         test_circadian_and_mood_reach_the_prompt,
+        test_internal_proxy_requires_token,
+        test_cancel_records_reason,
+        test_contract_layer_wired_into_dispatch,
+        test_contract_gaps_reach_the_packet_end_to_end,
     ):
         test()
     print(f"\n=== {passed} passed, {len(failed)} failed ===")

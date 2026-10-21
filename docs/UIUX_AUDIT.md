@@ -653,12 +653,15 @@ npm run dev
 # 或 vite 在沙箱里 spawn EPERM 时：
 node node_modules/vite/bin/vite.js --config vite.harness.mjs
 
-# 几何/DOM 采集（round-01）
-ego-browser nodejs -e "await import('file:///C:/Users/18712/.dsh/bot/workspace/ego-scripts/round-01.mjs')"
-# 像素/截图采集（round-02、round-04）
-ego-browser nodejs -e "await import('file:///C:/Users/18712/.dsh/bot/workspace/ego-scripts/round-02.mjs')"
-ego-browser nodejs -e "await import('file:///C:/Users/18712/.dsh/bot/workspace/ego-scripts/round-04.mjs')"
+# 几何/DOM 采集（round-01）、像素/截图采集（round-02、round-04）
+# 这三个脚本未入库，在采集者本机 bot workspace；规格见 §17.6「采集脚本规格」。
+# 不要直接复制本机绝对路径——换机器会找不到文件。
 ```
+
+> **⚠️ 复现性说明（2026-10-22 自查）**：本节原先列的 `ego-browser ... import('file:///C:/Users/<user>/...')`
+> 三条命令**换一台机器跑不了**——脚本在采集者的 bot workspace，不在仓库里。
+> 这是本文件里唯一一类「看起来可复现、实际不可复现」的命令，写在这里提醒后来的读者：
+> **看到 `file:///C:/Users/` 开头的路径，一律视为本机专用，不是复现步骤。**
 
 **截图能跑通的前提（踩过的坑，务必保留）**：ego 窗口在用户桌面不可见时会被 Chromium 节流，rAF 掉到 1–12fps，`page.screenshot()` 报 `Cannot capture a screenshot while the window is minimized`。解法是在 `page.goto()` **之前**执行：
 
@@ -681,6 +684,77 @@ await page.cdp('Page.addScriptToEvaluateOnNewDocument', { source: RAF_SHIM });
 > **本组数据与 §8.1b / §8.1d 不可比。** 那批采于 16 色画面（`stone #3a3f3b` 或刚改 `#3e433f` 的阶段），本组采于**美术语言重建 + 24 色调色板**之后。中间隔了两轮大改：`ca0bca3`（世界美术重建，8 文件 +1193/−290）与 `d56d64b`（调色板 16→24，见 `docs/ADR_PALETTE_24.md`，用户 2026-10-21 已批准）。
 >
 > **旧章节数据一律标为历史，不删。** 删了就无法追溯当时为什么判它是好是坏。
+
+### 17.0 数据基准：这组数能用多久，取决于哪几个文件
+
+> **采集基准：HEAD `2076770`（2026-10-21 17:42:35）。**
+>
+> **这组数不是靠采集时间判有效性的，是靠「决定它的文件有没有变」。** 时间过去多久不重要，依赖有没有动才重要。
+
+决定这组像素统计的文件只有 7 个（渲染层 + 色值表）：
+
+| 文件 | `2076770` 之后是否改动 |
+|---|---|
+| `pixel-world/src/world/palette-data.ts` | **无** |
+| `pixel-world/src/render/terrain-edges.ts` | **无** |
+| `pixel-world/src/render/decor.ts` | **无** |
+| `pixel-world/src/render/tilemap.ts` | **无** |
+| `pixel-world/src/scenes/SandboxScene.ts` | **无** |
+| `pixel-world/src/render/villager.ts` | **无** |
+| `pixel-world/src/render/buildings.ts` | **无** |
+
+验证命令（任一文件出现输出即失效，须重测）：
+
+```powershell
+git diff --numstat 2076770..HEAD -- `
+  pixel-world/src/world/palette-data.ts `
+  pixel-world/src/render/terrain-edges.ts `
+  pixel-world/src/render/decor.ts `
+  pixel-world/src/render/tilemap.ts `
+  pixel-world/src/scenes/SandboxScene.ts `
+  pixel-world/src/render/villager.ts `
+  pixel-world/src/render/buildings.ts
+```
+
+**2026-10-21 23:33 在 master `5f4d8f5` 上复测确认（round-18）**：`2076770..5f4d8f5` 之间 pixel-world 只改了 3 个文件（`README.md`、`scripts/check-s5-d.mjs`、`scripts/s5-e2e-drive.mjs`），**全部是脚本与文档，一个像素都没变**。实测三项指标与 §17.1 逐位一致：
+
+| 指标 | `2076770`（round-17） | `5f4d8f5`（round-18） | 差 |
+|---|---:|---:|---|
+| IQR | 0 | **0** | 0 |
+| q1 / 中位 / q3 | 55.1 / 55.1 / 55.1 | **55.1 / 55.1 / 55.1** | 0 |
+| 众数带 48–63 | 58.43% | **58.53%** | +0.10pp（帧间噪声内） |
+| 单色最大占比（`#2d3b2e` grass） | 50.95% | **50.95%** | 0 |
+| 唯一色 | 82 | 81–83 | — |
+
+> **⚠️ 已知的失效条件**：外部 Agent（`.claude/worktrees/optimistic-clarke-71e4fd`，用户本人开）正在改 `decor.ts`（摆件画像：灯挂齿轮 / 树带书 / 旗带砚台）与 `faith.ts`。**一旦它的改动进 master，`decor.ts` 就变了，§17 的「单色最大占比」与「众数带」需要重测。**
+>
+> **`IQR = 0` 这条同样对摆件敏感，而且比另外两项更敏感。**（原稿此处写「不受摆件影响」，2026-10-22 实测推翻，见 §17.7。）
+>
+> 要让 q1/q3 离开 grass，**不需要动中位数**——只要 grass 段的两端被啃掉一点：
+>
+> | 事件 | 需要挤占 grass 的像素 | 换算成摆件（栅格化实测面积） | 之后 IQR |
+> |---|---:|---|---:|
+> | q1 先离开 grass（暗侧） | **500 px** | **3 棵树**（每棵暗部约 185 px） | 0.82 → 1.86 |
+> | q3 先离开 grass（亮侧） | **723 px** | 5 盏灯 / 12 棵树（亮部约 63 px/棵） | 0.43 |
+> | 中位数离开 grass | 39,123 px | 约 211 棵树 | — |
+>
+> **暗侧 500 px 是最紧的一条，只占画面 0.33pp。** 而帧间 grass 占比本身就有 0.15pp 波动（50.95 / 50.95 / 50.86），**临界余量只有噪声的 2 倍**。
+>
+> **⚠️ 这三个数是阈值，不是监控指标。** 两者的区别在于「能不能反向用」：
+>
+> | 用法 | 判据 | 可靠吗 |
+> |---|---|---|
+> | 证安全 | grass 像素 > 77,522 | **可靠**——两侧都还没到，一定是 IQR = 0 |
+> | 证危险 | grass 像素 ≤ 77,522 | **不可靠**——取决于被替换成什么明度 |
+>
+> 暗侧阈值 500 只在「新增像素全是暗色」时成立；若新增是亮色，q3 要 723 px 才动。**所以 77,522 是安全下界（单侧保证），不是精确阈值。**
+>
+> **还有一个更容易搞反的地方：摆件像素数 ≠ grass 减少量。** 摆件自己就含 grass 色——树冠内层（size=1，365 px 覆盖）里有 **116 px 是 grass**，另有 soil 60、moss 48、ink 99。所以：
+>
+> - 树画在**草地**上：grass 净变化 = 116 − 365 = **−249 px**
+> - 树画在**石地/广场**上：grass 净变化 = **+116 px**（净增）
+>
+> **方向都不确定**，不只比例不确定。用「摆件占比涨了 0.5%」推「grass 少了 0.5%」会同时错方向和错数量级。
 
 ### 17.1 实测数据
 
@@ -765,10 +839,111 @@ await page.cdp('Page.addScriptToEvaluateOnNewDocument', { source: RAF_SHIM });
 
 ```powershell
 # 1) 起 dev server
-cd D:\project\neurosama\tmp\wt-pixel-world\pixel-world
+cd pixel-world
 npm run dev
-# 2) 采 3 帧（脚本内含 normal→maximized 两步恢复窗口，按 7feda3f）
-ego-browser nodejs -e "await import('file:///C:/Users/18712/.dsh/bot/workspace/ego-scripts/round-17.mjs')"
+# 2) 采 3 帧
+#    采集脚本 round-17.mjs / round-18.mjs 未入库（在采集者本机 bot workspace），
+#    规格见下「采集脚本规格」，可据此重写；不要直接复制本机的绝对路径。
 ```
 
-产物：`pixel-world/eval/uiux-audit/round-17-2026-10-21T14-04-27-568Z.json`、`round-17-frame0-*.png`（gitignored）。
+产物：`pixel-world/eval/uiux-audit/round-17-*.json`、`round-17-frame0-*.png`（**gitignored，不在仓库里**，只有采集者本机有）。
+
+> **⚠️ 复现性说明（2026-10-22 自查）**：本节原先写的复现命令指向采集者本机的绝对路径
+> （`C:\Users\<user>\.dsh\bot\workspace\ego-scripts\round-17.mjs`），**换一台机器跑不了**。
+> 与 §17.0 的 `git diff` 验证命令不同——那条依赖仓库自带内容，任何人可跑；本节的采集脚本没有入库。
+>
+> **采集脚本规格**（重写时按这个来，与 `diag-iqr.mjs` 同一套前置条件）：
+>
+> | 项 | 值 |
+> |---|---|
+> | 前置 | 注入 rAF 替身（`MessageChannel` 驱动，门控 60fps），否则 rAF 降到 1.1fps、`toDataURL` 返回全黑 |
+> | 前置 | `Browser.setWindowBounds` 先 `normal` 再 `maximized`，否则截图报 "window is minimized"（按 `7feda3f`） |
+> | 页面 | `http://127.0.0.1:5188/?ledger=off` |
+> | 取样 | `document.querySelector('#app canvas').toDataURL('image/png')`，取 3 帧 |
+> | 解 PNG | `zlib.inflateSync` + 逐行反滤波（filter 0–4），支持 colorType 2/6 |
+> | 明度 | `0.2126R + 0.7152G + 0.0722B`（rec709，在 gamma 编码值上直接算，**不转线性**） |
+> | 分位 | 逐像素 `Float64Array(W*H)` → `sort()` → `sorted[floor((n-1)*p)]`（最近秩法） |
+
+### 17.7 方法论：如何判断一个统计量是否处于临界状态
+
+§17.0 解决的是「这组数**还能用多久**」（依赖文件没变就还能用）。这一节解决另一个问题：**这组数本身离「变成别的值」有多远。**
+
+两者要分开。§17.0 的判据是「输入有没有变」，这一节的判据是「输入变一点点，输出会不会跳」。
+
+#### 为什么要单独做这件事
+
+`IQR = 0` 这个数**同时**是两件事：
+
+- 它是一个**测量值**：当前画面 q1 = q2 = q3 = 55.085。
+- 它落在**分位数的边界上**：q3 恰好在 grass 段的最后 722 px 之内。
+
+只报第一件事，读者会以为「这个数很稳」。实际上它离翻倍只差 500 px。
+
+**临界状态不是误差，是结构。** 误差可以靠多次测量消掉，临界状态不行——它每次测量都会重现。
+
+#### 三步做法（可复用到任何分位数 / 分桶 / 排序统计量）
+
+**第一步：把统计量拆成「它落在哪个色段」。**
+
+分位数只回答「第 75% 个像素的 luma 是多少」，不回答「这个 luma 属于谁」。要把完整色表按 luma 排序，标出 q1/中位/q3 各自落在哪一行：
+
+```
+luma    hex      像素数    占比      累积区间            分位
+ 17.35  #14110d   1708   1.112%    0.000 ->   1.112   ink
+ 31.36  #1b211c  24516  15.961%    1.115 ->  17.076   soil
+ ...
+ 55.08  #2d3b2e  78022  50.796%   24.674 ->  75.470   <= q1 <= median <= q3  grass
+ ...
+```
+
+**看到三个分位落在同一行，才有资格说「IQR = 0」；看到它们分散在三行，才该报三行各自的 luma。**
+
+**第二步：算「往两边各还能挪多少像素」。**
+
+对每个分位点，算它到所在色段两端的距离：
+
+```
+q1 到 grass 段左端：38,399 - 37,900 =   499 px
+q3 到 grass 段右端：115,921 - 115,199 =  722 px
+```
+
+**这两个数就是临界余量。** 它们不是误差范围，是「再多这么多像素的另一种明度，这个分位就换色了」。
+
+**第三步：把像素数换算成画面元素，再换算成占比。**
+
+像素数本身没有直觉。要换算两次：
+
+- 换成**画面占比**：499 / 153,600 = 0.325pp
+- 换成**具体对象**：499 / 185（一棵树的暗部像素）≈ 2.7 棵
+
+**只有换算完，才能和「帧间噪声」「一次美术改动的规模」比较。** 0.325pp 对上 0.15pp 的帧间噪声，结论是「余量只有噪声的 2 倍」——这才是有用的话。
+
+#### 本案的三层结论（必须分开写）
+
+| 层次 | 问题 | 答案 | 稳定性 |
+|---|---|---|---|
+| **值** | IQR 现在是多少 | 0 | **极脆**：3 棵树（0.71% 画面）就变 1.86 |
+| **判据结论** | IQR < 8 判「一片同亮度」成立吗 | 成立 | **很稳**：要 13 棵树（3.09% 画面）才到 8 |
+| **方向性结论** | 成因是「grass 单色占半屏」吗 | 是 | **极稳**：grass 占 50.80%，不靠临界 |
+
+**这三层不能混成一句「IQR = 0 说明一片同亮度」。** 值极脆、判据结论很稳、方向性结论极稳——写文档时必须让读者看出他引用的到底是哪一层。
+
+**最容易犯的错是把「值」的脆弱性说成「结论」的脆弱性**（或反过来）：说「IQR=0 不可信」是错的（判据结论很稳），说「IQR=0 很稳」也是错的（值本身极脆）。
+
+#### 一条通用判据
+
+> **任何分位数 / 分桶 / 排序统计量，报数时必须同时报「它落在哪个段」和「离段边界多远」。**
+>
+> 只报值不报位置，读者无法判断这个值是真分布还是边界效应。
+
+反例（本节记录的原始错误）：只报 `IQR = 0`，并附一句「不受摆件影响」——**位置没查，敏感性就断言反了。**
+
+#### 复现
+
+**复现方式**：`diag-iqr.mjs` **未入库**（在采集者本机 bot workspace），换机器跑不了——规格见 §17.6「采集脚本规格」。它比 §17.6 多做的只有一件事：**输出全部色（不是 top-N）并按 luma 升序标出 q1/中位/q3 落在哪一行**，这是本节三步做法的第一步。
+
+产物 `pixel-world/eval/uiux-audit/diag-iqr-*.json` 含 `colors[]`（全部色 + count + luma）与 `q{p25,p50,p75}`。**该目录被 `pixel-world/.gitignore` 忽略，不在仓库里**——所以「可离线复算」这句只对持有该文件的人成立。要在没有该文件时复算，必须重跑采集。
+
+**不依赖任何本机文件的部分**：§17.7 的三层结论表、§17.0 的失效验证命令，都可以只用仓库内容和本节的实测数字复核，不需要 `diag-iqr.mjs`。
+
+**注意浮点比较**：grass 的 luma 精确值是 `55.084999999999994`，不是 `55.085`。用字面量 `55.085` 做 `<` 比较会把「等于」判成「小于」，阈值算出来差一个数量级。**比较分位值必须用容差（`Math.abs(a - b) < 1e-9`），不能用字面量相等。**
