@@ -33,6 +33,10 @@
 2. `.agents/skills/pstack/poteto-mode/SKILL.md`（正文）
 3. 命中的 playbook 与 principle 叶子文件，按路径直读（它们不在 skill 目录里列名）
 
+**路径必须是绝对路径 `D:\project\neurosama\.agents\...`。** `.agents/` 在
+`.gitignore:55`，不会进 worktree；在 `tmp/wt-*` 里用相对路径会指向不存在的目录。
+worktree 里的 `AGENTS.md` 也可能落后（取决于它检出的提交），规矩以仓库根这份为准。
+
 **自主性档位：A（全开）**。原文「Just do it」「Never Block on the Human」生效：
 可逆工作、团队消息、工单更新、跑评测，不问直接做，做完报告。
 
@@ -40,8 +44,22 @@
 **项目叠加的额外红线**（比 poteto 更严，项目优先）：改 `server/assistant/executive.py`、加调色板颜色（须 ADR）、
 重启用户正在用的 8000/8010。这三条即使可逆也要先问。
 
-**已知残缺**（DSH.md 已认）：无 per-subagent 模型选择、无 Graphite、无 Bugbot、无 `gh stack`。
-pstack 里依赖这些的步骤标 `skip: <reason>`，不要静默跳过，也不要为了跑通而去装。
+**已知残缺**（DSH.md 已认 + 实测补充）：
+
+- 无 per-subagent 模型选择（不要指定 grok / claude 模型）
+- 无 Graphite、Bugbot、`gh stack`
+- **无 `deslop` / `create-skill` / `control-cli` / `control-ui` 四个 skill**
+  （poteto 要求 commit 前跑 deslop、agent 文案跟 create-skill，这两步只能标
+  `skip: skill not installed in DSH`）
+- **`bun` 未安装**：`orchestrate` 与 `autopilot-full` 跑不了（它们要 `bun test`/`bun install`）。
+  `multi-phase-plan` 不受影响（`check-plan.mjs` 走 node）。
+- `claude-code.md` 不存在，被 22 个文件引用；DSH.md 整体替代它，不阻塞。
+
+依赖这些的步骤标 `skip: <reason>`，不要静默跳过，也不要为了跑通而去装。
+
+**停下优先级冲突**：`docs/AGENT_PLAYBOOK.md` §「开工前协议红线确认」要求新增字段时
+输出 `[PROTOCOL_REQUEST]` 并停工等 Role 0。这是规范的一部分，**poteto 的
+「Never Block on the Human」在此不生效**。同理 PROTOCOL.md 的不得自造 WS 事件/字段、以及上面三条项目红线，都照旧拦。
 
 **与项目既有规矩的关系**：poteto 只管「怎么做」；本文件上面的验证命令、设计约束、协议红线不因它放宽。
 冲突时以本文件其余部分为准。
