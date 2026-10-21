@@ -26,6 +26,7 @@ from typing import Any
 from .lint import lint_acceptance
 from .model import (
     ContractShapeError, Criterion, InputRef, SideEffect, Slot, TaskContract, parse_contract,
+    slot_to_mapping,
 )
 from .risk import compute_risk
 
@@ -446,32 +447,11 @@ def freeze(draft: Draft) -> TaskContract:
 
 
 def _draft_payload(draft: Draft) -> dict[str, Any]:
-    def slot(item: Slot | None) -> dict[str, Any] | None:
-        if item is None:
-            return None
-        value = item.value
-        if hasattr(value, "type") and hasattr(value, "uri"):  # InputRef
-            value = {"type": value.type, "uri": value.uri,
-                     **({"resolved_by": value.resolved_by} if value.resolved_by else {}),
-                     **({"exists": value.exists} if value.exists is not None else {})}
-        elif hasattr(value, "kind"):  # ArtifactSpec
-            value = {"kind": value.kind,
-                     **({"format": value.format} if value.format else {}),
-                     **({"location": value.location} if value.location else {})}
-        source = {"kind": item.source.kind}
-        if item.source.turn_id:
-            source["turn_id"] = item.source.turn_id
-        if item.source.memory_id:
-            source["memory_id"] = item.source.memory_id
-        if item.source.confidence is not None:
-            source["confidence"] = item.source.confidence
-        if item.source.reason:
-            source["reason"] = item.source.reason
-        out: dict[str, Any] = {"value": value, "source": source,
-                               "confirmed": item.confirmed}
-        if item.highlight:
-            out["highlight"] = True
-        return out
+    # 槽位序列化用 model.slot_to_mapping，不要在这里再写一份内联副本。
+    # 曾经就是「两处各写一遍」导致 model.to_mapping 漂移：它漏了 InputRef/
+    # ArtifactSpec 的嵌套类型转换，json.dumps 直接抛 TypeError。
+    # 抽成共用函数后如果这里又抄一份，同一个 bug 会以同样方式再出现一次。
+    slot = slot_to_mapping
 
     def criterion(item: Criterion) -> dict[str, Any]:
         check = item.check
