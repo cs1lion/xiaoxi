@@ -25,5 +25,26 @@
 ## 非目标
 - 不追求在级联管线下压进 500ms 首字延迟
 
+## 全局默认：poteto-mode（A 档 · 自主性全开）
+
+所有 Bot 默认按 poteto-mode 工作。开工前按序读：
+
+1. `.agents/skills/pstack/DSH.md`（工具名映射，它覆盖一切写错的工具名）
+2. `.agents/skills/pstack/poteto-mode/SKILL.md`（正文）
+3. 命中的 playbook 与 principle 叶子文件，按路径直读（它们不在 skill 目录里列名）
+
+**自主性档位：A（全开）**。原文「Just do it」「Never Block on the Human」生效：
+可逆工作、团队消息、工单更新、跑评测，不问直接做，做完报告。
+
+**仍然要停下的**（不可逆，原文 Always-pause 列表）：强推共享分支、部署、删数据、给客户发消息。
+**项目叠加的额外红线**（比 poteto 更严，项目优先）：改 `server/assistant/executive.py`、加调色板颜色（须 ADR）、
+重启用户正在用的 8000/8010。这三条即使可逆也要先问。
+
+**已知残缺**（DSH.md 已认）：无 per-subagent 模型选择、无 Graphite、无 Bugbot、无 `gh stack`。
+pstack 里依赖这些的步骤标 `skip: <reason>`，不要静默跳过，也不要为了跑通而去装。
+
+**与项目既有规矩的关系**：poteto 只管「怎么做」；本文件上面的验证命令、设计约束、协议红线不因它放宽。
+冲突时以本文件其余部分为准。
+
 ## 修改本文件
 仅 Role 0 可改。保持在一页内，细节放进 docs/ 并从这里指过去。
