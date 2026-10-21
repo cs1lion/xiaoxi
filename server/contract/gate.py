@@ -38,6 +38,12 @@ GATE_READY = "ready"
 GATE_NEEDS_CLARIFICATION = "needs_clarification"
 GATE_REJECTED = "rejected"
 
+# §2.2 的 rejected 三个理由。
+REJECT_UNVERIFIABLE = "unverifiable_criteria"
+REJECT_UNSAFE = "unsafe"
+REJECT_OUT_OF_SCOPE = "out_of_scope"
+REJECT_REASONS = (REJECT_UNVERIFIABLE, REJECT_UNSAFE, REJECT_OUT_OF_SCOPE)
+
 # §3.3 追问排序：「按影响排序：副作用槽位 > 输入源 > 交付物 > 验收标准 > 其他」
 GAP_PRIORITY = (
     "side_effect",      # 副作用槽位
@@ -320,6 +326,12 @@ class GateOutcome:
     gap: Gap | None = None
     gaps: tuple[Gap, ...] = ()
     rounds_used: int = 0
+    # §2.2：rejected 要带 reason，取值限定三个。
+    #   unverifiable_criteria —— 没法生成可验的标准（目标/交付物/验收标准这类
+    #                            内容不能替用户猜，是本包里唯一的拒绝理由）
+    #   unsafe                —— 风险过高（§3.4 只给等级，没有"拒绝阈值"，所以暂无来源）
+    #   out_of_scope          —— 超出范围（§7 权限缺失，判不了，所以暂无来源）
+    reason: str = ""
     # 专指 §3.3「追问超限 → 不得走倒计时自动开工」这一条。
     # §3.4 按风险的确认策略是另一回事，由 risk.confirmation_policy() 给出，
     # 两者不要混用同一个字段名。
@@ -369,14 +381,16 @@ def evaluate(draft: Draft, *, round_index: int = 0, policy: Any = None) -> GateO
         # AttributeError 而不是 ContractShapeError，绕过这里。
         return GateOutcome(
             status=GATE_REJECTED, gaps=tuple(gaps) + tuple(remaining),
-            rounds_used=round_index, high_lighted_slots=highlighted_slots(filled, active),
+            rounds_used=round_index, reason=REJECT_UNVERIFIABLE,
+            high_lighted_slots=highlighted_slots(filled, active),
         )
     try:
         contract = freeze(filled)
     except ContractShapeError:
         return GateOutcome(
             status=GATE_REJECTED, gaps=tuple(gaps),
-            rounds_used=round_index, high_lighted_slots=marked,
+            rounds_used=round_index, reason=REJECT_UNVERIFIABLE,
+            high_lighted_slots=marked,
         )
     return GateOutcome(
         status=GATE_READY, contract=contract, gaps=tuple(gaps),

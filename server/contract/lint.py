@@ -47,10 +47,20 @@ _TRAVERSAL = re.compile(r'(?:^|[\\/])\.\.(?:[\\/]|$)')
 
 # L2：明显越界的命令。不是完备黑名单——真正的命令白名单属于 §7 权限，冻结。
 # 这里只拦「一看就知道不该出现在验收标准里」的那几类。
+#
+# 用「空白或行首」做边界而不是 \b：实测 `pytest test-reboot.py` 里
+# "test-reboot" 的 reboot 前面是连字符，\b 会命中造成误报。
 _DESTRUCTIVE_CMD = re.compile(
-    r'\brm\s+-[a-zA-Z]*[rf]|\bdel\s+/[sq]|\brmdir\s+/s|\bformat\s+[a-zA-Z]:'
-    r'|\bmkfs\b|\bdd\s+if=|\bshutdown\b|\breboot\b|\bcurl\b.*\|\s*(?:sh|bash)'
-    r'|:()\s*\{|\bchmod\s+-R\s+777\s+/', re.I)
+    r'(?:^|\s)rm\s+-[a-zA-Z]*[rf]'
+    r'|(?:^|\s)del\s+/[sq]'
+    r'|(?:^|\s)rmdir\s+/s'
+    r'|(?:^|\s)format\s+[a-zA-Z]:'
+    r'|(?:^|\s)mkfs(?:\.|\s|$)'
+    r'|(?:^|\s)dd\s+if='
+    r'|(?:^|\s)(?:shutdown|reboot|halt|poweroff)(?:\.exe)?(?:\s|$)'
+    r'|\bcurl\b[^|]*\|\s*(?:sh|bash)'
+    r'|:\(\)\s*\{'
+    r'|(?:^|\s)chmod\s+-R\s+777\s+/', re.I)
 
 # L5：不得引用 Worker 自述。
 SELF_REPORT_MARKERS = (
@@ -229,7 +239,8 @@ def _check_l3(criterion: Criterion, problems: list[LintProblem]) -> None:
                 "L3", label, f"rubric[{index}] 过短，不是可判真假的陈述: {text!r}"))
             continue
         # 整句就是空话才拒；句子里有其它内容（尤其是带数字/引用/核对对象）就放行。
-        bare = text.strip("。．.！!？? 　")
+        # 去空白再比：`内容 准确` 与 `内容准确` 是同一句空话（实测漏网过）。
+        bare = re.sub(r"\s+", "", text.strip("。．.！!？? 　"))
         if bare in VAGUE_CLAIMS:
             problems.append(LintProblem(
                 "L3", label,

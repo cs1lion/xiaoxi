@@ -528,6 +528,48 @@ class Criterion:
 # ---------- §3.1 TaskContract ----------
 
 
+def slot_to_mapping(item: "Slot | None") -> dict[str, Any] | None:
+    """把槽位回写成规范形状的 dict。
+
+    **这里必须把嵌套值序列化**：InputRef 与 ArtifactSpec 是 dataclass，
+    直接塞进 dict 会让 json.dumps 报 "Object of type ArtifactSpec is not
+    JSON serializable"，也会让 parse_contract(to_mapping()) 失败。
+    早期 TaskContract.to_mapping 就漏了这一步（只有标量槽位能过），
+    而 gate._draft_payload 是对的——两处各写一遍才出的这个 bug。
+    现在两处共用本函数。
+    """
+    if item is None:
+        return None
+    value = item.value
+    if isinstance(value, InputRef):
+        payload: dict[str, Any] = {"type": value.type, "uri": value.uri}
+        if value.resolved_by:
+            payload["resolved_by"] = value.resolved_by
+        if value.exists is not None:
+            payload["exists"] = value.exists
+        value = payload
+    elif isinstance(value, ArtifactSpec):
+        payload = {"kind": value.kind}
+        if value.format:
+            payload["format"] = value.format
+        if value.location:
+            payload["location"] = value.location
+        value = payload
+    source = {"kind": item.source.kind}
+    if item.source.turn_id:
+        source["turn_id"] = item.source.turn_id
+    if item.source.memory_id:
+        source["memory_id"] = item.source.memory_id
+    if item.source.confidence is not None:
+        source["confidence"] = item.source.confidence
+    if item.source.reason:
+        source["reason"] = item.source.reason
+    out: dict[str, Any] = {"value": value, "source": source,
+                           "confirmed": item.confirmed}
+    if item.highlight:
+        out["highlight"] = True
+    return out
+
 @dataclass(frozen=True)
 class TaskContract:
     """冻结后的结构化任务单。
@@ -551,24 +593,12 @@ class TaskContract:
     deliver_to: Slot | None = None
 
     def to_mapping(self) -> dict[str, Any]:
-        """回写成规范形状的 dict，便于测试断言与日志。"""
-        def slot(item: Slot | None) -> dict[str, Any] | None:
-            if item is None:
-                return None
-            source = {"kind": item.source.kind}
-            if item.source.turn_id:
-                source["turn_id"] = item.source.turn_id
-            if item.source.memory_id:
-                source["memory_id"] = item.source.memory_id
-            if item.source.confidence is not None:
-                source["confidence"] = item.source.confidence
-            if item.source.reason:
-                source["reason"] = item.source.reason
-            out: dict[str, Any] = {"value": item.value, "source": source,
-                                   "confirmed": item.confirmed}
-            if item.highlight:
-                out["highlight"] = True
-            return out
+        """回写成规范形状的 dict，可被 parse_contract 再读回去。
+
+        嵌套的 InputRef / ArtifactSpec 会被序列化成 §3.1 的对象形状
+        （由 slot_to_mapping 负责），所以 round-trip 成立。
+        """
+        slot = slot_to_mapping
 
         return {
             "contract_id": self.contract_id,
