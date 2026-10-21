@@ -200,8 +200,14 @@ def dynamic_prompt(
     circadian: str = "",
     mood: str = "",
     pushback: str = "",
+    intent_guard: str = "",
 ) -> str:
-    """Per-turn content. Always last, never in the cached prefix."""
+    """Per-turn content. Always last, never in the cached prefix.
+
+    `intent_guard` is the fast-loop suspicion constraint (see
+    dialogue.intent_guard). It goes last and is empty by default, so callers
+    that do not pass it get byte-identical output to before.
+    """
     sections: list[str] = []
     if circadian:
         sections.append(circadian)
@@ -234,6 +240,8 @@ def dynamic_prompt(
         sections.append(proactivity)
     if emotion_instruction:
         sections.append(emotion_instruction)
+    if intent_guard:
+        sections.append(intent_guard)
     return "\n\n".join(s.strip() for s in sections if s.strip())
 
 
