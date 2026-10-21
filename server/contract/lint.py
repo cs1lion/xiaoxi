@@ -157,7 +157,8 @@ def _path_in_contract_scope(path: str) -> str:
     return ""
 
 
-def _check_l2(criterion: Criterion, problems: list[LintProblem]) -> None:
+def _check_l2(criterion: Criterion, problems: list[LintProblem],
+              allowed_commands: tuple[str, ...] = ()) -> None:
     if criterion.kind != "deterministic":
         return
     check = criterion.check
@@ -193,6 +194,13 @@ def _check_l2(criterion: Criterion, problems: list[LintProblem]) -> None:
         elif _DESTRUCTIVE_CMD.search(check.cmd):
             problems.append(LintProblem(
                 "L2", label, f"命令有破坏性，不应出现在验收标准里：{check.cmd[:60]!r}"))
+        elif allowed_commands and not _cmd_allowed(check.cmd, allowed_commands):
+            # 白名单非空时为硬闸：不在名单里的命令一律不进契约。
+            # 与黑名单并存——黑名单管「这条命令本身危险」，
+            # 白名单管「这条命令不在允许跑的范围内」。
+            problems.append(LintProblem(
+                "L2", label,
+                f"命令不在白名单内，不能作为验收标准：{check.cmd[:60]!r}"))
         if not check.cwd:
             problems.append(LintProblem("L2", label, "exit_code_zero 缺 cwd"))
         else:
@@ -289,17 +297,64 @@ def _check_l7(criteria: tuple[Criterion, ...], problems: list[LintProblem]) -> N
             f"semantic {semantic} 条 > deterministic {deterministic} 条的两倍"))
 
 
-def lint_acceptance(criteria: tuple[Criterion, ...] | list[Criterion]) -> LintResult:
+def _cmd_allowed(cmd: str, allowed: tuple[str, ...]) -> bool:
+    """命令是否在白名单里。
+
+    `allowed` 里的条目两种形态：
+      - 单个可执行体（pytest / node）：比较 cmd 的第一个词
+      - 带空格的 glob（node scripts/*.mjs）：整条命令按 fnmatch 比
+
+    只做「能不能跑」的判断，不解析参数——参数里的危险词归黑名单管
+    （黑名单保留作第二道，见 _DESTRUCTIVE_CMD）。
+    """
+    import fnmatch
+    import shlex
+
+    text = (cmd or "").strip()
+    if not text:
+        return False
+    try:
+        parts = shlex.split(text, posix=False)
+    except ValueError:
+        parts = text.split()
+    head = parts[0].strip(chr(34) + chr(39)) if parts else ""
+    for entry in allowed:
+        pattern = str(entry or "").strip()
+        if not pattern:
+            continue
+        if " " in pattern:
+            if fnmatch.fnmatch(text, pattern):
+                return True
+            continue
+        base = head.replace(chr(92), "/").rsplit("/", 1)[-1]
+        if head != pattern and base != pattern:
+            continue
+        # 单 token 条目只允许「命令就是一个词」或「参数以 - 开头」。
+        # 踩过的坑：配置里写了裸 node，于是 node evil.js 也通过白名单——
+        # 因为只比了第一个词。解释器类命令必须写成带 glob 的形式。
+        rest = text[len(head):].strip()
+        if not rest or rest.startswith("-"):
+            return True
+    return False
+
+
+def lint_acceptance(criteria: tuple[Criterion, ...] | list[Criterion],
+                    allowed_commands: tuple[str, ...] = ()) -> LintResult:
     """对验收标准跑 L1–L7。
 
     注意 L4/L6/L7 是**契约级**规则（看整组），L1/L2/L3/L5 是**标准级**规则。
     单条标准能过前四关，整组仍可能因为 L4/L6/L7 不合格。
+
+    `allowed_commands`（§3.8 R1）：命令白名单。空 tuple = 不启用（保持旧行为，
+    只靠 _DESTRUCTIVE_CMD 黑名单兜底）。非空时 exit_code_zero 的 cmd 必须在
+    白名单内，否则 L2 报错。为什么需要：黑名单永远漏，
+    python -c "import shutil; shutil.rmtree(...)" 不含任何危险词。
     """
     items = tuple(criteria)
     problems: list[LintProblem] = []
     for criterion in items:
         _check_l1(criterion, problems)
-        _check_l2(criterion, problems)
+        _check_l2(criterion, problems, allowed_commands)
         _check_l3(criterion, problems)
         _check_l5(criterion, problems)
     _check_l4(items, problems)

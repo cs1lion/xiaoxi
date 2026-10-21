@@ -1034,6 +1034,52 @@ def test_j_parse_contract():
           all(isinstance(item["value"], dict) for item in round_tripped["inputs"]))
 
 
+def test_k_r1_command_whitelist():
+    """§3.8 R1：命令白名单。
+
+    背景：原先 L2 只有黑名单（rm -rf / format / dd if= ...），而黑名单永远漏——
+    python -c "import shutil; shutil.rmtree(...)" 不含任何危险词，却能删库。
+    白名单决定「能不能跑」，黑名单再兜一层「跑也不能这样跑」，两道并存。
+    """
+    print("[K] §3.8 R1 命令白名单")
+
+    def mk(cmd: str) -> Criterion:
+        return Criterion(
+            id="c1", text="跑测试", kind="deterministic", required=True,
+            check=CheckSpec(type="exit_code_zero", cmd=cmd, cwd=".", timeout_s=60),
+        )
+
+    allow = ("pytest", "node", "node scripts/*.mjs")
+
+    r = lint_acceptance([mk("任意命令 --x")])
+    blocked = [p for p in r.problems if p.rule == "L2" and "白名单" in p.message]
+    check("空白名单不拦（旧行为不变）", not blocked)
+
+    for cmd in ("pytest -q", "node", "node scripts/smoke.mjs"):
+        r = lint_acceptance([mk(cmd)], allowed_commands=allow)
+        hit = [p for p in r.problems if p.rule == "L2" and "白名单" in p.message]
+        check(f"白名单内放行：{cmd}", not hit)
+
+    for cmd in (
+        "python -c \"import shutil; shutil.rmtree(1)\"",
+        "node evil.js",
+        "bash -c whatever",
+    ):
+        r = lint_acceptance([mk(cmd)], allowed_commands=allow)
+        hit = [p for p in r.problems if p.rule == "L2" and "白名单" in p.message]
+        check(f"白名单外拦住：{cmd[:38]}", bool(hit))
+
+    r = lint_acceptance([mk("rm -rf /")], allowed_commands=allow)
+    destructive = [p for p in r.problems if p.rule == "L2" and "破坏性" in p.message]
+    check("黑名单仍生效（两道并存）", bool(destructive))
+
+    import yaml
+    cfg = yaml.safe_load((ROOT / "config" / "contract.yaml").read_text(encoding="utf-8"))
+    allowed = (cfg.get("lint") or {}).get("allowed_commands") or []
+    check("contract.yaml 里有 allowed_commands", isinstance(allowed, list) and len(allowed) > 0)
+    check("pytest 在默认白名单里", "pytest" in allowed)
+
+
 def main() -> int:
     test_a_gates()
     test_b_clarification()
@@ -1045,6 +1091,7 @@ def main() -> int:
     test_h_spec_example()
     test_i_boundaries()
     test_j_parse_contract()
+    test_k_r1_command_whitelist()
 
     print()
     print("=" * 72)

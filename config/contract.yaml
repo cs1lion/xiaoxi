@@ -23,6 +23,34 @@ goal:
 lint:
   max_required_criteria: 8
   semantic_to_deterministic_ratio: 2.0
+  # R1（§3.8）：命令白名单。
+  #
+  # 原先 L2 只有黑名单（rm -rf / format / dd if= ...），而黑名单永远漏：
+  #   python -c "import shutil; shutil.rmtree('/')"
+  # 不含任何危险词，却能删库。改成白名单 + 黑名单双道：
+  #   白名单决定「能不能跑」，黑名单再兜一层「跑也不能这样跑」。
+  #
+  # 空列表 = 不启用白名单检查（保持旧行为，靠黑名单兜底）。
+  # 填了之后，exit_code_zero 的 cmd 第一个词必须在白名单里（或匹配某个 glob），
+  # 否则 L2 报错。只比较可执行体，不看参数里出现的危险词。
+  # 只列「可执行体 + 允许的参数形态」，不要单写裸解释器。
+  #
+  # 教训：一开始写了裸 node，结果 node evil.js 也算白名单内——
+  # 单 token 条目只比第一个词，等于放行该解释器的任意脚本。
+  # 所以 node/npm/python 一律带 glob，把能跑的范围钉死。
+  allowed_commands:
+    - pytest
+    - ruff
+    - mypy
+    - tsc
+    - "node scripts/*.mjs"
+    - "node --test*"
+    - "npm run test"
+    - "npm run test:*"
+    - "python scripts/*.py"
+    - "python -m pytest*"
+    - "python3 scripts/*.py"
+    - "py scripts/*.py"
 
 # 预算默认值（§3.1 Budget；规范说这些都是配置项）
 budget:
