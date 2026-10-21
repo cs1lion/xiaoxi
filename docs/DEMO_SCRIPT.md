@@ -161,7 +161,7 @@
 - [ ] 以 `LEDGER=1 node scripts/smoke.mjs` 跑台账模式全绿（21/21）。
 - [ ] `python scripts/check_protocol.py` PASS。
 - [ ] `python scripts/test_core.py` 64/0。
-- [ ] `npm test` 全绿（180/180）。
+- [ ] `npm test` 全绿（221/221，2026-10-21 复跑）。
 - [ ] `npm run test:inprocess` 全绿（受限环境替代，覆盖核心逻辑与门禁）。
 
 > 注：smoke 需真实浏览器（Playwright / Chromium）；`test:inprocess` 在无浏览器或沙箱受限环境下作为替代。
@@ -332,7 +332,7 @@
 
 以下数字均已标注来源命令或文档路径，不手填估算：
 
-- **180/180**：`npm run test:inprocess` 测试总数（`docs/DEMO_SCRIPT.md` 技术验收清单）。
+- **221/221**：`npm run test:inprocess` 测试总数（`docs/DEMO_SCRIPT.md` 技术验收清单；2026-10-21 复跑；本节数字随测试增长而变，以实跑为准）。
 - **24/8/1/31**：调色板审计结果（世界 24 色 / UI 8 色 / 共享 1 色 / 并集 31 色）。世界层 2026-10-21 从 16 扩到 24 色，用户批准。来源 `docs/ADR_PALETTE_24.md`、`docs/ART_PALETTE_AUDIT.md`，复跑 `node scripts/audit-palette.mjs --strict`（exit 0）。
 - **114/114**：smoke 沙盒模式断言总数，来源 `scripts/smoke.mjs` 与 `docs/RUNTIME_VERIFICATION.md`。
 - **21/21**：smoke 台账模式断言总数，来源 `scripts/smoke.mjs`。
