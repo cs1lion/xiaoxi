@@ -1,0 +1,170 @@
+#!/usr/bin/env node
+/**
+ * S5 D 腿（完成/交付）验收检查器。
+ *
+ * 它只读 e2e 证据 JSON，不跑模型、不连服务；真正的 live 复跑需要 LLM_API_KEY 和隔离网关。
+ * 目的是把“D 到底算不算过”从口头判断变成可复跑的 pass/fail，避免把 blocked 当交付。
+ *
+ * 证据形状来自 pixel-world/eval/screens/s5-e2e-drive-r10.mjs：
+ *   { terminal, approved, timeline, verdict }
+ * 其中 terminal.audit.usage 必须是 c9ef30a 之后的 per-call / total 双字段。
+ */
+
+import { readFileSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
+import process from 'node:process';
+
+export const PER_CALL_LIMIT = 120_000;
+export const TOTAL_LIMIT = 400_000;
+
+function asArray(value) {
+  return Array.isArray(value) ? value : [];
+}
+
+/**
+ * @param {any} evidence
+ * @returns {{name: string, ok: boolean, detail: string}[]}
+ */
+export function checkEvidence(evidence) {
+  const checks = [];
+  const add = (name, ok, detail = '') => checks.push({ name, ok, detail });
+  const terminal = evidence?.terminal ?? {};
+  const verdict = evidence?.verdict ?? {};
+  const approved = evidence?.approved ?? verdict.approved ?? null;
+  const world = verdict.worldFinal ?? evidence?.worldFinal ?? {};
+  const usage = terminal.audit?.usage ?? verdict.auditUsage ?? {};
+  const findings = asArray(terminal.audit?.findings);
+  const timeline = asArray(evidence?.timeline);
+
+  const commissionId = String(verdict.commissionId ?? terminal.id ?? '');
+  add('有 commission_id', commissionId.length > 0, commissionId || '(empty)');
+
+  const finalStatus = String(approved?.status ?? verdict.terminalStatus ?? terminal.status ?? '');
+  add(
+    '终态为 done / ready_to_report',
+    finalStatus === 'done' || finalStatus === 'ready_to_report',
+    finalStatus || '(empty)',
+  );
+  if (finalStatus === 'ready_to_report') {
+    add(
+      'ready_to_report 后老板已批准',
+      String(approved?.status ?? '') === 'done',
+      String(approved?.status ?? '(missing)'),
+    );
+  }
+
+  add(
+    '世界侧 ledger 交付 ≥ 1',
+    Number(world.ledgerDeliveries ?? 0) >= 1,
+    `ledgerDeliveries=${world.ledgerDeliveries ?? '(missing)'}`,
+  );
+
+  const modes = [
+    ...asArray(world.modes),
+    ...timeline.flatMap((entry) => asArray(entry?.modes)),
+  ].map(String);
+  const sawDeliveryMotion = modes.some(
+    (mode) => mode.includes(':delivering') || mode.includes(':toAltar'),
+  );
+  add(
+    '世界出现 delivering / toAltar',
+    sawDeliveryMotion,
+    sawDeliveryMotion ? 'seen in timeline' : 'not seen',
+  );
+
+  const calls = Number(usage.calls ?? 0);
+  const perCall = Number(
+    usage.max_prompt_tokens_per_call ?? (calls === 1 ? usage.prompt_tokens : NaN),
+  );
+  add(
+    `单次调用 prompt ≤ ${PER_CALL_LIMIT}`,
+    Number.isFinite(perCall) && perCall > 0 && perCall <= PER_CALL_LIMIT,
+    Number.isFinite(perCall) ? `max_prompt_tokens_per_call=${perCall}` : 'missing per-call usage',
+  );
+
+  const bloat = findings.some((finding) => finding?.rule_id === 'prompt_token_bloat');
+  add(
+    '无 prompt_token_bloat 打回',
+    !bloat,
+    bloat ? 'audit still returned prompt_token_bloat' : 'no token-bloat finding',
+  );
+
+  const total = Number(usage.prompt_tokens ?? 0);
+  if (Number.isFinite(total) && total > TOTAL_LIMIT) {
+    checks.push({
+      name: '整单成本告警（不阻断交付）',
+      ok: true,
+      detail: `prompt_tokens=${total} > ${TOTAL_LIMIT}`,
+    });
+  }
+
+  return checks;
+}
+
+function report(checks) {
+  let failed = 0;
+  for (const check of checks) {
+    console.log(`  ${check.ok ? 'ok  ' : 'FAIL'} ${check.name}${check.detail ? `  (${check.detail})` : ''}`);
+    if (!check.ok) failed += 1;
+  }
+  console.log(`\n=== ${checks.length - failed}/${checks.length} passed, ${failed} failed ===`);
+  return failed === 0;
+}
+
+function selfTest() {
+  const good = {
+    terminal: {
+      id: 'c_good',
+      status: 'done',
+      audit: {
+        usage: { calls: 1, prompt_tokens: 110_000, max_prompt_tokens_per_call: 110_000 },
+        findings: [],
+      },
+    },
+    approved: { status: 'done' },
+    timeline: [{ modes: ['v0:working', 'v0:delivering'] }],
+    verdict: { commissionId: 'c_good', terminalStatus: 'done', worldFinal: { ledgerDeliveries: 1, modes: ['v0:toAltar'] } },
+  };
+  const bad = {
+    terminal: {
+      id: 'c_bad',
+      status: 'blocked',
+      blocked_question: 'Prompt Tokens 421413 超出上限 120000',
+      audit: {
+        usage: { calls: 3, prompt_tokens: 1_017_073, max_prompt_tokens_per_call: 421_413 },
+        findings: [{ rule_id: 'prompt_token_bloat', severity: 'major' }],
+      },
+    },
+    approved: null,
+    timeline: [{ modes: ['v0:working'] }],
+    verdict: { commissionId: 'c_bad', terminalStatus: 'blocked', worldFinal: { ledgerDeliveries: 0, modes: ['v0:working'] } },
+  };
+  console.log('self-test good evidence:');
+  const goodPass = report(checkEvidence(good));
+  console.log('\nself-test blocked evidence (must fail):');
+  const badChecks = checkEvidence(bad);
+  const badPass = report(badChecks);
+  const badHasFailure = badChecks.some((check) => !check.ok);
+  if (!goodPass || badPass || !badHasFailure) {
+    console.error('\nself-test failed: checker does not separate good and blocked evidence');
+    process.exit(1);
+  }
+  console.log('\nself-test passed');
+}
+
+const arg = process.argv[2];
+if (arg === '--self-test') {
+  selfTest();
+} else {
+  const file = arg ?? fileURLToPath(new URL('../eval/screens/s5-e2e-evidence-d3.json', import.meta.url));
+  let data;
+  try {
+    data = JSON.parse(readFileSync(file, 'utf8'));
+  } catch (error) {
+    console.error(`读不到 D 证据：${file}\n${error instanceof Error ? error.message : error}`);
+    process.exit(2);
+  }
+  console.log(`D 证据：${file}`);
+  const passed = report(checkEvidence(data));
+  process.exit(passed ? 0 : 1);
+}
