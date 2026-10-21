@@ -74,7 +74,7 @@ worktree 里的 `AGENTS.md` 也可能落后（取决于它检出的提交），�
 - `claude-code.md` 的**存在与可解析是两件事**：文件在 `.agents/skills/pstack/docs/harness/claude-code.md`
   （指回 DSH.md 的短指针；**不写字节数与行数**，因为编辑 adapter 就会让它过期，
   要准确值就对路径跑 `Get-Item`），但**21 处叶子引用全部是死链**。
-  **严格口径：live 0 / dead 21** —— 21 处全是相对路径形式的死链，0 处可解析。
+  **严格口径：live 0 / dead 21**，全是相对路径形式，0 处可解析。
   （`DSH.md` 里提到该文件名的两处是散文，不是链接：`:36` 拿文件名当主语、`:37` 说"用 grep 搜这个词"。
   把「出现了文件名」算成「活的链接」，会让任何提及都被计数。）
   叶子写 `../../docs/harness/claude-code.md`，从 `.agents/skills/pstack/<leaf>/` 出发会解析成
@@ -127,8 +127,9 @@ worktree 里的 `AGENTS.md` 也可能落后（取决于它检出的提交），�
    （不写「N 处」：一处怎么算取决于粒度，这个数没法核，也没人会去重数。）
    入库需要改 `.gitignore` 为 `.agents/*` 加白名单（negation 对整目录忽略无效），
    且要单独定 `DSH.md` 的同步策略 —— 它是本机适配层，不该和上游 bundle 同一策略。
-2. **8 个 Bot 硬绑定** —— 目前「默认 poteto-mode」是通过团队记忆 + 本文件传递的，
+2. **Bot 硬绑定** —— 目前「默认 poteto-mode」是通过团队记忆 + 本文件传递的，
    不是硬约束。某个 Bot 的旧指令话术可能压过它。要更硬需逐个改 `instructions`。
+   （不写数量：团队增减会让它过期，要查就跑 `list_bots`。）
 3. **`tmp/` 清理** —— 有大量 `eval-fastloop-*` 残留（不写数量：会变，且会去删的人
    自己会先跑 `Get-ChildItem tmp` 点一遍）。大部分不影响功能。
 
