@@ -60,11 +60,14 @@ worktree 里的 `AGENTS.md` 也可能落后（取决于它检出的提交），�
   `babysit` 的 GitHub 路径因 `watch-pr` 是 bun 脚本而跑不了。
   `multi-phase-plan` 第 6 步能跑（`check-plan.mjs` 走 node）。
 - `claude-code.md` 的**存在与可解析是两件事**：文件在 `.agents/skills/pstack/docs/harness/claude-code.md`
-  （1805 字节，12 行，指回 DSH.md 的指针），但**22 处引用全是死链**（实测可解析 0/22）。
-  它们写 `../../docs/harness/claude-code.md`，从 `.agents/skills/pstack/<leaf>/` 出发会解析成
+  （2026-10-21 实测 1876 字节 / 25 行，指回 DSH.md 的指针），但**21 处叶子引用是死链**
+  （实测 alive 2 / dead 21；活的 2 处都在 `DSH.md` 自己身上，它写 `docs/harness/...` 从 `pstack/` 出发是对的）。
+  叶子写 `../../docs/harness/claude-code.md`，从 `.agents/skills/pstack/<leaf>/` 出发会解析成
   `.agents/skills/docs/harness/claude-code.md`，多退了一层；实际只需 `../docs/...`。
-  修法两条都碰 bundle 布局（挪文件或改 22 个文件），而 `DSH.md:10` 要求 bundle 只读，所以**不修**。
+  修法两条都碰 bundle 布局（挪文件或改 21 个文件），而 `DSH.md:10` 要求 bundle 只读，所以**不修**。
   **DSH.md 整体替代它，不依赖这些链接。**
+  （判定这类链接必须用真实路径解析：手写正则很容易把 `../../` 里的一个 `../` 吃掉，
+  于是每处都被解析成 `../docs/...` 而“存在”——**一个 bug 的校验器给出的「全 OK」，比「没找到」更危险**。）
 - `/loop` 是 Cursor 内置、盘上无 skill，但 `schedule_create` 的 `every_seconds` 能覆盖。
 
 依赖这些的步骤标 `skip: <reason>`，不要静默跳过，也不要为了跑通而去装。
