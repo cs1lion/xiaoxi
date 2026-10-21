@@ -61,6 +61,22 @@ export type PlacementCheck =
   | { readonly ok: true }
   | { readonly ok: false; readonly reason: PlacementProblem };
 
+/** 把拒绝理由翻译成玩家读得懂的一句话。 */
+export function hintFor(reason: PlacementProblem): string {
+  switch (reason) {
+    case 'edge':
+      return '太靠边了，楼会出界。';
+    case 'outOfZone':
+      return '这种铺子不能建在这个区。';
+    case 'occupied':
+      return '这里已经有东西了。';
+    case 'margin':
+      return '离别的建筑太近，得留出空地。';
+    case 'doorBlocked':
+      return '门口被堵住了，人走不进去。';
+  }
+}
+
 /**
  * 能不能把这份蓝图落在 `origin`。
  *

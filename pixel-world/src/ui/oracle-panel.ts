@@ -19,6 +19,11 @@ export interface OracleApi {
   readonly build: (prefabId: string) => void;
   /** 神迹：点灯 / 种树 / 召唤猫。不是神谕，不刻石板。 */
   readonly miracle: (kind: 'light' | 'tree' | 'cat') => void;
+  /** 造物模式：进入后世界暂停，选位置、回车确认、Esc 取消。 */
+  readonly beginCreation: (prefabId: string) => { readonly ok: boolean; readonly message: string };
+  readonly confirmCreation: () => { readonly ok: boolean; readonly message: string };
+  readonly cancelCreation: () => { readonly ok: boolean; readonly message: string };
+  readonly creation: () => { readonly prefabId: string; readonly ghostAt: unknown } | null;
   readonly feed: (message: {
     readonly type: 'task.assigned';
     readonly taskId: string;
@@ -195,6 +200,15 @@ export function bindOraclePanel(getApi: () => OracleApi | undefined): void {
   const clear = document.querySelector<HTMLButtonElement>('#clear');
   rain?.addEventListener('click', () => submit('下雨了'));
   clear?.addEventListener('click', () => submit('放晴吧'));
+
+  for (const button of form.querySelectorAll<HTMLButtonElement>('button[data-create]')) {
+    button.addEventListener('click', () => {
+      const api = getApi();
+      const prefabId = button.dataset.create;
+      if (api === undefined || prefabId === undefined) return;
+      show(true, api.beginCreation(prefabId).message);
+    });
+  }
 
   for (const button of form.querySelectorAll<HTMLButtonElement>('button[data-miracle]')) {
     button.addEventListener('click', () => {

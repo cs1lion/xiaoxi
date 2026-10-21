@@ -75,7 +75,15 @@ export type WorldCommand =
   | { readonly kind: 'complete'; readonly target?: string }
   | { readonly kind: 'cancelPending'; readonly id?: string }
   | { readonly kind: 'setWeather'; readonly weather: Weather }
-  | { readonly kind: 'build'; readonly prefabId: string; readonly instanceId: string }
+  /**
+   * 造物。`at` 省略时自动选址（旧行为）；给了就是玩家在造物模式里指定的位置。
+   */
+  | {
+      readonly kind: 'build';
+      readonly prefabId: string;
+      readonly instanceId: string;
+      readonly at?: GridPoint;
+    }
   /**
    * 神迹：纯世界侧动作，不是你的话，所以不刻石板。
    * 三件：点灯、种树、召唤猫（猫只做氛围，会自己走开）。
@@ -131,8 +139,15 @@ export interface SimulationDeps {
    * 传 3 个名字即可扩到 3 人，逻辑不需要再改。
    */
   readonly villagerNames?: readonly string[];
-  /** 造物主：把一栋新楼落进世界。返回 null 表示空间不够。 */
-  readonly spawnBuilding?: (prefabId: string, instanceId: string) => NewBuilding | null;
+  /**
+   * 造物主：把一栋新楼落进世界。返回 null 表示落不下。
+   * `at` 省略时自动选址；给了就是玩家指定的位置。
+   */
+  readonly spawnBuilding?: (
+    prefabId: string,
+    instanceId: string,
+    at?: GridPoint,
+  ) => NewBuilding | null;
   /** 本地 wall clock（只给 settled.completedAt 的 mock 来源用，不喂逻辑）。 */
   readonly wallClock?: () => number;
 }
@@ -183,7 +198,9 @@ const FAITH_MILESTONE = MILESTONE_POINTS;
 export class Simulation {
   private readonly grid: WorldGrid;
   private readonly altar: GridPoint;
-  private readonly spawnBuilding: ((prefabId: string, instanceId: string) => NewBuilding | null) | undefined;
+  private readonly spawnBuilding:
+    | ((prefabId: string, instanceId: string, at?: GridPoint) => NewBuilding | null)
+    | undefined;
 
   private readonly buildings: PlacedBuilding[];
   private readonly villagers: Villager[];
@@ -392,7 +409,7 @@ export class Simulation {
       case 'setWeather':
         return this.setWeather(command.weather);
       case 'build':
-        return this.build(command.prefabId, command.instanceId);
+        return this.build(command.prefabId, command.instanceId, command.at);
       case 'miracle':
         return this.performMiracle(command.miracle);
       case 'sync':
@@ -1019,16 +1036,20 @@ export class Simulation {
     return { ok: true, message: `成果已交付（${villager.name}，${label}，不计入台账）。` };
   }
 
-  private build(prefabId: string, instanceId: string): CommandResult {
+  private build(prefabId: string, instanceId: string, at?: GridPoint): CommandResult {
     if (this.spawnBuilding === undefined) {
       return { ok: false, message: '这个世界没有造物主。' };
     }
     if (this.buildings.some((item) => item.prefabId === prefabId)) {
       return { ok: false, message: '这种铺子已经有一栋了。' };
     }
-    const spawned = this.spawnBuilding(prefabId, instanceId);
+    const spawned = this.spawnBuilding(prefabId, instanceId, at);
     if (spawned === null) {
-      return { ok: false, message: '分区里已经没有合规空地。' };
+      return {
+        ok: false,
+        // 指定位置时要说清是"这里不行"，不是"没地方了"。
+        message: at === undefined ? '分区里已经没有合规空地。' : '这个位置放不下。',
+      };
     }
     this.buildings.push(spawned.building);
     this.activities.set(spawned.building.instanceId, { kind: 'idle' });

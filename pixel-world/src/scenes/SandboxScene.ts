@@ -6,10 +6,9 @@
 import Phaser from 'phaser';
 import { TILE_PX } from '../world/setup.ts';
 import { Simulation, type MiracleKind, type NewBuilding } from '../world/simulation.ts';
-import type { CommandResult, OracleRecord, WorldSnapshot } from '../world/types.ts';
+import type { CommandResult, GridPoint, OracleRecord, PrefabBlueprint, WorldSnapshot } from '../world/types.ts';
 import { excerptBlockedQuestion } from '../world/types.ts';
 import { placeBlueprint, type BuiltWorld } from '../world/setup.ts';
-import type { PrefabBlueprint } from '../world/types.ts';
 import { WORLD } from '../world/palette-data.ts';
 import { drawTerrain } from '../render/tilemap.ts';
 import { createBuilding, updateBuilding, type BuildingView } from '../render/buildings.ts';
@@ -18,6 +17,8 @@ import { createWorldOverlay, type WorldOverlay } from '../render/world-overlay.t
 import { createAccentEmitter, ensureAccentTextures, type AccentEmitter } from '../render/smoke.ts';
 import { createWeatherView, type WeatherView } from '../render/weather.ts';
 import { createPhaseView, type PhaseView } from '../render/phase-view.ts';
+import { createGhostView, type GhostView } from '../render/ghost.ts';
+import { checkPlacement, hintFor } from '../world/setup.ts';
 import { parsePhaseParam, phaseAt, type PhaseId } from '../render/day-phase.ts';
 import { createDecorView, type DecorView } from '../render/decor.ts';
 import { composeReport, type DailyReport } from '../world/report.ts';
@@ -58,6 +59,7 @@ export class SandboxScene extends Phaser.Scene {
   private weatherView!: WeatherView;
   private phaseView!: PhaseView;
   private nightKeyListener: ((event: KeyboardEvent) => void) | null = null;
+  private creationKeyListener: ((event: KeyboardEvent) => void) | null = null;
   /** 真实时间推进用的定时器；?time= 固定某刻时不启动。 */
   private phaseTimer: number | null = null;
   private decor!: DecorView;
@@ -67,6 +69,9 @@ export class SandboxScene extends Phaser.Scene {
   private villagerName = '莞尔';
   private lastStatus = '';
   private lastRoadCount = -1;
+  /** 造物模式会话。null 表示不在造物模式里。 */
+  private creation: { readonly prefabId: string; ghostAt: GridPoint | null } | null = null;
+  private ghost!: GhostView;
   private lastConstructionKey = '';
   private readonly lastBubbles = new Map<string, string | null>();
   private readonly animalese: Animalese = createLazyAnimalese();
@@ -122,6 +127,7 @@ export class SandboxScene extends Phaser.Scene {
     }));
     this.weatherView = createWeatherView(this);
     this.phaseView = createPhaseView(this);
+    this.ghost = createGhostView(this);
     // 时相来源：?time= 显式指定（截图与调试用）> ?night=1（旧入口，等价于夜）> 真实本地时间。
     const params = new URLSearchParams(window.location.search);
     const forced = parsePhaseParam(params.get('time'));
@@ -157,6 +163,48 @@ export class SandboxScene extends Phaser.Scene {
     };
     window.addEventListener('keydown', this.nightKeyListener);
 
+    // 造物模式的指针与键盘。指针只在造物模式里有用，所以这里不注册常驻
+    // 监听器，而是在 beginCreation 里挂、endCreation 里摘——避免平时每帧
+    // 做一次无意义的坐标换算。
+    this.input.on('pointermove', (pointer: Phaser.Input.Pointer) => {
+      if (this.creation === null) return;
+      const world = pointer.positionToCamera(this.cameras.main) as Phaser.Math.Vector2;
+      this.hoverCell({
+        x: Math.floor(world.x / TILE_PX),
+        y: Math.floor(world.y / TILE_PX),
+      });
+    });
+    // 用 DOM 层的 keydown 而不是 Phaser 的键盘插件：Phaser 只在自己获得焦点时
+    // 派发按键，而页面里输入框、按钮都可能抢焦点，造物模式会因此"回车没反应"。
+    // 这里与 N 键用同一套判定：输入框里打字不算。
+    this.creationKeyListener = (event: KeyboardEvent): void => {
+      if (this.creation === null) return;
+      const target = event.target as HTMLElement | null;
+      if (
+        target !== null &&
+        (target.tagName === 'INPUT' ||
+          target.tagName === 'TEXTAREA' ||
+          target.tagName === 'SELECT' ||
+          target.isContentEditable)
+      ) {
+        return;
+      }
+      if (event.key === 'Enter') {
+        // 焦点常在按钮上（刚点完「造物模式」）。此时浏览器的默认行为是
+        // 再点一次那个按钮，于是模式刚确认又重新打开。必须在这里拦掉：
+        // 造物模式下回车只表示「就建在这里」。
+        event.preventDefault();
+        (target as HTMLElement | null)?.blur?.();
+        const result = this.confirmCreation();
+        if (!result.ok) this.publishCreationHint(result.message);
+      } else if (event.key === 'Escape') {
+        event.preventDefault();
+        this.cancelCreation();
+      }
+    };
+    // 捕获阶段先拦：按钮的默认点击发生在冒泡之后，冒泡阶段拦住也晚了。
+    window.addEventListener('keydown', this.creationKeyListener, true);
+
     this.drawAltar(originX, originY);
 
     const simDeps = {
@@ -164,10 +212,10 @@ export class SandboxScene extends Phaser.Scene {
       buildings: this.world.buildings,
       altar: this.world.altar,
       villagerName: this.villagerName,
-      spawnBuilding: (prefabId: string, instanceId: string): NewBuilding | null => {
+      spawnBuilding: (prefabId: string, instanceId: string, at?: GridPoint): NewBuilding | null => {
         const blueprint = this.blueprints.get(prefabId);
         if (blueprint === undefined) return null;
-        return placeBlueprint(this.world.grid, blueprint, instanceId, this.world.altar);
+        return placeBlueprint(this.world.grid, blueprint, instanceId, this.world.altar, at);
       },
     };
     // 有档就重建世界；读档后台账标未对账，等首个 sync 走 reconcile。
@@ -223,6 +271,10 @@ export class SandboxScene extends Phaser.Scene {
     if (this.phaseTimer !== null) {
       window.clearInterval(this.phaseTimer);
       this.phaseTimer = null;
+    }
+    if (this.creationKeyListener !== null) {
+      window.removeEventListener('keydown', this.creationKeyListener, true);
+      this.creationKeyListener = null;
     }
     if (this.onPageHide !== null) {
       window.removeEventListener('pagehide', this.onPageHide);
@@ -317,6 +369,14 @@ export class SandboxScene extends Phaser.Scene {
 
   update(_time: number, delta: number): void {
     this.accumulator += Math.min(delta, 250);
+    // 造物模式暂停世界：幽灵预览期间不该有人走动或收工。
+    // 只暂停推进，不清空累加器——退出后不会一次性补跑一大段。
+    if (this.creation !== null) {
+      this.accumulator = 0;
+      this.snapshot = this.sim.snapshot();
+      this.renderSnapshot(delta);
+      return;
+    }
     let steps = 0;
     while (this.accumulator >= LOGIC_STEP_MS && steps < MAX_STEPS_PER_FRAME) {
       this.accumulator -= LOGIC_STEP_MS;
@@ -360,6 +420,86 @@ export class SandboxScene extends Phaser.Scene {
   build(prefabId: string): void {
     const instanceId = `${prefabId}#${this.snapshot.buildings.length + 1}`;
     this.sim.enqueue({ kind: 'build', prefabId, instanceId });
+  }
+
+  // -------------------------------------------------------------- 造物模式
+
+  /**
+   * 进入造物模式。世界就此暂停，直到确认或取消。
+   *
+   * 模式只活在场景层：`Simulation` 不知道有这回事，存档里也没有它的位置。
+   */
+  beginCreation(prefabId: string): CommandResult {
+    const blueprint = this.blueprints.get(prefabId);
+    if (blueprint === undefined) return { ok: false, message: '没有这份蓝图。' };
+    if (this.snapshot.buildings.some((building) => building.prefabId === prefabId)) {
+      return { ok: false, message: '这种铺子已经有一栋了。' };
+    }
+    this.creation = { prefabId, ghostAt: null };
+    this.ghost.hide();
+    // 把焦点从按钮上拿走：否则回车会被浏览器当成「再点一次那个按钮」，
+    // 模式刚确认又重新打开。焦点交给 body，键盘事件才由页面统一处理。
+    (document.activeElement as HTMLElement | null)?.blur?.();
+    return { ok: true, message: '选个位置：移动指针，回车确认，Esc 取消。' };
+  }
+
+  /** 指针移到某格时更新幽灵。不在造物模式里就什么也不做。 */
+  hoverCell(cell: GridPoint): void {
+    const session = this.creation;
+    if (session === null) return;
+    const blueprint = this.blueprints.get(session.prefabId);
+    if (blueprint === undefined) return;
+    this.creation = { ...session, ghostAt: cell };
+    const check = checkPlacement(this.world.grid, blueprint, cell);
+    this.ghost.show(cell, blueprint, check.ok);
+    this.publishCreationHint(check.ok ? '可以建在这里，回车确认。' : hintFor(check.reason));
+  }
+
+  /** 确认施工。没有幽灵位置时拒绝，不猜一个地方。 */
+  confirmCreation(): CommandResult {
+    const session = this.creation;
+    if (session === null) return { ok: false, message: '不在造物模式。' };
+    if (session.ghostAt === null) {
+      return { ok: false, message: '先把指针移到想建的位置。' };
+    }
+    const blueprint = this.blueprints.get(session.prefabId);
+    if (blueprint === undefined) return { ok: false, message: '没有这份蓝图。' };
+    const check = checkPlacement(this.world.grid, blueprint, session.ghostAt);
+    if (!check.ok) {
+      // 留在造物模式里让玩家换个位置，并说明为什么这里不行。
+      return { ok: false, message: hintFor(check.reason) };
+    }
+    const instanceId = `${session.prefabId}#${this.snapshot.buildings.length + 1}`;
+    this.sim.enqueue({
+      kind: 'build',
+      prefabId: session.prefabId,
+      instanceId,
+      at: session.ghostAt,
+    });
+    this.endCreation();
+    return { ok: true, message: '动工了。' };
+  }
+
+  /** 取消：世界没有任何变化，恢复推进。 */
+  cancelCreation(): CommandResult {
+    if (this.creation === null) return { ok: false, message: '不在造物模式。' };
+    this.endCreation();
+    return { ok: true, message: '取消了，世界没动。' };
+  }
+
+  creating(): { readonly prefabId: string; readonly ghostAt: GridPoint | null } | null {
+    return this.creation;
+  }
+
+  private endCreation(): void {
+    this.creation = null;
+    this.ghost.hide();
+    this.publishCreationHint('');
+  }
+
+  private publishCreationHint(line: string): void {
+    if (line === '') return;
+    for (const listener of this.resultListeners) listener({ ok: true, message: line });
   }
 
   /** 手动存档：立即把当前世界写进单槽。 */
@@ -502,6 +642,11 @@ export class SandboxScene extends Phaser.Scene {
         this.dispatch(kind, summary),
       finish: (target?: string): void => this.finish(target),
       build: (prefabId: string): void => this.build(prefabId),
+      beginCreation: (prefabId: string): CommandResult => this.beginCreation(prefabId),
+      hoverCell: (cell: GridPoint): void => this.hoverCell(cell),
+      confirmCreation: (): CommandResult => this.confirmCreation(),
+      cancelCreation: (): CommandResult => this.cancelCreation(),
+      creation: () => this.creating(),
       miracle: (kind: MiracleKind): void => {
         this.sim.enqueue({ kind: 'miracle', miracle: kind });
       },
