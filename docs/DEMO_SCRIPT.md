@@ -333,7 +333,7 @@
 以下数字均已标注来源命令或文档路径，不手填估算：
 
 - **180/180**：`npm run test:inprocess` 测试总数（`docs/DEMO_SCRIPT.md` 技术验收清单）。
-- **16/8/1/23**：调色板审计结果（世界 16 色 / UI 8 色 / 共享 1 色 / 并集 23 色），来源 `docs/ART_PALETTE_AUDIT.md`（已 QA 通过）。
+- **24/8/1/31**：调色板审计结果（世界 24 色 / UI 8 色 / 共享 1 色 / 并集 31 色）。世界层 2026-10-21 从 16 扩到 24 色，用户批准。来源 `docs/ADR_PALETTE_24.md`、`docs/ART_PALETTE_AUDIT.md`，复跑 `node scripts/audit-palette.mjs --strict`（exit 0）。
 - **114/114**：smoke 沙盒模式断言总数，来源 `scripts/smoke.mjs` 与 `docs/RUNTIME_VERIFICATION.md`。
 - **21/21**：smoke 台账模式断言总数，来源 `scripts/smoke.mjs`。
 - **64/0**：`python scripts/test_core.py` 通过/失败数，来源 `docs/RUNTIME_VERIFICATION.md`。
@@ -364,4 +364,4 @@
 | 存档 | localStorage 单槽，v1 schema 冻结；task-22 新增导出/导入 | `pixel-world/src/world/save.ts` / `pixel-world/src/ui/save-store.ts` 中 `SaveStore` / `exportFileName` |
 | 调试面板 | 固定右上角，4Hz 刷新，只读 | `pixel-world/src/ui/debug-panel.ts` 中 `bindDebugPanel` / `DEBUG_REFRESH_MS` |
 | 中文策略 | 动态名字/气泡走 DOM overlay，不进 canvas | `pixel-world/src/render/world-overlay.ts` 中 `createWorldOverlay` / `sync` |
-| 调色板 | 世界 16 色 + UI 8 色 + 共享 1 色 = 并集 23 色 | `docs/ART_PALETTE_AUDIT.md`（已 QA 通过） |
+| 调色板 | 世界 24 色 + UI 8 色 + 共享 1 色 = 并集 31 色（2026-10-21 从 16 扩到 24，用户批准） | `docs/ADR_PALETTE_24.md`、`docs/ART_PALETTE_AUDIT.md` |
