@@ -653,12 +653,15 @@ npm run dev
 # 或 vite 在沙箱里 spawn EPERM 时：
 node node_modules/vite/bin/vite.js --config vite.harness.mjs
 
-# 几何/DOM 采集（round-01）
-ego-browser nodejs -e "await import('file:///C:/Users/18712/.dsh/bot/workspace/ego-scripts/round-01.mjs')"
-# 像素/截图采集（round-02、round-04）
-ego-browser nodejs -e "await import('file:///C:/Users/18712/.dsh/bot/workspace/ego-scripts/round-02.mjs')"
-ego-browser nodejs -e "await import('file:///C:/Users/18712/.dsh/bot/workspace/ego-scripts/round-04.mjs')"
+# 几何/DOM 采集（round-01）、像素/截图采集（round-02、round-04）
+# 这三个脚本未入库，在采集者本机 bot workspace；规格见 §17.6「采集脚本规格」。
+# 不要直接复制本机绝对路径——换机器会找不到文件。
 ```
+
+> **⚠️ 复现性说明（2026-10-22 自查）**：本节原先列的 `ego-browser ... import('file:///C:/Users/<user>/...')`
+> 三条命令**换一台机器跑不了**——脚本在采集者的 bot workspace，不在仓库里。
+> 这是本文件里唯一一类「看起来可复现、实际不可复现」的命令，写在这里提醒后来的读者：
+> **看到 `file:///C:/Users/` 开头的路径，一律视为本机专用，不是复现步骤。**
 
 **截图能跑通的前提（踩过的坑，务必保留）**：ego 窗口在用户桌面不可见时会被 Chromium 节流，rAF 掉到 1–12fps，`page.screenshot()` 报 `Cannot capture a screenshot while the window is minimized`。解法是在 `page.goto()` **之前**执行：
 
@@ -820,13 +823,30 @@ git diff --numstat 2076770..HEAD -- `
 
 ```powershell
 # 1) 起 dev server
-cd D:\project\neurosama\tmp\wt-pixel-world\pixel-world
+cd pixel-world
 npm run dev
-# 2) 采 3 帧（脚本内含 normal→maximized 两步恢复窗口，按 7feda3f）
-ego-browser nodejs -e "await import('file:///C:/Users/18712/.dsh/bot/workspace/ego-scripts/round-17.mjs')"
+# 2) 采 3 帧
+#    采集脚本 round-17.mjs / round-18.mjs 未入库（在采集者本机 bot workspace），
+#    规格见下「采集脚本规格」，可据此重写；不要直接复制本机的绝对路径。
 ```
 
-产物：`pixel-world/eval/uiux-audit/round-17-2026-10-21T14-04-27-568Z.json`、`round-17-frame0-*.png`（gitignored）。
+产物：`pixel-world/eval/uiux-audit/round-17-*.json`、`round-17-frame0-*.png`（**gitignored，不在仓库里**，只有采集者本机有）。
+
+> **⚠️ 复现性说明（2026-10-22 自查）**：本节原先写的复现命令指向采集者本机的绝对路径
+> （`C:\Users\<user>\.dsh\bot\workspace\ego-scripts\round-17.mjs`），**换一台机器跑不了**。
+> 与 §17.0 的 `git diff` 验证命令不同——那条依赖仓库自带内容，任何人可跑；本节的采集脚本没有入库。
+>
+> **采集脚本规格**（重写时按这个来，与 `diag-iqr.mjs` 同一套前置条件）：
+>
+> | 项 | 值 |
+> |---|---|
+> | 前置 | 注入 rAF 替身（`MessageChannel` 驱动，门控 60fps），否则 rAF 降到 1.1fps、`toDataURL` 返回全黑 |
+> | 前置 | `Browser.setWindowBounds` 先 `normal` 再 `maximized`，否则截图报 "window is minimized"（按 `7feda3f`） |
+> | 页面 | `http://127.0.0.1:5188/?ledger=off` |
+> | 取样 | `document.querySelector('#app canvas').toDataURL('image/png')`，取 3 帧 |
+> | 解 PNG | `zlib.inflateSync` + 逐行反滤波（filter 0–4），支持 colorType 2/6 |
+> | 明度 | `0.2126R + 0.7152G + 0.0722B`（rec709，在 gamma 编码值上直接算，**不转线性**） |
+> | 分位 | 逐像素 `Float64Array(W*H)` → `sort()` → `sorted[floor((n-1)*p)]`（最近秩法） |
 
 ### 17.7 方法论：如何判断一个统计量是否处于临界状态
 
@@ -904,11 +924,10 @@ q3 到 grass 段右端：115,921 - 115,199 =  722 px
 
 #### 复现
 
-```powershell
-# 完整色表 + 分位落点 + 累积到 75% 落在哪
-ego-browser nodejs -e "await import('file:///C:/Users/18712/.dsh/bot/workspace/ego-scripts/diag-iqr.mjs')"
-```
+**复现方式**：`diag-iqr.mjs` **未入库**（在采集者本机 bot workspace），换机器跑不了——规格见 §17.6「采集脚本规格」。它比 §17.6 多做的只有一件事：**输出全部色（不是 top-N）并按 luma 升序标出 q1/中位/q3 落在哪一行**，这是本节三步做法的第一步。
 
-产物 `pixel-world/eval/uiux-audit/diag-iqr-*.json`（gitignored）含 `colors[]` 全部色与 `q{p25,p50,p75}`，可离线复算，不必重开浏览器。
+产物 `pixel-world/eval/uiux-audit/diag-iqr-*.json` 含 `colors[]`（全部色 + count + luma）与 `q{p25,p50,p75}`。**该目录被 `pixel-world/.gitignore` 忽略，不在仓库里**——所以「可离线复算」这句只对持有该文件的人成立。要在没有该文件时复算，必须重跑采集。
+
+**不依赖任何本机文件的部分**：§17.7 的三层结论表、§17.0 的失效验证命令，都可以只用仓库内容和本节的实测数字复核，不需要 `diag-iqr.mjs`。
 
 **注意浮点比较**：grass 的 luma 精确值是 `55.084999999999994`，不是 `55.085`。用字面量 `55.085` 做 `<` 比较会把「等于」判成「小于」，阈值算出来差一个数量级。**比较分位值必须用容差（`Math.abs(a - b) < 1e-9`），不能用字面量相等。**
