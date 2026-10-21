@@ -72,7 +72,8 @@ worktree 里的 `AGENTS.md` 也可能落后（取决于它检出的提交），�
   `babysit` 的 GitHub 路径因 `watch-pr` 是 bun 脚本而跑不了。
   `multi-phase-plan` 第 6 步能跑（`check-plan.mjs` 走 node）。
 - `claude-code.md` 的**存在与可解析是两件事**：文件在 `.agents/skills/pstack/docs/harness/claude-code.md`
-  （2026-10-21 实测 **2044 字节 / 25 行**，指回 DSH.md 的指针），但**21 处叶子引用全部是死链**。
+  （指回 DSH.md 的短指针；**不写字节数与行数**，因为编辑 adapter 就会让它过期，
+  要准确值就对路径跑 `Get-Item`），但**21 处叶子引用全部是死链**。
   **严格口径：live 0 / dead 21** —— 21 处全是相对路径形式的死链，0 处可解析。
   （`DSH.md` 里提到该文件名的两处是散文，不是链接：`:36` 拿文件名当主语、`:37` 说"用 grep 搜这个词"。
   把「出现了文件名」算成「活的链接」，会让任何提及都被计数。）
