@@ -22,6 +22,7 @@ import { createCameraController, type CameraController } from '../render/camera-
 import { createMinimapView, type MinimapView } from '../render/minimap.ts';
 import { createFogView, type FogView } from '../render/fog-view.ts';
 import { bakeLayer, type BakedLayer } from '../render/bake.ts';
+import { shouldAnimateAt, targetFpsFor } from '../render/eco-mode.ts';
 import { fogAt } from '../world/fog.ts';
 import { checkPlacement, hintFor } from '../world/setup.ts';
 import { parsePhaseParam, phaseAt, type PhaseId } from '../render/day-phase.ts';
@@ -80,6 +81,17 @@ export class SandboxScene extends Phaser.Scene {
   private cameraCtl!: CameraController;
   private minimap: MinimapView | null = null;
   private fogView!: FogView;
+  private focusListener: (() => void) | null = null;
+  /** 诊断用：场景 update 被调用过多少次。降频是否生效看它。 */
+  private updateCount = 0;
+  /** 真正推进了世界的帧数。降频是否生效看它。 */
+  private advanceCount = 0;
+  /** 省电模式：窗口不在前台时为 true，渲染与逻辑都按 `minFrameIntervalMs` 跳帧。 */
+  private backgroundMode = false;
+  /** 两帧之间的最小间隔（毫秒）。前台为 1000/60，后台为 1000/12。 */
+  private minFrameIntervalMs = 1000 / 60;
+  /** 上次真正推进世界的时刻（Phaser 的 time 参数）。 */
+  private lastAdvanceAt = 0;
   private terrainLayer!: BakedLayer;
   /** 拖拽平移的起点（屏幕坐标）；null 表示没在拖。 */
   private dragFrom: { x: number; y: number } | null = null;
@@ -303,6 +315,26 @@ export class SandboxScene extends Phaser.Scene {
     const overlayRoot = document.querySelector<HTMLDivElement>('#world-overlay');
     if (overlayRoot !== null) this.overlay = createWorldOverlay(this, overlayRoot);
     this.lastSaveKey = this.saveStateKey();
+    // 省电模式：切到后台就降频。这是常驻窗口能不能长期开着的前提——
+    // 用户写代码时如果它还跑满 60fps，笔记本会发烫。
+    // 用 visibilitychange 而不是 hasFocus：后者在无头环境与部分浏览器里
+    // 不随标签页切换变化（实测切到后台仍报 focused=true）。
+    // 页面被遮挡或切走时 visibilityState 一定会变。
+    this.focusListener = (): void => {
+      const focused = document.visibilityState === 'visible' && document.hasFocus();
+      // 不碰 Phaser 的限帧机制：它的 `step` / `stepLimitFPS` 回调在 `start()`
+      // 时就绑定死了，运行时切换要 sleep + start，而 sleep 会停掉 raf、
+      // start 又因 `started` 标志不重启——实测结果是直接归零。
+      // 改成自己控制：记下后台模式与最小帧间隔，在 `update()` 里跳帧。
+      this.backgroundMode = !focused;
+      this.minFrameIntervalMs = 1000 / targetFpsFor(focused);
+    };
+    document.addEventListener('visibilitychange', this.focusListener);
+    window.addEventListener('focus', this.focusListener);
+    window.addEventListener('blur', this.focusListener);
+    // 初始状态也按当前焦点设一次。
+    this.focusListener();
+
     this.onPageHide = () => {
       this.saveStore.write(this.sim.toSave());
     };
@@ -355,6 +387,12 @@ export class SandboxScene extends Phaser.Scene {
     if (this.creationKeyListener !== null) {
       window.removeEventListener('keydown', this.creationKeyListener, true);
       this.creationKeyListener = null;
+    }
+    if (this.focusListener !== null) {
+      document.removeEventListener('visibilitychange', this.focusListener);
+      window.removeEventListener('focus', this.focusListener);
+      window.removeEventListener('blur', this.focusListener);
+      this.focusListener = null;
     }
     if (this.onPageHide !== null) {
       window.removeEventListener('pagehide', this.onPageHide);
@@ -448,7 +486,20 @@ export class SandboxScene extends Phaser.Scene {
   }
 
   update(_time: number, delta: number): void {
-    this.accumulator += Math.min(delta, 250);
+    this.updateCount += 1;
+
+    // 省电：后台时按最小间隔跳帧。**跳过的是这一帧的渲染与逻辑推进**，
+    // 世界本身不会错乱——逻辑时钟按真实经过的时间推进，只是推得粗一些。
+    //
+    // 用真实经过的时间而不是上一帧的 delta：跳帧后 delta 只有 16ms，
+    // 直接累加会让世界时钟在后台越走越慢。
+    const elapsed = this.lastAdvanceAt === 0 ? delta : _time - this.lastAdvanceAt;
+    if (this.backgroundMode && elapsed < this.minFrameIntervalMs) return;
+    this.lastAdvanceAt = _time;
+    // 真正推进过的帧才计数：`updateCount` 统计的是 Phaser 的调用次数，
+    // 跳帧时它仍然每帧加一，看不出降频。
+    this.advanceCount += 1;
+    this.accumulator += Math.min(elapsed, 250);
     // 造物模式暂停世界：幽灵预览期间不该有人走动或收工。
     // 只暂停推进，不清空累加器——退出后不会一次性补跑一大段。
     if (this.creation !== null) {
@@ -772,6 +823,20 @@ export class SandboxScene extends Phaser.Scene {
       confirmCreation: (): CommandResult => this.confirmCreation(),
       cancelCreation: (): CommandResult => this.cancelCreation(),
       creation: () => this.creating(),
+      /** 省电模式状态：当前帧率上限与焦点。 */
+      ecoState: () => ({
+        fpsLimit: this.game.loop.fpsLimit,
+        hasFpsLimit: this.game.loop.hasFpsLimit,
+        /** Phaser 实际渲染帧率：这是降频有没有生效的真正指标。 */
+        actualFps: this.game.loop.actualFps,
+        updateCount: this.updateCount,
+        advanceCount: this.advanceCount,
+        backgroundMode: this.backgroundMode,
+        minFrameIntervalMs: this.minFrameIntervalMs,
+        limitRate: (this.game.loop as unknown as { _limitRate: number })._limitRate,
+        hasCallback: (this.game.loop as unknown as { callback?: unknown }).callback !== undefined,
+        focused: document.visibilityState === 'visible' && document.hasFocus(),
+      }),
       /** 渲染统计：排查性能时看每帧有多少绘制指令。 */
       renderStats: () => {
         const graphics = this.children.list.filter(
@@ -856,8 +921,13 @@ export class SandboxScene extends Phaser.Scene {
       const operating = workstation?.activity.kind === 'operating';
       const broken = workstation?.activity.kind === 'overheating';
       if ((operating || broken) && this.tick % 3 === 0) {
-        const intensity = operating ? 1 + Math.min(2, (workstation?.progress ?? 0) * 2) : 2.5;
-        entry.emitter.emitAt(entry.view.chimneyWorld.x, entry.view.chimneyWorld.y, intensity * 0.7);
+        // 视野外的烟不发射：逻辑照常结算，只是看不见就不必画。
+        const chimney = entry.view.chimneyWorld;
+        const view = this.cameras.main.worldView;
+        if (shouldAnimateAt({ x: chimney.x, y: chimney.y }, view)) {
+          const intensity = operating ? 1 + Math.min(2, (workstation?.progress ?? 0) * 2) : 2.5;
+          entry.emitter.emitAt(chimney.x, chimney.y, intensity * 0.7);
+        }
       }
     }
 

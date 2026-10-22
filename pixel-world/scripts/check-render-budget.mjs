@@ -82,6 +82,41 @@ check(
   '拖动时帧率不明显低于静止',
   `静止 ${idleFps.toFixed(1)} / 拖动 ${dragFps.toFixed(1)}`,
 );
+// 省电模式：切到后台必须真的降频。用 advanceCount（真正推进世界的帧数），
+// 不能用 Phaser 的 update 调用次数——跳帧时它仍然每帧加一，看不出差别。
+const countAdvances = async (ms) => {
+  const before = await page.evaluate(() => window.Oracle.ecoState().advanceCount);
+  await page.waitForTimeout(ms);
+  const after = await page.evaluate(() => window.Oracle.ecoState().advanceCount);
+  return ((after - before) / ms) * 1000;
+};
+
+const foregroundRate = await countAdvances(1500);
+await page.evaluate(() => {
+  Object.defineProperty(document, 'visibilityState', { value: 'hidden', configurable: true });
+  document.dispatchEvent(new Event('visibilitychange'));
+});
+await page.waitForTimeout(400);
+const backgroundRate = await countAdvances(1500);
+
+await page.evaluate(() => {
+  Object.defineProperty(document, 'visibilityState', { value: 'visible', configurable: true });
+  document.dispatchEvent(new Event('visibilitychange'));
+});
+await page.waitForTimeout(400);
+const restoredRate = await countAdvances(1500);
+
+check(
+  backgroundRate <= foregroundRate / 3,
+  '切到后台真的降频',
+  `前台 ${foregroundRate.toFixed(1)} / 后台 ${backgroundRate.toFixed(1)}`,
+);
+check(
+  restoredRate >= foregroundRate * 0.9,
+  '回到前台恢复满帧',
+  `恢复 ${restoredRate.toFixed(1)}`,
+);
+
 check(errors.length === 0, '全程无 JS 报错', errors.join('; '));
 
 await browser.close();
