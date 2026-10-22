@@ -99,11 +99,11 @@ test('大世界寻路不慢：单次跨图寻路在 20ms 内', () => {
 
 // ------------------------------------------------------------------ 世界不变量
 
-test('大世界开局满足既有不变量：三栋铺子、分区不重叠、都能走到祭坛', () => {
+test('大世界开局满足既有不变量：六栋铺子（镇内三 + 郊野三），都能走到祭坛', () => {
   const world = buildLargeWorld(blueprints);
   assert.doesNotThrow(() => assertWorldInvariants(world.grid, world.buildings));
   const workshops = world.buildings.filter((b) => b.boundTask !== null);
-  assert.equal(workshops.length, 3);
+  assert.equal(workshops.length, 6, '每种活镇内一栋、郊野一栋');
 });
 
 test('大世界把郊野铺子放在核心圈之外', () => {
@@ -126,12 +126,13 @@ test('默认 buildWorld 仍用旧规格：20 处既有调用点行为不变', ()
   assert.equal(world.grid.height, 20);
 });
 
-test('大世界与小世界可以并存：同一个蓝图表能建两种规格', () => {
+test('大世界与小世界可以并存：小世界只放镇内三栋，大世界放六栋', () => {
   const small = buildWorld(blueprints);
   const large = buildLargeWorld(blueprints);
   assert.equal(small.grid.width, 30);
   assert.equal(large.grid.width, 80);
-  assert.equal(small.buildings.length, large.buildings.length, '常驻铺子数量不随规格变化');
+  assert.equal(small.buildings.length, 3, '小世界放不下郊野铺子');
+  assert.equal(large.buildings.length, 6, '大世界有郊野铺子');
 });
 
 test('空网格：大世界规格能独立构造，不依赖 buildLargeWorld', () => {

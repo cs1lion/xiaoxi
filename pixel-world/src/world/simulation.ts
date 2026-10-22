@@ -8,6 +8,19 @@
 
 import type { WorldGrid } from './grid.ts';
 import { TASK_PROFILES } from './tasks.ts';
+import { pickVenue, type VenueCandidate } from './venue.ts';
+/**
+ * 郊野铺子的 prefab id。
+ *
+ * 为什么写死在这里而不是从 setup 导入：`venueCandidates` 只关心"这栋楼是不是
+ * 郊野的"，不需要知道世界规格；写死一份 id 列表，比把整个 setup 拖进来干净。
+ * 加郊野铺子时这里必须同步，`venue.test.ts` 与 `large-world.test.ts` 会提醒。
+ */
+const WILD_PREFAB_IDS: ReadonlySet<string> = new Set([
+  'crawler_mine',
+  'ink_mill',
+  'gear_tower',
+]);
 import { parseOracle } from './oracle.ts';
 import {
   nextProp,
@@ -658,14 +671,14 @@ export class Simulation {
     // 读档后对账前：台账单只读展示，不派活。
     if (!this.ledgerReconciled) return;
     for (const task of this.nextLedgerTasks()) {
-      const building = this.buildings.find((item) => item.boundTask === task.kind);
-      if (building === undefined) {
-        this.log('warn', `没有承接 ${task.kind} 的铺子，「${task.summary}」派不下去。`);
+      // 台账活只去镇内铺子：那是本地确定性工作。郊野留给探索性的神谕活。
+      const chosen = pickVenue(this.venueCandidates(), task.kind, 'ledger');
+      if (chosen === null) {
+        this.log('warn', `没有空闲的镇内铺子承接 ${task.kind}，「${task.summary}」先等着。`);
         continue;
       }
-      if (this.constructions.has(building.instanceId)) continue;
-      if (this.activities.get(building.instanceId)?.kind === 'overheating') continue;
-      if (this.buildingBusy(building)) continue;
+      const building = this.buildings.find((item) => item.instanceId === chosen.instanceId);
+      if (building === undefined) continue;
       const path = this.grid.path(this.cellOf(villager.pos), building.door);
       if (path.length === 0) continue;
       task.buildingId = building.instanceId;
@@ -674,6 +687,26 @@ export class Simulation {
       this.log('oracle', `台账派活：${task.summary} → ${building.displayName}（${villager.name}）`);
       return;
     }
+  }
+
+  /**
+   * 当前所有铺子的候选视图，供 `pickVenue` 挑。
+   *
+   * 「郊野」按离祭坛的距离判，而不是按分区名：镇内与郊野的铺子可能同属
+   * `industry`，只有位置能区分。
+   */
+  private venueCandidates(): readonly VenueCandidate[] {
+    return this.buildings.map((building) => ({
+      instanceId: building.instanceId,
+      boundTask: building.boundTask,
+      // 按**身份**判郊野，不按距离：镇内书斋实测落在 23 格外，按距离会被
+      // 误判成郊野，于是神谕活全派给了镇内铺子。prefab id 是可靠的来源。
+      isWild: WILD_PREFAB_IDS.has(building.prefabId),
+      busy:
+        this.constructions.has(building.instanceId) ||
+        this.activities.get(building.instanceId)?.kind === 'overheating' ||
+        this.buildingBusy(building),
+    }));
   }
 
   /** 按台账给的优先级排好的、还没人接的台账单。 */
@@ -808,26 +841,16 @@ export class Simulation {
       return { ok: true, message: '这点小事她当场就办。' };
     }
 
-    const building = this.buildings.find((item) => item.boundTask === taskKind);
+    // 你派的活优先去郊野：那是探索性的外部工作。
+    const chosen = pickVenue(this.venueCandidates(), taskKind, 'oracle');
+    if (chosen === null) {
+      const message = `没有空闲的 ${taskKind} 铺子。`;
+      this.log('warn', message);
+      return { ok: false, message };
+    }
+    const building = this.buildings.find((item) => item.instanceId === chosen.instanceId);
     if (building === undefined) {
-      const message = `没有承接 ${taskKind} 的铺子。`;
-      this.log('warn', message);
-      return { ok: false, message };
-    }
-    if (this.constructions.has(building.instanceId)) {
-      const message = `${building.displayName} 还在施工，接不了活。`;
-      this.log('warn', message);
-      return { ok: false, message };
-    }
-    if (this.activities.get(building.instanceId)?.kind === 'overheating') {
-      const message = `${building.displayName} 还没修好。`;
-      this.log('warn', message);
-      return { ok: false, message };
-    }
-    if (this.buildingBusy(building)) {
-      const message = `${building.displayName} 正忙，这单得等它空出来。`;
-      this.log('warn', message);
-      return { ok: false, message };
+      return { ok: false, message: `找不到那栋铺子。` };
     }
     const path = this.grid.path(this.cellOf(villager.pos), building.door);
     if (path.length === 0) {

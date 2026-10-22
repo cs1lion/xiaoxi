@@ -119,6 +119,8 @@ check(
 await page.screenshot({ path: `${OUT}/creation-rejected.png` });
 
 // ------------------------------------------------------------------ Esc 取消
+// 先记下进入模式前的建筑数，Esc 之后必须还是这个数。
+const buildingsBeforeEsc = await page.evaluate(() => window.Oracle.view().buildings.length);
 await page.keyboard.press('Escape');
 await page.waitForTimeout(400);
 const afterEsc = await page.evaluate(() => ({
@@ -127,7 +129,11 @@ const afterEsc = await page.evaluate(() => ({
   now: window.Oracle.view().now,
 }));
 check(afterEsc.creating === null, 'Esc 退出造物模式');
-check(afterEsc.buildings === 3, '取消后没有新建筑', String(afterEsc.buildings));
+check(
+  afterEsc.buildings === buildingsBeforeEsc,
+  '取消后没有新建筑',
+  `${afterEsc.buildings} vs ${buildingsBeforeEsc}`,
+);
 await page.waitForTimeout(800);
 check(
   (await page.evaluate(() => window.Oracle.view().now)) > afterEsc.now,

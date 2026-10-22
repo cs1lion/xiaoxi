@@ -65,10 +65,15 @@ function makeRig(): Rig {
 
 // ------------------------------------------------------------------ blueprints
 
-test('生产蓝图表能解析，每种活恰好一栋铺子，扩建样板不占名额', () => {
-  assert.equal(blueprints.size, 4);
+test('生产蓝图表能解析，每种活 1–2 栋铺子，扩建样板不占名额', () => {
+  // 镇内三栋 + 郊野三栋 + 扩建样板一栋
+  assert.equal(blueprints.size, 7);
   assert.deepEqual(validateCoverage(blueprints), []);
   assert.equal(blueprints.get('workshop_plot')?.boundTask, null);
+  for (const kind of ['code', 'research', 'writing']) {
+    const matches = [...blueprints.values()].filter((bp) => bp.boundTask === kind);
+    assert.equal(matches.length, 2, `${kind} 应有镇内与郊野各一栋`);
+  }
 });
 
 test('蓝图 id 与键名不符时拒绝加载', () => {

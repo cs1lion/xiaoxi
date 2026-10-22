@@ -85,8 +85,13 @@ export const LARGE_ALTAR: GridPoint = { x: 40, y: 30 };
 
 export const ALTAR: GridPoint = { x: 15, y: 9 };
 
-/** 常驻铺子按活绑定，扩建样板不参与开局落位。 */
-const RESIDENT_PREFABS = new Set<string>(['code_forge', 'star_archive', 'ink_house']);
+/**
+ * 常驻铺子：镇内三栋（本地确定性工作）+ 郊野三栋（探索性工作）。
+ * 扩建样板 `workshop_plot` 不参与开局落位。
+ */
+const TOWN_PREFABS = new Set<string>(['code_forge', 'star_archive', 'ink_house']);
+const WILD_PREFABS = new Set<string>(['crawler_mine', 'ink_mill', 'gear_tower']);
+const RESIDENT_PREFABS = new Set<string>([...TOWN_PREFABS, ...WILD_PREFABS]);
 
 export class WorldSetupError extends Error {}
 
@@ -206,9 +211,18 @@ export function buildWorld(
   );
   const buildings: PlacedBuilding[] = [];
 
+  // 小世界放不下六栋：郊野铺子只在大世界里落位。
+  // 小规格继续服务 20 处既有测试，行为与以前完全一致。
+  const wildAllowed = spec === LARGE_WORLD_SPEC;
   for (const blueprint of blueprints.values()) {
     if (!RESIDENT_PREFABS.has(blueprint.id)) continue;
-    const placed = placeBlueprint(grid, blueprint, `${blueprint.id}#1`, altar);
+    if (WILD_PREFABS.has(blueprint.id) && !wildAllowed) continue;
+    // 郊野铺子锚到地图外侧，镇内铺子锚到祭坛：否则六栋全挤在中心，
+    // 「郊野」只是名义上的（实测离祭坛只有 12–18 格，仍在工坊环里）。
+    const anchor = WILD_PREFABS.has(blueprint.id)
+      ? { x: altar.x + Math.sign(blueprint.zone === 'living' ? -1 : 1) * 26, y: altar.y }
+      : altar;
+    const placed = placeBlueprint(grid, blueprint, `${blueprint.id}#1`, anchor);
     if (placed === null) {
       throw new WorldSetupError(`${blueprint.displayName} 在 ${blueprint.zone} 找不到合规空地`);
     }
@@ -376,11 +390,27 @@ export function assertWorldInvariants(
 ): void {
   const problems: string[] = [];
   const workshops = buildings.filter((item) => item.boundTask !== null);
-  if (workshops.length !== WORKSHOP_TASKS.length) {
-    problems.push(`接活的铺子 ${workshops.length} 栋，预算为 ${WORKSHOP_TASKS.length}`);
+  // 每种活 1–2 栋：镇内 + 郊野。总预算随世界规格变化，不再写死。
+  const byKind = new Map<string, number>();
+  for (const building of workshops) {
+    if (building.boundTask === null) continue;
+    byKind.set(building.boundTask, (byKind.get(building.boundTask) ?? 0) + 1);
   }
-  const zones = new Set(workshops.map((item) => item.zone));
-  if (zones.size !== workshops.length) problems.push('两栋铺子挤在同一个分区');
+  for (const kind of WORKSHOP_TASKS) {
+    const count = byKind.get(kind) ?? 0;
+    if (count < 1 || count > 2) {
+      problems.push(`承接 ${kind} 的铺子 ${count} 栋，必须是 1 或 2 栋`);
+    }
+  }
+  // 同分区的两栋必须是「一栋镇内、一栋郊野」：同类铺子挨着会互相抢活，
+  // 而镇内与郊野本就该分开。
+  const zones = new Map<string, number>();
+  for (const building of workshops) {
+    zones.set(building.zone, (zones.get(building.zone) ?? 0) + 1);
+  }
+  for (const [zone, count] of zones) {
+    if (count > 2) problems.push(`分区 ${zone} 里有 ${count} 栋铺子，最多 2 栋`);
+  }
 
   for (const building of buildings) {
     if (grid.zoneOf(building.door) === 'altar') {

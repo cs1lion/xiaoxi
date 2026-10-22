@@ -788,7 +788,7 @@ async function runSandboxSuite() {
   await page.waitForFunction(() => window.Oracle !== undefined, null, { timeout: 15000 });
   const freshWorld = await state();
   check(
-    freshWorld.buildings.length === 3 && freshWorld.faith.milestones === 0,
+    freshWorld.buildings.length >= 3 && freshWorld.faith.milestones === 0,
     '清档后从新世界开始',
   );
 
@@ -834,7 +834,14 @@ try {
   check(errors.length === 0, '页面加载无 JS 报错');
 
   const opening = await state();
-  check(opening.buildings.length === 3, '世界里摆了三栋铺子');
+  // 大世界开局：镇内三栋 + 郊野三栋。小世界只剩镇内三栋。
+  const expectedBuildings = await page.evaluate(() =>
+    window.Oracle.view().buildings.filter((b) => b.boundTask !== null).length,
+  );
+  check(
+    opening.buildings.length === expectedBuildings && expectedBuildings >= 3,
+    `世界里摆好了铺子（${opening.buildings.length} 栋）`,
+  );
   check(opening.villager.mode === 'idle', '开局她在闲逛');
 
   if (LEDGER) {
