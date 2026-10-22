@@ -33,7 +33,8 @@ def run_test() -> tuple[int, list[str]]:
     return proc.returncode, failures
 
 
-def apply_probe(name: str, filename: str, old: str, new: str, expect: str) -> bool:
+def apply_probe(name: str, filename: str, old: str, new: str,
+                expect: str | tuple[str, ...]) -> bool:
     path = TASK / filename
     original = path.read_text(encoding="utf-8")
     if old not in original:
@@ -53,15 +54,17 @@ def apply_probe(name: str, filename: str, old: str, new: str, expect: str) -> bo
     if code == 0:
         print(f"  INVALID 实现被改坏但测试仍然全绿（测试没有覆盖这条规则）")
         return False
-    hit = [f for f in failures if expect in f]
-    if not hit:
-        print(f"  INVALID 变红了，但红的不是预期断言（期望含 {expect!r}）")
+    expects = (expect,) if isinstance(expect, str) else tuple(expect)
+    missing = [e for e in expects if not any(e in f for f in failures)]
+    if missing:
+        print(f"  INVALID 变红了，但这些预期断言没红：{missing!r}")
         for f in failures[:6]:
             print(f"           红: {f}")
         return False
+    hit = [f for f in failures if any(e in f for e in expects)]
     print(f"  ok      {name}")
-    print(f"          变红断言（{len(failures)} 条，命中预期 {len(hit)} 条）：")
-    for f in hit[:3]:
+    print(f"          变红断言（{len(failures)} 条，命中预期 {len(hit)} 条 / 期望 {len(expects)} 项）：")
+    for f in hit[:6]:
         print(f"            - {f}")
     return True
 
@@ -96,7 +99,7 @@ def main() -> int:
     return 0 if ok else 1
 
 
-def build_probes() -> list[tuple[str, str, str, str, str]]:
+def build_probes() -> list[tuple[str, str, str, str, str | tuple[str, ...]]]:
     return [
         (
             "P1 T24 的 Step 守卫恒真（允许带未取消 Step 直接结单，违反 §4.4 T24 守卫）",
@@ -148,7 +151,9 @@ def build_probes() -> list[tuple[str, str, str, str, str]]:
             "machine.py",
             'succeeded = [record for record in matched if record.status == "done"]',
             "succeeded = list(matched)",
-            "只有一条 failed",
+            # 双向：两侧都必须红。只锁「失败当成功」而漏掉「正常重试被挡」，
+            # 等于这次修复只做了一半。
+            ("一条 done + 一条 failed", "只有一条 failed"),
         ),
         (
             # 第二种改坏法：status 比对写错大小写，等于永远不匹配 done。
