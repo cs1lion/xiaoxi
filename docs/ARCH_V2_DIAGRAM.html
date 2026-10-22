@@ -1,0 +1,511 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<title>小汐像素工坊 · 架构图 v2</title>
+<style>
+  :root{
+    --surface-dim:#f2f0f0; --stroke-default:#e3e3e3; --outline:#727676;
+    --on-surface-variant:rgba(0,0,0,.55);
+    --primary:#3186ff; --accent-container:#dcf1ff;
+    --positive:#008052; --positive-container:#daf9d4;
+    --error:#de2d29; --warn:#a86a00; --warn-container:#fff4e0;
+    --ff-sans:'Google Sans','Segoe UI',system-ui,sans-serif;
+    --ff-mono:'Google Sans Code',ui-monospace,monospace;
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  body{font-family:var(--ff-sans);background:#f7f6f5;color:#000;padding:24px;line-height:1.5}
+  .wrap{max-width:1520px;margin:0 auto}
+  header{background:#fff;border:1px solid var(--stroke-default);border-radius:16px;padding:18px 22px;margin-bottom:16px}
+  h1{font-size:20px;font-weight:600}
+  .ver{display:inline-block;margin-left:10px;padding:2px 8px;border-radius:999px;background:var(--accent-container);color:var(--primary);font-size:11px;font-family:var(--ff-mono);vertical-align:2px}
+  .sub{font-size:12.5px;color:var(--on-surface-variant);margin-top:6px}
+  .board{background:#fff;border:1px solid var(--stroke-default);border-radius:16px;padding:18px;margin-bottom:16px}
+  .board h2{font-size:15px;font-weight:600;margin-bottom:4px}
+  .board .note{font-size:12px;color:var(--on-surface-variant);margin-bottom:12px;line-height:1.6}
+  svg{width:100%;height:auto;display:block}
+  .node{fill:var(--surface-dim);stroke:var(--stroke-default);stroke-width:1.5}
+  .node-data{fill:#fafafa;stroke:var(--outline);stroke-width:1.6;stroke-dasharray:8 5}
+  .node-user{fill:var(--accent-container);stroke:var(--primary);stroke-width:2}
+  .node-bus{fill:var(--positive-container);stroke:var(--positive);stroke-width:2}
+  .node-fail{fill:var(--warn-container);stroke:var(--warn);stroke-width:1.6;stroke-dasharray:5 3}
+  .node-term{fill:#fff;stroke:var(--outline);stroke-width:2}
+  .t{font-family:var(--ff-sans);font-size:13px;font-weight:600;fill:#000}
+  .t-sm{font-family:var(--ff-sans);font-size:12px;font-weight:600;fill:#000}
+  .s{font-family:var(--ff-sans);font-size:10.5px;fill:rgba(0,0,0,.58)}
+  .s-mono{font-family:var(--ff-mono);font-size:10px;fill:rgba(0,0,0,.62)}
+  .edge{stroke:var(--outline);stroke-width:1.5;fill:none}
+  .edge-b{stroke:var(--primary);stroke-width:2.6;fill:none}
+  .edge-w{stroke:var(--warn);stroke-width:1.9;fill:none;stroke-dasharray:6 3}
+  .edge-m{stroke:var(--positive);stroke-width:2.2;fill:none}
+  .edge-m-dash{stroke:var(--positive);stroke-width:1.3;fill:none;stroke-dasharray:4 3}
+  .edge-faint{stroke:#c2c2c2;stroke-width:1.2;fill:none;stroke-dasharray:2 4}
+  .lbl{font-family:var(--ff-mono);font-size:10px;fill:rgba(0,0,0,.66)}
+  .lbl-b{fill:var(--primary);font-weight:600;font-size:10px;font-family:var(--ff-mono)}
+  .lbl-w{fill:var(--warn);font-weight:600;font-size:10px;font-family:var(--ff-mono)}
+  .lbl-m{fill:var(--positive);font-weight:600;font-size:10px;font-family:var(--ff-mono)}
+  .lane{font-size:11px;font-family:var(--ff-mono);fill:var(--on-surface-variant);letter-spacing:.06em}
+  .band{opacity:.05}
+  .tick{stroke:#d8d8d8;stroke-width:1;stroke-dasharray:3 5}
+  .tick-lbl{font-family:var(--ff-mono);font-size:10px;fill:rgba(0,0,0,.5)}
+  table.map{width:100%;border-collapse:collapse;font-size:12px}
+  table.map th,table.map td{border:1px solid var(--stroke-default);padding:7px 10px;text-align:left;vertical-align:top}
+  table.map th{background:var(--surface-dim);font-weight:600}
+  table.map code{font-family:var(--ff-mono);font-size:11px;background:#f4f4f4;padding:1px 4px;border-radius:3px}
+  .legend{display:flex;gap:20px;flex-wrap:wrap;font-size:12px;color:var(--on-surface-variant);margin-top:12px;padding-top:10px;border-top:1px dashed var(--stroke-default)}
+  .legend span{display:inline-flex;align-items:center;gap:7px}
+  .sw{display:inline-block;width:30px;height:0;border-top-width:2.5px;border-top-style:solid}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<header>
+  <h1>小汐像素工坊 · 架构图 v2<span class="ver">按 PIXEL_WORKSHOP_SPEC_V2 重做</span></h1>
+  <div class="sub">
+    三张图分开画：<b>A 模块与数据流</b>（谁连谁、什么是进程什么是数据）·
+    <b>B 时间轴 + 泳道</b>（并发，不是五阶段串行）·
+    <b>C BLOCKED 分支</b>（一个状态、五种 reason、四个 resume_to）。
+    每条修正对应的规范行号见 <code>docs/ARCH_V2_DIAGRAM.md</code> 与本页末尾对照表。
+  </div>
+</header>
+
+<!-- ============ A · 模块与数据流 ============ -->
+<div class="board" id="board-a">
+  <h2>A · 模块与数据流（§2.3 模块关系、§5.2 事件清单）</h2>
+  <div class="note">右侧竖带 = 事件总线，横切所有后端模块，每个模块向右发事件（附录 C 第 2 条）。虚线直角框 = 数据，不执行（第 3 条）。</div>
+  <svg viewBox="0 0 1500 700" role="img" aria-label="模块与数据流">
+    <defs>
+      <marker id="a-ar" markerWidth="9" markerHeight="9" refX="8" refY="4.5" orient="auto"><path d="M0,0 L9,4.5 L0,9 z" fill="#727676"/></marker>
+      <marker id="a-arb" markerWidth="9" markerHeight="9" refX="8" refY="4.5" orient="auto"><path d="M0,0 L9,4.5 L0,9 z" fill="#3186ff"/></marker>
+      <marker id="a-arw" markerWidth="9" markerHeight="9" refX="8" refY="4.5" orient="auto"><path d="M0,0 L9,4.5 L0,9 z" fill="#a86a00"/></marker>
+      <marker id="a-arm" markerWidth="9" markerHeight="9" refX="8" refY="4.5" orient="auto"><path d="M0,0 L9,4.5 L0,9 z" fill="#008052"/></marker>
+    </defs>
+
+    <!-- 层带 -->
+    <rect class="band" x="60" y="26"  width="1160" height="84"  fill="#3186ff"/>
+    <rect class="band" x="60" y="140" width="1160" height="120" fill="#727676"/>
+    <rect class="band" x="60" y="290" width="1160" height="130" fill="#008052"/>
+    <rect class="band" x="60" y="470" width="1160" height="110" fill="#a86a00"/>
+    <text class="lane" x="8" y="72">用户</text>
+    <text class="lane" x="8" y="205">判断</text>
+    <text class="lane" x="8" y="360">执行</text>
+    <text class="lane" x="8" y="530">出口</text>
+
+    <!-- 用户层 -->
+    <rect class="node-user" x="120" y="42" width="260" height="56" rx="12"/>
+    <text class="t" x="250" y="66" text-anchor="middle">用户 · 神谕祭坛</text>
+    <text class="s" x="250" y="84" text-anchor="middle">ASK_USER · CONFIRM_CONTRACT · ANSWER</text>
+
+    <rect class="node" x="492" y="42" width="180" height="56" rx="10"/>
+    <text class="t" x="582" y="66" text-anchor="middle">System1_Voice</text>
+    <text class="s" x="582" y="84" text-anchor="middle">快系统 · 语音/文字</text>
+
+    <!-- 判断层 -->
+    <rect class="node" x="72" y="165" width="160" height="70" rx="10"/>
+    <text class="t-sm" x="152" y="188" text-anchor="middle">MemoryService</text>
+    <text class="s" x="152" y="205" text-anchor="middle">三档来源 · 物理硬删</text>
+    <text class="s-mono" x="152" y="222" text-anchor="middle">→ MEMORY_UPDATE</text>
+
+    <rect class="node" x="272" y="165" width="160" height="70" rx="10"/>
+    <text class="t-sm" x="352" y="188" text-anchor="middle">MemoryView</text>
+    <text class="s" x="352" y="205" text-anchor="middle">置信度分层视图</text>
+    <text class="s" x="352" y="222" text-anchor="middle">§2.3 :96</text>
+
+    <rect class="node" x="492" y="165" width="180" height="70" rx="10"/>
+    <text class="t-sm" x="582" y="188" text-anchor="middle">IntentGate</text>
+    <text class="s" x="582" y="205" text-anchor="middle">G1–G6 完备度拦截</text>
+    <text class="s-mono" x="582" y="222" text-anchor="middle">→ CONTRACT_PROPOSED</text>
+
+    <rect class="node-data" x="712" y="165" width="190" height="70" rx="4"/>
+    <text class="t-sm" x="807" y="188" text-anchor="middle">Task_Contract</text>
+    <text class="s" x="807" y="205" text-anchor="middle">契约卷轴 · 数据不执行</text>
+    <text class="s-mono" x="807" y="222" text-anchor="middle">version 冻结后只读</text>
+
+    <!-- 执行层 -->
+    <rect class="node" x="72" y="310" width="180" height="80" rx="10"/>
+    <text class="t-sm" x="162" y="334" text-anchor="middle">TaskEngine</text>
+    <text class="s" x="162" y="351" text-anchor="middle">13 态 · 唯一写入口</text>
+    <text class="s-mono" x="162" y="368" text-anchor="middle">→ TASK/STEP_STATE_CHANGE</text>
+
+    <rect class="node" x="292" y="310" width="180" height="80" rx="10"/>
+    <text class="t-sm" x="382" y="334" text-anchor="middle">Worker 池</text>
+    <text class="s" x="382" y="351" text-anchor="middle">cli_subproc / http_api / mcp</text>
+    <text class="s-mono" x="382" y="368" text-anchor="middle">→ TOOL_EXECUTION</text>
+
+    <rect class="node" x="512" y="310" width="180" height="80" rx="10"/>
+    <text class="t-sm" x="602" y="334" text-anchor="middle">Verifier</text>
+    <text class="s" x="602" y="351" text-anchor="middle">独立质检 · 执行者不自评</text>
+    <text class="s-mono" x="602" y="368" text-anchor="middle">→ VERIFICATION_REPORT</text>
+
+    <rect class="node" x="732" y="310" width="200" height="80" rx="10"/>
+    <text class="t-sm" x="832" y="334" text-anchor="middle">交付执行器</text>
+    <text class="s" x="832" y="351" text-anchor="middle">确定性代码 · 幂等键</text>
+    <text class="s-mono" x="832" y="368" text-anchor="middle">→ DELIVERY_EFFECT</text>
+
+    <!-- 总线竖带 -->
+    <rect class="node-bus" x="1330" y="140" width="72" height="440" rx="8"/>
+    <text class="t" x="1366" y="360" text-anchor="middle" transform="rotate(-90 1366 360)">EventBus</text>
+    <text class="s" x="1366" y="250" text-anchor="middle" transform="rotate(-90 1366 250)">横切所有后端模块</text>
+
+    <!-- 出口层 -->
+    <rect class="node-term" x="72" y="500" width="130" height="64" rx="8"/>
+    <text class="t-sm" x="137" y="524" text-anchor="middle">DELIVERED</text>
+    <text class="s" x="137" y="541" text-anchor="middle">终态 · effect_log</text>
+
+    <rect class="node-term" x="222" y="500" width="130" height="64" rx="8"/>
+    <text class="t-sm" x="287" y="524" text-anchor="middle">CANCELLED</text>
+    <text class="s" x="287" y="541" text-anchor="middle">终态 · 副作用对账</text>
+
+    <rect class="node-term" x="372" y="500" width="130" height="64" rx="8"/>
+    <text class="t-sm" x="437" y="524" text-anchor="middle">FAILED</text>
+    <text class="s" x="437" y="541" text-anchor="middle">终态 · 契约违规</text>
+
+    <rect class="node-term" x="522" y="500" width="130" height="64" rx="8"/>
+    <text class="t-sm" x="587" y="524" text-anchor="middle">TIMEOUT</text>
+    <text class="s" x="587" y="541" text-anchor="middle">终态 · 墙钟超限</text>
+
+    <rect class="node-fail" x="672" y="500" width="200" height="64" rx="8"/>
+    <text class="t-sm" x="772" y="524" text-anchor="middle">BLOCKED</text>
+    <text class="s" x="772" y="541" text-anchor="middle">非终态 · reason + resume_to</text>
+
+    <!-- ===== 边 ===== -->
+    <!-- 用户 -> Voice -->
+    <path class="edge" d="M 380 70 L 492 70" marker-end="url(#a-ar)"/>
+    <text class="lbl" x="392" y="62">话语</text>
+
+    <!-- Voice -> IntentGate -->
+    <path class="edge" d="M 582 98 L 582 165" marker-end="url(#a-ar)"/>
+    <text class="lbl" x="590" y="136">文字</text>
+
+    <!-- MemoryService -> MemoryView -> IntentGate -->
+    <path class="edge" d="M 232 200 L 272 200" marker-end="url(#a-ar)"/>
+    <path class="edge" d="M 432 200 L 492 200" marker-end="url(#a-ar)"/>
+    <text class="lbl" x="436" y="193">read</text>
+
+    <!-- IntentGate -> 契约 -->
+    <path class="edge" d="M 672 200 L 712 200" marker-end="url(#a-ar)"/>
+    <text class="lbl" x="676" y="193">freeze</text>
+
+    <!-- IntentGate -> 用户：ASK_USER -->
+    <path class="edge-w" d="M 520 165 L 330 98" marker-end="url(#a-arw)"/>
+    <text class="lbl-w" x="430" y="158">ASK_USER</text>
+
+    <!-- 用户 -> 契约：CONFIRM_CONTRACT（y=130 通道） -->
+    <path class="edge-b" d="M 390 98 L 390 130 L 760 130 L 760 165" marker-end="url(#a-arb)"/>
+    <text class="lbl-b" x="560" y="124">CONFIRM_CONTRACT</text>
+
+    <!-- 契约 -> TaskEngine：dispatch（y=268 通道） -->
+    <path class="edge-b" d="M 807 235 L 807 268 L 162 268 L 162 310" marker-end="url(#a-arb)"/>
+    <text class="lbl-b" x="250" y="262">dispatch · 契约是唯一入口（P1）</text>
+
+    <!-- TaskEngine -> Worker -> Verifier -->
+    <path class="edge" d="M 252 350 L 292 350" marker-end="url(#a-ar)"/>
+    <text class="lbl" x="254" y="343">派单</text>
+    <path class="edge" d="M 472 350 L 512 350" marker-end="url(#a-ar)"/>
+    <text class="lbl" x="474" y="343">产出物</text>
+
+    <!-- Verifier -> TaskEngine：打回（y=440 通道） -->
+    <path class="edge-w" d="M 602 390 L 602 440 L 162 440 L 162 390" marker-end="url(#a-arw)"/>
+    <text class="lbl-w" x="300" y="434">打回 / 通过（T16 / T18）</text>
+
+    <!-- TaskEngine -> 交付执行器：ACCEPTED→DELIVERING（y=462 通道） -->
+    <path class="edge-b" d="M 220 390 L 220 462 L 832 462 L 832 390" marker-end="url(#a-arb)"/>
+    <text class="lbl-b" x="600" y="456">ACCEPTED → DELIVERING（P4 副作用后置）</text>
+
+    <!-- 交付执行器 -> 用户：DELIVERY_EFFECT（y=118 通道） -->
+    <path class="edge-m" d="M 932 350 L 1090 350 L 1090 108 L 250 108 L 250 98" marker-end="url(#a-arm)"/>
+    <text class="lbl-m" x="1100" y="240">DELIVERY_EFFECT</text>
+    <text class="s" x="1100" y="256" style="font-size:9px">送达用户（P4 副作用后置）</text>
+
+    <!-- 用户 -> MemoryService：promoted / confirmed（实线） -->
+    <path class="edge-m" d="M 152 98 L 152 165" marker-end="url(#a-arm)"/>
+    <text class="s" x="160" y="120" style="font-size:9px">用户确认 → 写回</text>
+    <text class="lbl-m" x="58" y="140">promoted /</text>
+    <text class="lbl-m" x="58" y="152">confirmed</text>
+
+    <!-- Verifier -> MemoryService：distilled（虚线，y=252 通道） -->
+    <path class="edge-m-dash" d="M 560 310 L 560 252 L 152 252 L 152 235" marker-end="url(#a-arm)"/>
+    <text class="lbl-m" x="300" y="246">distilled（打回中提炼）</text>
+
+    <!-- 各模块 -> 总线 -->
+    <path class="edge-faint" d="M 672 60 L 1330 165"/>
+    <path class="edge-faint" d="M 672 180 L 1330 195"/>
+    <path class="edge-faint" d="M 432 228 L 1330 225"/>
+    <path class="edge-faint" d="M 252 330 L 1330 330"/>
+    <path class="edge-faint" d="M 472 380 L 1330 380"/>
+    <path class="edge-faint" d="M 692 340 L 1330 410"/>
+    <path class="edge-faint" d="M 932 380 L 1330 440"/>
+    <path class="edge-faint" d="M 872 530 L 1330 480"/>
+    <text class="lbl" x="1322" y="600" text-anchor="end">8 条上报边 · 每个后端模块都向右发事件</text>
+
+    <!-- 总线 -> 前端 -->
+    <path class="edge" d="M 1402 360 L 1450 360" marker-end="url(#a-ar)"/>
+    <text class="lbl" x="1406" y="352" style="font-size:9px">WS</text>
+  </svg>
+  <div class="legend">
+    <span><i class="sw" style="border-color:#3186ff"></i>主通路（契约 → 派单 → 验收 → 交付）</span>
+    <span><i class="sw" style="border-color:#a86a00;border-top-style:dashed"></i>人工 / 失败出口</span>
+    <span><i class="sw" style="border-color:#008052"></i>记忆写回 · 实线 = 事实（promoted/confirmed）</span>
+    <span><i class="sw" style="border-color:#008052;border-top-style:dashed"></i>记忆写回 · 虚线 = 经验（distilled）</span>
+    <span><i class="sw" style="border-color:#c2c2c2;border-top-style:dotted"></i>事件上报</span>
+  </div>
+</div>
+
+<!-- ============ B · 时间轴 + 泳道 ============ -->
+<div class="board" id="board-b">
+  <h2>B · 时间轴 + 泳道（附录 C 第 5 条、§5.7 事件脚本 e1–e17）</h2>
+  <div class="note">
+    横轴是 §5.7 的真实时间戳（相对 e1），纵轴是四条泳道。<b>同一竖线上的方块 = 同时发生</b>——
+    t≈1.0s 时 Task 已 DISPATCHED 而 Step 在 RUNNING；t≈2.0s 打回（T16）与第二次 VERIFYING 交叠。
+    不是「上一页 / 下一页」。
+  </div>
+  <svg viewBox="0 0 1560 430" role="img" aria-label="时间轴与泳道">
+    <defs>
+      <marker id="b-ar" markerWidth="9" markerHeight="9" refX="8" refY="4.5" orient="auto"><path d="M0,0 L9,4.5 L0,9 z" fill="#a86a00"/></marker>
+    </defs>
+
+    <!-- 泳道 -->
+    <rect class="band" x="130" y="34"  width="1380" height="70" fill="#3186ff"/>
+    <rect class="band" x="130" y="114" width="1380" height="70" fill="#727676"/>
+    <rect class="band" x="130" y="194" width="1380" height="86" fill="#008052"/>
+    <rect class="band" x="130" y="290" width="1380" height="70" fill="#a86a00"/>
+    <text class="lane" x="10" y="74">用户</text>
+    <text class="lane" x="10" y="154">Task</text>
+    <text class="lane" x="10" y="242">Step</text>
+    <text class="lane" x="10" y="330">记忆 / 交付</text>
+
+    <!-- 刻度 -->
+    <line class="tick" x1="130"  y1="28" x2="130"  y2="366"/>
+    <line class="tick" x1="310"  y1="28" x2="310"  y2="366"/>
+    <line class="tick" x1="490"  y1="28" x2="490"  y2="366"/>
+    <line class="tick" x1="670"  y1="28" x2="670"  y2="366"/>
+    <line class="tick" x1="850"  y1="28" x2="850"  y2="366"/>
+    <line class="tick" x1="1030" y1="28" x2="1030" y2="366"/>
+    <line class="tick" x1="1210" y1="28" x2="1210" y2="366"/>
+    <line class="tick" x1="1390" y1="28" x2="1390" y2="366"/>
+    <text class="tick-lbl" x="130"  y="382" text-anchor="middle">0.0s</text>
+    <text class="tick-lbl" x="310"  y="382" text-anchor="middle">0.5s</text>
+    <text class="tick-lbl" x="490"  y="382" text-anchor="middle">1.0s</text>
+    <text class="tick-lbl" x="670"  y="382" text-anchor="middle">1.5s</text>
+    <text class="tick-lbl" x="850"  y="382" text-anchor="middle">2.0s</text>
+    <text class="tick-lbl" x="1030" y="382" text-anchor="middle">2.5s</text>
+    <text class="tick-lbl" x="1210" y="382" text-anchor="middle">3.0s</text>
+    <text class="tick-lbl" x="1390" y="382" text-anchor="middle">3.5s</text>
+
+    <!-- 用户泳道 -->
+    <rect class="node-user" x="140" y="48" width="150" height="42" rx="8"/>
+    <text class="t-sm" x="215" y="66" text-anchor="middle">看到契约卡</text>
+    <text class="s" x="215" y="82" text-anchor="middle">e1 CONTRACT_PROPOSED</text>
+
+    <rect class="node-user" x="320" y="48" width="150" height="42" rx="8"/>
+    <text class="t-sm" x="395" y="66" text-anchor="middle">确认契约</text>
+    <text class="s" x="395" y="82" text-anchor="middle">e2 CONFIRM_CONTRACT</text>
+
+    <rect class="node-user" x="1230" y="48" width="170" height="42" rx="8"/>
+    <text class="t-sm" x="1315" y="66" text-anchor="middle">收到交付</text>
+    <text class="s" x="1315" y="82" text-anchor="middle">e15 DELIVERY_EFFECT</text>
+
+    <!-- Task 泳道 -->
+    <rect class="node" x="320" y="128" width="110" height="42" rx="6"/>
+    <text class="s-mono" x="375" y="153" text-anchor="middle">SPEC_LOCKED</text>
+
+    <rect class="node" x="440" y="128" width="110" height="42" rx="6"/>
+    <text class="s-mono" x="495" y="153" text-anchor="middle">DISPATCHED</text>
+
+    <rect class="node" x="560" y="128" width="110" height="42" rx="6"/>
+    <text class="s-mono" x="615" y="153" text-anchor="middle">EXECUTING</text>
+
+    <rect class="node" x="850" y="128" width="110" height="42" rx="6"/>
+    <text class="s-mono" x="905" y="153" text-anchor="middle">VERIFYING</text>
+
+    <rect class="node-fail" x="960" y="128" width="120" height="42" rx="6"/>
+    <text class="s-mono" x="1020" y="149" text-anchor="middle">EXECUTING</text>
+    <text class="s" x="1020" y="163" text-anchor="middle" style="font-size:9px">打回 attempt=1</text>
+
+    <rect class="node" x="1090" y="128" width="110" height="42" rx="6"/>
+    <text class="s-mono" x="1145" y="153" text-anchor="middle">VERIFYING</text>
+
+    <rect class="node" x="1210" y="128" width="100" height="42" rx="6"/>
+    <text class="s-mono" x="1260" y="153" text-anchor="middle">ACCEPTED</text>
+
+    <rect class="node" x="1320" y="128" width="100" height="42" rx="6"/>
+    <text class="s-mono" x="1370" y="153" text-anchor="middle">DELIVERING</text>
+
+    <rect class="node-term" x="1430" y="128" width="100" height="42" rx="6"/>
+    <text class="s-mono" x="1480" y="153" text-anchor="middle">DELIVERED</text>
+
+    <!-- Step 泳道 -->
+    <rect class="node" x="440" y="208" width="120" height="34" rx="6"/>
+    <text class="s-mono" x="500" y="229" text-anchor="middle">s_fetch RUNNING</text>
+
+    <rect class="node" x="580" y="208" width="150" height="34" rx="6"/>
+    <text class="s-mono" x="655" y="229" text-anchor="middle">s_fetch OBSERVED</text>
+
+    <rect class="node" x="560" y="248" width="260" height="26" rx="6"/>
+    <text class="s-mono" x="690" y="265" text-anchor="middle">s_write RUNNING · 与 s_fetch 同时（DAG 并发）</text>
+
+    <!-- 记忆/交付泳道 -->
+    <rect class="node-fail" x="1210" y="304" width="150" height="42" rx="6"/>
+    <text class="s-mono" x="1285" y="329" text-anchor="middle">DELIVERY_EFFECT</text>
+
+    <rect class="node" x="1380" y="304" width="150" height="42" rx="6"/>
+    <text class="s-mono" x="1455" y="329" text-anchor="middle">MEMORY distilled</text>
+
+    <!-- 并发标注 -->
+    <line x1="670" y1="196" x2="670" y2="282" stroke="#008052" stroke-width="1.8"/>
+    <text class="lbl-m" x="678" y="192">↑ 同一竖线 = 同时发生</text>
+
+    <!-- 打回回环 -->
+    <path class="edge-w" d="M 960 140 C 930 106 890 106 860 132" marker-end="url(#b-ar)"/>
+    <text class="lbl-w" x="866" y="104">T16 打回</text>
+
+    <!-- 事件序号 -->
+    <text class="s-mono" x="130"  y="404">e1</text>
+    <text class="s-mono" x="320"  y="404">e2</text>
+    <text class="s-mono" x="440"  y="404">e4</text>
+    <text class="s-mono" x="560"  y="404">e6</text>
+    <text class="s-mono" x="850"  y="404">e9–e10</text>
+    <text class="s-mono" x="960"  y="404">e11</text>
+    <text class="s-mono" x="1090" y="404">e12</text>
+    <text class="s-mono" x="1210" y="404">e13–e14</text>
+    <text class="s-mono" x="1320" y="404">e15</text>
+    <text class="s-mono" x="1430" y="404">e16–e17</text>
+  </svg>
+</div>
+
+<!-- ============ C · BLOCKED 分支 ============ -->
+<div class="board" id="board-c">
+  <h2>C · BLOCKED 分支（附录 C 第 1 条、§4.2 状态集、§4.4 迁移表、§4.6 失败分类）</h2>
+  <div class="note">
+    <b>BLOCKED 是一个状态，不是一个分支族。</b>它带两个必填字段：<code>reason</code>（5 个取值）与
+    <code>resume_to</code>（4 个取值）。<b>没有 resume_to 的阻塞等于把任务丢进黑洞</b>（§4.2 :441）。
+    右侧五个方块是 reason 的取值，不是并列的状态。
+  </div>
+  <svg viewBox="0 0 1500 500" role="img" aria-label="BLOCKED 分支">
+    <defs>
+      <marker id="c-ar" markerWidth="9" markerHeight="9" refX="8" refY="4.5" orient="auto"><path d="M0,0 L9,4.5 L0,9 z" fill="#727676"/></marker>
+      <marker id="c-arw" markerWidth="9" markerHeight="9" refX="8" refY="4.5" orient="auto"><path d="M0,0 L9,4.5 L0,9 z" fill="#a86a00"/></marker>
+      <marker id="c-arg" markerWidth="9" markerHeight="9" refX="8" refY="4.5" orient="auto"><path d="M0,0 L9,4.5 L0,9 z" fill="#008052"/></marker>
+    </defs>
+
+    <!-- 正常通路（缩略） -->
+    <rect class="node" x="40" y="40" width="200" height="60" rx="8"/>
+    <text class="t-sm" x="140" y="64" text-anchor="middle">正常通路</text>
+    <text class="s" x="140" y="82" text-anchor="middle">SPEC_LOCKED → … → DELIVERED</text>
+
+    <!-- BLOCKED 主节点 -->
+    <rect class="node-fail" x="300" y="180" width="240" height="100" rx="10"/>
+    <text class="t" x="420" y="208" text-anchor="middle" style="font-size:15px">BLOCKED</text>
+    <text class="s" x="420" y="228" text-anchor="middle">非终态 · 可恢复</text>
+    <text class="s-mono" x="420" y="246" text-anchor="middle">reason + resume_to 均必填</text>
+    <text class="s" x="420" y="264" text-anchor="middle">§4.2 :433 / :441</text>
+
+    <!-- 五个 reason -->
+    <rect class="node-fail" x="640" y="26" width="300" height="62" rx="8"/>
+    <text class="s-mono" x="790" y="48" text-anchor="middle">need_clarification</text>
+    <text class="s" x="790" y="65" text-anchor="middle">E_INPUT：输入路径不存在 / URL 不可达</text>
+    <text class="s" x="790" y="80" text-anchor="middle">E_INPUT 默认去向（§4.6 :562）· 迁移表未单列</text>
+
+    <rect class="node-fail" x="640" y="100" width="300" height="62" rx="8"/>
+    <text class="s-mono" x="790" y="122" text-anchor="middle">need_approval</text>
+    <text class="s" x="790" y="139" text-anchor="middle">E_BUDGET 超限 / 交付目标拒绝</text>
+    <text class="s" x="790" y="154" text-anchor="middle">T9 resume_to=SPEC_LOCKED · T21 resume_to=DELIVERING</text>
+
+    <rect class="node-fail" x="640" y="174" width="300" height="62" rx="8"/>
+    <text class="s-mono" x="790" y="196" text-anchor="middle">need_authorization</text>
+    <text class="s" x="790" y="213" text-anchor="middle">E_PERMISSION：需要未授予的权限</text>
+    <text class="s" x="790" y="228" text-anchor="middle">T9 resume_to=SPEC_LOCKED · T13 未规定 resume_to</text>
+
+    <rect class="node-fail" x="640" y="248" width="300" height="62" rx="8"/>
+    <text class="s-mono" x="790" y="270" text-anchor="middle">retry_exhausted</text>
+    <text class="s" x="790" y="287" text-anchor="middle">attempt ≥ max_retries，或失败签名重复</text>
+    <text class="s" x="790" y="302" text-anchor="middle">T13 / T17 均未规定 resume_to（规范缺口）</text>
+
+    <rect class="node-fail" x="640" y="322" width="300" height="62" rx="8"/>
+    <text class="s-mono" x="790" y="344" text-anchor="middle">ambiguous_result</text>
+    <text class="s" x="790" y="361" text-anchor="middle">E_AMBIGUOUS：已派发但无回执</text>
+    <text class="s" x="790" y="376" text-anchor="middle">resume_to = DISPATCHED · T11</text>
+
+    <!-- BLOCKED -> 五个 reason -->
+    <path class="edge-w" d="M 540 196 L 640 58" marker-end="url(#c-arw)"/>
+    <path class="edge-w" d="M 540 212 L 640 131" marker-end="url(#c-arw)"/>
+    <path class="edge-w" d="M 540 228 L 640 205" marker-end="url(#c-arw)"/>
+    <path class="edge-w" d="M 540 246 L 640 279" marker-end="url(#c-arw)"/>
+    <path class="edge-w" d="M 540 264 L 640 353" marker-end="url(#c-arw)"/>
+
+    <!-- 恢复 / 取消 -->
+    <rect class="node-term" x="1010" y="100" width="200" height="70" rx="8"/>
+    <text class="t-sm" x="1110" y="124" text-anchor="middle">T22 恢复</text>
+    <text class="s" x="1110" y="142" text-anchor="middle">ANSWER / 授权 / 人工改判</text>
+    <text class="s-mono" x="1110" y="158" text-anchor="middle">→ resume_to（回到阻塞点）</text>
+
+    <rect class="node-term" x="1010" y="200" width="200" height="70" rx="8"/>
+    <text class="t-sm" x="1110" y="224" text-anchor="middle">T23 取消</text>
+    <text class="s" x="1110" y="242" text-anchor="middle">BLOCKED → CANCELLED</text>
+    <text class="s-mono" x="1110" y="258" text-anchor="middle">用户主动放弃</text>
+
+    <path class="edge" d="M 940 130 L 1010 130" marker-end="url(#c-ar)"/>
+    <path class="edge" d="M 940 232 L 1010 232" marker-end="url(#c-ar)"/>
+
+    <!-- 用户 -->
+    <rect class="node-user" x="1260" y="140" width="200" height="76" rx="12"/>
+    <text class="t-sm" x="1360" y="164" text-anchor="middle">用户 · 神谕祭坛</text>
+    <text class="s" x="1360" y="182" text-anchor="middle">ASK_USER 到达这里</text>
+    <text class="s-mono" x="1360" y="198" text-anchor="middle">ANSWER · APPROVE_SIDE_EFFECT</text>
+
+    <path class="edge-w" d="M 940 56 L 1220 56 L 1220 158 L 1260 158" marker-end="url(#c-arw)"/>
+    <text class="lbl-w" x="1000" y="50">ASK_USER（每条阻塞都发 · §5.2 :720）</text>
+
+    <path class="edge-m" d="M 1260 190 L 1210 190" marker-end="url(#c-arg)"/>
+    <text class="lbl-m" x="1206" y="184">答复</text>
+
+    <!-- Step UNKNOWN 对照 -->
+    <rect class="node-fail" x="1260" y="270" width="200" height="100" rx="8"/>
+    <text class="t-sm" x="1360" y="294" text-anchor="middle">Step UNKNOWN</text>
+    <text class="s" x="1360" y="312" text-anchor="middle">≠ BLOCKED</text>
+    <text class="s" x="1360" y="330" text-anchor="middle">它是 Step 级状态，不是 Task 级</text>
+    <text class="s" x="1360" y="348" text-anchor="middle">禁止直接重放（§4.8 :596）</text>
+
+    <!-- 底部说明 -->
+    <text class="s" x="40" y="424" style="font-size:11.5px">
+      附录 C :1234 原话「重试超限、需授权、结果未知这三条路在图上不存在」——
+      三者都落到同一个 BLOCKED，靠 reason 区分；「结果未知」在 Step 级另有 UNKNOWN，两者不可混。
+    </text>
+    <text class="s" x="40" y="446" style="font-size:11.5px">
+      草稿 tmp/arch-v2.html 把它们画成 BLOCKED / UNKNOWN / RETRY_EXHAUSTED 三个并列 Task 节点，
+      与 §4.2 的 13 态不符：RETRY_EXHAUSTED 不是状态，是 reason 的取值。
+    </text>
+    <text class="s" x="40" y="468" style="font-size:11.5px">
+      <tspan style="fill:#de2d29;font-weight:600">规范缺口（本图如实标出，不自行补值）：</tspan>
+      §4.2 :441 要求 resume_to 必填且取 SPEC_LOCKED/EXECUTING/VERIFYING/DELIVERING 之一，
+      但 T13（retry_exhausted）与 T17 的迁移行没有写 resume_to；T17 连 reason 也没写。这两个洞需要规范补。
+    </text>
+  </svg>
+</div>
+
+<!-- ============ 对照表 ============ -->
+<div class="board" id="board-map">
+  <h2>七条 + 三条的落地对照（每条都能追到规范行号）</h2>
+  <table class="map">
+    <thead>
+      <tr><th style="width:36px">#</th><th style="width:210px">问题</th><th style="width:330px">规范依据（节 : 行）</th><th>本图怎么改的</th></tr>
+    </thead>
+    <tbody>
+      <tr><td>1</td><td>缺 BLOCKED 分支</td><td>附录 C :1234 · §4.2 :433/:441/:443 · §4.4 T9/T11/T13/T17/T21/T22/T23</td><td><b>图 C 全幅。</b>BLOCKED 单节点 + 5 个 reason + 4 个 resume_to + T22 恢复 / T23 取消</td></tr>
+      <tr><td>2</td><td>事件总线只从 Verifier 出来</td><td>附录 C :1235 · §5.2 :715–725（9 类事件来自 6 个不同模块）</td><td><b>图 A 右侧竖带。</b>8 条上报边，来自 IntentGate / MemoryView / System1_Voice / TaskEngine / Worker / Verifier / 交付执行器 / BLOCKED</td></tr>
+      <tr><td>3</td><td><code>Task_Contract</code> 被画成进程</td><td>附录 C :1236 · §4.1 :419（契约只有一份，Step 不持有副本）</td><td><b>图 A 虚线直角框</b>，标「数据不执行 / version 冻结后只读」</td></tr>
+      <tr><td>4</td><td><code>Sync</code> 边语义不明</td><td>附录 C :1237 · §5.2 :719 · §5.6 :813–817</td><td><b>拆成两条：</b><code>read</code>（MemoryService→MemoryView→IntentGate，派单前补槽）与 <code>promoted/confirmed</code>（验收后写回，粗实线）</td></tr>
+      <tr><td>5</td><td>五阶段线性播放</td><td>附录 C :1238 · §5.7 :829–847（e1–e17 真实时间戳）</td><td><b>图 B 时间轴 + 四泳道</b>，横轴是真实 ts；同一竖线 = 同时发生（两条 Step 并发已标出）</td></tr>
+      <tr><td>6</td><td>缺「用户」参与者</td><td>附录 C :1239 · §5.2 :720 · §5.3 :747–754</td><td><b>图 A 顶部 + 图 C 右侧</b>「用户 · 神谕祭坛」，ASK_USER / CONFIRM_CONTRACT / ANSWER / APPROVE_SIDE_EFFECT 都连到它</td></tr>
+      <tr><td>7</td><td>缺记忆写回回边</td><td>附录 C :1240 · §5.6 :811–817（5 个 action）</td><td><b>图 A 两条：</b><code>distilled</code> 细虚线（来自打回）· <code>promoted/confirmed</code> 粗实线（来自用户确认），粗细不同</td></tr>
+      <tr><td>A</td><td>§2.3 的 <code>IntentGate</code> 是独立模块</td><td>§2.3 :96 · §5.2 :719（发 CONTRACT_PROPOSED）</td><td><b>图 A 判断层独立节点</b>，与 System1_Voice 分开，出边到契约</td></tr>
+      <tr><td>B</td><td>§2.3 的 <code>Worker 池</code></td><td>§2.3 :99 · §2.1 P3 :54（执行者不自评）</td><td><b>图 A 执行层独立节点</b>：TaskEngine → 派单 → Worker → 产出物 → Verifier；Worker 与 Verifier 分开才能表达 P3</td></tr>
+      <tr><td>C</td><td>交付不是 Verifier 的出口</td><td>§2.1 P4 :55 · §5.2 :723（DELIVERY_EFFECT 由「交付执行器」发）</td><td><b>图 A 独立「交付执行器」节点</b>，入口来自 TaskEngine 的 ACCEPTED→DELIVERING；Verifier 不直接连用户</td></tr>
+    </tbody>
+  </table>
+</div>
+
+</div>
+</body>
+</html>
