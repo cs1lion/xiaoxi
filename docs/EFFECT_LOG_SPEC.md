@@ -34,24 +34,42 @@ if count != 1:
 
 ## 二、一条 `effect_log` 记录是什么
 
-定为一个 **dict**（落盘时是 JSON 行），字段与 §5.2 的 `DELIVERY_EFFECT` 载荷对齐：
+定为 **frozen dataclass**（`server/task/model.py` 的 `EffectRecord`），字段与 §5.2 的
+`DELIVERY_EFFECT` 载荷对齐：
 
-```jsonc
-{
-  "effect_id": "se_1",              // 必填。本条记录自身的 id，重放时新生成
-  "idempotency_key": "ct_1:se_1",   // 必填。幂等键，契约层给，同一副作用永远同一键
-  "type": "send_message",           // 必填。副作用类型，取自 side_effects[].type
-  "target_class": "self",           // 必填。本机 / 远端 / 他人
-  "status": "done",                 // 必填。done | failed | replayed（见第三节）
-  "attempt": 1,                     // 必填。第几次尝试，从 1 开始
-  "at": 1761000023500,              // 必填。epoch ms，服务端时钟
-  "detail": ""                      // 可选。失败原因 / 远端回执摘要，不进任何账目判断
-}
+```python
+EFFECT_STATUSES = ("done", "failed", "replayed")   # 闭集
+
+@dataclass(frozen=True)
+class EffectRecord:
+    idempotency_key: str          # 必填。幂等键，契约层给，同一副作用永远同一键
+    status: str                   # 必填。闭集三值之一，构造时校验
+    type: str = ""                # 副作用类型，取自 side_effects[].type
+    target_class: str = ""        # 本机 / 远端 / 他人
+    at: int = 0                   # epoch ms，服务端时钟
+
+    def __post_init__(self):
+        if not self.idempotency_key:
+            raise ValueError("EffectRecord 缺少 idempotency_key")
+        if self.status not in EFFECT_STATUS_SET:
+            raise ValueError(f"EffectRecord.status 必须是 {EFFECT_STATUSES} 之一，实际 {self.status!r}")
 ```
 
-**为什么是 dict 而不是 tuple**：`status` 和 `attempt` 是 T20 判定的必需信息，
-而 `detail` 是给人看的。用 dict 之后，将来加字段不破坏读者（JSON 容忍未知键），
-用 tuple 则每次加字段都要改所有读它的地方。
+**为什么是 frozen dataclass 而不是 dict**（`3f950f8` 按首席架构意见改，原草案写的是 dict）：
+
+`status` 是**闭集**。用 dict 时 `status="DONE"` 或拼错成 `"succes"` 会**静默**落进
+「不是 done」的分支，T20 把它当失败记录、永远拒绝，而没人知道是拼错了——
+**这跟 T20 原本那个 bug 是同一种形状：读不到就不报错，只给出错误结论。**
+
+dataclass 在**构造时**炸（`__post_init__` 校验闭集），与本包既有纪律一致：
+`failures.py:114/133/145`、`retry.py:149`、`SideEffectDecl.from_mapping`
+都是「构造时 raise ValueError，不在守卫里兜」。实测 `status="DONE"` 直接抛错。
+
+**`attempt` 和 `detail` 不加**（首席架构意见，原草案有这两个字段）：
+`attempt` 现在没有消费者——T20 不看他，加了就是凭猜测设计；
+且它将来的「按 attempt 去重」会和「按 key 去重」打架。
+真要追溯重试，`at` + `status` 序列已经够看出来。等第 6 步 `delivery.py`
+真实现时，它知道自己需要什么，那时再加。
 
 ---
 
