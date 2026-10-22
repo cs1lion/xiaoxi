@@ -4,7 +4,7 @@ import { readFileSync } from 'node:fs';
 import { parseBlueprintTable } from '../src/world/blueprints.ts';
 import { buildLargeWorld } from '../src/world/setup.ts';
 import { Simulation } from '../src/world/simulation.ts';
-import { summarizeWorld } from '../src/world/world-state.ts';
+import { describeWorldState, summarizeWorld } from '../src/world/world-state.ts';
 
 const blueprints = parseBlueprintTable(
   JSON.parse(
@@ -156,4 +156,40 @@ test('没有缺口时，回应退回「想扩建就说建个工坊」', () => {
   sim.enqueue({ kind: 'oracle', raw: '建一间书阁' });
   const result = sim.update(16)[0];
   assert.match(result?.message ?? '', /建个工坊/);
+});
+
+// ------------------------------------------------------------------ 给界面用的摘要
+
+test('界面摘要：一行说清镇内郊野、缺口、可建模板', () => {
+  const sim = makeSim();
+  const state = summarizeWorld(sim.snapshot());
+  const line = describeWorldState(state);
+
+  assert.match(line, /镇内 3/);
+  assert.match(line, /郊野 3/);
+  // 没有缺口时不该出现「缺」字。
+  assert.ok(!line.includes('缺'), `没有缺口时不该提：${line}`);
+});
+
+test('有缺口时，摘要点名缺哪一类（用纸面说法）', () => {
+  const world = buildLargeWorld(blueprints);
+  const without = world.buildings.filter((b) => b.instanceId !== 'crawler_mine#1');
+  const sim = new Simulation({
+    grid: world.grid,
+    buildings: without,
+    altar: world.altar,
+    villagerName: '莞尔',
+    wallClock: () => 1000,
+    blueprints,
+  });
+
+  const line = describeWorldState(summarizeWorld(sim.snapshot()));
+  assert.match(line, /缺/);
+  assert.match(line, /查资料/, '要说「查资料」，不是 research');
+});
+
+test('摘要里说得出郊野还剩多少空地', () => {
+  const sim = makeSim();
+  const line = describeWorldState(summarizeWorld(sim.snapshot()));
+  assert.match(line, /空地/);
 });

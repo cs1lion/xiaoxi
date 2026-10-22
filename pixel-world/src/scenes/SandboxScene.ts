@@ -25,6 +25,7 @@ import { bakeLayer, type BakedLayer } from '../render/bake.ts';
 import { shouldAnimateAt, targetFpsFor } from '../render/eco-mode.ts';
 import { fogAt } from '../world/fog.ts';
 import { awaitingDecree } from '../world/decree.ts';
+import { describeWorldState, summarizeWorld } from '../world/world-state.ts';
 import { parseCreationPlan } from '../world/creator-schema.ts';
 import { checkPlacement, hintFor } from '../world/setup.ts';
 import { parsePhaseParam, phaseAt, type PhaseId } from '../render/day-phase.ts';
@@ -896,6 +897,14 @@ export class SandboxScene extends Phaser.Scene {
           finished: [],
           connected: true,
         });
+      },
+      /** 世界状态摘要：界面据此显示"世界缺什么"。 */
+      worldState: () => {
+        const state = summarizeWorld(this.snapshot);
+        return {
+          line: describeWorldState(state),
+          missingWild: state.gaps.missingWild,
+        };
       },
       /** 当前该呈给用户的急件；没有则为 null。 */
       decree: () => awaitingDecree(this.snapshot),

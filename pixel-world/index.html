@@ -70,6 +70,18 @@
           2px 2px 0 0 color-mix(in srgb, var(--base) 55%, transparent);
       }
       #minimap canvas { display: block; image-rendering: pixelated; }
+      /* 世界状态：造物区上方一行，说清镇内郊野与缺口。
+         用纸面底色 + 琥珀左边线，让它读成"一块状态"，而不是一行灰字。 */
+      .world-state {
+        color: var(--ink);
+        font-size: 12px;
+        line-height: 1.7;
+        padding: 6px 10px;
+        margin: 2px 0 4px;
+        background: color-mix(in srgb, var(--base) 60%, transparent);
+        border-left: 2px solid var(--amber);
+        letter-spacing: 0.02em;
+      }
       /* 动态中文 DOM overlay（D5-A）：按 canvas 实际位置换算，不遮输入/纸面。 */
       #world-overlay {
         position: absolute;
@@ -402,7 +414,8 @@
         <button type="button" data-kind="quick">顺手看一眼</button>
         <button type="button" id="finish">现实完成：交付</button>
       </div>
-      <div class="row">
+      <div class="world-state" id="world-state" aria-live="polite">世界正在醒来…</div>
+      <div class="row" id="build-row">
         <button type="button" data-build="workshop_plot">世界法则：扩建一栋工坊</button>
         <button type="button" data-create="workshop_plot">造物模式：选位置扩建</button>
         <button type="button" id="rain">世界法则：下雨</button>

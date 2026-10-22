@@ -9,7 +9,7 @@
  */
 
 import { WILD_PREFABS } from './setup.ts';
-import { WORKSHOP_TASKS } from './tasks.ts';
+import { TASK_PROFILES, WORKSHOP_TASKS } from './tasks.ts';
 import type { TaskKind, WorldSnapshot } from './types.ts';
 
 /** 某一类活的铺子覆盖情况。 */
@@ -98,4 +98,42 @@ export function summarizeWorld(snapshot: WorldSnapshot): WorldState {
       missingWild: taskKinds.filter((entry) => entry.wild === 0).map((entry) => entry.kind),
     },
   };
+}
+
+/**
+ * 每类活对应的**郊野**模板 id。
+ *
+ * 补缺时界面据此决定建哪栋。与 `setup.ts` 的 `WILD_PREFABS` 同源：
+ * 那边是"哪些是郊野铺子"，这边是"哪类活该建哪栋"。
+ */
+export const WILD_PREFAB_OF: Readonly<Record<TaskKind, string>> = {
+  code: 'gear_tower',
+  research: 'crawler_mine',
+  writing: 'ink_mill',
+  quick: 'workshop_plot',
+};
+
+/**
+ * 给界面用的一行摘要。
+ *
+ * 一行说完：镇内几栋、郊野几栋、还剩多少空地、缺什么。
+ * 缺什么用纸面说法（「查资料」），不是内部枚举名——这一行是给人看的。
+ */
+export function describeWorldState(state: WorldState): string {
+  const parts: string[] = [
+    `镇内 ${state.buildings.town} 栋`,
+    `郊野 ${state.buildings.wild} 栋`,
+  ];
+  // 每类活各几栋：这一行是玩家判断"世界长什么样"的主要依据，
+  // 只说总数等于没说——3 栋可能是三类各一栋，也可能是两类各一栋加一栋空的。
+  const perKind = state.taskKinds
+    .map((entry) => `${TASK_PROFILES[entry.kind].label} 镇内${entry.town} / 郊野${entry.wild}`)
+    .join('、');
+  parts.push(`（${perKind}）`);
+  parts.push(`空地约 ${state.space.wildFree} 栋`);
+  if (state.gaps.missingWild.length > 0) {
+    const labels = state.gaps.missingWild.map((kind) => TASK_PROFILES[kind].label);
+    parts.push(`缺${labels.join('、')}的郊野铺子`);
+  }
+  return parts.join('　·　');
 }

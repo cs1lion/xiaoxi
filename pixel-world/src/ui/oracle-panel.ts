@@ -4,6 +4,10 @@
  * 免得上层要维护两套意图解析。
  */
 
+import { TASK_PROFILES } from '../world/tasks.ts';
+import { WILD_PREFAB_OF } from '../world/world-state.ts';
+import type { TaskKind } from '../world/types.ts';
+
 export interface OracleApi {
   /** 只表示这句话认没认出。世界是否照办在下一个逻辑拍结算，结果走 onResult。 */
   readonly say: (text: string) => { readonly ok: boolean; readonly message: string };
@@ -26,6 +30,11 @@ export interface OracleApi {
   readonly creation: () => { readonly prefabId: string; readonly ghostAt: unknown } | null;
   /** 调试注入：造一条 blocked 单验证急件流程。 */
   readonly injectBlocked: (id: string, title: string, question: string) => void;
+  /** 世界状态摘要：镇内郊野、空地、缺口。 */
+  readonly worldState: () => {
+    readonly line: string;
+    readonly missingWild: readonly string[];
+  };
   /** 当前急件：台账 blocked 单的完整问题。 */
   readonly decree: () => { readonly commissionId: string; readonly question: string; readonly title: string } | null;
   /** 渲染统计：绘制对象数与指令总量。 */
@@ -93,6 +102,8 @@ export function bindOraclePanel(getApi: () => OracleApi | undefined): void {
   const decreePanel = document.querySelector<HTMLElement>('#decree');
   const decreeTitle = document.querySelector<HTMLSpanElement>('#decree-title');
   const decreeQuestion = document.querySelector<HTMLElement>('#decree-question');
+  const worldStateLine = document.querySelector<HTMLDivElement>('#world-state');
+  const buildRow = document.querySelector<HTMLDivElement>('#build-row');
   if (
     form === null ||
     input === null ||
@@ -106,7 +117,9 @@ export function bindOraclePanel(getApi: () => OracleApi | undefined): void {
     slabLines === null ||
     decreePanel === null ||
     decreeTitle === null ||
-    decreeQuestion === null
+    decreeQuestion === null ||
+    worldStateLine === null ||
+    buildRow === null
   ) {
     return;
   }
@@ -165,6 +178,35 @@ export function bindOraclePanel(getApi: () => OracleApi | undefined): void {
     decreeQuestion.textContent = decree.question;
   };
 
+  /**
+   * 世界状态行 + 按缺口生成的造物按钮。
+   *
+   * 缺口按钮只在真有缺口时出现：世界不缺东西的时候，多一排按钮只是噪音。
+   */
+  const paintWorldState = (api: OracleApi): void => {
+    const state = api.worldState();
+    worldStateLine.textContent = state.line;
+
+    // 清掉上一次按缺口生成的按钮，保留固定的那几个。
+    for (const button of [...buildRow.querySelectorAll('button[data-gap]')]) {
+      button.remove();
+    }
+    for (const kind of state.missingWild) {
+      const button = document.createElement('button');
+      button.type = 'button';
+      button.dataset.gap = kind;
+      button.textContent = `补缺：建${TASK_PROFILES[kind as TaskKind]?.label ?? kind}铺子`;
+      button.addEventListener('click', () => {
+        const current = getApi();
+        if (current === undefined) return;
+        const prefabId = WILD_PREFAB_OF[kind as TaskKind];
+        if (prefabId === undefined) return;
+        show(true, current.beginCreation(prefabId).message);
+      });
+      buildRow.appendChild(button);
+    }
+  };
+
   const show = (ok: boolean, message: string): void => {
     reply.textContent = message;
     reply.classList.toggle('bad', !ok);
@@ -186,10 +228,12 @@ export function bindOraclePanel(getApi: () => OracleApi | undefined): void {
       paintPaper(api);
       paintSlab(api);
       paintDecree(api);
+      paintWorldState(api);
     });
     paintPaper(api);
     paintSlab(api);
     paintDecree(api);
+    paintWorldState(api);
   };
   subscribe();
 
