@@ -212,9 +212,18 @@ def test_a_gates():
           gap_checks(mk_draft(permissions_required=("L1", ""))) == ["G6"])
     check("G6 拦下·权限含非字符串",
           gap_checks(mk_draft(permissions_required=("L1", 3))) == ["G6"])
-    # 冻结项：权限等级合法性不校验（§7 缺失）——拿到乱码等级也应当放过 G6
-    check("G6 冻结项·乱码等级也放行（不校验等级合法性）",
-          "G6" not in gap_checks(mk_draft(permissions_required=("NONSENSE_LEVEL",))))
+    # §6.2（L0–L6）取代了缺失的 §7.1，规范 L954 原话：「permissions_required 的取值域
+    # 就在这张表。G6 从『非空字符串』升级为『必须在本表内』。」原「冻结项：不校验等级
+    # 合法性」的前提已不成立，改为双向断言。
+    # 注：shape 层（parse_contract）是否也要同步校验等级，架构尚未裁定（issue 503），
+    # 这里只动 gate 层；shape 层那处断言保持原样，等裁定后单独一次提交。
+    for level in ("L0", "L1", "L2", "L3", "L4", "L5", "L6"):
+        check(f"G6 合法等级 {level} 不产生 gap",
+              "G6" not in gap_checks(mk_draft(permissions_required=(level,))))
+    for bad in ("NONSENSE_LEVEL", "L7", "l1", "", "L", "L10"):
+        check(f"G6 非法等级 {bad!r} 被拦下",
+              gap_checks(mk_draft(permissions_required=("L1", bad))) == ["G6"],
+              str(gap_checks(mk_draft(permissions_required=("L1", bad)))))
 
     # 每轮只问 1 个：collect_gaps 给全量，evaluate 只暴露第一个
     multi = mk_draft(goal=None, artifact=None, budget=None)
