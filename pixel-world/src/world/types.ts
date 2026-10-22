@@ -78,7 +78,9 @@ export type VillagerMode =
   | 'working'
   | 'delivering'
   | 'toAltar'
-  | 'sheltering';
+  | 'sheltering'
+  /** 举着急件跑去祭坛：台账有单在等人答复。 */
+  | 'bearingDecree';
 
 export type TaskStatus = 'assigned' | 'in_progress' | 'done' | 'failed';
 

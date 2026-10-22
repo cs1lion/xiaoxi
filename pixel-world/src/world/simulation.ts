@@ -10,6 +10,7 @@ import type { WorldGrid } from './grid.ts';
 import { TASK_PROFILES } from './tasks.ts';
 import { pickVenue, type VenueCandidate } from './venue.ts';
 import { revealedRadiusFor } from './fog.ts';
+import { awaitingDecree } from './decree.ts';
 /**
  * 郊野铺子的 prefab id。
  *
@@ -230,6 +231,8 @@ export class Simulation {
   private critters: Critter[] = [];
   /** 神迹编号：世界内自增，不用时间戳/随机数，保证可回放。 */
   private nextMiracleNumber = 1;
+  /** 正在举急件的那位角色；null 表示没有急件在呈。 */
+  private decreeBearer: string | null = null;
   private readonly roads: GridPoint[] = [];
   private readonly constructions = new Map<string, WorkstationState>();
 
@@ -322,6 +325,7 @@ export class Simulation {
     this.stepConstructions(deltaMs);
     for (const villager of this.villagers) this.stepVillager(villager, deltaMs);
     this.stepWorkstations();
+    this.stepDecrees();
     this.stepCritters();
     for (const villager of this.villagers) this.expireBubble(villager);
     // 固定步长的最后一拍：每个空闲角色先接台账的活，再轮到自己队列里的神谕。
@@ -1157,6 +1161,16 @@ export class Simulation {
         this.walk(villager, deltaMs);
         if (villager.path.length === 0) this.arriveAtAltar(villager);
         return;
+      case 'bearingDecree':
+        this.walk(villager, deltaMs);
+        // 走到祭坛就停下举牌，等用户点开。**不自己回去**：
+        // 问题没答完之前，急件一直呈在那里。
+        if (villager.path.length === 0) {
+          villager.mode = 'idle';
+          villager.bubble = '有急件请旨';
+          villager.bubbleUntil = this.now + 4000;
+        }
+        return;
       case 'sheltering':
         this.walk(villager, deltaMs);
         if (villager.path.length === 0) {
@@ -1202,6 +1216,10 @@ export class Simulation {
       this.walk(villager, deltaMs);
       return;
     }
+    // 举着急件的人不走作息：他得守在祭坛等答复。
+    // 不加这条，他一到祭坛就被作息带走，急件呈不出来（实测 v1 在祭坛
+    // 停一拍就溜去农田）。
+    if (this.decreeBearer === villager.id && this.hasDecree()) return;
     if (this.now < villager.nextRoutineAt) return;
 
     // 已经站在这一拍的落点上就跳过它，否则开局会在祭坛上干坐一轮。
@@ -1391,6 +1409,55 @@ export class Simulation {
     this.milestones += 1;
     // 日志写清是哪一单换的：这是"被记住"在事件流里的第一次落地。
     this.log('info', `神恩落地：${describePropSource(prop)}。`);
+  }
+
+  /**
+   * 有 blocked 单就派一个人把急件送到祭坛。
+   *
+   * 只在没人已经举着的时候派：一次只呈一张，同时三个人举牌会把祭坛变收件箱。
+   * 送件的人挑第一个空闲的；都忙就等下一拍——不打断正在干的活。
+   */
+  private stepDecrees(): void {
+    const decree = awaitingDecree(this.snapshotForDecree());
+    if (decree === null) {
+      this.decreeBearer = null;
+      return;
+    }
+    if (this.decreeBearer !== null) {
+      const bearer = this.villagers.find((item) => item.id === this.decreeBearer);
+      // 已在位：正在跑，或者已经到了并站在祭坛旁。
+      // 判「到没到」用位置而不是 bubble——bubble 会过期，过期后这里会
+      // 误判成"没人送"再派一次，把已经举着的人重新派出去。
+      if (bearer !== undefined) {
+        const atAltar =
+          Math.abs(bearer.pos.x - this.altar.x) < 1.5 &&
+          Math.abs(bearer.pos.y - this.altar.y) < 1.5;
+        if (bearer.mode === 'bearingDecree' || atAltar) return;
+      }
+      this.decreeBearer = null;
+    }
+
+    const free = this.villagers.find((item) => item.mode === 'idle' && item.path.length === 0);
+    if (free === undefined) return;
+
+    const path = this.grid.path(this.cellOf(free.pos), this.altar);
+    if (path.length === 0) return;
+    free.mode = 'bearingDecree';
+    free.path = path;
+    free.bubble = '急件！';
+    free.bubbleUntil = this.now + 3000;
+    this.decreeBearer = free.id;
+    this.log('warn', `急件请旨：${decree.title}`);
+  }
+
+  /** 当前是否有待答复的急件。 */
+  private hasDecree(): boolean {
+    return awaitingDecree(this.snapshotForDecree()) !== null;
+  }
+
+  /** 造一个只含台账单的视图给 `awaitingDecree` 用。 */
+  private snapshotForDecree(): WorldSnapshot {
+    return { ...this.snapshot(), tasks: this.tasks };
   }
 
   /** 到点的猫自己走开。猫不参与任何结算，这里只做退场。 */

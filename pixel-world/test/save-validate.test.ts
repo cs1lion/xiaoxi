@@ -268,7 +268,7 @@ test('task-32：四种合法存档全部通过（样例 / fresh / 走路中 / �
 });
 
 test('task-32：枚举常量与 types.ts 联合类型逐项对齐', () => {
-  assert.deepEqual([...VILLAGER_MODES].sort(), ['delivering', 'idle', 'saluting', 'sheltering', 'toAltar', 'toWork', 'working']);
+  assert.deepEqual([...VILLAGER_MODES].sort(), ['bearingDecree', 'delivering', 'idle', 'saluting', 'sheltering', 'toAltar', 'toWork', 'working']);
   assert.deepEqual([...TASK_STATUSES].sort(), ['assigned', 'done', 'failed', 'in_progress']);
   assert.deepEqual([...TASK_KINDS].sort(), ['code', 'quick', 'research', 'writing']);
   assert.deepEqual([...TASK_SOURCES].sort(), ['ledger', 'sandbox']);

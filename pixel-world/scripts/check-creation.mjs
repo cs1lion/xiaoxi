@@ -173,6 +173,30 @@ const fogCheck = await page.evaluate(() => {
 });
 check(fogCheck.allowed === false, '迷雾区不能建', JSON.stringify(fogCheck));
 
+// 急件请旨：blocked 单必须完整呈现在纸面上。
+const decreeQuestion = '要执行 rm -rf ./temp_build 吗？这个目录里有 3 个未提交的文件。';
+await page.evaluate(
+  (q) => window.Oracle.injectBlocked('c_decree', '清理临时目录', q),
+  decreeQuestion,
+);
+await page.waitForTimeout(800);
+const decreeState = await page.evaluate(() => ({
+  decree: window.Oracle.decree(),
+  panelHidden: document.querySelector('#decree')?.hidden,
+  shown: document.querySelector('#decree-question')?.textContent ?? '',
+}));
+check(
+  decreeState.decree?.question === decreeQuestion,
+  '急件保留完整问题原文',
+  decreeState.decree?.question ?? 'null',
+);
+check(decreeState.panelHidden === false, '急件面板显示出来');
+check(
+  decreeState.shown === decreeQuestion,
+  '纸面显示的是完整原文，没有截断',
+  decreeState.shown,
+);
+
 check(errors.length === 0, '全程无 JS 报错', errors.join('; '));
 
 await browser.close();

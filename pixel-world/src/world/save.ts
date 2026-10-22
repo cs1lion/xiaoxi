@@ -398,6 +398,7 @@ function assertKeys(
 /** 合法枚举值（与 types.ts 的联合类型逐项对应，改一处必须同步）。 */
 export const VILLAGER_MODES: readonly VillagerMode[] = [
   'idle', 'saluting', 'toWork', 'working', 'delivering', 'toAltar', 'sheltering',
+  'bearingDecree',
 ];
 export const TASK_STATUSES: readonly TaskStatus[] = ['assigned', 'in_progress', 'done', 'failed'];
 export const TASK_KINDS: readonly TaskKind[] = ['code', 'research', 'writing', 'quick'];

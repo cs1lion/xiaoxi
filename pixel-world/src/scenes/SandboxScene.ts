@@ -24,6 +24,7 @@ import { createFogView, type FogView } from '../render/fog-view.ts';
 import { bakeLayer, type BakedLayer } from '../render/bake.ts';
 import { shouldAnimateAt, targetFpsFor } from '../render/eco-mode.ts';
 import { fogAt } from '../world/fog.ts';
+import { awaitingDecree } from '../world/decree.ts';
 import { checkPlacement, hintFor } from '../world/setup.ts';
 import { parsePhaseParam, phaseAt, type PhaseId } from '../render/day-phase.ts';
 import { createDecorView, type DecorView } from '../render/decor.ts';
@@ -823,6 +824,29 @@ export class SandboxScene extends Phaser.Scene {
       confirmCreation: (): CommandResult => this.confirmCreation(),
       cancelCreation: (): CommandResult => this.cancelCreation(),
       creation: () => this.creating(),
+      /**
+       * 调试注入：造一条 blocked 的台账督办，用来验证急件流程。
+       * 只供调试面板与浏览器回归用，正常路径不会有调用方。
+       */
+      injectBlocked: (commissionId: string, title: string, question: string): void => {
+        this.sim.enqueue({
+          kind: 'sync',
+          tasks: [
+            {
+              commissionId,
+              kind: 'code',
+              title,
+              agentName: '甲',
+              status: 'blocked',
+              blockedQuestion: question,
+            },
+          ],
+          finished: [],
+          connected: true,
+        });
+      },
+      /** 当前该呈给用户的急件；没有则为 null。 */
+      decree: () => awaitingDecree(this.snapshot),
       /** 省电模式状态：当前帧率上限与焦点。 */
       ecoState: () => ({
         fpsLimit: this.game.loop.fpsLimit,
@@ -1047,6 +1071,7 @@ export class SandboxScene extends Phaser.Scene {
           delivering: '正在交付',
           toAltar: '回到祭坛',
           sheltering: '跑到屋檐下躲雨',
+          bearingDecree: '举着急件跑向祭坛',
         };
         return `${villager.name}：${modeLabel[villager.mode]}`;
       })

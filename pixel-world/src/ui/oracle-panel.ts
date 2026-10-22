@@ -24,6 +24,10 @@ export interface OracleApi {
   readonly confirmCreation: () => { readonly ok: boolean; readonly message: string };
   readonly cancelCreation: () => { readonly ok: boolean; readonly message: string };
   readonly creation: () => { readonly prefabId: string; readonly ghostAt: unknown } | null;
+  /** 调试注入：造一条 blocked 单验证急件流程。 */
+  readonly injectBlocked: (id: string, title: string, question: string) => void;
+  /** 当前急件：台账 blocked 单的完整问题。 */
+  readonly decree: () => { readonly commissionId: string; readonly question: string; readonly title: string } | null;
   /** 渲染统计：绘制对象数与指令总量。 */
   readonly renderStats: () => {
     readonly graphicsObjects: number;
@@ -86,6 +90,9 @@ export function bindOraclePanel(getApi: () => OracleApi | undefined): void {
   const paperDate = document.querySelector<HTMLSpanElement>('#paper-date');
   const slabCount = document.querySelector<HTMLSpanElement>('#slab-count');
   const slabLines = document.querySelector<HTMLOListElement>('#slab-lines');
+  const decreePanel = document.querySelector<HTMLElement>('#decree');
+  const decreeTitle = document.querySelector<HTMLSpanElement>('#decree-title');
+  const decreeQuestion = document.querySelector<HTMLElement>('#decree-question');
   if (
     form === null ||
     input === null ||
@@ -96,7 +103,10 @@ export function bindOraclePanel(getApi: () => OracleApi | undefined): void {
     paperLines === null ||
     paperDate === null ||
     slabCount === null ||
-    slabLines === null
+    slabLines === null ||
+    decreePanel === null ||
+    decreeTitle === null ||
+    decreeQuestion === null
   ) {
     return;
   }
@@ -138,6 +148,23 @@ export function bindOraclePanel(getApi: () => OracleApi | undefined): void {
     );
   };
 
+  /**
+   * 急件：把台账 blocked 单的完整问题呈出来。
+   *
+   * 这里**只展示**，不给「准奏/驳回」按钮：世界是纯投影，改台账状态是主产品的事。
+   * 放一对按不动的印章比不放更糟——用户会以为点了就该有反应。
+   */
+  const paintDecree = (api: OracleApi): void => {
+    const decree = api.decree();
+    if (decree === null) {
+      decreePanel.hidden = true;
+      return;
+    }
+    decreePanel.hidden = false;
+    decreeTitle.textContent = decree.title;
+    decreeQuestion.textContent = decree.question;
+  };
+
   const show = (ok: boolean, message: string): void => {
     reply.textContent = message;
     reply.classList.toggle('bad', !ok);
@@ -158,9 +185,11 @@ export function bindOraclePanel(getApi: () => OracleApi | undefined): void {
       status.textContent = line;
       paintPaper(api);
       paintSlab(api);
+      paintDecree(api);
     });
     paintPaper(api);
     paintSlab(api);
+    paintDecree(api);
   };
   subscribe();
 
