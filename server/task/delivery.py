@@ -31,7 +31,20 @@
    第 8 步发事件时构造不出来。
 3. 执行器抛异常时副作用**可能已经发生**（超时 ≠ 没执行），但交付层只有
    done/failed/replayed 三值，没有 unknown，所以这里只能记 failed。
-   缓解在幂等键本身：真实执行器必须尊重它，同一 key 不重复产生副作用。
+
+为什么这里不需要 unknown（刻意不补，不是漏）
+--------------------------------------------
+§4.8 的 `UNKNOWN` 属于**派发层**：派单发出去了，但不知道对方有没有开始执行。
+那一层必须对账，因为没有别的证据能回答「发出去的那条到底跑没跑」。
+
+交付层不同：`deliver()` 是**同步调用**，执行器的返回值就是结果——它返回了，
+就说明这次调用结束了；它抛异常，说明调用没正常返回。这里没有「在途」这个概念，
+所以没有 unknown 的位置。在这层再造一个对账机制，会与 `effect_log` 的三值 status
+打架（unknown 既不算成功也不算失败，T20 没有分支能处理它）。
+
+**真正的缓解在幂等键**：真实执行器必须尊重 `idempotency_key`——同一个 key
+不得产生第二个副作用。这样即使「执行了但记成 failed」再重试，也不会重复副作用。
+这条是执行器实现的契约，写在 `EffectExecutor` 的 docstring 里。
 """
 from __future__ import annotations
 
@@ -107,6 +120,16 @@ class DeliveryOutcome:
         return all(step.action != STEP_FAILED for step in self.steps)
 
 
+def _effect_id(effect: SideEffectDecl, action: str) -> str:
+    """本条记录的 id（§5.2 DELIVERY_EFFECT 的 `effect_id`）。
+
+    由「副作用的契约 id + 本次处置」组成：同一副作用被重试会产生多条记录，
+    `effect_id` 必须区分它们，否则 `APPROVE_SIDE_EFFECT` 定位不到是哪一次。
+    不引入随机数或时钟——那会让同输入不同输出，测试不可复现。
+    """
+    return f"{effect.id}:{action}"
+
+
 def _require_int(value: Any, name: str) -> int:
     if isinstance(value, bool) or not isinstance(value, int):
         raise ValueError(f"{name} 必须是整数，实际 {type(value).__name__}")
@@ -151,6 +174,7 @@ def deliver(
 
         if key in seen_done:
             records.append(EffectRecord(
+                effect_id=_effect_id(effect, STEP_REPLAYED),
                 idempotency_key=key,
                 status="replayed",
                 type=effect.type,
@@ -169,6 +193,7 @@ def deliver(
 
         if result.ok:
             records.append(EffectRecord(
+                effect_id=_effect_id(effect, STEP_EXECUTED),
                 idempotency_key=key,
                 status="done",
                 type=effect.type,
@@ -180,6 +205,7 @@ def deliver(
                 idempotency_key=key, action=STEP_EXECUTED, value=result.value))
         else:
             records.append(EffectRecord(
+                effect_id=_effect_id(effect, STEP_FAILED),
                 idempotency_key=key,
                 status="failed",
                 type=effect.type,
