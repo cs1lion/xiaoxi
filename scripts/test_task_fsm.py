@@ -1098,7 +1098,7 @@ def test_f_acceptance_cases() -> None:
     expect_guard("SM-11 两条 done 记录被拒", lambda: M.transition(
         task("DELIVERING"), "T20", TaskFacts(declared_effect_keys=("k1",),
                                             effect_records=(rec("k1"), rec("k1")))))
-    expect_ok("SM-11 重放只留 replayed 时仍算一条成功", M,
+    expect_ok("SM-11 一条 done + 一条 replayed 仍放行（重放不阻碍 T20）", M,
               task("DELIVERING"), "T20",
               TaskFacts(declared_effect_keys=("k1",),
                         effect_records=(rec("k1"), rec("k1", "replayed"))),
