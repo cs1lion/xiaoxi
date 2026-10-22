@@ -20,6 +20,14 @@
 from __future__ import annotations
 
 from .errors import GuardRejected, IllegalTransition, TransitionError
+from .events import (
+    ENVELOPE_VERSION,
+    EventEnvelope,
+    EventLogError,
+    append_event,
+    event_path,
+    next_seq,
+)
 from .delivery import (
     STEP_EXECUTED,
     STEP_FAILED,
@@ -101,6 +109,9 @@ __all__ = [
     # machine (§4.4 / §4.5)
     "TaskState", "StepState", "TransitionResult", "TransitionRule",
     "TASK_RULES", "STEP_RULES", "TaskMachine", "StepMachine",
+    # events (§7.1)
+    "ENVELOPE_VERSION", "EventEnvelope", "EventLogError",
+    "append_event", "event_path", "next_seq",
     # delivery (§4.9 / §5.2)
     "EffectResult", "EffectExecutor", "DeliveryStep", "DeliveryOutcome",
     "deliver", "pending_effects", "declared_keys",
