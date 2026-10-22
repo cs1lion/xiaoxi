@@ -382,7 +382,7 @@
     <code>resume_to</code>（4 个取值）。<b>没有 resume_to 的阻塞等于把任务丢进黑洞</b>（§4.2 :441）。
     右侧五个方块是 reason 的取值，不是并列的状态。
   </div>
-  <svg viewBox="0 0 1500 500" role="img" aria-label="BLOCKED 分支">
+  <svg viewBox="0 0 1500 520" role="img" aria-label="BLOCKED 分支">
     <defs>
       <marker id="c-ar" markerWidth="9" markerHeight="9" refX="8" refY="4.5" orient="auto"><path d="M0,0 L9,4.5 L0,9 z" fill="#727676"/></marker>
       <marker id="c-arw" markerWidth="9" markerHeight="9" refX="8" refY="4.5" orient="auto"><path d="M0,0 L9,4.5 L0,9 z" fill="#a86a00"/></marker>
@@ -405,7 +405,7 @@
     <rect class="node-fail" x="640" y="26" width="300" height="62" rx="8"/>
     <text class="s-mono" x="790" y="48" text-anchor="middle">need_clarification</text>
     <text class="s" x="790" y="65" text-anchor="middle">E_INPUT：输入路径不存在 / URL 不可达</text>
-    <text class="s" x="790" y="80" text-anchor="middle">E_INPUT 默认去向（§4.6 :562）· 迁移表未单列</text>
+    <text class="s" x="790" y="80" text-anchor="middle">T17（kind=human 标准）· resume_to=VERIFYING</text>
 
     <rect class="node-fail" x="640" y="100" width="300" height="62" rx="8"/>
     <text class="s-mono" x="790" y="122" text-anchor="middle">need_approval</text>
@@ -415,12 +415,12 @@
     <rect class="node-fail" x="640" y="174" width="300" height="62" rx="8"/>
     <text class="s-mono" x="790" y="196" text-anchor="middle">need_authorization</text>
     <text class="s" x="790" y="213" text-anchor="middle">E_PERMISSION：需要未授予的权限</text>
-    <text class="s" x="790" y="228" text-anchor="middle">T9 resume_to=SPEC_LOCKED · T13 未规定 resume_to</text>
+    <text class="s" x="790" y="228" text-anchor="middle">T9 resume_to=SPEC_LOCKED · T13 resume_to=EXECUTING</text>
 
     <rect class="node-fail" x="640" y="248" width="300" height="62" rx="8"/>
     <text class="s-mono" x="790" y="270" text-anchor="middle">retry_exhausted</text>
     <text class="s" x="790" y="287" text-anchor="middle">attempt ≥ max_retries，或失败签名重复</text>
-    <text class="s" x="790" y="302" text-anchor="middle">T13 / T17 均未规定 resume_to（规范缺口）</text>
+    <text class="s" x="790" y="302" text-anchor="middle">T13 resume_to=EXECUTING · T17 resume_to=VERIFYING</text>
 
     <rect class="node-fail" x="640" y="322" width="300" height="62" rx="8"/>
     <text class="s-mono" x="790" y="344" text-anchor="middle">ambiguous_result</text>
@@ -473,13 +473,17 @@
       三者都落到同一个 BLOCKED，靠 reason 区分；「结果未知」在 Step 级另有 UNKNOWN，两者不可混。
     </text>
     <text class="s" x="40" y="446" style="font-size:11.5px">
-      草稿 tmp/arch-v2.html 把它们画成 BLOCKED / UNKNOWN / RETRY_EXHAUSTED 三个并列 Task 节点，
-      与 §4.2 的 13 态不符：RETRY_EXHAUSTED 不是状态，是 reason 的取值。
+      <tspan style="fill:#a86a00;font-weight:600">仍待拍（规范已标「待拍」，本图不替它选）：</tspan>
+      E_INPUT 在 EXECUTING 阶段走哪条迁移、reason 取什么；E_BUDGET 软超限落 FAILED 还是 BLOCKED(need_approval)。
+      两处都只影响 T13 的 reason 取值域，拍板前 T13 保持 {retry_exhausted, need_authorization}。
     </text>
-    <text class="s" x="40" y="468" style="font-size:11.5px">
-      <tspan style="fill:#de2d29;font-weight:600">规范缺口（本图如实标出，不自行补值）：</tspan>
-      §4.2 :441 要求 resume_to 必填且取 SPEC_LOCKED/EXECUTING/VERIFYING/DELIVERING 之一，
-      但 T13（retry_exhausted）与 T17 的迁移行没有写 resume_to；T17 连 reason 也没写。这两个洞需要规范补。
+    <text class="s" x="40" y="466" style="font-size:11.5px">
+      <tspan style="fill:#008052;font-weight:600">2026-10-22 已由规范 6b23691 补齐：</tspan>
+      resume_to 集合补入 DISPATCHED（T11 原本就写它，是集合漏了）；T13 补 resume_to=EXECUTING；
+    </text>
+    <text class="s" x="40" y="486" style="font-size:11.5px">
+      T17 补 reason（retry_exhausted / need_clarification）+ resume_to=VERIFYING；need_clarification 的产生者补到 T17
+      （SM-17 原写「停在 VERIFYING」也一并改掉）。
     </text>
   </svg>
 </div>

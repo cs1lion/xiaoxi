@@ -35,30 +35,60 @@
 
 以下三处，我**没有自行补值**，而是照规范原样画并标出缺口。理由：这三处是规范内部不自洽，改图等于替规范做决定，应当由规范作者裁决。
 
-### 3.1 T13 / T17 缺 `resume_to`（图 C 底部红字标出）
+### 3.1 T13 / T17 缺 `resume_to` —— **已由规范 `6b23691` 补齐**
 
-§4.2 :441 明确规定「`BLOCKED.resume_to ∈ {SPEC_LOCKED, EXECUTING, VERIFYING, DELIVERING}`，**必须显式给出**：没有 `resume_to` 的阻塞等于把任务丢进黑洞」。
+提出时（对 `431ca65` 核）：§4.2 :441 明确要求 `resume_to` 必须显式给出，但 §4.4 里 **T13** 只写了 `reason`、没写 `resume_to`；**T17** 连 `reason` 都没写。
 
-但 §4.4 的迁移表里：
+**2026-10-22 10:46 规范 `6b23691` 的处理（与我建议的有一处不同）：**
 
-- **T13**（`EXECUTING → BLOCKED`）：只写了 `reason ∈ {retry_exhausted, need_authorization}`，**没写 `resume_to`**
-- **T17**（`VERIFYING → BLOCKED`）：连 `reason` 都没写，只有守卫条件
+| 项 | 我建议 | 规范实际采用 |
+|---|---|---|
+| T13 的 `resume_to` | `EXECUTING` | **`EXECUTING`** ✓ 一致 |
+| T17 的 `reason` | 「`retry_exhausted`，或由 human 标准走 `need_clarification`」 | **两种都写，且规定并存时取 `need_clarification`**（要人来判，比「再试也没用」更具体）——比我的建议细 |
+| T17 的 `resume_to` | `VERIFYING` | **`VERIFYING`** ✓ 一致 |
+| `need_clarification` 的产生者 | 未提 | **补到 T17**（见 3.2） |
+| `resume_to` 集合 | 未提 | **补入 `DISPATCHED`** —— 这是我没扫出来的，见 3.4 |
 
-**这直接违反 :441 自己的硬约束。** 建议规范补：T13 补 `resume_to=EXECUTING`，T17 补 `reason=retry_exhausted` + `resume_to=VERIFYING`（或由 human 标准走 `need_clarification`）。
+**最终状态（规范 `6b23691` 之后）**：
 
-### 3.2 `need_clarification` 没有对应的 Task 迁移行
+```
+T13  EXECUTING → BLOCKED   reason ∈ {retry_exhausted, need_authorization}   resume_to=EXECUTING
+T17  VERIFYING → BLOCKED   reason=retry_exhausted | need_clarification      resume_to=VERIFYING
+                           （两者并存时取 need_clarification）
+:441 resume_to ∈ {SPEC_LOCKED, DISPATCHED, EXECUTING, VERIFYING, DELIVERING}
+```
 
-§4.2 :443 列出 `reason ∈ {need_clarification, need_approval, need_authorization, retry_exhausted, ambiguous_result}`，共 5 个取值。
+图 C 已按 `6b23691` 更新，底部红字改为绿字「已补齐」，并列出具体补了什么。
 
-但 §4.4 迁移表里，`need_clarification` 只出现在 §4.6 :562 的 `E_INPUT` 去向栏（「`BLOCKED(need_clarification)`」），**迁移表里没有任何一行产生它**。
+### 3.2 `need_clarification` 没有对应的 Task 迁移行 —— **已由 `6b23691` 补到 T17**
 
-图 C 里我把它画出来了，但标注为「`E_INPUT` 默认去向（§4.6 :562）· 迁移表未单列」。
+提出时：§4.2 :443 列了 5 个 `reason` 取值，但迁移表里**没有任何一行产生 `need_clarification`**，它只出现在 §4.6 :562 的 `E_INPUT` 去向栏。
 
-### 3.3 `E_BUDGET` 的去向是二选一，图里只能画一条
+**规范 `6b23691` 的处理比我查到的更硬**：作者写了机械核对（`reason` 集合 ∩ 每行 T 表文本），原版跑出 `need_clarification <- NONE`，其余四个各有 T9/T11/T13/T21。**补到 T17**，理由是 SM-17 本就要求在 `VERIFYING` 停下等人判，而停下必须落成带 `resume_to` 的 `BLOCKED`，T17 是唯一承载 human 标准的迁移。
 
-§4.6 :565 写 `E_BUDGET` 的去向是「`FAILED` **或** `BLOCKED(need_approval)`」。这是二选一，不是固定边。图 A 里 FAILED 与 BLOCKED 并列，**没有连线**表达这个二选一，因为画成两条会与「T14 契约违规→FAILED」冲突。
+**连带改了 SM-17**：原文「停在 `VERIFYING` 等 `ANSWER`」——停在非终态等于没有阻塞记录的悬挂，与 :441 冲突；已改为迁到 `BLOCKED(need_clarification)`。
 
-如果规范能定下「什么情况下 `E_BUDGET` 落 `FAILED`、什么情况下落 `BLOCKED`」，图 A 就能补一条确定边。
+图 C 里 `need_clarification` 那格已从「迁移表未单列」改为「T17（kind=human 标准）· resume_to=VERIFYING」。
+
+### 3.3 `E_BUDGET` 的去向是二选一 —— **规范标为「待拍」，未替它选**
+
+§4.6 :565 写 `E_BUDGET` 的去向是「`FAILED` **或** `BLOCKED(need_approval)`」。这是二选一，不是固定边。
+
+**图 A 里没有画这个二选一的连线，原因是规范没给分派判据**——不是图的容量限制。同一份输入（`E_BUDGET`）能落两个终点，而规范没写什么情况下落哪个，画任何一条都是替规范做决定。
+
+> **更正**：本节初稿写的理由是「画成两条会与『T14 契约违规→FAILED』冲突」。**这个理由不成立**——T14 存在与画不画这两条边无关；真正的问题是**分派判据缺失**，不是与别的迁移冲突。
+
+**规范 `6b23691` 的处理**：明确写「本轮**没有**替它选」，迁移表保持原样（T14 的 `budget_hard_exhausted` → `FAILED`），`BLOCKED(need_approval)` 那条路的触发条件列入「待拍」。图 C 底部已加「仍待拍」一行，与规范同步。
+
+### 3.4 `resume_to` 集合漏了 `DISPATCHED` —— 我没扫出来，规范自己找出来的
+
+原 §4.2 :441 写 `resume_to ∈ {SPEC_LOCKED, EXECUTING, VERIFYING, DELIVERING}`，**没有 `DISPATCHED`**；而 T11 明写 `resume_to=DISPATCHED`。
+
+**按原集合，T11 产出的状态违反本节自己的约束。** 规范 `6b23691` 把 `DISPATCHED` 补进集合（以 T11 为准，不是删 T11）。
+
+**这条我漏了**：我核了 T13/T17 的 `resume_to` 缺失，但没做「所有 T 行出现的 `resume_to` 值是否都在集合内」这个反向核对。**正向查「缺什么」容易，反向查「多了什么」需要把枚举值全扫一遍。**
+
+> **教训**：判据「每个 `reason` 都要有产生它的迁移行」（正向）和「每个 `resume_to` 值都要在集合内」（反向）是**两个方向**，我做了第一个就以为覆盖完了。
 
 ---
 
