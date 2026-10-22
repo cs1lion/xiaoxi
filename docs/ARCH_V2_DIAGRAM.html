@@ -38,6 +38,8 @@
   .edge-b{stroke:var(--primary);stroke-width:2.6;fill:none}
   .edge-w{stroke:var(--warn);stroke-width:1.9;fill:none;stroke-dasharray:6 3}
   .edge-m{stroke:var(--positive);stroke-width:2.2;fill:none}
+  .edge-cur{stroke:#6a3fb8;stroke-width:2.4;fill:none}
+  .lbl-cur{fill:#6a3fb8;font-weight:600;font-size:10px;font-family:var(--ff-mono)}
   .edge-m-dash{stroke:var(--positive);stroke-width:1.3;fill:none;stroke-dasharray:4 3}
   .edge-faint{stroke:#c2c2c2;stroke-width:1.2;fill:none;stroke-dasharray:2 4}
   .lbl{font-family:var(--ff-mono);font-size:10px;fill:rgba(0,0,0,.66)}
@@ -73,13 +75,18 @@
 <!-- ============ A · 模块与数据流 ============ -->
 <div class="board" id="board-a">
   <h2>A · 模块与数据流（§2.3 模块关系、§5.2 事件清单）</h2>
-  <div class="note">右侧竖带 = 事件总线，横切所有后端模块，每个模块向右发事件（附录 C 第 2 条）。虚线直角框 = 数据，不执行（第 3 条）。</div>
-  <svg viewBox="0 0 1500 720" role="img" aria-label="模块与数据流">
+  <div class="note">
+    右侧竖带 = 事件总线，横切所有后端模块，每个模块向右发事件（附录 C 第 2 条）。虚线直角框 = 数据，不执行（第 3 条）。<br>
+    <b style="color:#a86a00">⚠ 本图所有 v2 事件名（§5.2 那九类）均为「提案，未生效」</b>——§5 标题即写明，落地需 <code>[PROTOCOL_REQUEST]</code>。
+    当前实际在跑的是下方那条实线通路（<code>commission_update</code> + REST 对账）。
+  </div>
+  <svg viewBox="0 0 1560 760" role="img" aria-label="模块与数据流">
     <defs>
       <marker id="a-ar" markerWidth="9" markerHeight="9" refX="8" refY="4.5" orient="auto"><path d="M0,0 L9,4.5 L0,9 z" fill="#727676"/></marker>
       <marker id="a-arb" markerWidth="9" markerHeight="9" refX="8" refY="4.5" orient="auto"><path d="M0,0 L9,4.5 L0,9 z" fill="#3186ff"/></marker>
       <marker id="a-arw" markerWidth="9" markerHeight="9" refX="8" refY="4.5" orient="auto"><path d="M0,0 L9,4.5 L0,9 z" fill="#a86a00"/></marker>
       <marker id="a-arm" markerWidth="9" markerHeight="9" refX="8" refY="4.5" orient="auto"><path d="M0,0 L9,4.5 L0,9 z" fill="#008052"/></marker>
+      <marker id="a-arc" markerWidth="9" markerHeight="9" refX="8" refY="4.5" orient="auto"><path d="M0,0 L9,4.5 L0,9 z" fill="#6a3fb8"/></marker>
     </defs>
 
     <!-- 层带 -->
@@ -145,8 +152,9 @@
 
     <!-- 总线竖带 -->
     <rect class="node-bus" x="1330" y="140" width="72" height="440" rx="8"/>
-    <text class="t" x="1366" y="360" text-anchor="middle" transform="rotate(-90 1366 360)">EventBus</text>
+    <text class="t" x="1366" y="330" text-anchor="middle" transform="rotate(-90 1366 330)">EventBus</text>
     <text class="s" x="1366" y="250" text-anchor="middle" transform="rotate(-90 1366 250)">横切所有后端模块</text>
+    <text class="s-mono" x="1366" y="470" text-anchor="middle" transform="rotate(-90 1366 470)" style="fill:#a86a00;font-weight:600">§5 提案 · 未生效 · 需 PROTOCOL_REQUEST</text>
 
     <!-- 出口层 -->
     <rect class="node-term" x="72" y="500" width="130" height="64" rx="8"/>
@@ -241,18 +249,27 @@
     <path class="edge-faint" d="M 692 340 L 1330 410"/>
     <path class="edge-faint" d="M 932 380 L 1330 440"/>
     <path class="edge-faint" d="M 872 530 L 1330 480"/>
-    <text class="lbl" x="1322" y="636" text-anchor="end">8 条上报边 · 每个后端模块都向右发事件</text>
+    <text class="lbl" x="1300" y="620" text-anchor="end">8 条上报边 · 每个后端模块都向右发事件</text>
 
-    <!-- 总线 -> 前端 -->
-    <path class="edge" d="M 1402 360 L 1450 360" marker-end="url(#a-ar)"/>
-    <text class="lbl" x="1406" y="352" style="font-size:9px">WS</text>
+    <!-- 总线 -> 前端（v2 提案通路，虚线） -->
+    <path class="edge" d="M 1402 330 L 1440 330" marker-end="url(#a-ar)" stroke-dasharray="5 3"/>
+    <text class="lbl" x="1404" y="322" style="font-size:9px">WS（提案）</text>
+
+    <!-- 当前实际在跑的通路：commission_update + REST 对账（实线，独立通道） -->
+    <rect class="node" x="1448" y="300" width="52" height="120" rx="6" style="fill:#f0e8ff;stroke:#6a3fb8;stroke-width:2;stroke-dasharray:none"/>
+    <text class="s-mono" x="1474" y="330" text-anchor="middle" transform="rotate(-90 1474 330)" style="fill:#6a3fb8;font-weight:600">现行通路</text>
+
+    <!-- 现行通路：TaskEngine 右侧 -> 竖通道 x=1520 -> 现行通路框 -->
+    <path class="edge-cur" d="M 252 400 L 252 712 L 1520 712 L 1520 424" marker-end="url(#a-arc)"/>
+    <text class="lbl-cur" x="640" y="706">commission_update（WS 增量）+ 4s 轮询 + 30s REST 对账 · ledger.ts:56/58</text>
   </svg>
   <div class="legend">
     <span><i class="sw" style="border-color:#3186ff"></i>主通路（契约 → 派单 → 验收 → 交付）</span>
     <span><i class="sw" style="border-color:#a86a00;border-top-style:dashed"></i>人工 / 失败出口</span>
     <span><i class="sw" style="border-color:#008052"></i>记忆写回 · 实线 = 事实（promoted/confirmed）</span>
     <span><i class="sw" style="border-color:#008052;border-top-style:dashed"></i>记忆写回 · 虚线 = 经验（distilled）</span>
-    <span><i class="sw" style="border-color:#c2c2c2;border-top-style:dotted"></i>事件上报</span>
+    <span><i class="sw" style="border-color:#c2c2c2;border-top-style:dotted"></i>事件上报（v2 提案）</span>
+    <span><i class="sw" style="border-color:#6a3fb8;border-top-width:2.5px"></i>现行通路 commission_update（已生效）</span>
   </div>
 </div>
 
