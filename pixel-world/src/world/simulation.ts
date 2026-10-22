@@ -13,6 +13,7 @@ import { revealedRadiusFor } from './fog.ts';
 import { awaitingDecree } from './decree.ts';
 
 import { parseOracle } from './oracle.ts';
+import { parseOracleBuild, type BuildIntent } from './oracle-build.ts';
 import { WILD_PREFABS } from './setup.ts';
 import {
   nextProp,
@@ -36,6 +37,7 @@ import type {
   OracleRecord,
   PendingDispatch,
   PlacedBuilding,
+  PrefabBlueprint,
   TaskRecord,
   TaskKind,
   Vec2,
@@ -147,6 +149,11 @@ export interface SimulationDeps {
    */
   readonly villagerNames?: readonly string[];
   /**
+   * 蓝图注册表。造物神谕（「建一间书阁」）要用它把词换成模板。
+   * 省略时造物神谕一律认不出——那是安全的降级，不是错误。
+   */
+  readonly blueprints?: ReadonlyMap<string, PrefabBlueprint>;
+  /**
    * 造物主：把一栋新楼落进世界。返回 null 表示落不下。
    * `at` 省略时自动选址；给了就是玩家指定的位置。
    */
@@ -246,6 +253,7 @@ export class Simulation {
   /** 私有结算日志：save-only，不入快照（ADR_SAVE §2.1）。 */
   private readonly settledLog: SettledRecord[] = [];
   private readonly wallClock: () => number;
+  private readonly blueprints: ReadonlyMap<string, PrefabBlueprint> | undefined;
   /** 是否已与台账对过账。读档后为 false：对账前不驱动台账单。 */
   private ledgerReconciled = true;
   /** 上游台账是否在线。离线时世界照常过日子，但状态行必须说出来。 */
@@ -271,6 +279,7 @@ export class Simulation {
     this.altar = deps.altar;
     this.spawnBuilding = deps.spawnBuilding;
     this.wallClock = deps.wallClock ?? (() => Date.now());
+    this.blueprints = deps.blueprints;
     this.buildings = [...deps.buildings];
     this.beats = routineBeats(deps.altar, deps.grid);
     const names = deps.villagerNames ?? [deps.villagerName, DEFAULT_ASSISTANT_NAME];
@@ -515,6 +524,11 @@ export class Simulation {
    * 认不出的输入不落石板，回执里明说没听懂：石板不是聊天记录。
    */
   private speak(raw: string): CommandResult {
+    // 先试造物：它认「建一间书阁」这类话，与派活解析器不重叠
+    // （那个的动词表里没有「建 / 盖 / 造」）。
+    const buildIntent = this.parseBuildIntent(raw);
+    if (buildIntent !== null) return this.buildFromIntent(raw, buildIntent);
+
     const intent = parseOracle(raw);
     if (intent.kind === 'unknown') {
       const message = '没听懂这句，世界没有动。';
@@ -536,6 +550,42 @@ export class Simulation {
         command = { kind: 'complete' };
     }
     const result = this.apply(command);
+    if (result.ok) this.inscribe(raw, result.message);
+    return result;
+  }
+
+  /** 试着把这句话认成造物意图。认不出返回 null，交给别的解析器。 */
+  private parseBuildIntent(raw: string): BuildIntent | null {
+    if (this.blueprints === undefined) return null;
+    return parseOracleBuild(raw, this.blueprints);
+  }
+
+  /**
+   * 把造物意图落成一次建造。
+   *
+   * 位置：说了就用说的；没说就由 `findBestSlot` 挑——那是世界的判断，
+   * 不是模型的。校验仍走 `build` 那一套（重复检查、施工、铺路）。
+   */
+  private buildFromIntent(raw: string, intent: BuildIntent): CommandResult {
+    const blueprint = this.blueprints?.get(intent.templateId);
+    if (blueprint === undefined) {
+      const message = `没有 ${intent.templateId} 这份蓝图。`;
+      this.log('warn', message);
+      return { ok: false, message };
+    }
+    // 世界里的每种铺子只有一栋。认出了意图，但要说清"已经有了"——
+    // 这比认不出有用：用户知道自己被听懂了，也知道为什么没建。
+    const existing = this.buildings.find((b) => b.prefabId === intent.templateId);
+    if (existing !== undefined) {
+      const message = `已经有${existing.displayName}了。想扩建的话说「建个工坊」。`;
+      this.log('warn', message);
+      return { ok: false, message };
+    }
+    const instanceId = `${intent.templateId}#${this.buildings.length + 1}`;
+    const result = this.build(intent.templateId, instanceId, intent.at ?? undefined, {
+      taskId: `oracle-build-${instanceId}`,
+      summary: `按神谕建了${blueprint.displayName}`,
+    });
     if (result.ok) this.inscribe(raw, result.message);
     return result;
   }

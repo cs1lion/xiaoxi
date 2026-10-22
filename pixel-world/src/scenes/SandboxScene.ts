@@ -308,6 +308,8 @@ export class SandboxScene extends Phaser.Scene {
       buildings: this.world.buildings,
       altar: this.world.altar,
       villagerName: this.villagerName,
+      // 造物神谕（「建一间书阁」）要靠它把词换成模板。
+      blueprints: this.blueprints,
       spawnBuilding: (
         prefabId: string,
         instanceId: string,
