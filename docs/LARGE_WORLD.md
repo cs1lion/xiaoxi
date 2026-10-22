@@ -12,7 +12,7 @@
 | 群落 | 同心圆四层：核心镇、工坊农田、郊野、未探索 | `src/world/biomes.ts` |
 | 加权寻路 | 按地形代价，二叉堆，启发式乘最小代价 | `test/path-cost.test.ts` 7 项 |
 | 郊野林地 | 两层值噪声，确定性，避开镇内与可建区 | `src/world/wilderness.ts`，`test/wilderness.test.ts` 8 项 |
-| 三模相机 | 自由拖拽、阶梯缩放、自动导播 | `src/render/camera-controller.ts`，`test/camera.test.ts` 10 项 |
+| 三模相机 | 自由拖拽、阶梯缩放、自动导播 | `src/render/camera-controller.ts`，`test/camera.test.ts` 10 项 + `director.test.ts` 7 项 |
 | 小地图 | 独立 Canvas 2D，视野白框，点击跳转 | `src/render/minimap.ts` |
 | 郊野探索点 | 三栋郊野铺子 + 按圈层分流派活 | `src/world/venue.ts`，`test/venue.test.ts` 8 项 + `venue-routing.test.ts` 4 项 |
 | 生产入口 | 切到大世界；旧规格留给测试 | `src/main.ts` |
@@ -24,6 +24,14 @@
 按距离会被误判成郊野，导致神谕活全派给镇内铺子。
 
 | 迷雾 | 交付越多揭示越大；只压暗与拦建造，不拦通行 | `src/world/fog.ts`，`test/fog.test.ts` 6 项 |
+
+## 导播的两条规则
+
+**闲置 15 秒才接管**，用户一拖一缩立刻退出——导播不该跟人抢镜头。
+
+**候选里必须有多个点**。两个角色都闲在祭坛时，如果候选只有祭坛一个位置，
+导播「接管」了却无处可去，镜头一动不动，看起来像坏了。现在候选顺序是
+正在忙的人 → 运转中的铺子 → 祭坛 → 其它铺子。
 
 ## 迷雾的设计约束
 

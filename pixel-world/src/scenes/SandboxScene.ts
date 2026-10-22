@@ -152,9 +152,10 @@ export class SandboxScene extends Phaser.Scene {
     const focusX = this.world.altar.x * TILE_PX;
     const focusY = this.world.altar.y * TILE_PX;
     this.time.delayedCall(0, () => this.cameraCtl.panTo(focusX, focusY, 0));
-    // 自动导播：没活看祭坛，有活看正在忙的人。
+    // 自动导播：闲置 15 秒后接管，有活看正在忙的人，没活看祭坛。
+    // 这里只是**登记**目标列表，真正进入导播要等闲置计时到点——
+    // 用户一拖一缩就退出，不会跟人抢镜头。
     this.cameraCtl.enableDirector(() => this.directorTargets());
-    this.cameraCtl.disableDirector();
 
     const minimapHost = document.querySelector<HTMLDivElement>('#minimap');
     if (minimapHost !== null) {
@@ -569,25 +570,40 @@ export class SandboxScene extends Phaser.Scene {
     this.publishCreationHint('');
   }
 
-  /** 导播要看的地方：有人干活就看工坊，否则看祭坛与正在闲逛的人。 */
+  /**
+   * 导播要看的地方。
+   *
+   * 排序即优先级：正在忙的人 → 正在运转的铺子 → 祭坛 → 其它铺子。
+   *
+   * 为什么要把空闲铺子也列进来：两个角色都闲在祭坛时，候选只剩祭坛一个点，
+   * 导播"接管"了却无处可去，镜头一动不动——看起来像坏了。
+   * 有铺子做候选，镜头才会真的在镇子里游走。
+   */
   private directorTargets(): readonly { x: number; y: number }[] {
     const targets: { x: number; y: number }[] = [];
     for (const villager of this.snapshot.villagers) {
       if (villager.mode === 'idle') continue;
       targets.push({ x: villager.pos.x * TILE_PX, y: villager.pos.y * TILE_PX });
     }
+
+    const operating: { x: number; y: number }[] = [];
+    const idle: { x: number; y: number }[] = [];
     for (const building of this.snapshot.buildings) {
       const station = this.snapshot.workstations.find(
         (item) => item.buildingId === building.instanceId,
       );
-      if (station?.activity.kind !== 'operating') continue;
-      targets.push({
+      const point = {
         x: (building.origin.x + building.footprint.w / 2) * TILE_PX,
         y: (building.origin.y + building.footprint.h / 2) * TILE_PX,
-      });
+      };
+      if (station?.activity.kind === 'operating') operating.push(point);
+      else idle.push(point);
     }
-    // 没活时看祭坛：这是世界的心跳，空镜头也该停在那儿。
+    targets.push(...operating);
+
+    // 祭坛是世界的心跳，空镜头也该回到它。
     targets.push({ x: this.world.altar.x * TILE_PX, y: this.world.altar.y * TILE_PX });
+    targets.push(...idle);
     return targets;
   }
 

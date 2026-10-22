@@ -15,6 +15,7 @@ import {
   DIRECTOR_IDLE_MS,
   ZOOM_STEPS,
   clampScroll,
+  createDirectorClock,
   stepZoomIndex,
 } from './camera-math.ts';
 
@@ -50,16 +51,19 @@ export function createCameraController(
   const cam = scene.cameras.main;
   cam.setBounds(0, 0, worldWidth, worldHeight);
 
-  let mode: CameraMode = 'free';
-  let idleMs = 0;
-  let dwellMs = 0;
+  // 计时逻辑交给纯函数时钟：规则只写一份，测试也只验一份。
+  const clock = createDirectorClock(DIRECTOR_IDLE_MS, DIRECTOR_DWELL_MS);
+  /** 跟随模式是相机自己的事，时钟只管"自由 / 导播"。 */
+  let following = false;
   let candidates: (() => readonly { x: number; y: number }[]) | null = null;
   let nextCandidate = 0;
+
+  const mode = (): CameraMode => (following ? 'follow' : clock.mode());
 
   let zoomIndex = Math.max(0, ZOOM_STEPS.indexOf(2));
 
   return {
-    mode: () => mode,
+    mode,
 
     panBy(dx, dy) {
       this.notifyInput();
@@ -97,50 +101,41 @@ export function createCameraController(
       this.notifyInput();
       if (target === null) {
         cam.stopFollow();
-        mode = 'free';
+        following = false;
         return;
       }
-      mode = 'follow';
+      following = true;
       cam.startFollow(target, true, 0.08, 0.08);
     },
 
     enableDirector(nextCandidates) {
+      // 只登记目标，不立刻接管：导播要等闲置计时到点。
+      // 直接切进 director 会和用户抢镜头——他一进来就发现镜头自己在动。
       candidates = nextCandidates;
-      mode = 'director';
-      idleMs = 0;
-      dwellMs = DIRECTOR_DWELL_MS; // 进来就立刻切一次，别等
+      clock.enable();
     },
 
     disableDirector() {
       candidates = null;
-      if (mode === 'director') mode = 'free';
+      clock.disable();
     },
 
     update(deltaMs) {
-      if (mode === 'director') {
-        dwellMs += deltaMs;
-        if (dwellMs < DIRECTOR_DWELL_MS) return;
-        dwellMs = 0;
-        const list = candidates?.() ?? [];
-        if (list.length === 0) return;
-        const point = list[nextCandidate % list.length]!;
-        nextCandidate += 1;
-        cam.pan(point.x, point.y, 900, 'Sine.easeInOut', true);
-        return;
-      }
+      const before = clock.targetIndex();
+      clock.tick(deltaMs);
+      if (clock.mode() !== 'director') return;
+      if (clock.targetIndex() === before && nextCandidate > 0) return;
 
-      if (mode !== 'free') return;
-      idleMs += deltaMs;
-      if (idleMs >= DIRECTOR_IDLE_MS && candidates !== null) {
-        mode = 'director';
-        dwellMs = DIRECTOR_DWELL_MS;
-        idleMs = 0;
-      }
+      const list = candidates?.() ?? [];
+      if (list.length === 0) return;
+      const point = list[nextCandidate % list.length]!;
+      nextCandidate += 1;
+      cam.pan(point.x, point.y, 900, 'Sine.easeInOut', true);
     },
 
     notifyInput() {
-      idleMs = 0;
-      if (mode === 'director') mode = 'free';
+      following = false;
+      clock.notifyInput();
     },
 
     viewportRect() {

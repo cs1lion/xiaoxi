@@ -45,3 +45,61 @@ export function clampScroll(
     y: Math.max(0, Math.min(maxY, y)),
   };
 }
+
+export type DirectorMode = 'free' | 'director';
+
+/**
+ * 导播计时：闲置多久接管、接管后多久换一个目标。
+ *
+ * 抽成纯逻辑是因为这些规则最容易写错，而它们又必须脱离浏览器反复验：
+ * 「刚进来就接管」和「用户一动还抢镜头」都是很烦人的行为。
+ */
+export function createDirectorClock(idleMs: number, dwellMs: number): {
+  mode(): DirectorMode;
+  enable(): void;
+  disable(): void;
+  notifyInput(): void;
+  tick(deltaMs: number): void;
+  targetIndex(): number;
+} {
+  let registered = false;
+  let mode: DirectorMode = 'free';
+  let idle = 0;
+  let dwell = 0;
+  let index = 0;
+
+  return {
+    mode: () => mode,
+    enable() {
+      registered = true;
+      idle = 0;
+      if (mode === 'director') dwell = dwellMs;
+    },
+    disable() {
+      registered = false;
+      if (mode === 'director') mode = 'free';
+    },
+    notifyInput() {
+      idle = 0;
+      if (mode === 'director') mode = 'free';
+    },
+    tick(deltaMs) {
+      if (mode === 'director') {
+        dwell += deltaMs;
+        if (dwell >= dwellMs) {
+          dwell = 0;
+          index += 1;
+        }
+        return;
+      }
+      if (!registered) return;
+      idle += deltaMs;
+      if (idle >= idleMs) {
+        mode = 'director';
+        dwell = dwellMs; // 进来立刻切一次
+        idle = 0;
+      }
+    },
+    targetIndex: () => index,
+  };
+}
