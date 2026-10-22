@@ -161,6 +161,18 @@ check(
 );
 check(built.creating === null, '建成后自动退出造物模式');
 
+// 迷雾区不能建：那是还没长出来的地方。
+const fogCheck = await page.evaluate(() => {
+  const fog = window.Oracle.view().fog;
+  window.Oracle.beginCreation('workshop_plot');
+  // 取一个明确在迷雾深处的位置：中心往外很远。
+  const far = { x: fog.center.x, y: fog.center.y + fog.revealedRadius + 12 };
+  const allowed = window.Oracle.canPlaceAt(far);
+  window.Oracle.cancelCreation();
+  return { allowed, far, radius: fog.revealedRadius };
+});
+check(fogCheck.allowed === false, '迷雾区不能建', JSON.stringify(fogCheck));
+
 check(errors.length === 0, '全程无 JS 报错', errors.join('; '));
 
 await browser.close();

@@ -304,6 +304,11 @@ export interface WorldSnapshot {
   readonly oracle: readonly OracleRecord[];
   /** 氛围实体（猫等）。不参与任何世界结算。 */
   readonly critters: readonly Critter[];
+  /**
+   * 迷雾：世界还没长出来的部分。
+   * **不影响通行**，只压暗画面并拦住新建造——否则读档时迷雾里的建筑会变孤岛。
+   */
+  readonly fog: { readonly center: GridPoint; readonly revealedRadius: number };
   readonly roads: readonly GridPoint[];
   readonly altar: GridPoint;
   readonly events: readonly WorldEvent[];

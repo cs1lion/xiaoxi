@@ -9,6 +9,7 @@
 import type { WorldGrid } from './grid.ts';
 import { TASK_PROFILES } from './tasks.ts';
 import { pickVenue, type VenueCandidate } from './venue.ts';
+import { revealedRadiusFor } from './fog.ts';
 /**
  * 郊野铺子的 prefab id。
  *
@@ -368,6 +369,11 @@ export class Simulation {
       props: this.props,
       oracle: this.oracleLog,
       critters: this.critters,
+      // 揭示半径由交付数决定：用得越久，迷雾退得越多。
+      fog: {
+        center: this.altar,
+        revealedRadius: revealedRadiusFor(this.ledgerDeliveries + this.mockDeliveries),
+      },
       roads: this.roads,
       events: this.events.slice(-12),
       weather: this.weather.kind,

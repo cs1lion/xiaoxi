@@ -20,6 +20,8 @@ import { createPhaseView, type PhaseView } from '../render/phase-view.ts';
 import { createGhostView, type GhostView } from '../render/ghost.ts';
 import { createCameraController, type CameraController } from '../render/camera-controller.ts';
 import { createMinimapView, type MinimapView } from '../render/minimap.ts';
+import { createFogView, type FogView } from '../render/fog-view.ts';
+import { fogAt } from '../world/fog.ts';
 import { checkPlacement, hintFor } from '../world/setup.ts';
 import { parsePhaseParam, phaseAt, type PhaseId } from '../render/day-phase.ts';
 import { createDecorView, type DecorView } from '../render/decor.ts';
@@ -76,6 +78,7 @@ export class SandboxScene extends Phaser.Scene {
   private ghost!: GhostView;
   private cameraCtl!: CameraController;
   private minimap: MinimapView | null = null;
+  private fogView!: FogView;
   /** 拖拽平移的起点（屏幕坐标）；null 表示没在拖。 */
   private dragFrom: { x: number; y: number } | null = null;
   private lastConstructionKey = '';
@@ -139,6 +142,7 @@ export class SandboxScene extends Phaser.Scene {
     this.weatherView = createWeatherView(this, worldPx.w, worldPx.h);
     this.phaseView = createPhaseView(this, worldPx.w, worldPx.h);
     this.ghost = createGhostView(this);
+    this.fogView = createFogView(this, this.world.grid.width, this.world.grid.height);
 
     // 相机：锁在世界边界内，初始对准祭坛。
     this.cameraCtl = createCameraController(this, worldPx.w, worldPx.h);
@@ -513,8 +517,11 @@ export class SandboxScene extends Phaser.Scene {
     if (blueprint === undefined) return;
     this.creation = { ...session, ghostAt: cell };
     const check = checkPlacement(this.world.grid, blueprint, cell);
-    this.ghost.show(cell, blueprint, check.ok);
-    this.publishCreationHint(check.ok ? '可以建在这里，回车确认。' : hintFor(check.reason));
+    const fogged = fogAt(cell, this.snapshot.fog);
+    this.ghost.show(cell, blueprint, check.ok && !fogged);
+    this.publishCreationHint(
+      fogged ? '那里还没长出来，先让世界走到那儿。' : check.ok ? '可以建在这里，回车确认。' : hintFor(check.reason),
+    );
   }
 
   /** 确认施工。没有幽灵位置时拒绝，不猜一个地方。 */
@@ -526,6 +533,9 @@ export class SandboxScene extends Phaser.Scene {
     }
     const blueprint = this.blueprints.get(session.prefabId);
     if (blueprint === undefined) return { ok: false, message: '没有这份蓝图。' };
+    if (fogAt(session.ghostAt, this.snapshot.fog)) {
+      return { ok: false, message: '那里还没长出来，先让世界走到那儿。' };
+    }
     const check = checkPlacement(this.world.grid, blueprint, session.ghostAt);
     if (!check.ok) {
       // 留在造物模式里让玩家换个位置，并说明为什么这里不行。
@@ -739,6 +749,8 @@ export class SandboxScene extends Phaser.Scene {
         if (session === null) return false;
         const blueprint = this.blueprints.get(session.prefabId);
         if (blueprint === undefined) return false;
+        // 迷雾区不能建：那是还没长出来的地方。迷雾只拦建造，不拦通行。
+        if (fogAt(cell, this.snapshot.fog)) return false;
         return checkPlacement(this.world.grid, blueprint, cell).ok;
       },
       camera: () => ({
@@ -832,6 +844,7 @@ export class SandboxScene extends Phaser.Scene {
     }
     this.weatherView.update(this.sim.weatherIntensity(), delta);
     this.phaseView.update(this.snapshot, delta);
+    this.fogView.update(this.snapshot.fog);
 
     // 气泡一出现就出声；同一个角色的同一句话不重复念。
     for (const villager of snapshot.villagers) {
