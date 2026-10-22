@@ -108,11 +108,18 @@
 
 ## 四、当前证据（不要当成长期结论）
 
-- `python scripts/test_contract.py` —— 2026-10-22 02:xx 时 266/266；契约层自 `1fd5ef3` 起零改动。
-- `python scripts/test_core.py` —— 92/92。
-- `pixel-world` `npm run test:inprocess` —— 234 tests / 225 pass / 9 skip / 0 fail。
-- `python scripts/check_protocol.py` —— exit 0。
-- 以上都要在合并后重跑，本文件不保证明天还绿。
+取数条件：HEAD `431ca65`、2026-10-22 10:2x 由 Chief 亲自跑，此后只有读操作。
+
+- `.\.venv\Scripts\python.exe scripts\test_contract.py` —— 266/266，exit 0；契约层自 `1fd5ef3` 起零改动。
+- `.\.venv\Scripts\python.exe scripts\test_core.py` —— 92 passed / 0 failed，exit 0。
+- `pixel-world`（worktree `tmp/wt-pixel-world`）`npm run test:inprocess` —— 234 tests / 225 pass / 9 skip / 0 fail。
+- `.\.venv\Scripts\python.exe scripts\check_protocol.py` —— exit 0。
+
+**解释器必须写 `.venv`，不能写裸 `python`**：本机 PATH 上是 anaconda，
+跑 `python scripts/test_core.py` 会因 `numpy.core.multiarray failed to import`（scipy 冲突）**exit 1**，
+与代码无关。2026-10-22 实测踩过一次；`docs/TESTING.md:13` 的既有口径也是 `.venv`。
+
+以上都要在合并后重跑，本文件不保证明天还绿。
 
 ## 五、这份文件不做什么
 

@@ -634,7 +634,7 @@ v2 有 `CANCELLED` / `FAILED` / `TIMEOUT`，台账没有。方案：
 且旧客户端的「未知状态降级为进行中」会让 `done` 与 `cancelled` 看起来一样。
 **事件表只追加不改写**（PROTOCOL §19），用它承载细分原因，成本最低、回滚最容易。
 
-**已知缺口（诚实记录）**：今天的 `cancel` 直接把单迁到 `done`（`server/assistant/dispatcher.py:636-640`），
+**已知缺口（诚实记录）**：今天的 `cancel` 直接把单迁到 `done`（`server/assistant/dispatcher.py` 的 `Dispatcher.cancel()`），
 不写取消原因、不区分「用户取消」与「正常归档」。像素世界因此会把取消的单当成「已交付」，
 还给信仰加点（`pixel-world/src/world/simulation.ts` 的交付结算路径）。
 **这是本轮查出来的真实缺陷**，修法就是上表的 `closed_reason`。
