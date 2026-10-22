@@ -3,6 +3,8 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { parseBlueprintTable } from '../src/world/blueprints.ts';
 import { ALTAR, buildWorld, checkPlacement, placeBlueprint } from '../src/world/setup.ts';
+import { Simulation } from '../src/world/simulation.ts';
+import { composeReport } from '../src/world/report.ts';
 import { WorldGrid } from '../src/world/grid.ts';
 import type { PrefabBlueprint } from '../src/world/types.ts';
 
@@ -153,4 +155,56 @@ test('指定非法位置时返回 null，不建半截楼', () => {
   const placed = placeBlueprint(world.grid, plot, 'plot#bad', ALTAR, { x: -3, y: -3 });
   assert.equal(placed, null);
   assert.equal(world.grid.countOccupied(), before, '被拒时不能占用任何格子');
+});
+
+// ------------------------------------------------------------------ 建筑来源
+
+test('造物模式建出的楼记着自己是从哪来的', () => {
+  const world = buildWorld(blueprints);
+  const slot = world.grid.findBestSlot(plot, ALTAR);
+  assert.ok(slot !== null);
+
+  const placed = placeBlueprint(world.grid, plot, 'plot#src', ALTAR, slot, {
+    taskId: 't_42',
+    summary: '开一间新工坊',
+  });
+  assert.ok(placed !== null);
+  assert.equal(placed.building.sourceTaskId, 't_42');
+  assert.equal(placed.building.sourceSummary, '开一间新工坊');
+});
+
+test('开局常驻的楼没有来源：它们是世界自带的，不是谁建的', () => {
+  const world = buildWorld(blueprints);
+  for (const building of world.buildings) {
+    assert.equal(building.sourceTaskId, null, `${building.instanceId} 不该有来源`);
+    assert.equal(building.sourceSummary, null);
+  }
+});
+
+test('有来由的楼在日报里写清来由', () => {
+  const world = buildWorld(blueprints);
+  const sim = new Simulation({
+    grid: world.grid,
+    buildings: world.buildings,
+    altar: ALTAR,
+    villagerName: '莞尔',
+    wallClock: () => 1000,
+    spawnBuilding: (prefabId, instanceId, at, source) => {
+      const blueprint = blueprints.get(prefabId);
+      if (blueprint === undefined) return null;
+      return placeBlueprint(world.grid, blueprint, instanceId, ALTAR, at, source);
+    },
+  });
+  sim.enqueue({
+    kind: 'build',
+    prefabId: 'workshop_plot',
+    instanceId: 'plot#report',
+    source: { taskId: 'creation-1', summary: '在 (2,2) 建了新工坊' },
+  });
+  sim.update(16);
+
+  const report = composeReport(sim.snapshot());
+  const line = report.lines.find((item) => item.includes('造物主新起'));
+  assert.ok(line !== undefined, '日报应当提到新建的楼');
+  assert.match(line, /在 \(2,2\) 建了新工坊/, '日报要写清这栋楼是怎么来的');
 });

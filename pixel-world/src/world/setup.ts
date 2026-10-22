@@ -253,6 +253,7 @@ export function placeBlueprint(
   instanceId: string,
   anchor: GridPoint,
   at?: GridPoint,
+  source?: { readonly taskId: string; readonly summary: string },
 ): SpawnResult | null {
   let origin: GridPoint | null;
   if (at === undefined) {
@@ -288,6 +289,8 @@ export function placeBlueprint(
     silhouette: blueprint.silhouette,
     boundTask: blueprint.boundTask,
     palette: blueprint.palette,
+    sourceTaskId: source?.taskId ?? null,
+    sourceSummary: source?.summary ?? null,
   };
 
   const road = paveFrom(grid, door, anchor);

@@ -5,7 +5,7 @@ import { parseBlueprintTable } from '../src/world/blueprints.ts';
 import { ALTAR, buildWorld, buildWorldFromSave, placeBlueprint } from '../src/world/setup.ts';
 import { Simulation } from '../src/world/simulation.ts';
 import { assertSave, migrateSave, SAVE_SETTLED_KEYS, SAVE_TASK_KEYS, type WorldSave } from '../src/world/save.ts';
-import type { WorldProp } from '../src/world/types.ts';
+import type { PlacedBuilding, WorldProp } from '../src/world/types.ts';
 
 const raw = JSON.parse(
   readFileSync(new URL('../src/world/prefabs.json', import.meta.url), 'utf8'),
@@ -240,9 +240,26 @@ test('v1→v2 迁移：除新增字段外，世界状态逐字段不变', () => 
   ) as unknown as WorldSave;
   const migrated = migrateSave(v1 as unknown as Record<string, unknown>) as unknown as WorldSave;
 
-  const { oracle: _oracle, critters: _critters, props: migratedProps, ...migratedRest } = migrated.world;
-  const { props: v1Props, ...v1Rest } = v1.world;
+  const {
+    oracle: _oracle,
+    critters: _critters,
+    props: migratedProps,
+    buildings: migratedBuildings,
+    ...migratedRest
+  } = migrated.world;
+  const { props: v1Props, buildings: v1Buildings, ...v1Rest } = v1.world;
   assert.deepEqual(migratedRest, v1Rest, '迁移不能顺手改动别的世界状态');
+
+  const stripBuildings = (list: readonly PlacedBuilding[]): unknown[] =>
+    list.map((building) => {
+      const { sourceTaskId: _id, sourceSummary: _summary, ...rest } = building;
+      return rest;
+    });
+  assert.deepEqual(
+    stripBuildings(migratedBuildings),
+    stripBuildings(v1Buildings),
+    '建筑除来源外必须逐字段一致',
+  );
 
   const strip = (props: readonly WorldProp[]): unknown[] =>
     props.map((prop) => {

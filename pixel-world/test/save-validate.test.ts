@@ -234,6 +234,8 @@ const NULLABLE_PATHS: ReadonlySet<string> = new Set([
   'world.props[].sourceTaskKind',
   'world.props[].sourceTaskId',
   'world.props[].sourceSummary',
+  'world.buildings[].sourceTaskId',
+  'world.buildings[].sourceSummary',
 ]);
 
 /* ---------------------------------------------------------------- 用例 */

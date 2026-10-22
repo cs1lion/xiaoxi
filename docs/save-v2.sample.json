@@ -84,7 +84,9 @@
           "roof": 4147786,
           "trim": 13208383,
           "window": 15777904
-        }
+        },
+        "sourceTaskId": null,
+        "sourceSummary": null
       },
       {
         "instanceId": "star_archive#1",
@@ -119,7 +121,9 @@
           "roof": 3095347,
           "trim": 9412746,
           "window": 15918000
-        }
+        },
+        "sourceTaskId": null,
+        "sourceSummary": null
       },
       {
         "instanceId": "ink_house#1",
@@ -154,7 +158,9 @@
           "roof": 4865849,
           "trim": 13082730,
           "window": 16177568
-        }
+        },
+        "sourceTaskId": null,
+        "sourceSummary": null
       },
       {
         "instanceId": "workshop_plot#1",
@@ -189,7 +195,9 @@
           "roof": 4525891,
           "trim": 12624582,
           "window": 15777904
-        }
+        },
+        "sourceTaskId": "t_42",
+        "sourceSummary": "开一间新工坊"
       }
     ],
     "roads": [
@@ -347,6 +355,6 @@
   "meta": {
     "savedAtWallClock": 1792500000000,
     "savedReconciled": true,
-    "schemaFingerprint": "d6effa804a737b0b"
+    "schemaFingerprint": "72c4a6c0f1f444f7"
   }
 }

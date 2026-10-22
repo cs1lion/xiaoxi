@@ -223,13 +223,19 @@ export class SandboxScene extends Phaser.Scene {
     this.phaseView.setPhase(initialPhase);
     if (forced !== null || legacyNight) {
       this.phaseView.setAutoAdvance(false);
-    } else {
-      // 每一分钟对一次表：跨过相位边界时自动切换。不读世界时钟，只读墙钟喂渲染。
-      this.phaseTimer = window.setInterval(() => {
-        if (!this.phaseView.isAutoAdvancing()) return;
-        this.phaseView.setPhase(phaseAt(Date.now()));
-      }, 60_000);
     }
+
+    // 定时器**无条件创建**，由 `isAutoAdvancing()` 决定要不要真的切换。
+    //
+    // 早先只在「没有 ?time=」时创建它，于是从 ?time= 进入后再调 setAutoPhase，
+    // 标志变 true 却没有定时器在跑——「交还给真实时间」是个空承诺。
+    // 15 秒对一次表，不是 60 秒：相位边界是整点，60 秒的粒度意味着最多晚
+    // 一分钟才切，而切换本身只有 900ms 渐变——用户会在 17:00 后还看着正午。
+    // 15 秒的代价可以忽略（一次 Date.now 与一次比较）。
+    this.phaseTimer = window.setInterval(() => {
+      if (!this.phaseView.isAutoAdvancing()) return;
+      this.phaseView.setPhase(phaseAt(Date.now()));
+    }, 15_000);
     this.nightKeyListener = (event: KeyboardEvent): void => {
       if (event.key.toLowerCase() !== 'n') return;
       const target = event.target as HTMLElement | null;
@@ -301,10 +307,22 @@ export class SandboxScene extends Phaser.Scene {
       buildings: this.world.buildings,
       altar: this.world.altar,
       villagerName: this.villagerName,
-      spawnBuilding: (prefabId: string, instanceId: string, at?: GridPoint): NewBuilding | null => {
+      spawnBuilding: (
+        prefabId: string,
+        instanceId: string,
+        at?: GridPoint,
+        source?: { readonly taskId: string; readonly summary: string },
+      ): NewBuilding | null => {
         const blueprint = this.blueprints.get(prefabId);
         if (blueprint === undefined) return null;
-        return placeBlueprint(this.world.grid, blueprint, instanceId, this.world.altar, at);
+        return placeBlueprint(
+          this.world.grid,
+          blueprint,
+          instanceId,
+          this.world.altar,
+          at,
+          source,
+        );
       },
     };
     // 有档就重建世界；读档后台账标未对账，等首个 sync 走 reconcile。
@@ -615,6 +633,11 @@ export class SandboxScene extends Phaser.Scene {
       prefabId: session.prefabId,
       instanceId,
       at: session.ghostAt,
+      // 记下来由：这栋楼是你在造物模式里点出来的。纸面据此说得出它的来历。
+      source: {
+        taskId: `creation-${instanceId}`,
+        summary: `在 (${session.ghostAt.x},${session.ghostAt.y}) 建了${blueprint.displayName}`,
+      },
     });
     this.endCreation();
     return { ok: true, message: '动工了。' };

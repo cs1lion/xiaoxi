@@ -98,6 +98,8 @@ export type WorldCommand =
       readonly prefabId: string;
       readonly instanceId: string;
       readonly at?: GridPoint;
+      /** 这次建造的来由，写进建筑的来源字段。省略表示"没有来由"。 */
+      readonly source?: { readonly taskId: string; readonly summary: string };
     }
   /**
    * 神迹：纯世界侧动作，不是你的话，所以不刻石板。
@@ -162,6 +164,7 @@ export interface SimulationDeps {
     prefabId: string,
     instanceId: string,
     at?: GridPoint,
+    source?: { readonly taskId: string; readonly summary: string },
   ) => NewBuilding | null;
   /** 本地 wall clock（只给 settled.completedAt 的 mock 来源用，不喂逻辑）。 */
   readonly wallClock?: () => number;
@@ -214,7 +217,12 @@ export class Simulation {
   private readonly grid: WorldGrid;
   private readonly altar: GridPoint;
   private readonly spawnBuilding:
-    | ((prefabId: string, instanceId: string, at?: GridPoint) => NewBuilding | null)
+    | ((
+        prefabId: string,
+        instanceId: string,
+        at?: GridPoint,
+        source?: { readonly taskId: string; readonly summary: string },
+      ) => NewBuilding | null)
     | undefined;
 
   private readonly buildings: PlacedBuilding[];
@@ -432,7 +440,7 @@ export class Simulation {
       case 'setWeather':
         return this.setWeather(command.weather);
       case 'build':
-        return this.build(command.prefabId, command.instanceId, command.at);
+        return this.build(command.prefabId, command.instanceId, command.at, command.source);
       case 'miracle':
         return this.performMiracle(command.miracle);
       case 'sync':
@@ -1069,14 +1077,19 @@ export class Simulation {
     return { ok: true, message: `成果已交付（${villager.name}，${label}，不计入台账）。` };
   }
 
-  private build(prefabId: string, instanceId: string, at?: GridPoint): CommandResult {
+  private build(
+    prefabId: string,
+    instanceId: string,
+    at?: GridPoint,
+    source?: { readonly taskId: string; readonly summary: string },
+  ): CommandResult {
     if (this.spawnBuilding === undefined) {
       return { ok: false, message: '这个世界没有造物主。' };
     }
     if (this.buildings.some((item) => item.prefabId === prefabId)) {
       return { ok: false, message: '这种铺子已经有一栋了。' };
     }
-    const spawned = this.spawnBuilding(prefabId, instanceId, at);
+    const spawned = this.spawnBuilding(prefabId, instanceId, at, source);
     if (spawned === null) {
       return {
         ok: false,

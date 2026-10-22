@@ -249,6 +249,16 @@ export function bindOraclePanel(getApi: () => OracleApi | undefined): void {
     });
   }
 
+  // 时相：按 N 或 ?time= 会停掉自动推进，这个按钮把它交还给真实时间。
+  // 没有它的话，世界会永远停在某一刻——用户只能刷新页面才能恢复。
+  const phaseAuto = document.querySelector<HTMLButtonElement>('#phase-auto');
+  phaseAuto?.addEventListener('click', () => {
+    const api = getApi();
+    if (api === undefined) return;
+    api.setAutoPhase();
+    show(true, '时辰跟着真实时间走了。');
+  });
+
   for (const button of form.querySelectorAll<HTMLButtonElement>('button[data-miracle]')) {
     button.addEventListener('click', () => {
       const api = getApi();

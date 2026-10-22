@@ -24,7 +24,8 @@
 按距离会被误判成郊野，导致神谕活全派给镇内铺子。
 
 | 迷雾 | 交付越多揭示越大；只压暗与拦建造，不拦通行 | `src/world/fog.ts`，`test/fog.test.ts` 6 项 |
-| 视野裁剪 | 地形与迷雾烘焙成纹理，指令从 77 万降到 475 | `src/render/bake.ts`，`scripts/check-render-budget.mjs` 4 项；研究见 `docs/VIEW_CULLING_RESEARCH.md` |
+| 视野裁剪 | 地形与迷雾烘焙成纹理，指令从 77 万降到 475 | `src/render/bake.ts`，`scripts/check-render-budget.mjs` 6 项；研究见 `docs/VIEW_CULLING_RESEARCH.md` |
+| 建筑来源 | 建出来的楼记得自己是怎么来的 | `test/placement.test.ts`，日报写出来由 |
 
 ## 导播的两条规则
 

@@ -163,6 +163,14 @@ export interface PlacedBuilding {
   readonly silhouette: Silhouette;
   readonly boundTask: WorkshopTask | null;
   readonly palette: PrefabBlueprint['palette'];
+  /**
+   * 这栋楼是谁建的、为什么建。开局常驻的楼没有来源，记 null。
+   *
+   * 与摆件同一个理由：没有来源，过两天就没人知道它为什么在那儿。
+   * 老档迁移来的楼也没有来源，读作"世界自带的"。
+   */
+  readonly sourceTaskId?: string | null;
+  readonly sourceSummary?: string | null;
 }
 
 export type WorkstationActivity =

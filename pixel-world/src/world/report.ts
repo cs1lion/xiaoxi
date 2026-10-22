@@ -56,7 +56,13 @@ export function composeReport(snapshot: WorldSnapshot): DailyReport {
 
   const newBuildings = snapshot.buildings.filter((building) => building.boundTask === null);
   if (newBuildings.length > 0) {
-    lines.push(`造物主新起 ${newBuildings.length} 栋楼：${newBuildings.map((b) => b.displayName).join('、')}`);
+    // 有来由的楼写清来由：那是"被记住"在建筑上的落点。
+    const described = newBuildings.map((building) =>
+      building.sourceSummary === null || building.sourceSummary === undefined
+        ? building.displayName
+        : `${building.displayName}（${building.sourceSummary}）`,
+    );
+    lines.push(`造物主新起 ${newBuildings.length} 栋楼：${described.join('、')}`);
   }
 
   if (snapshot.props.length > 0) {

@@ -37,7 +37,7 @@ export const SETTLED_WARN_THRESHOLD = 5000;
 /** v1 冻结指纹（ADR_SAVE §1，frozen）。旧档迁移前用它自证，仍然有效。 */
 export const SCHEMA_V1_FINGERPRINT = 'f53a0736d782d657';
 /** v2 冻结指纹（ADR_WORLD_ALIVE §8）。由 docs/save-v2.sample.json 算出，单测核对。 */
-export const SCHEMA_V2_FINGERPRINT = 'd6effa804a737b0b';
+export const SCHEMA_V2_FINGERPRINT = '72c4a6c0f1f444f7';
 
 /** v1 冻结路径全集（99 条，来自 docs/save-v1.sample.json；指纹见上，单测核对）。
  * `assertSaveV1` 做**集合包含**校验：存档出现的每条叶子路径都必须在这个集合里；
@@ -160,6 +160,8 @@ export const SAVE_V1_PATHS: readonly string[] = [
  * （v1 当年补 optional，是因为样例里 path/pendingRoute 是空数组。）
  */
 export const SAVE_V2_ADDED_PATHS: readonly string[] = [
+  'world.buildings[].sourceSummary',
+  'world.buildings[].sourceTaskId',
   'world.critters[]',
   'world.critters[].at.x',
   'world.critters[].at.y',
@@ -578,6 +580,15 @@ function validateWorldFields(raw: Record<string, unknown>, version: 1 | 2): void
     for (const slot of ['body', 'roof', 'trim', 'window'] as const) {
       checkNumber(requireKey(palette, slot, `${path}.palette`), `${path}.palette.${slot}`, { min: 0 });
     }
+    if (version >= 2) {
+      // 建筑的来源：开局常驻的楼与老档迁移来的楼都是 null。
+      checkStringOrNull(requireKey(building, 'sourceTaskId', path), `${path}.sourceTaskId`, {
+        allowEmpty: true,
+      });
+      checkStringOrNull(requireKey(building, 'sourceSummary', path), `${path}.sourceSummary`, {
+        allowEmpty: true,
+      });
+    }
   });
 
   // ---- 道路 / 摆件
@@ -895,6 +906,11 @@ export const MIGRATIONS: Record<number, Migration> = {
                 sourceSummary: prop.sourceSummary ?? null,
               }
             : prop,
+        ),
+        buildings: (Array.isArray(world.buildings) ? world.buildings : []).map((b) =>
+          isObject(b)
+            ? { ...b, sourceTaskId: b.sourceTaskId ?? null, sourceSummary: b.sourceSummary ?? null }
+            : b,
         ),
         oracle: Array.isArray(world.oracle) ? world.oracle : [],
         critters: Array.isArray(world.critters) ? world.critters : [],
