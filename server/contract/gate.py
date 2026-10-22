@@ -15,8 +15,9 @@
 - G2 的「输入可解析」需要 stat/探测 —— 本模块只读 `InputRef.exists` 字段，
   由调用方先探测再填。没探测（`exists is None`）时按**未证实**处理并追问，
   不假设存在。
-- G6 的「权限在 7.1 的可授予范围内」—— §7.1 不存在，所以 G6 降级为
-  「非空 + 元素为非空字符串」。等级合法性一经验证码就会变成臆造。
+- G6 的权限等级校验：v2 规范 §6.2 给出了 L0–L6 七级表（原 §7.1 的占位由它取代），
+  并明写「G6 从『非空字符串』升级为『必须在本表内』」。所以 G6 现在既查非空，
+  也查每个等级是否在这七级闭集里。等级表只此一份，见 PERMISSION_LEVELS。
 """
 from __future__ import annotations
 
@@ -34,6 +35,20 @@ from .risk import compute_risk
 MAX_CLARIFICATION_ROUNDS = 3
 # §3.2 goal：「一句话，形如"动词 + 对象"，不超过 80 字」
 MAX_GOAL_CHARS = 80
+
+# §6.2 的七级权限表（规范 :956-964）。这是 permissions_required 的**取值域**，
+# 也是 G6 的判定依据（规范 :954 原话：「G6 从『非空字符串』升级为『必须在本表内』」）。
+#
+# 七级逐个列，不用 range 或推导式生成：这是一张**闭集**，少写一级就是多放行一类
+# 越权声明，而循环生成时删掉一项在源码里看不出来。
+#
+# L6 的边界（刻意写在这里，否则下一个人会「顺手」把它也拦掉）：
+#   L6 **可声明、不可默认授予**。「默认不可授予 / 需人工逐次批准」是**授予策略**，
+#   在运行时判（谁在什么条件下能拿到 L6），不在 G6 判。G6 判的是「这个等级名合不合法」——
+#   声明 L6 是合法的，所以这里必须放行。两件事不能合并，合并就等于用契约校验
+#   代替了运行时授权，而后者才是真正防越权的那一道。
+PERMISSION_LEVELS: tuple[str, ...] = ("L0", "L1", "L2", "L3", "L4", "L5", "L6")
+PERMISSION_LEVEL_SET = frozenset(PERMISSION_LEVELS)
 
 GATE_READY = "ready"
 GATE_NEEDS_CLARIFICATION = "needs_clarification"
@@ -249,9 +264,10 @@ def _check_risk(draft: Draft) -> Gap | None:
 
 
 def _check_budget_permission(draft: Draft) -> Gap | None:
-    """G6：budget、permissions_required 非空。
+    """G6：budget 必填，permissions_required 必须是 §6.2 的 L0–L6。
 
-    「权限在 7.1 的可授予范围内」这一半**不做**——§7.1 不存在（见模块头）。
+    三个检查按「先形状、后取值」排：budget 缺失要问标准问题，空项/非字符串是
+    结构错误（问法不同），最后才是等级是否在这七级闭集里。
     """
     if draft.budget is None:
         return Gap(check="G6", key="budget", missing=("budget",),
@@ -264,6 +280,15 @@ def _check_budget_permission(draft: Draft) -> Gap | None:
             return Gap(check="G6", key="permission",
                        missing=(f"permissions_required[{index}]",),
                        question="权限列表里有空项，确认一下需要哪些权限。")
+    for index, item in enumerate(draft.permissions_required):
+        if item not in PERMISSION_LEVEL_SET:
+            return Gap(
+                check="G6", key="permission",
+                missing=(f"permissions_required[{index}]",),
+                question=(f"权限等级 {item!r} 不在 L0–L6 里。"
+                          f"可选：{'、'.join(PERMISSION_LEVELS)}；"
+                          f"不知道选哪个就说要做什么，我按最小权限算。"),
+            )
     return None
 
 
@@ -422,9 +447,10 @@ def fill_conservative_defaults(draft: Draft, gaps: list[Gap]) -> Draft:
 
     if "budget" in keys and filled.budget is None:
         filled.budget = Budget()
-    # 权限**不填**。规范 §3.1 的 permissions_required 是 L1/L4/L5 这类等级，
-    # 而 §7.1 的等级定义缺失——编一个 "read_only" 出来就是臆造一个看起来合法的
-    # 等级名，且它会被冻进契约。宁可让 G6 保持缺口走 rejected。
+    # 权限**不填**。规范 §6.2 已经把等级定死为 L0–L6（见 PERMISSION_LEVELS），
+    # 但「这单到底需要哪几级」必须从任务语义推出来，不是从等级表抄一个默认值。
+    # 编一个 "L0" 出来看着合法、实则替用户做了权限判断，且它会被冻进契约。
+    # 宁可让 G6 保持缺口走 rejected，让用户自己说是哪几级。
     # 有缺口的槽位一律高亮，让用户在契约卡上看得到哪些是猜的。
     filled.goal = mark(filled.goal)
     filled.artifact = mark(filled.artifact)
