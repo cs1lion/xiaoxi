@@ -77,8 +77,9 @@
   <h2>A · 模块与数据流（§2.3 模块关系、§5.2 事件清单）</h2>
   <div class="note">
     右侧竖带 = 事件总线，横切所有后端模块，每个模块向右发事件（附录 C 第 2 条）。虚线直角框 = 数据，不执行（第 3 条）。<br>
-    <b style="color:#a86a00">⚠ 本图所有 v2 事件名（§5.2 那九类）均为「提案，未生效」</b>——§5 标题即写明，落地需 <code>[PROTOCOL_REQUEST]</code>。
-    当前实际在跑的是下方那条实线通路（<code>commission_update</code> + REST 对账）。
+    <b style="color:#a86a00">⚠ 本图所有 v2 事件名（§5.2 那九类）均为「提案，未生效」</b>——§5 :774 标题即写明，落地需 <code>[PROTOCOL_REQUEST]</code>。<br>
+    <b style="color:#6a3fb8">而当前实际在跑的是紫色那条</b>：<code>commission_update</code>（WS 增量）+ 4s 轮询 + 30s REST 对账。
+    <b>它不走 EventBus</b>——所以本图有两条通路：紫色=现状，其余=目标态。
   </div>
   <svg viewBox="0 0 1560 760" role="img" aria-label="模块与数据流">
     <defs>
@@ -257,7 +258,7 @@
 
     <!-- 当前实际在跑的通路：commission_update + REST 对账（实线，独立通道） -->
     <rect class="node" x="1448" y="300" width="52" height="120" rx="6" style="fill:#f0e8ff;stroke:#6a3fb8;stroke-width:2;stroke-dasharray:none"/>
-    <text class="s-mono" x="1474" y="330" text-anchor="middle" transform="rotate(-90 1474 330)" style="fill:#6a3fb8;font-weight:600">现行通路</text>
+    <text class="s-mono" x="1474" y="318" text-anchor="middle" transform="rotate(-90 1474 318)" style="fill:#6a3fb8;font-weight:600">现行通路 · 不走 EventBus</text>
 
     <!-- 现行通路：TaskEngine 右侧 -> 竖通道 x=1520 -> 现行通路框 -->
     <path class="edge-cur" d="M 252 400 L 252 712 L 1520 712 L 1520 424" marker-end="url(#a-arc)"/>
