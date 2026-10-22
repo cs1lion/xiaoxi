@@ -274,11 +274,24 @@ def _t19_guard(state: TaskState, facts: TaskFacts) -> str:
 
 
 def _t20_guard(state: TaskState, facts: TaskFacts) -> str:
+    """T20：每条声明的副作用，在 effect_log 里**恰好一条 status=done**。
+
+    effect_log 的每条记录是一个 dict（形状见 docs/EFFECT_LOG_SPEC.md）：
+    idempotency_key / status / attempt / ...。status 三值 done | failed | replayed，
+    **只有 done 算成功**。
+
+    为什么不能只数 key 出现次数：失败的那次也会被算进去，于是
+    「1 条 done + 1 条 failed」的正常重试反被挡，而「1 条 failed」被当成成功放行——
+    两个方向都错，且都不报错。
+    """
     records = tuple(facts.effect_records or ())
     for key in facts.declared_effect_keys or ():
-        count = sum(1 for record in records if record == key)
+        count = sum(
+            1 for record in records
+            if record.get("idempotency_key") == key and record.get("status") == "done"
+        )
         if count != 1:
-            return f"idempotency_key {key!r} 在 effect_log 里出现 {count} 次（应为 1）"
+            return f"idempotency_key {key!r} 在 effect_log 里有 {count} 条成功记录（应为 1）"
     return ""
 
 
@@ -580,7 +593,7 @@ TASK_RULES: tuple[TransitionRule, ...] = (
                "approve_side_effect 或（risk=low 且无副作用）",
                ("TASK_STATE_CHANGE",), _t19_guard),
     _task_rule("T20", "DELIVERING", "DELIVERED", "副作用全部完成",
-               "每个 declared_effect_key 在 effect_records 里恰好一次",
+               "每个 declared_effect_key 在 effect_log 里恰好一条 status=done",
                ("TASK_STATE_CHANGE",), _t20_guard),
     _task_rule("T21", "DELIVERING", "BLOCKED", "目标拒绝 / 需要重授权",
                "blocked_reason == need_approval",

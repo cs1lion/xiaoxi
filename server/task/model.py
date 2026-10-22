@@ -108,7 +108,7 @@ class TaskFacts:
     human_required_count: int = 0
     approve_side_effect: bool = False
     declared_effect_keys: tuple[str, ...] = ()
-    effect_records: tuple[str, ...] = ()
+    effect_records: tuple[dict[str, Any], ...] = ()
     answer_text: str = ""
     authorization_effect_id: str = ""
     blocked_effect_id: str = ""

@@ -128,6 +128,19 @@ def eff(**kw) -> SideEffectDecl:
     return SideEffectDecl(**base)
 
 
+def rec(key: str, status: str = "done", **kw) -> dict:
+    """构造一条 effect_log 记录（形状见 docs/EFFECT_LOG_SPEC.md）。
+
+    status 三值：done 真的执行成功 / failed 尝试了但失败 / replayed 被幂等键挡住没再执行。
+    只有 done 计入 T20 的「成功记录」。
+    """
+    base = {"effect_id": f"e_{key}", "idempotency_key": key, "type": "overwrite_file",
+            "target_class": "local", "status": status, "attempt": 1,
+            "at": 1761000000000, "detail": ""}
+    base.update(kw)
+    return base
+
+
 def expect_illegal(label: str, fn) -> None:
     try:
         fn()
@@ -447,15 +460,33 @@ def test_b_task_edges() -> None:
         contains="APPROVE_SIDE_EFFECT")
 
     # T20 DELIVERING -> DELIVERED
-    expect_ok("T20 允许：每条副作用恰好一条成功记录", M, task("DELIVERING"), "T20",
-              TaskFacts(declared_effect_keys=("k1",), effect_records=("k1",)),
+    # 只数 status=done 的记录。下面四条覆盖两个方向的偏离，不只是「能过」。
+    expect_ok("T20 允许：恰好一条 done", M, task("DELIVERING"), "T20",
+              TaskFacts(declared_effect_keys=("k1",), effect_records=(rec("k1"),)),
               target="DELIVERED")
+    # 这一条是改动前会误拒的正向场景：1 条 done + 1 条 failed 是正常重试，不是重复执行
+    expect_ok("T20 允许：一条 done + 一条 failed（正常重试，只数 done）", M,
+              task("DELIVERING"), "T20",
+              TaskFacts(declared_effect_keys=("k1",),
+                        effect_records=(rec("k1", "failed"), rec("k1", "done"))),
+              target="DELIVERED")
+    expect_guard("T20 拒绝：只有一条 failed 记录（0 条成功）", lambda: M.transition(
+        task("DELIVERING"), "T20", TaskFacts(
+            declared_effect_keys=("k1",),
+            effect_records=(rec("k1", "failed"),))), contains="0")
+    expect_guard("T20 拒绝：只有 replayed（没真执行过）", lambda: M.transition(
+        task("DELIVERING"), "T20", TaskFacts(
+            declared_effect_keys=("k1",),
+            effect_records=(rec("k1", "replayed"),))), contains="0")
     expect_guard("T20 拒绝：记录缺失", lambda: M.transition(
         task("DELIVERING"), "T20", TaskFacts(declared_effect_keys=("k1",),
                                             effect_records=())), contains="k1")
-    expect_guard("T20 拒绝：重复执行（SM-11）", lambda: M.transition(
+    expect_guard("T20 拒绝：两条 done（重复执行，SM-11）", lambda: M.transition(
         task("DELIVERING"), "T20", TaskFacts(declared_effect_keys=("k1",),
-                                            effect_records=("k1", "k1"))), contains="k1")
+                                            effect_records=(rec("k1"), rec("k1")))), contains="k1")
+    expect_guard("T20 拒绝：key 不匹配", lambda: M.transition(
+        task("DELIVERING"), "T20", TaskFacts(declared_effect_keys=("k1",),
+                                            effect_records=(rec("k2"),))), contains="k1")
 
     # T21 DELIVERING -> BLOCKED
     res = expect_ok("T21 允许：目标拒绝要重授权", M, task("DELIVERING"), "T21",
@@ -1015,10 +1046,15 @@ def test_f_acceptance_cases() -> None:
     expect_guard("SM-10 未批准不得交付", lambda: M.transition(
         task("ACCEPTED"), "T19", TaskFacts(risk="high", side_effects=(eff(),))))
 
-    # SM-11 同一 idempotency_key 触发两次 -> 第二次应被 T20 拒绝
-    expect_guard("SM-11 重复副作用记录被拒", lambda: M.transition(
+    # SM-11 同一 idempotency_key 触发两次 -> 第二次不应产生第二个 done 记录
+    expect_guard("SM-11 两条 done 记录被拒", lambda: M.transition(
         task("DELIVERING"), "T20", TaskFacts(declared_effect_keys=("k1",),
-                                            effect_records=("k1", "k1"))))
+                                            effect_records=(rec("k1"), rec("k1")))))
+    expect_ok("SM-11 重放只留 replayed 时仍算一条成功", M,
+              task("DELIVERING"), "T20",
+              TaskFacts(declared_effect_keys=("k1",),
+                        effect_records=(rec("k1"), rec("k1", "replayed"))),
+              target="DELIVERED")
 
     # SM-12 RUNNING 断开 -> 立刻重试应被拒；先 UNKNOWN 再对账
     expect_illegal("SM-12 RUNNING 不能直接回 READY", lambda: StepMachine.attempt(
