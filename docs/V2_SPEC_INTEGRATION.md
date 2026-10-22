@@ -163,7 +163,7 @@ JSON 容忍未知键所以不会崩，但项目红线是「不得自造 API 字�
 |---|---|---|---|---|
 | 1 | Task/Step 双层状态机 + 迁移表（§4.2/4.4/4.5） | 新包 `server/task/` | 功能上无依赖；**架构上留了一个语义真空**（见①） | 无（不动运行时） |
 | 2 | 失败分类与签名（§4.6）、重试与确认（§4.7） | `server/task/` | 1 | 无 |
-| 3 | 权限等级 L0–L6（§6.2）+ G6 升级为「必须在本表内」 | `server/contract/` | 无 | 只改契约层自身校验；**连带改 `test_contract.py` 的 G6 冻结项断言**（见⑤） |
+| 3 | 权限等级 L0–L6（§6.2）+ G6 升级为「必须在本表内」 | `server/contract/` | 无 | 只改契约层自身校验；**连带改 `test_contract.py` 的 G6 冻结项断言**（见⑤）；**改完必须跑 `test_core.py` 92/0**（见⑥） |
 | 4 | 事件写 JSONL 追加（§7.1） | `server/task/events.py` | 1 | 无（只写本地文件，不发 WS）；**落盘带 `v:2`**（见②） |
 | 5 | Verifier 确定性规则 + 语义 Judge 分离（§9.1） | **新写逐条 criterion 执行器**，只复用 evaluator 的原则（见④） | 1 | 无 |
 | 6 | 交付与 `effect_log` 幂等（§4.9 / §5.2） | `server/task/delivery.py` | 1 | **开工前先定 `effect_log` 形状**（见③） |
@@ -291,6 +291,25 @@ git ls-files scripts/probe_task_fsm_mutations.py →  已跟踪
 **为什么不现在就 add `server/task/`**：§4–§9 的实施范围尚未取得用户明确授权
 （见 C2 第 ② 条：「是我做的」只回答归属，不回答开工）。代码写完、测绿、探针有效，
 **但落进 master 要等那一句**。这不是技术阻塞，是范围问题。
+（**2026-10-22 13:1x 已解**：用户连续三次说「继续」，`server/task/` 按「可撤回」入库。）
+
+### ⑥ 第 3 步改完 G6 必须跑 `test_core.py`
+
+G6 变严会让契约层的 `collect_gaps` 对含乱码等级的单多报一条 gap。
+全仓只有两个消费者，都在 `server/assistant/dispatcher.py`（`:133` / `:157`），
+都是**只读旁路**（`_contract_gaps`，算缺口展示进派单密件）——不决定派不派、不决定路由。
+
+**但「不影响路由」是我基于读码的判断，不是实测。** 所以改完 G6 必须跑：
+
+```
+.\.venv\Scripts\python.exe scripts\test_core.py    # 期望 92 passed / 0 failed
+```
+
+`test_core.py` 覆盖 dispatcher 的真实链路。**92 条仍全绿 = 判断成立；红了 = 影响比预期大，
+停下重判，不要「顺手改测试让它绿」。**
+
+**这道工序写在这里而不是靠谁记得**——今晚已经因为「只在口头说过」让下一个人
+差点以为 master 坏了（`server/task/` 未入库那件事）。
 
 **实现现状**：`server/task/` 10 个文件、24 Task 规则 + 15 Step 规则、
 零业务 import、零 IO。QA 的 460 条断言与 6 条变异探针全绿。
