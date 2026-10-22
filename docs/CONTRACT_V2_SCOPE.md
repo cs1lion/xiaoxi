@@ -5,6 +5,15 @@
 - 决策人：用户（2026-10-21 20:38「0-3.7 先开工」；2026-10-22「是我做的」→ §4–§9 采纳）
 - 状态：§3 实施完毕；§4–§9 开始实施，顺序见 `docs/V2_SPEC_INTEGRATION.md` 第三节
 
+> **Verifier 的位置（2026-10-22 首席架构裁定）**：Verifier 在 **`server/verify/`**，
+> **契约层仍不读文件**。不放 `server/contract/`（那会让「不读库、不发网络、不跑命令」的
+> 边界声明作废），也不放 `server/task/`（那会让 `test_task_fsm.py:1508` 的
+> 「不 import `server.contract`」断言失败——Verifier 必须 import 契约层的 `Criterion`/`CheckSpec`）。
+>
+> `server/verify/` 自己的边界：**允许读文件，禁止开 socket、连库、subprocess**。
+> `exit_code_zero` 的 `cmd` 只校验形状、不执行，执行属第 8 步之后（有 `[PROTOCOL_REQUEST]` 门）。
+> `server/task` 调用 Verifier **不 import 它**，靠注入 callable——数据依赖，不是代码依赖。
+
 > **2026-10-22 凌晨更新（§3.8 已落地）**：
 > - **R1 命令白名单**已做：`config/contract.yaml` 的 `lint.allowed_commands` + `lint.py:_cmd_allowed`，
 >   黑名单保留作第二道。测试在 `test_contract.py` 的 `[K]` 节。

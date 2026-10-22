@@ -1505,8 +1505,11 @@ def test_k_boundaries() -> None:
     check("StateValueError 是 ValueError", issubclass(StateValueError, ValueError))
 
     # 不 import server.contract / server.assistant / server.interaction
+    # server.verify 也禁止：Verifier 由 TaskEngine 在 VERIFYING 状态调用，但它必须 import
+    # 契约层的 Criterion/CheckSpec。所以 server/task 不能 import 它，只能靠注入 callable——
+    # 数据依赖，不是代码依赖（2026-10-22 首席架构裁定，见 CONTRACT_V2_SCOPE.md 抬头）。
     for forbidden in ("server.contract", "server.assistant", "server.interaction",
-                      "server.dialogue", "server.memory"):
+                      "server.dialogue", "server.memory", "server.verify"):
         hits = [b for b in business if forbidden in b]
         check(f"不 import {forbidden}", hits == [], str(hits))
 
