@@ -438,10 +438,38 @@ v0.1 的六态（SPEC_LOCKED / DISPATCHED / EXECUTING / VERIFYING / BLOCKED / AC
 | `FAILED` | 不可重试失败（契约违规、预算耗尽、未声明副作用） | **是** |
 | `TIMEOUT` | 超过 `budget.max_wall_s`，副作用已对账 | **是** |
 
-- `BLOCKED.resume_to ∈ {SPEC_LOCKED, EXECUTING, VERIFYING, DELIVERING}`，**必须显式给出**：
+- `BLOCKED.resume_to ∈ {SPEC_LOCKED, DISPATCHED, EXECUTING, VERIFYING, DELIVERING}`，**必须显式给出**：
   没有 `resume_to` 的阻塞等于把任务丢进黑洞。
+  （**2026-10-22 补 `DISPATCHED`**：原集合漏了它，而 T11 明写 `resume_to=DISPATCHED`——
+  按原集合 T11 产出的状态违反本节自己的约束。以 T11 为准补进集合，不是删 T11。）
 - `BLOCKED.reason ∈ {need_clarification, need_approval, need_authorization, retry_exhausted, ambiguous_result}`。
   前两类对应台账既有的 `blocked_kind`（`clarification` / `approval`），后三类是 v2 新增语义（见 4.9）。
+  五个取值**每个都要有产生它的迁移行**，对照如下。**2026-10-22 改前只有 `need_clarification` 没有产生者**
+  （判据：`reason` 集合 ∩ 每行 T 表文本，脚本跑原版得到 `need_clarification <- NONE`；
+  这是机械核对，不是数的）：
+
+  | reason | 由哪条迁移产生 |
+  | --- | --- |
+  | `need_clarification` | **T17**（存在 `kind=human` 的 required 标准，见 SM-17）。补它的理由：SM-17 要求在 `VERIFYING` 停下等人判，而停下必须落成带 `resume_to` 的 `BLOCKED`，T17 本来就是唯一承载 human 标准的迁移 |
+  | `need_approval` | T9（无可用适配器，选择「请示」而非「要授权」）、T21（交付目标拒绝 / 需重授权） |
+  | `need_authorization` | T9（无容量 / 无适配器）、T13（`E_PERMISSION`） |
+  | `retry_exhausted` | T13、T17（重试耗尽或签名重复） |
+  | `ambiguous_result` | T11（全部 Step 无回执且超 `dispatch_ack_timeout`） |
+
+  **只补到能消除矛盾为止，不顺手扩大**：本轮**没有**把 `need_clarification` 塞进 T13，
+  尽管 `§4.6` 说 `E_INPUT` 的默认去向是 `BLOCKED(need_clarification)`。
+  原因：`E_INPUT` 是失败分类层的东西，把它挂到哪条 Task 迁移上属于**新决定**，
+  不是修矛盾。这一条留白送裁决（见下面「待拍」）。
+
+  同理 `§4.6` 的 `E_BUDGET` 去向写成「`FAILED` 或 `BLOCKED(need_approval)`」，二选一判据没写。
+  本轮**没有**替它选：迁移表保持原样（T14 的 `budget_hard_exhausted` → `FAILED`），
+  `BLOCKED(need_approval)` 那条路的触发条件待定。
+
+  **待拍（两处，都不阻塞 M1 #1/#2）**：
+  1. `E_INPUT`（输入不可达）在 `EXECUTING` 阶段出现时，走 `T13(BLOCKED)` 还是别的？走的话 `reason` 取 `need_clarification` 还是 `retry_exhausted`？
+  2. `E_BUDGET` 软超限（`max_tokens` / `max_cost_usd` 告警后）走 `FAILED` 还是 `BLOCKED(need_approval)`？
+  两处都只影响 `T13` 的 `reason` 取值域，改一行即可；在拍板前 `T13` 的取值域**保持**
+  `{retry_exhausted, need_authorization}` 不变。
 
 **Step 状态（11）**
 
@@ -513,11 +541,11 @@ v0.1 的六态（SPEC_LOCKED / DISPATCHED / EXECUTING / VERIFYING / BLOCKED / AC
 | T10 | `DISPATCHED → EXECUTING` | 任一 Step 进入 `RUNNING` | 至少一条 `dispatch_receipt` 存在 | `TASK_STATE_CHANGE` |
 | T11 | `DISPATCHED → BLOCKED` | 全部 Step 均无回执且超过 `dispatch_ack_timeout` | `reason=ambiguous_result`；`resume_to=DISPATCHED` | `ASK_USER` |
 | T12 | `EXECUTING → VERIFYING` | 全部 Step 终态且已交产出物 | 没有 `UNKNOWN`/`DISPATCHED` 的 Step；未发现未声明的副作用 | `VERIFICATION_REPORT` |
-| T13 | `EXECUTING → BLOCKED` | Step 失败且 Step 重试耗尽 / 熔断 / 需授权 | `reason ∈ {retry_exhausted, need_authorization}` | `ASK_USER` |
+| T13 | `EXECUTING → BLOCKED` | Step 失败且 Step 重试耗尽 / 熔断 / 需授权 | `reason ∈ {retry_exhausted, need_authorization}`；`resume_to=EXECUTING` | `ASK_USER` |
 | T14 | `EXECUTING → FAILED` | 契约违规 | 出现未在 `side_effects` 声明的副作用，或 `budget` 硬耗尽 | `TASK_STATE_CHANGE` |
 | T15 | `EXECUTING → TIMEOUT` | 墙钟超限 | 已对账全部在飞副作用（见 4.8） | `TASK_STATE_CHANGE` |
 | T16 | `VERIFYING → EXECUTING` | 存在 `required` 标准未过 | 任务级 `attempt < budget.max_retries`；本次失败签名 ≠ 上次签名 | `TASK_STATE_CHANGE` |
-| T17 | `VERIFYING → BLOCKED` | 同上但不可自动重试 | `attempt ≥ max_retries`，或签名重复，或存在 `kind=human` 的 `required` 标准 | `ASK_USER` |
+| T17 | `VERIFYING → BLOCKED` | 同上但不可自动重试 | `attempt ≥ max_retries`，或签名重复 → `reason=retry_exhausted`；或存在 `kind=human` 的 `required` 标准 → `reason=need_clarification`；两者并存时取 `need_clarification`（要人来判，比「再试也没用」更具体）；`resume_to=VERIFYING` | `ASK_USER` |
 | T18 | `VERIFYING → ACCEPTED` | 验收全过 | 所有 `required` 标准通过；`semantic` 标准每条都带证据 | `VERIFICATION_REPORT` |
 | T19 | `ACCEPTED → DELIVERING` | 交付确认 | `risk==low` 且无副作用 → 直接进入；`risk∈{medium,high}` → 必须 `APPROVE_SIDE_EFFECT` | `TASK_STATE_CHANGE` |
 | T20 | `DELIVERING → DELIVERED` | 副作用全部完成 | 每条 `side_effects[].idempotency_key` 在 `effect_log` 里恰好一条成功记录 | `TASK_STATE_CHANGE` |
@@ -669,7 +697,7 @@ v2 有 `CANCELLED` / `FAILED` / `TIMEOUT`，台账没有。方案：
 | SM-14 | `UNKNOWN`，对账确认未执行 | 对账 | `UNKNOWN→READY`，可用同一幂等键重派 |
 | SM-15 | `BLOCKED(need_authorization)`，用户授权 | `ANSWER` | 回到 `resume_to`，且授权只对当次 `side_effect.id` 有效 |
 | SM-16 | `EXECUTING`，用户说「算了」 | `CANCEL_TASK` | Step 全部 `CANCELLED`，Worker `cancel()` 已返回，Task `CANCELLED` |
-| SM-17 | `VERIFYING`，存在 `kind=human` 的 required 标准 | 自动判定全过 | 停在 `VERIFYING` 等 `ANSWER`，不直接 `ACCEPTED` |
+| SM-17 | `VERIFYING`，存在 `kind=human` 的 required 标准 | 自动判定全过 | 迁到 `BLOCKED(need_clarification)` 并等 `ANSWER`，`resume_to=VERIFYING`；**不**直接 `ACCEPTED`（2026-10-22 改：原写「停在 VERIFYING 等」，但停在非终态等于没有阻塞记录的悬挂，与 §4.2「没有 `resume_to` 的阻塞等于把任务丢进黑洞」冲突，以 T17 为准） |
 | SM-18 | 任意状态收到一个不在迁移表里的目标 | 迁移 | 拒绝并记 `kind=illegal_transition`，状态不变 |
 
 **属性测试**（比逐条用例更省）：随机生成 10 万条迁移序列，断言
