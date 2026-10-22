@@ -215,3 +215,32 @@ test('落位失败时不占格：账本保持原样', () => {
   placeFromPlan(world, plan, 'plot#bad', blueprints);
   assert.equal(world.grid.countOccupied(), before, '被拒时不能占用任何格子');
 });
+
+// ------------------------------------------------------------------ 玩家操作也走 schema
+
+test('玩家在造物模式里的选择，拼成同一份意图后能被 schema 接受', () => {
+  // 这是「schema 不是死代码」的证据：手动造物与将来的 LLM 走同一条校验。
+  const intent = {
+    templateId: 'workshop_plot',
+    at: { x: 30, y: 14 },
+    palette: {
+      body: 'timber',
+      roof: 'cloak',
+      trim: 'pale',
+      window: 'amber',
+    },
+  };
+  assert.doesNotThrow(() => parse(intent));
+});
+
+test('玩家选的配色同样受 24 色约束：造物模式没有特权', () => {
+  assert.throws(
+    () =>
+      parse({
+        templateId: 'workshop_plot',
+        at: { x: 30, y: 14 },
+        palette: { body: '#123456' },
+      }),
+    /十六进制/,
+  );
+});

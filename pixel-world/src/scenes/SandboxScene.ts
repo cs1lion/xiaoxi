@@ -9,7 +9,7 @@ import { Simulation, type MiracleKind, type NewBuilding } from '../world/simulat
 import type { CommandResult, GridPoint, OracleRecord, PrefabBlueprint, WorldSnapshot } from '../world/types.ts';
 import { excerptBlockedQuestion } from '../world/types.ts';
 import { placeBlueprint, type BuiltWorld } from '../world/setup.ts';
-import { WORLD } from '../world/palette-data.ts';
+import { WORLD, tokenNameOf } from '../world/palette-data.ts';
 import { drawTerrain } from '../render/tilemap.ts';
 import { createBuilding, updateBuilding, type BuildingView } from '../render/buildings.ts';
 import { createVillager, updateVillager, type VillagerView } from '../render/villager.ts';
@@ -25,6 +25,7 @@ import { bakeLayer, type BakedLayer } from '../render/bake.ts';
 import { shouldAnimateAt, targetFpsFor } from '../render/eco-mode.ts';
 import { fogAt } from '../world/fog.ts';
 import { awaitingDecree } from '../world/decree.ts';
+import { parseCreationPlan } from '../world/creator-schema.ts';
 import { checkPlacement, hintFor } from '../world/setup.ts';
 import { parsePhaseParam, phaseAt, type PhaseId } from '../render/day-phase.ts';
 import { createDecorView, type DecorView } from '../render/decor.ts';
@@ -628,6 +629,32 @@ export class SandboxScene extends Phaser.Scene {
       return { ok: false, message: hintFor(check.reason) };
     }
     const instanceId = `${session.prefabId}#${this.snapshot.buildings.length + 1}`;
+
+    // 玩家的选择先拼成一份**造物意图**，过 schema 再落位。
+    // 这样手动造物与将来的 LLM 输出走同一条校验，schema 不是死代码。
+    const intent = {
+      templateId: session.prefabId,
+      at: session.ghostAt,
+      palette: {
+        body: tokenNameOf(blueprint.palette.body),
+        roof: tokenNameOf(blueprint.palette.roof),
+        trim: tokenNameOf(blueprint.palette.trim),
+        window: tokenNameOf(blueprint.palette.window),
+      },
+    };
+    try {
+      parseCreationPlan(intent, this.blueprints, {
+        width: this.world.grid.width,
+        height: this.world.grid.height,
+      });
+    } catch (error) {
+      // schema 不过就是玩家的选择有问题：留在模式里，说清哪里不对。
+      return {
+        ok: false,
+        message: error instanceof Error ? error.message : '造物意图不合法。',
+      };
+    }
+
     this.sim.enqueue({
       kind: 'build',
       prefabId: session.prefabId,
