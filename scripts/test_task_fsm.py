@@ -138,6 +138,7 @@ def rec(key: str, status: str = "done", **kw) -> "EffectRecord":
     return EffectRecord(
         idempotency_key=key,
         status=status,
+        effect_id=kw.get("effect_id", f"e_{key}:{status}"),
         type=kw.get("type", "overwrite_file"),
         target_class=kw.get("target_class", "local"),
         at=kw.get("at", 1761000000000),
@@ -497,33 +498,36 @@ def test_b_task_edges() -> None:
     # 不能静默落进「不是 done」的分支（那会让 T20 永远拒绝且没人知道是拼错了）
     for bad_status in ("DONE", "Done", "succes", "success", "ok", ""):
         try:
-            EffectRecord(idempotency_key="k1", status=bad_status)
+            EffectRecord(idempotency_key="k1", status=bad_status, effect_id="e1")
         except ValueError:
             check(f"EffectRecord 拒绝非法 status {bad_status!r}", True)
         else:
             check(f"EffectRecord 拒绝非法 status {bad_status!r}", False, "没有抛 ValueError")
     for good_status in ("done", "failed", "replayed"):
         try:
-            EffectRecord(idempotency_key="k1", status=good_status)
+            EffectRecord(idempotency_key="k1", status=good_status, effect_id="e1")
         except ValueError as exc:
             check(f"EffectRecord 接受合法 status {good_status!r}", False, str(exc))
         else:
             check(f"EffectRecord 接受合法 status {good_status!r}", True)
     try:
-        EffectRecord(idempotency_key="", status="done")
+        EffectRecord(idempotency_key="", status="done", effect_id="e1")
     except ValueError:
         check("EffectRecord 拒绝空 idempotency_key", True)
     else:
         check("EffectRecord 拒绝空 idempotency_key", False, "没有抛")
+    # effect_id 也补上：否则这条会因为「缺 effect_id」先炸，而不是因为 status 非法，
+    # 就成了「因为错的原因通过」。补上后它只测 status。
     try:
-        EffectRecord.from_mapping({"idempotency_key": "k1", "status": "bogus"})
+        EffectRecord.from_mapping({"idempotency_key": "k1", "status": "bogus",
+                                   "effect_id": "e1"})
     except ValueError:
         check("from_mapping 也校 status", True)
     else:
         check("from_mapping 也校 status", False, "没有抛")
     ok_rec = EffectRecord.from_mapping({"idempotency_key": "k1", "status": "done",
-                                        "type": "overwrite_file", "target_class": "local",
-                                        "at": 1761000000000})
+                                        "effect_id": "e1", "type": "overwrite_file",
+                                        "target_class": "local", "at": 1761000000000})
     check("from_mapping 正常构造", ok_rec.idempotency_key == "k1" and ok_rec.status == "done")
 
     # 失败情形 3：重复 done

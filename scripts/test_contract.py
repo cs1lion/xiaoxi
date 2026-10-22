@@ -924,7 +924,10 @@ def test_i_boundaries():
                 found.append(f"{path.name}: def {node.name}")
     check("边界·没有 TaskEngine/Verifier/EventBus 实现", not found, str(found))
 
-    # 冻结项：permissions_required 不校验等级合法性
+    # 等级合法性归 G6（gate.py）管，shape 层**故意不管**——这不是疏漏，是层级裁定。
+    # 依据：L0–L6 等级表现在定义在 gate.py，model.py 若去 import 它会形成
+    # model → gate → model 循环依赖。所以 shape 层只校验形状（非空 + 元素为非空字符串），
+    # 等级合法性由 G6 把关。别在这里「补上」等级校验，那会绕过裁定并引入循环依赖。
     nonsense = {"contract_id": "ct_n", "version": 1, "created_at": "t", "utterance": "u",
                 "goal": {"value": "做点事", "source": {"kind": "user_utterance", "turn_id": "t1"}},
                 "artifact": {"value": {"kind": "csv", "format": "csv"},
@@ -937,10 +940,11 @@ def test_i_boundaries():
                 "budget": {"max_retries": 3, "max_step_retries": 2, "max_wall_s": 900}}
     try:
         parsed = parse_contract(nonsense)
-        check("冻结项·乱码权限等级也能解析（等级合法性属 §7，冻结）",
+        check("shape 层不管等级合法性（归 G6，避开 model→gate 循环依赖）",
               parsed.permissions_required == ("NONSENSE_LEVEL",))
     except ContractShapeError as exc:
-        check("冻结项·乱码权限等级也能解析（等级合法性属 §7，冻结）", False, str(exc.problems))
+        check("shape 层不管等级合法性（归 G6，避开 model→gate 循环依赖）",
+              False, str(exc.problems))
 
     # 冻结项：exit_code_zero 的 cmd 只校验形状，不执行
     tmpdir = tempfile.mkdtemp(prefix="qa-contract-")
