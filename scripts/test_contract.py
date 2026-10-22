@@ -217,9 +217,24 @@ def test_a_gates():
     # 合法性」的前提已不成立，改为双向断言。
     # 注：shape 层（parse_contract）是否也要同步校验等级，架构尚未裁定（issue 503），
     # 这里只动 gate 层；shape 层那处断言保持原样，等裁定后单独一次提交。
-    for level in ("L0", "L1", "L2", "L3", "L4", "L5", "L6"):
-        check(f"G6 合法等级 {level} 不产生 gap",
-              "G6" not in gap_checks(mk_draft(permissions_required=(level,))))
+    # 七级逐个显式列，不用循环：合法集是闭集，少认一级 G6 就漏一级，
+    # 而循环写在元组里删掉一项是静默的（测试照跑，覆盖少一级无人知道）。
+    # 写成七条独立断言，删掉任何一条都是源码里可见的改动。
+    check("G6 合法等级 L0 不产生 gap",
+          "G6" not in gap_checks(mk_draft(permissions_required=("L0",))))
+    check("G6 合法等级 L1 不产生 gap",
+          "G6" not in gap_checks(mk_draft(permissions_required=("L1",))))
+    check("G6 合法等级 L2 不产生 gap",
+          "G6" not in gap_checks(mk_draft(permissions_required=("L2",))))
+    check("G6 合法等级 L3 不产生 gap",
+          "G6" not in gap_checks(mk_draft(permissions_required=("L3",))))
+    check("G6 合法等级 L4 不产生 gap",
+          "G6" not in gap_checks(mk_draft(permissions_required=("L4",))))
+    check("G6 合法等级 L5 不产生 gap",
+          "G6" not in gap_checks(mk_draft(permissions_required=("L5",))))
+    check("G6 合法等级 L6 不产生 gap",
+          "G6" not in gap_checks(mk_draft(permissions_required=("L6",))))
+    # 非法值是开集（任何不在 L0–L6 里的串），抽样即可，用循环不掩盖缺口。
     for bad in ("NONSENSE_LEVEL", "L7", "l1", "", "L", "L10"):
         check(f"G6 非法等级 {bad!r} 被拦下",
               gap_checks(mk_draft(permissions_required=("L1", bad))) == ["G6"],
