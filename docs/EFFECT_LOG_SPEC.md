@@ -105,24 +105,39 @@ dataclass 在**构造时**炸（`__post_init__` 校验闭集），与本包既�
 在只有失败记录、和有失败记录混入时给出相反结论。
 
 ```python
-# 现在（machine.py:276-282）：数 key 出现次数
+# 改前（machine.py，d0e96c6 之前）：数 key 出现次数
 count = sum(1 for record in records if record == key)
 
-# 改成：数「该 key 且 status == done」的条数
+# 改后（d0e96c6）：数「该 key 且 status == done」的条数
 count = sum(
     1 for record in records
-    if record.get("idempotency_key") == key and record.get("status") == "done"
+    if record.idempotency_key == key and record.status == "done"
 )
 if count != 1:
-    return f"idempotency_key {key!r} 在 effect_log 里有 {count} 条成功记录（应为 1）"
+    return f"idempotency_key {key!r} 有 {count} 条成功记录（应为 1）"
 ```
 
-**连带影响**：`TaskFacts.effect_records` 的类型从 `tuple[str, ...]` 改为
-`tuple[dict[str, Any], ...]`。这是**新包内部的类型**，不涉及协议、不涉及台账 schema。
+**改后的实际守卫比分词更细**：三种失败情况报三句不同文案（`d0e96c6` 落地）——
+「没有任何记录（声明了但没执行过）」「有 N 条记录但没有成功的：status = …」
+「有 N 条成功记录（应为 1，疑似重复执行）」。
+**这不是文案洁癖**：P8 探针把 status 比对写成大写后，报的是
+「有 1 条记录但没有成功的：status = done」——一眼看出是比对写错，不是真没执行。
+压成一句「出现 N 次」就分不出来。
 
-**这一条测试要同步**：现有断言用的是字符串列表，改类型后会红。
-红了是对的——它说明类型变化被测试看见了。**改测试前先确认那条断言保护的是
-「T20 数成功记录」还是「effect_records 是字符串」**：前者要保留，后者才是要改的。
+**这一条测试要同步**：`test_task_fsm.py` 里原有用字符串当 `effect_records` 的断言，
+改类型后要换成构造 `EffectRecord`。红了是对的——它说明类型变化被测试看见了。
+**改测试前先确认那条断言保护的是「T20 数成功记录」还是「effect_records 是字符串」**：
+前者要保留，后者才是要改的。
+
+**防线验证的可见性（`9efbc83`）**：这次改动**没有补任何断言**——两侧的断言在 `d0e96c6`
+就都在（`expect_ok("T20 允许：一条 done + 一条 failed…")` 与
+`expect_ok("T20 拒绝：只有一条 failed…")`）。缺的是**探针看不见第二侧**：
+`apply_probe` 原只收一个期望串，P7 写的是 `"只有一条 failed"`，于是只报「命中 1 条」，
+另一侧红了却不算进命中数。
+
+**修的是探针，不是防线**：现在支持多期望元组，缺一项直接判 `INVALID`。
+这个区别要记清——**「防线有洞」和「防线没被验证到」是两件事**，
+前者要补断言，后者要修补验证工具。混成一件会让人反复加重复断言。
 
 ---
 
