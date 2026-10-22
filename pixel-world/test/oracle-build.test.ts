@@ -3,8 +3,9 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { parseBlueprintTable } from '../src/world/blueprints.ts';
 import { parseOracleBuild } from '../src/world/oracle-build.ts';
-import { ALTAR, buildWorld, placeBlueprint } from '../src/world/setup.ts';
+import { ALTAR, buildLargeWorld, buildWorld, placeBlueprint } from '../src/world/setup.ts';
 import { Simulation } from '../src/world/simulation.ts';
+import { summarizeWorld } from '../src/world/world-state.ts';
 
 const blueprints = parseBlueprintTable(
   JSON.parse(
@@ -129,4 +130,73 @@ test('已经有书阁时说「建一间书阁」，认得出但不建，并说�
   assert.equal(result?.ok, false);
   assert.match(result?.message ?? '', /已经有星图书阁/);
   assert.equal(sim.snapshot().oracle.length, 0, '没改变世界就不刻石板');
+});
+
+// ------------------------------------------------------------------ 拆
+
+test('「拆掉矿洞」认成拆，不是建', () => {
+  const intent = parseOracleBuild('拆掉矿洞', blueprints);
+  assert.ok(intent !== null);
+  assert.equal(intent.action, 'demolish');
+  assert.equal(intent.templateId, 'crawler_mine');
+});
+
+test('拆与建共用别名表：同一个词两种动作', () => {
+  const build = parseOracleBuild('建一间书阁', blueprints);
+  const demolish = parseOracleBuild('拆掉书阁', blueprints);
+  assert.equal(build?.templateId, demolish?.templateId, '别名指向同一个模板');
+  assert.equal(build?.action, 'build');
+  assert.equal(demolish?.action, 'demolish');
+});
+
+test('「拆」不带模板时不认', () => {
+  assert.equal(parseOracleBuild('拆掉它', blueprints), null);
+});
+
+test('叙述性的「拆」不认', () => {
+  assert.equal(parseOracleBuild('我想拆了那栋楼', blueprints), null);
+  assert.equal(parseOracleBuild('要不要拆掉矿洞？', blueprints), null);
+});
+
+// ------------------------------------------------------------------ 拆进世界
+
+test('一句「拆掉矿洞」真的把矿洞拆了，并刻石板', () => {
+  // 矿洞是郊野铺子，只在大世界里存在。
+  const world = buildLargeWorld(blueprints);
+  const sim = new Simulation({
+    grid: world.grid,
+    buildings: world.buildings,
+    altar: world.altar,
+    villagerName: '莞尔',
+    wallClock: () => 1000,
+    blueprints,
+  });
+
+  sim.enqueue({ kind: 'oracle', raw: '拆掉矿洞' });
+  const result = sim.update(16)[0];
+
+  assert.equal(result?.ok, true, result?.message);
+  assert.ok(
+    !sim.snapshot().buildings.some((b) => b.prefabId === 'crawler_mine'),
+    '矿洞应当没了',
+  );
+  assert.equal(sim.snapshot().oracle.length, 1, '拆也是改变了世界的事');
+});
+
+test('拆掉郊野研究铺子后，世界状态说出缺口——补缺按钮这才有了来源', () => {
+  const world = buildLargeWorld(blueprints);
+  const sim = new Simulation({
+    grid: world.grid,
+    buildings: world.buildings,
+    altar: world.altar,
+    villagerName: '莞尔',
+    wallClock: () => 1000,
+    blueprints,
+  });
+
+  sim.enqueue({ kind: 'oracle', raw: '拆掉矿洞' });
+  sim.update(16);
+
+  const state = summarizeWorld(sim.snapshot());
+  assert.deepEqual(state.gaps.missingWild, ['research']);
 });

@@ -16,6 +16,8 @@ import type { GridPoint, PrefabBlueprint } from './types.ts';
 
 /** 建造动词。句首（或去掉礼貌前缀后）是这些词，才当造物。 */
 const BUILD_VERBS = ['建', '盖', '造', '修', '开', '起'];
+/** 拆除动词。与建造共用别名表，方向相反。 */
+const DEMOLISH_VERBS = ['拆', '拆掉', '拆除', '推倒', '铲平'];
 
 /** 礼貌与承接前缀，与 oracle.ts 同口径。 */
 const PREFIXES = [
@@ -55,8 +57,10 @@ const TEMPLATE_ALIASES: Readonly<Record<string, string>> = {
 };
 
 export interface BuildIntent {
+  /** build 或 demolish：同一个模板，方向相反。 */
+  readonly action: 'build' | 'demolish';
   readonly templateId: string;
-  /** null 表示"由世界挑地方"。 */
+  /** null 表示"由世界挑地方"。拆的时候无意义。 */
   readonly at: GridPoint | null;
 }
 
@@ -80,8 +84,12 @@ export function parseOracleBuild(
   const body = stripPrefixes(stripLocation(lower));
   if (NARRATIVE_SUBJECTS.some((subject) => body.startsWith(subject))) return null;
 
-  // 句首必须是建造动词。
-  if (!BUILD_VERBS.some((verb) => body.startsWith(verb))) return null;
+  // 句首必须是建造或拆除动词。拆优先：`拆掉` 也以 `拆` 开头，
+  // 但两个表不重叠，顺序只影响可读性。
+  let action: 'build' | 'demolish' | null = null;
+  if (DEMOLISH_VERBS.some((verb) => body.startsWith(verb))) action = 'demolish';
+  else if (BUILD_VERBS.some((verb) => body.startsWith(verb))) action = 'build';
+  if (action === null) return null;
 
   // 找一个能认的模板。长的别名优先：「爬虫矿洞」不该被「矿洞」抢。
   const aliases = Object.keys(TEMPLATE_ALIASES).sort((a, b) => b.length - a.length);
@@ -89,7 +97,7 @@ export function parseOracleBuild(
     if (!lower.includes(alias)) continue;
     const templateId = TEMPLATE_ALIASES[alias]!;
     if (!templates.has(templateId)) continue;
-    return { templateId, at: readPoint(lower) };
+    return { action, templateId, at: action === 'build' ? readPoint(lower) : null };
   }
   return null;
 }

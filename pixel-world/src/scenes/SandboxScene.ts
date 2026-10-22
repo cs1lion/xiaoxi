@@ -26,6 +26,8 @@ import { shouldAnimateAt, targetFpsFor } from '../render/eco-mode.ts';
 import { fogAt } from '../world/fog.ts';
 import { awaitingDecree } from '../world/decree.ts';
 import { describeWorldState, summarizeWorld } from '../world/world-state.ts';
+import { BIOME_RADII } from '../world/biomes.ts';
+import { WILD_PREFABS } from '../world/setup.ts';
 import { parseCreationPlan } from '../world/creator-schema.ts';
 import { checkPlacement, hintFor } from '../world/setup.ts';
 import { parsePhaseParam, phaseAt, type PhaseId } from '../render/day-phase.ts';
@@ -606,12 +608,9 @@ export class SandboxScene extends Phaser.Scene {
     const blueprint = this.blueprints.get(session.prefabId);
     if (blueprint === undefined) return;
     this.creation = { ...session, ghostAt: cell };
-    const check = checkPlacement(this.world.grid, blueprint, cell);
-    const fogged = fogAt(cell, this.snapshot.fog);
-    this.ghost.show(cell, blueprint, check.ok && !fogged);
-    this.publishCreationHint(
-      fogged ? '那里还没长出来，先让世界走到那儿。' : check.ok ? '可以建在这里，回车确认。' : hintFor(check.reason),
-    );
+    const check = this.canPlaceBlueprintHere(blueprint, cell);
+    this.ghost.show(cell, blueprint, check.ok);
+    this.publishCreationHint(check.ok ? '可以建在这里，回车确认。' : check.message);
   }
 
   /** 确认施工。没有幽灵位置时拒绝，不猜一个地方。 */
@@ -623,13 +622,10 @@ export class SandboxScene extends Phaser.Scene {
     }
     const blueprint = this.blueprints.get(session.prefabId);
     if (blueprint === undefined) return { ok: false, message: '没有这份蓝图。' };
-    if (fogAt(session.ghostAt, this.snapshot.fog)) {
-      return { ok: false, message: '那里还没长出来，先让世界走到那儿。' };
-    }
-    const check = checkPlacement(this.world.grid, blueprint, session.ghostAt);
+    const check = this.canPlaceBlueprintHere(blueprint, session.ghostAt);
     if (!check.ok) {
       // 留在造物模式里让玩家换个位置，并说明为什么这里不行。
-      return { ok: false, message: hintFor(check.reason) };
+      return { ok: false, message: check.message };
     }
     const instanceId = `${session.prefabId}#${this.snapshot.buildings.length + 1}`;
 
@@ -671,6 +667,37 @@ export class SandboxScene extends Phaser.Scene {
     });
     this.endCreation();
     return { ok: true, message: '动工了。' };
+  }
+
+  /**
+   * 造物落位校验：迷雾、空间、群落三道。
+   *
+   * 三处调用（hover / confirm / canPlaceAt）必须共用这一份——
+   * 各写一遍就会漏掉其中一条，而漏掉的那条会在真机上表现为
+   * 「预览说可以，确认却建到了不该建的地方」。
+   */
+  private canPlaceBlueprintHere(
+    blueprint: PrefabBlueprint,
+    cell: GridPoint,
+  ): { ok: true } | { ok: false; message: string } {
+    if (fogAt(cell, this.snapshot.fog)) {
+      return { ok: false, message: '那里还没长出来，先让世界走到那儿。' };
+    }
+    const check = checkPlacement(this.world.grid, blueprint, cell);
+    if (!check.ok) return { ok: false, message: hintFor(check.reason) };
+
+    // 群落：郊野铺子必须在郊野圈，镇内铺子在工坊环内。
+    // 与开局落位同一套规则（setup.ts 的 accept 谓词），否则拆了重建会把
+    // 郊野铺子建到镇里——实测 crawler_mine 曾被建到 15.5 格的 craftRing。
+    const distance = Math.hypot(cell.x - this.world.altar.x, cell.y - this.world.altar.y);
+    const isWild = WILD_PREFABS.has(blueprint.id);
+    if (isWild && distance <= BIOME_RADII.craftRing) {
+      return { ok: false, message: '这种铺子要建在郊野，离镇子远一点。' };
+    }
+    if (!isWild && distance > BIOME_RADII.craftRing) {
+      return { ok: false, message: '这种铺子要建在镇子里。' };
+    }
+    return { ok: true };
   }
 
   /** 取消：世界没有任何变化，恢复推进。 */
@@ -942,9 +969,7 @@ export class SandboxScene extends Phaser.Scene {
         if (session === null) return false;
         const blueprint = this.blueprints.get(session.prefabId);
         if (blueprint === undefined) return false;
-        // 迷雾区不能建：那是还没长出来的地方。迷雾只拦建造，不拦通行。
-        if (fogAt(cell, this.snapshot.fog)) return false;
-        return checkPlacement(this.world.grid, blueprint, cell).ok;
+        return this.canPlaceBlueprintHere(blueprint, cell).ok;
       },
       camera: () => ({
         scrollX: this.cameras.main.scrollX,

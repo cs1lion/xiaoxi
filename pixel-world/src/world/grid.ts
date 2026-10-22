@@ -139,6 +139,27 @@ export class WorldGrid {
     return true;
   }
 
+  /**
+   * 把一栋建筑从账本里撤掉：清占用、恢复可走。
+   *
+   * 门口保留 stone 地形——那是铺过的路，拆楼不该把路也铲了。
+   * 返回是否真的撤掉了（找不到占用者时返回 false）。
+   */
+  remove(instanceId: string, origin: GridPoint, w: number, h: number): boolean {
+    let found = false;
+    for (let y = origin.y; y < origin.y + h; y += 1) {
+      for (let x = origin.x; x < origin.x + w; x += 1) {
+        const cell = this.at({ x, y });
+        if (cell === undefined) continue;
+        if (cell.occupant !== instanceId) continue;
+        cell.occupant = null;
+        cell.walkable = true;
+        found = true;
+      }
+    }
+    return found;
+  }
+
   /** 占地 + 留白全部没被占才允许落。margin 会把周围几圈也算进检查。 */
   canPlace(origin: GridPoint, w: number, h: number, margin: number): boolean {
     for (let y = origin.y - margin; y < origin.y + h + margin; y += 1) {

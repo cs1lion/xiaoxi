@@ -38,7 +38,9 @@ export const BIOME_RADII: Readonly<Record<Exclude<BiomeId, 'frontier'>, number>>
   townCore: 10,
   // 22 而不是 20：镇内四块分区的最远处是 21.3 格，20 会把最外一角的铺子判成郊野。
   craftRing: 22,
-  wilderness: 34,
+  // 42 而不是 34：郊野四块分区的距离是 26.1..40.5，34 会把外半截判成 frontier，
+  // 郊野铺子就只剩一条 26..34 的窄带可建，放不下 6×6 的净空。
+  wilderness: 42,
 };
 
 /**

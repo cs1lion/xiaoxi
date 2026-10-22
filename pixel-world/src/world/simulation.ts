@@ -99,6 +99,13 @@ export type WorldCommand =
    * 三件：点灯、种树、召唤猫（猫只做氛围，会自己走开）。
    */
   | { readonly kind: 'miracle'; readonly miracle: MiracleKind }
+  /**
+   * 拆掉一栋楼。
+   *
+   * 三条拒绝：找不到、正在施工、有人在里面干活。
+   * 后者不是为了保护建筑，是为了保护正在干的活——拆了会让那单悬空。
+   */
+  | { readonly kind: 'demolish'; readonly instanceId: string }
   /** 台账快照。这是世界接真实工作的唯一入口。 */
   | {
       readonly kind: 'sync';
@@ -443,6 +450,8 @@ export class Simulation {
         return this.build(command.prefabId, command.instanceId, command.at, command.source);
       case 'miracle':
         return this.performMiracle(command.miracle);
+      case 'demolish':
+        return this.demolish(command.instanceId);
       case 'sync':
         return this.sync(command.tasks, command.finished, command.connected,
           command.complete ?? true, command.order ?? [], command.finishedAt ?? []);
@@ -568,6 +577,19 @@ export class Simulation {
    * 不是模型的。校验仍走 `build` 那一套（重复检查、施工、铺路）。
    */
   private buildFromIntent(raw: string, intent: BuildIntent): CommandResult {
+    // 拆：同一份意图，方向相反。找到那栋楼再走 demolish 的三条拒绝。
+    if (intent.action === 'demolish') {
+      const target = this.buildings.find((b) => b.prefabId === intent.templateId);
+      if (target === undefined) {
+        const message = `没有${this.blueprints?.get(intent.templateId)?.displayName ?? intent.templateId}可拆。`;
+        this.log('warn', message);
+        return { ok: false, message };
+      }
+      const result = this.demolish(target.instanceId);
+      if (result.ok) this.inscribe(raw, result.message);
+      return result;
+    }
+
     const blueprint = this.blueprints?.get(intent.templateId);
     if (blueprint === undefined) {
       const message = `没有 ${intent.templateId} 这份蓝图。`;
@@ -1525,6 +1547,37 @@ export class Simulation {
   private stepCritters(): void {
     if (this.critters.length === 0) return;
     this.critters = this.critters.filter((critter) => critter.leavesAt > this.now);
+  }
+
+  /** 拆一栋楼。见 `WorldCommand.demolish` 的三条拒绝。 */
+  private demolish(instanceId: string): CommandResult {
+    const building = this.buildings.find((item) => item.instanceId === instanceId);
+    if (building === undefined) {
+      const message = `没有 ${instanceId} 这栋楼。`;
+      this.log('warn', message);
+      return { ok: false, message };
+    }
+    if (this.constructions.has(instanceId)) {
+      const message = `${building.displayName} 还在施工，拆不了。`;
+      this.log('warn', message);
+      return { ok: false, message };
+    }
+    const busy = this.activities.get(instanceId);
+    if (busy !== undefined && busy.kind === 'operating') {
+      const message = `${building.displayName} 里有人在干活，等这单收工再拆。`;
+      this.log('warn', message);
+      return { ok: false, message };
+    }
+
+    // 释放网格占用。门口的路保留——那是铺过的路，拆楼不铲路。
+    this.grid.remove(instanceId, building.origin, building.footprint.w, building.footprint.h);
+    const index = this.buildings.findIndex((item) => item.instanceId === instanceId);
+    if (index >= 0) this.buildings.splice(index, 1);
+    this.activities.delete(instanceId);
+
+    const message = `${building.displayName} 拆掉了。`;
+    this.log('info', message);
+    return { ok: true, message };
   }
 
   private stepConstructions(deltaMs: number): void {

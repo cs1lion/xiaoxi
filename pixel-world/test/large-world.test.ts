@@ -53,7 +53,8 @@ test('群落按离中心距离划分：越靠近祭坛越是核心', () => {
   assert.equal(biomeAt({ x: center.x + 6, y: center.y }, center), 'townCore');
   assert.equal(biomeAt({ x: center.x + 12, y: center.y }, center), 'craftRing');
   assert.equal(biomeAt({ x: center.x + 24, y: center.y }, center), 'wilderness');
-  assert.equal(biomeAt({ x: center.x + 36, y: center.y }, center), 'frontier');
+  // wilderness 上限 42（见 biomes.ts 的注释：郊野分区最远 40.5 格）。
+  assert.equal(biomeAt({ x: center.x + 44, y: center.y }, center), 'frontier');
 });
 
 test('群落判定是纯函数：同输入同输出', () => {
