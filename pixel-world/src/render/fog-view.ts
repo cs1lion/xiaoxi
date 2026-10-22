@@ -11,6 +11,7 @@ import Phaser from 'phaser';
 import { TILE_PX } from '../world/setup.ts';
 import { WORLD } from '../world/palette-data.ts';
 import { bakeLayer, type BakedLayer } from './bake.ts';
+import { driftPuffs } from '../world/fog-drift.ts';
 
 export interface FogState {
   readonly center: { readonly x: number; readonly y: number };
@@ -18,7 +19,8 @@ export interface FogState {
 }
 
 export interface FogView {
-  update(fog: FogState): void;
+  /** `timeMs` 只驱动边缘雾团的漂移，不触发烘焙。 */
+  update(fog: FogState, timeMs: number): void;
   /** 释放烘焙纹理。场景关闭时必须调，否则同名纹理残留。 */
   destroy(): void;
 }
@@ -39,6 +41,10 @@ export function createFogView(
   let layer: BakedLayer | null = null;
   let current: FogState | null = null;
   let lastKey = '';
+  // 雾团是**少量独立对象**，每帧重画也不贵（十几团）。
+  // 关键是它们不参与烘焙——否则每帧重烘整张大图，视野裁剪就白做了。
+  const puffs = scene.add.graphics();
+  puffs.setDepth(FOG_DEPTH + 1);
 
   /** 把给定迷雾状态画进 Graphics。首次烘焙与重烘都走这里。 */
   const paint = (g: Phaser.GameObjects.Graphics, fog: FogState): void => {
@@ -62,24 +68,49 @@ export function createFogView(
   };
 
   return {
-    update(fog) {
+    update(fog, timeMs) {
       const key = `${fog.center.x},${fog.center.y},${fog.revealedRadius}`;
-      if (key === lastKey) return;
-      lastKey = key;
-      current = fog;
-
-      if (layer === null) {
-        layer = bakeLayer(scene, 'world-fog', width, height, FOG_DEPTH, (g) => {
-          if (current !== null) paint(g, current);
-        });
-        return;
+      if (key !== lastKey) {
+        lastKey = key;
+        current = fog;
+        if (layer === null) {
+          layer = bakeLayer(scene, 'world-fog', width, height, FOG_DEPTH, (g) => {
+            if (current !== null) paint(g, current);
+          });
+        } else {
+          layer.rebake();
+        }
       }
-      layer.rebake();
+
+      // 边缘雾团：每帧按时间重算。十几团、每团几块，代价可以忽略。
+      //
+      // 不能画成一个矩形：硬边矩形在像素风里读成"半透明贴纸"，不是雾。
+      // 用 4px 的小块按距离衰减拼出来，边缘才有绒感——与迷雾本体同一种手法。
+      puffs.clear();
+      // 8px 一块而不是 4px：4px 时一团要上百块，十几团就是六万多条指令，
+      // 超过渲染预算。8px 仍有足够的绒感，指令量降到四分之一。
+      const CELL = 8;
+      for (const puff of driftPuffs(fog.center, fog.revealedRadius, timeMs)) {
+        const cx = puff.at.x * TILE_PX;
+        const cy = puff.at.y * TILE_PX;
+        const r = puff.radius * TILE_PX;
+        for (let dy = -r; dy <= r; dy += CELL) {
+          for (let dx = -r; dx <= r; dx += CELL) {
+            const d = Math.hypot(dx, dy) / r;
+            if (d > 1) continue;
+            // 中心浓、边缘趋零，平方衰减让过渡更柔。
+            const falloff = (1 - d) * (1 - d);
+            puffs.fillStyle(WORLD.water, puff.alpha * 0.24 * falloff);
+            puffs.fillRect(Math.round(cx + dx), Math.round(cy + dy), CELL, CELL);
+          }
+        }
+      }
     },
 
     destroy() {
       layer?.destroy();
       layer = null;
+      puffs.destroy();
       lastKey = '';
     },
   };

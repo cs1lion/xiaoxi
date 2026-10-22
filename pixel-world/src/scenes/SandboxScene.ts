@@ -887,7 +887,7 @@ export class SandboxScene extends Phaser.Scene {
     }
     this.weatherView.update(this.sim.weatherIntensity(), delta);
     this.phaseView.update(this.snapshot, delta);
-    this.fogView.update(this.snapshot.fog);
+    this.fogView.update(this.snapshot.fog, this.snapshot.now);
 
     // 气泡一出现就出声；同一个角色的同一句话不重复念。
     for (const villager of snapshot.villagers) {
