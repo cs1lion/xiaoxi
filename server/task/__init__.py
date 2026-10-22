@@ -20,6 +20,18 @@
 from __future__ import annotations
 
 from .errors import GuardRejected, IllegalTransition, TransitionError
+from .delivery import (
+    STEP_EXECUTED,
+    STEP_FAILED,
+    STEP_REPLAYED,
+    DeliveryOutcome,
+    DeliveryStep,
+    EffectExecutor,
+    EffectResult,
+    declared_keys,
+    deliver,
+    pending_effects,
+)
 from .failures import (
     DEFAULT_DESTINATION,
     FAILURE_CLASSES,
@@ -89,6 +101,10 @@ __all__ = [
     # machine (§4.4 / §4.5)
     "TaskState", "StepState", "TransitionResult", "TransitionRule",
     "TASK_RULES", "STEP_RULES", "TaskMachine", "StepMachine",
+    # delivery (§4.9 / §5.2)
+    "EffectResult", "EffectExecutor", "DeliveryStep", "DeliveryOutcome",
+    "deliver", "pending_effects", "declared_keys",
+    "STEP_EXECUTED", "STEP_FAILED", "STEP_REPLAYED",
     # failures (§4.6)
     "FAILURE_CLASSES", "RETRYABLE", "DEFAULT_DESTINATION", "Failure",
     "normalize_error_text", "build_signature", "classify", "destination_for",
