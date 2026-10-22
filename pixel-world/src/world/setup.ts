@@ -52,40 +52,34 @@ export const GRID_HEIGHT = SMALL_WORLD_SPEC.height;
  * 两者职责不同：分区决定能建什么，群落决定看起来像哪一带。
  */
 export const LARGE_WORLD_SPEC: GridSpec = {
-  width: 80,
-  height: 60,
+  width: 96,
+  height: 72,
   border: BORDER,
   zones: [
     // 核心：祭坛 + 中心广场。
-    // 街道只是**路**，不是广场：旧规格里 street 是 4 格宽的十字，
-    // 大世界照抄比例会让整片中心变成铺装，草地被切碎。
-    { id: 'altar', x: 37, y: 27, w: 6, h: 6 },
-    // 十字主干道：3 格宽，从镇中心一直铺到地图边缘，
-    // 这样 A* 才有"先上大路"的落点，玩家也看得出哪里是路。
-    { id: 'street', x: 38, y: 1, w: 4, h: 26 },
-    { id: 'street', x: 38, y: 33, w: 4, h: 26 },
-    { id: 'street', x: 1, y: 28, w: 36, h: 4 },
-    { id: 'street', x: 43, y: 28, w: 36, h: 4 },
-    // 工坊环：四块围着十字街排开，每块 10×12。
+    { id: 'altar', x: 45, y: 33, w: 6, h: 6 },
+    // 十字主干道：4 格宽，从镇中心一直铺到地图边缘。
+    { id: 'street', x: 46, y: 1, w: 4, h: 32 },
+    { id: 'street', x: 46, y: 39, w: 4, h: 32 },
+    { id: 'street', x: 1, y: 34, w: 45, h: 4 },
+    { id: 'street', x: 50, y: 34, w: 45, h: 4 },
+    // 工坊环：四块围着十字街排开，每块 10×10。
     //
-    // 位置是**按群落半径反推**的：早先的布局让镇内书斋落在 24.5 格、
-    // 郊野磨坊落在 20.8 格——两者交错，任何半径都分不开「镇内」与「郊野」。
-    // 现在镇内四块全部落在 22 格内，郊野四块全部落在 26 格外，中间留出空隙。
-    // 10 格宽是下限：5×4 的工坊加一圈留白需要 7×6 净空。
-    { id: 'industry', x: 26, y: 14, w: 10, h: 12 },
-    { id: 'scholarly', x: 44, y: 14, w: 10, h: 12 },
-    { id: 'agriculture', x: 26, y: 33, w: 10, h: 12 },
-    { id: 'living', x: 44, y: 33, w: 10, h: 12 },
-    // 郊野：四角，全部在 26 格外
-    { id: 'industry', x: 6, y: 8, w: 12, h: 8 },
-    { id: 'scholarly', x: 62, y: 8, w: 12, h: 8 },
-    { id: 'agriculture', x: 6, y: 44, w: 12, h: 8 },
-    { id: 'living', x: 62, y: 44, w: 12, h: 8 },
+    // 位置按**群落半径反推**：镇内四块全部落在 21 格内。
+    { id: 'industry', x: 35, y: 20, w: 10, h: 10 },
+    { id: 'scholarly', x: 51, y: 20, w: 10, h: 10 },
+    { id: 'agriculture', x: 35, y: 42, w: 10, h: 10 },
+    { id: 'living', x: 51, y: 42, w: 10, h: 10 },
+    // 郊野：四角，全部落在 21..37 格的环带里。
+    { id: 'industry', x: 18, y: 18, w: 9, h: 8 },
+    { id: 'scholarly', x: 69, y: 18, w: 9, h: 8 },
+    { id: 'agriculture', x: 18, y: 46, w: 9, h: 8 },
+    { id: 'living', x: 69, y: 46, w: 9, h: 8 },
   ],
 };
 
 /** 大世界的祭坛：规格正中心。 */
-export const LARGE_ALTAR: GridPoint = { x: 40, y: 30 };
+export const LARGE_ALTAR: GridPoint = { x: 48, y: 36 };
 
 export const ALTAR: GridPoint = { x: 15, y: 9 };
 

@@ -22,9 +22,9 @@ const blueprints = parseBlueprintTable(
 
 // ------------------------------------------------------------------ 规格
 
-test('大世界规格：80×60，图块仍是 16px', () => {
-  assert.equal(LARGE_WORLD_SPEC.width, 80);
-  assert.equal(LARGE_WORLD_SPEC.height, 60);
+test('大世界规格：96×72，图块仍是 16px', () => {
+  assert.equal(LARGE_WORLD_SPEC.width, 96);
+  assert.equal(LARGE_WORLD_SPEC.height, 72);
   assert.equal(TILE_PX, 16, '放大图块与扩大世界互相抵消，图块尺寸不动');
 });
 
@@ -33,12 +33,13 @@ test('旧规格保留为测试夹具，尺寸不变', () => {
   assert.equal(SMALL_WORLD_SPEC.height, 20);
 });
 
-test('大世界总像素：1280×960，是旧世界的约 8 倍面积', () => {
+test('大世界总像素：1536×1152，面积是旧世界的约 11.5 倍', () => {
   const large = LARGE_WORLD_SPEC.width * LARGE_WORLD_SPEC.height;
   const small = SMALL_WORLD_SPEC.width * SMALL_WORLD_SPEC.height;
-  assert.equal(LARGE_WORLD_SPEC.width * TILE_PX, 1280);
-  assert.equal(LARGE_WORLD_SPEC.height * TILE_PX, 960);
-  assert.ok(large >= small * 7.5, `面积比 ${(large / small).toFixed(2)} 应约 8 倍`);
+  assert.equal(LARGE_WORLD_SPEC.width * TILE_PX, 1536);
+  assert.equal(LARGE_WORLD_SPEC.height * TILE_PX, 1152);
+  // 96×72 / (30×20) = 11.52。放大到 96×72 是为了容下「镇内 / 郊野 / 未探索」三层。
+  assert.ok(large >= small * 11, `面积比 ${(large / small).toFixed(2)} 应约 11.5 倍`);
 });
 
 // ------------------------------------------------------------------ 群落
@@ -131,17 +132,17 @@ test('大世界与小世界可以并存：小世界只放镇内三栋，大世�
   const small = buildWorld(blueprints);
   const large = buildLargeWorld(blueprints);
   assert.equal(small.grid.width, 30);
-  assert.equal(large.grid.width, 80);
+  assert.equal(large.grid.width, 96);
   assert.equal(small.buildings.length, 3, '小世界放不下郊野铺子');
   assert.equal(large.buildings.length, 6, '大世界有郊野铺子');
 });
 
 test('空网格：大世界规格能独立构造，不依赖 buildLargeWorld', () => {
   const grid = new WorldGrid(LARGE_WORLD_SPEC);
-  assert.equal(grid.width, 80);
-  assert.equal(grid.height, 60);
-  assert.equal(grid.at({ x: 79, y: 59 }) !== undefined, true);
-  assert.equal(grid.at({ x: 80, y: 59 }), undefined);
+  assert.equal(grid.width, 96);
+  assert.equal(grid.height, 72);
+  assert.equal(grid.at({ x: 95, y: 71 }) !== undefined, true);
+  assert.equal(grid.at({ x: 96, y: 71 }), undefined);
 });
 
 // ------------------------------------------------------------------ 群落与落位一致
