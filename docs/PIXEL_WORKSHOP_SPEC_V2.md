@@ -547,7 +547,7 @@ v0.1 的六态（SPEC_LOCKED / DISPATCHED / EXECUTING / VERIFYING / BLOCKED / AC
 | T16 | `VERIFYING → EXECUTING` | 存在 `required` 标准未过 | 任务级 `attempt < budget.max_retries`；本次失败签名 ≠ 上次签名 | `TASK_STATE_CHANGE` |
 | T17 | `VERIFYING → BLOCKED` | 同上但不可自动重试 | `attempt ≥ max_retries`，或签名重复 → `reason=retry_exhausted`；或存在 `kind=human` 的 `required` 标准 → `reason=need_clarification`；两者并存时取 `need_clarification`（要人来判，比「再试也没用」更具体）；`resume_to=VERIFYING` | `ASK_USER` |
 | T18 | `VERIFYING → ACCEPTED` | 验收全过 | 所有 `required` 标准通过；`semantic` 标准每条都带证据 | `VERIFICATION_REPORT` |
-| T19 | `ACCEPTED → DELIVERING` | 交付确认 | `risk==low` 且无副作用 → 直接进入；`risk∈{medium,high}` → 必须 `APPROVE_SIDE_EFFECT` | `TASK_STATE_CHANGE` |
+| T19 | `ACCEPTED → DELIVERING` | 交付确认 | `risk==low` 且无副作用 → 直接进入；`risk∈{medium,high}` → 必须 `APPROVE_SIDE_EFFECT`；**`risk==low` 且有副作用 → 按「有副作用」处理，必须 `APPROVE_SIDE_EFFECT`**（见下注） | `TASK_STATE_CHANGE` |
 | T20 | `DELIVERING → DELIVERED` | 副作用全部完成 | 每条 `side_effects[].idempotency_key` 在 `effect_log` 里恰好一条成功记录 | `TASK_STATE_CHANGE` |
 | T21 | `DELIVERING → BLOCKED` | 目标拒绝 / 需要重授权 | `reason=need_approval`；`resume_to=DELIVERING` | `ASK_USER` |
 | T22 | `BLOCKED → resume_to` | `ANSWER` / 授权 / 人工改判 | 回答非空；或授权对象命中了阻塞时的 `side_effect.id` | `TASK_STATE_CHANGE` |
@@ -556,6 +556,20 @@ v0.1 的六态（SPEC_LOCKED / DISPATCHED / EXECUTING / VERIFYING / BLOCKED / AC
 
 **重试次数口径**：`budget.max_retries` 数的是**验收打回**次数（T16），不是 Step 内部工具重试
 （`budget.max_step_retries` 管那个）。这两个数混用，就会出现「重试了 3 次却只打回 1 次」的争议。
+
+> **T19 补第三支的由来（2026-10-22，Agent 集成工程师在实现时发现）**：
+> 原文只写了两支——「`risk==low` 且无副作用」与「`risk∈{medium,high}`」，
+> **`risk==low` 但有副作用**这个组合落在两者之间的缝里，规范没说该怎么办。
+> 补的判据只有一句：**要不要批准取决于「有没有副作用」，与 `risk` 无关**——
+> 因为 `APPROVE_SIDE_EFFECT` 防的是「会改变世界的那一下」，而 `risk` 是按槽位置信度算的，
+> 两者是不同维度（§3.4 与 §6.2 各自定义）。所以有副作用就要点头，`risk=low` 不能豁免。
+> **这条不是新决定，是把原文漏掉的组合按原文自己的逻辑补全**；如果判定它应当算新决定，
+> 改这一注即可，迁移表不用动。
+
+**T12 的一处冗余是故意的**：守卫同时查「全部 Step 终态」与「没有 `UNKNOWN`/`DISPATCHED`」，
+而 `UNKNOWN` 本身就不是终态（§4.2），所以后一句在当前定义下是冗余的。
+保留它是因为**「UNKNOWN 不是终态」这个前提将来若被改动，这层检查会先红**——
+冗余在这里是给未来留的报警器，不是笔误。
 
 ### 4.5 Step 级迁移表
 
