@@ -65,7 +65,7 @@
   <div class="sub">
     三张图分开画：<b>A 模块与数据流</b>（谁连谁、什么是进程什么是数据）·
     <b>B 时间轴 + 泳道</b>（并发，不是五阶段串行）·
-    <b>C BLOCKED 分支</b>（一个状态、五种 reason、四个 resume_to）。
+    <b>C BLOCKED 分支</b>（一个状态、五种 reason、五个 resume_to）。
     每条修正对应的规范行号见 <code>docs/ARCH_V2_DIAGRAM.md</code> 与本页末尾对照表。
   </div>
 </header>
@@ -379,7 +379,7 @@
   <h2>C · BLOCKED 分支（附录 C 第 1 条、§4.2 状态集、§4.4 迁移表、§4.6 失败分类）</h2>
   <div class="note">
     <b>BLOCKED 是一个状态，不是一个分支族。</b>它带两个必填字段：<code>reason</code>（5 个取值）与
-    <code>resume_to</code>（4 个取值）。<b>没有 resume_to 的阻塞等于把任务丢进黑洞</b>（§4.2 :441）。
+    <code>resume_to</code>（5 个取值：SPEC_LOCKED / DISPATCHED / EXECUTING / VERIFYING / DELIVERING）。<b>没有 resume_to 的阻塞等于把任务丢进黑洞</b>（§4.2 :441）。
     右侧五个方块是 reason 的取值，不是并列的状态。
   </div>
   <svg viewBox="0 0 1500 520" role="img" aria-label="BLOCKED 分支">

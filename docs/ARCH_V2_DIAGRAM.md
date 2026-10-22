@@ -58,7 +58,7 @@ T17  VERIFYING → BLOCKED   reason=retry_exhausted | need_clarification      re
 :441 resume_to ∈ {SPEC_LOCKED, DISPATCHED, EXECUTING, VERIFYING, DELIVERING}
 ```
 
-图 C 已按 `6b23691` 更新，底部红字改为绿字「已补齐」，并列出具体补了什么。
+图 C 已按 `6b23691` 更新：底部原来那行红字换成一行为绿色（`#008052`）的说明，**实际文本是「2026-10-22 已由规范 6b23691 补齐：」**，其后逐条列出补了什么（`resume_to` 集合补 `DISPATCHED`、T13 补 `resume_to`、T17 补 `reason` 与 `resume_to`）。
 
 ### 3.2 `need_clarification` 没有对应的 Task 迁移行 —— **已由 `6b23691` 补到 T17**
 
