@@ -40,7 +40,7 @@ from .machine import (
     TransitionResult,
     TransitionRule,
 )
-from .model import SideEffectDecl, StepFacts, TaskFacts
+from .model import EFFECT_STATUSES, EffectRecord, SideEffectDecl, StepFacts, TaskFacts
 from .paths import path_in_contract_scope
 from .projection import LedgerProjection, blocked_kind_of, project_task
 from .replay import (
@@ -85,7 +85,7 @@ __all__ = [
     # paths
     "path_in_contract_scope",
     # model
-    "SideEffectDecl", "TaskFacts", "StepFacts",
+    "EFFECT_STATUSES", "EffectRecord", "SideEffectDecl", "TaskFacts", "StepFacts",
     # machine (§4.4 / §4.5)
     "TaskState", "StepState", "TransitionResult", "TransitionRule",
     "TASK_RULES", "STEP_RULES", "TaskMachine", "StepMachine",

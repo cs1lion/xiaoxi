@@ -276,22 +276,30 @@ def _t19_guard(state: TaskState, facts: TaskFacts) -> str:
 def _t20_guard(state: TaskState, facts: TaskFacts) -> str:
     """T20：每条声明的副作用，在 effect_log 里**恰好一条 status=done**。
 
-    effect_log 的每条记录是一个 dict（形状见 docs/EFFECT_LOG_SPEC.md）：
-    idempotency_key / status / attempt / ...。status 三值 done | failed | replayed，
-    **只有 done 算成功**。
-
-    为什么不能只数 key 出现次数：失败的那次也会被算进去，于是
-    「1 条 done + 1 条 failed」的正常重试反被挡，而「1 条 failed」被当成成功放行——
-    两个方向都错，且都不报错。
+    三种失败要能分开报，否则排查时分不出是哪一种：
+      1. 声明了但记录里根本没这个键        -> 0 条记录
+      2. 有记录但一条 done 都没有           -> N 条记录 / 0 条成功
+      3. 重复 done                          -> M 条成功
     """
     records = tuple(facts.effect_records or ())
     for key in facts.declared_effect_keys or ():
-        count = sum(
-            1 for record in records
-            if record.get("idempotency_key") == key and record.get("status") == "done"
-        )
-        if count != 1:
-            return f"idempotency_key {key!r} 在 effect_log 里有 {count} 条成功记录（应为 1）"
+        matched = [record for record in records if record.idempotency_key == key]
+        succeeded = [record for record in matched if record.status == "done"]
+        if not matched:
+            return (
+                f"idempotency_key {key!r} 在 effect_log 里没有任何记录"
+                f"（声明了这个副作用但没执行过）"
+            )
+        if not succeeded:
+            statuses = ", ".join(record.status for record in matched)
+            return (
+                f"idempotency_key {key!r} 有 {len(matched)} 条记录但没有成功的："
+                f"status = {statuses}（需要恰好 1 条 done）"
+            )
+        if len(succeeded) != 1:
+            return (
+                f"idempotency_key {key!r} 有 {len(succeeded)} 条成功记录（应为 1，疑似重复执行）"
+            )
     return ""
 
 
@@ -593,7 +601,7 @@ TASK_RULES: tuple[TransitionRule, ...] = (
                "approve_side_effect 或（risk=low 且无副作用）",
                ("TASK_STATE_CHANGE",), _t19_guard),
     _task_rule("T20", "DELIVERING", "DELIVERED", "副作用全部完成",
-               "每个 declared_effect_key 在 effect_log 里恰好一条 status=done",
+               "每个 declared_effect_key 在 effect_log 里恰好一条 status=done（成功）",
                ("TASK_STATE_CHANGE",), _t20_guard),
     _task_rule("T21", "DELIVERING", "BLOCKED", "目标拒绝 / 需要重授权",
                "blocked_reason == need_approval",

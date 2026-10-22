@@ -140,6 +140,24 @@ def build_probes() -> list[tuple[str, str, str, str, str]]:
             "    return REPLAY_SAME_KEY",
             "UNKNOWN",
         ),
+        (
+            # T20 的反向证据：把「只取 done」放宽成「所有记录都算成功」，
+            # 失败记录就会被当成成功。期望侧（done+failed 仍应放行）不红，
+            # 拒绝侧（只有 failed / 只有 replayed）必须红。
+            "P7 T20 守卫不读 status（把所有记录都算成功）",
+            "machine.py",
+            'succeeded = [record for record in matched if record.status == "done"]',
+            "succeeded = list(matched)",
+            "只有一条 failed",
+        ),
+        (
+            # 第二种改坏法：status 比对写错大小写，等于永远不匹配 done。
+            "P8 T20 status 比对写成大写（永远匹配不到 done）",
+            "machine.py",
+            'succeeded = [record for record in matched if record.status == "done"]',
+            'succeeded = [record for record in matched if record.status == "DONE"]',
+            "T20 允许：恰好一条 done",
+        ),
     ]
 
 

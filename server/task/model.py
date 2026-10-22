@@ -28,6 +28,56 @@ def _text_tuple(value: Any) -> tuple[str, ...]:
     return tuple(item for item in value if isinstance(item, str))
 
 
+# §4.4 T20 / §5.2 DELIVERY_EFFECT 的 effect_log 记录。
+# 一条记录 = 一次副作用尝试的结果。字段收窄到「T20 真的会读」的五个：
+#   idempotency_key 幂等键（契约层给，同一副作用永远同一键）
+#   status          闭集 done | failed | replayed，只有 done 算成功
+#   type / target_class  副作用类型与作用对象类别
+#   at              epoch ms，服务端时钟
+#
+# 为什么**不**加 attempt / detail：现在没有消费者（T20 不读它们）。
+# 加一个没人读的字段等于凭猜测设计，等第 6 步 delivery 真实现时再按需加。
+#
+# 为什么用 frozen dataclass 而不是 dict：status 是**闭集**。用 dict 时
+# status="DONE" 或拼错成 "succes" 会静默落进「不是 done」的分支，T20 把它当
+# 失败记录永远拒绝，而**没人知道是拼错了**——读不到就不报错、只给出错误结论，
+# 正是这个包要避免的形状。所以非法值在**构造时**就 raise ValueError。
+EFFECT_STATUSES: tuple[str, ...] = ("done", "failed", "replayed")
+EFFECT_STATUS_SET = frozenset(EFFECT_STATUSES)
+
+
+@dataclass(frozen=True)
+class EffectRecord:
+    """effect_log 的一条记录。构造即校验，坏值不给进守卫的机会。"""
+
+    idempotency_key: str
+    status: str
+    type: str = ""
+    target_class: str = ""
+    at: int = 0
+
+    def __post_init__(self) -> None:
+        if not self.idempotency_key:
+            raise ValueError("EffectRecord 缺少 idempotency_key")
+        if self.status not in EFFECT_STATUS_SET:
+            raise ValueError(
+                f"EffectRecord.status 必须是 {EFFECT_STATUSES} 之一，实际 {self.status!r}"
+            )
+
+    @staticmethod
+    def from_mapping(raw: Any) -> "EffectRecord":
+        """从一条 dict（未来从 JSONL 读回）构造；缺字段与坏 status 都抛 ValueError。"""
+        if not isinstance(raw, dict):
+            raise ValueError(f"effect_log 记录必须是对象，实际 {type(raw).__name__}")
+        return EffectRecord(
+            idempotency_key=_text(raw.get("idempotency_key")),
+            status=_text(raw.get("status")),
+            type=_text(raw.get("type")),
+            target_class=_text(raw.get("target_class")),
+            at=int(raw.get("at") or 0),
+        )
+
+
 @dataclass(frozen=True)
 class SideEffectDecl:
     """契约里声明的一条副作用。
@@ -108,7 +158,7 @@ class TaskFacts:
     human_required_count: int = 0
     approve_side_effect: bool = False
     declared_effect_keys: tuple[str, ...] = ()
-    effect_records: tuple[dict[str, Any], ...] = ()
+    effect_records: tuple[EffectRecord, ...] = ()
     answer_text: str = ""
     authorization_effect_id: str = ""
     blocked_effect_id: str = ""

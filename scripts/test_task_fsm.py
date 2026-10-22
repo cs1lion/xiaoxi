@@ -71,7 +71,8 @@ try:
         REPLAY_SAME_KEY, REPLAY_UNKNOWN, RESUME_TARGETS, RETRYABLE, START_POLICIES, STEP_STATES,
         STEP_TERMINAL, TASK_STATES, TASK_TERMINAL, DispatchEvidence, Failure, GuardRejected,
         IllegalTransition, LedgerProjection, RetryDecision, SideEffectDecl, StateValueError,
-        StepFacts, StepMachine, StepState, TaskFacts, TaskMachine, TaskState, TransitionError,
+        EffectRecord, StepFacts, StepMachine, StepState, TaskFacts, TaskMachine, TaskState,
+    TransitionError,
         blocked_kind_of, build_signature, can_auto_start, classify, destination_for,
         normalize_error_text, project_task, replay_decision, requires_reconciliation,
         step_retry_decision, task_retry_decision, unknown_exits,
@@ -128,17 +129,19 @@ def eff(**kw) -> SideEffectDecl:
     return SideEffectDecl(**base)
 
 
-def rec(key: str, status: str = "done", **kw) -> dict:
-    """构造一条 effect_log 记录（形状见 docs/EFFECT_LOG_SPEC.md）。
+def rec(key: str, status: str = "done", **kw) -> "EffectRecord":
+    """构造一条 effect_log 记录（§4.4 T20 / §5.2 DELIVERY_EFFECT）。
 
-    status 三值：done 真的执行成功 / failed 尝试了但失败 / replayed 被幂等键挡住没再执行。
-    只有 done 计入 T20 的「成功记录」。
+    status 是闭集 done | failed | replayed，只有 done 算成功。
+    非法 status 在 EffectRecord 构造时就抛 ValueError，不在守卫里兜。
     """
-    base = {"effect_id": f"e_{key}", "idempotency_key": key, "type": "overwrite_file",
-            "target_class": "local", "status": status, "attempt": 1,
-            "at": 1761000000000, "detail": ""}
-    base.update(kw)
-    return base
+    return EffectRecord(
+        idempotency_key=key,
+        status=status,
+        type=kw.get("type", "overwrite_file"),
+        target_class=kw.get("target_class", "local"),
+        at=kw.get("at", 1761000000000),
+    )
 
 
 def expect_illegal(label: str, fn) -> None:
@@ -460,33 +463,74 @@ def test_b_task_edges() -> None:
         contains="APPROVE_SIDE_EFFECT")
 
     # T20 DELIVERING -> DELIVERED
-    # 只数 status=done 的记录。下面四条覆盖两个方向的偏离，不只是「能过」。
+    # 只数 status=done 的记录。三种失败必须报三种不同文案——排查时分得清是哪一种。
     expect_ok("T20 允许：恰好一条 done", M, task("DELIVERING"), "T20",
               TaskFacts(declared_effect_keys=("k1",), effect_records=(rec("k1"),)),
               target="DELIVERED")
-    # 这一条是改动前会误拒的正向场景：1 条 done + 1 条 failed 是正常重试，不是重复执行
+    # 改动前会误拒的正向场景：1 条 done + 1 条 failed 是正常重试，不是重复执行
     expect_ok("T20 允许：一条 done + 一条 failed（正常重试，只数 done）", M,
               task("DELIVERING"), "T20",
               TaskFacts(declared_effect_keys=("k1",),
                         effect_records=(rec("k1", "failed"), rec("k1", "done"))),
               target="DELIVERED")
-    expect_guard("T20 拒绝：只有一条 failed 记录（0 条成功）", lambda: M.transition(
+    # 失败情形 1：声明了但记录里根本没这个键
+    expect_guard("T20 拒绝(1/3)：完全没有这个键的记录", lambda: M.transition(
+        task("DELIVERING"), "T20", TaskFacts(declared_effect_keys=("k1",),
+                                            effect_records=())), contains="没有任何记录")
+    expect_guard("T20 拒绝(1/3)：只有别的 key", lambda: M.transition(
+        task("DELIVERING"), "T20", TaskFacts(declared_effect_keys=("k1",),
+                                            effect_records=(rec("k2"),))), contains="没有任何记录")
+    # 失败情形 2：有记录但一条 done 都没有
+    expect_guard("T20 拒绝(2/3)：只有一条 failed（0 条成功）", lambda: M.transition(
         task("DELIVERING"), "T20", TaskFacts(
             declared_effect_keys=("k1",),
-            effect_records=(rec("k1", "failed"),))), contains="0")
-    expect_guard("T20 拒绝：只有 replayed（没真执行过）", lambda: M.transition(
+            effect_records=(rec("k1", "failed"),))), contains="没有成功的")
+    expect_guard("T20 拒绝(2/3)：只有 replayed（没真执行过）", lambda: M.transition(
         task("DELIVERING"), "T20", TaskFacts(
             declared_effect_keys=("k1",),
-            effect_records=(rec("k1", "replayed"),))), contains="0")
-    expect_guard("T20 拒绝：记录缺失", lambda: M.transition(
+            effect_records=(rec("k1", "replayed"),))), contains="没有成功的")
+    expect_guard("T20 拒绝(2/3)：两条 failed 也不报成「重复执行」", lambda: M.transition(
+        task("DELIVERING"), "T20", TaskFacts(
+            declared_effect_keys=("k1",),
+            effect_records=(rec("k1", "failed"), rec("k1", "failed")))), contains="没有成功的")
+    # EffectRecord 自身的构造时校验：status 是闭集，拼错必须在构造时炸，
+    # 不能静默落进「不是 done」的分支（那会让 T20 永远拒绝且没人知道是拼错了）
+    for bad_status in ("DONE", "Done", "succes", "success", "ok", ""):
+        try:
+            EffectRecord(idempotency_key="k1", status=bad_status)
+        except ValueError:
+            check(f"EffectRecord 拒绝非法 status {bad_status!r}", True)
+        else:
+            check(f"EffectRecord 拒绝非法 status {bad_status!r}", False, "没有抛 ValueError")
+    for good_status in ("done", "failed", "replayed"):
+        try:
+            EffectRecord(idempotency_key="k1", status=good_status)
+        except ValueError as exc:
+            check(f"EffectRecord 接受合法 status {good_status!r}", False, str(exc))
+        else:
+            check(f"EffectRecord 接受合法 status {good_status!r}", True)
+    try:
+        EffectRecord(idempotency_key="", status="done")
+    except ValueError:
+        check("EffectRecord 拒绝空 idempotency_key", True)
+    else:
+        check("EffectRecord 拒绝空 idempotency_key", False, "没有抛")
+    try:
+        EffectRecord.from_mapping({"idempotency_key": "k1", "status": "bogus"})
+    except ValueError:
+        check("from_mapping 也校 status", True)
+    else:
+        check("from_mapping 也校 status", False, "没有抛")
+    ok_rec = EffectRecord.from_mapping({"idempotency_key": "k1", "status": "done",
+                                        "type": "overwrite_file", "target_class": "local",
+                                        "at": 1761000000000})
+    check("from_mapping 正常构造", ok_rec.idempotency_key == "k1" and ok_rec.status == "done")
+
+    # 失败情形 3：重复 done
+    expect_guard("T20 拒绝(3/3)：两条 done（重复执行，SM-11）", lambda: M.transition(
         task("DELIVERING"), "T20", TaskFacts(declared_effect_keys=("k1",),
-                                            effect_records=())), contains="k1")
-    expect_guard("T20 拒绝：两条 done（重复执行，SM-11）", lambda: M.transition(
-        task("DELIVERING"), "T20", TaskFacts(declared_effect_keys=("k1",),
-                                            effect_records=(rec("k1"), rec("k1")))), contains="k1")
-    expect_guard("T20 拒绝：key 不匹配", lambda: M.transition(
-        task("DELIVERING"), "T20", TaskFacts(declared_effect_keys=("k1",),
-                                            effect_records=(rec("k2"),))), contains="k1")
+                                            effect_records=(rec("k1"), rec("k1")))),
+        contains="疑似重复执行")
 
     # T21 DELIVERING -> BLOCKED
     res = expect_ok("T21 允许：目标拒绝要重授权", M, task("DELIVERING"), "T21",
