@@ -1433,8 +1433,15 @@ def test_k_boundaries() -> None:
     pkg = ROOT / "server" / "task"
     check("server/task 目录存在", pkg.is_dir())
     for name in ("__init__.py", "states.py", "errors.py", "paths.py", "model.py", "machine.py",
-                 "failures.py", "retry.py", "replay.py", "projection.py"):
+                 "failures.py", "retry.py", "replay.py", "projection.py", "events.py",
+                 "delivery.py"):
         check(f"文件存在 {name}", (pkg / name).is_file())
+
+    # events.py 是第 4 步引入的合法例外：它的职责就是写事件 JSONL（§7.1），
+    # 所以 open() 必然出现，"type" 也必然出现（§5.1 的信封字段名就叫 type）。
+    # 豁免**只给这一个文件**，不放宽到整包——将来有人往 machine.py 里加 open()
+    # 或被扫出 "type" 字面量，这两条断言仍然会红。这个区分就是设计的一部分。
+    IO_ALLOWED = {"events.py"}
 
     business = []
     event_literals = []
@@ -1451,7 +1458,7 @@ def test_k_boundaries() -> None:
                 if node.module and (node.module == "server" or
                                     node.module.startswith("server.")):
                     business.append(f"{path.name}:{node.lineno}")
-            if isinstance(node, ast.Dict):
+            if isinstance(node, ast.Dict) and path.name not in IO_ALLOWED:
                 for key in node.keys:
                     if isinstance(key, ast.Constant) and key.value == "type":
                         event_literals.append(f"{path.name}:{node.lineno}")
@@ -1463,14 +1470,16 @@ def test_k_boundaries() -> None:
             elif isinstance(node, ast.ImportFrom) and node.module in (
                     "socket", "sqlite3", "requests", "urllib", "http"):
                 io_calls.append(f"{path.name}:{node.module}")
-            elif isinstance(node, ast.Call):
+            elif isinstance(node, ast.Call) and path.name not in IO_ALLOWED:
                 func = node.func
                 name = getattr(func, "id", "") or getattr(func, "attr", "")
                 if name in ("open", "print", "input"):
                     io_calls.append(f"{path.name}:{name}()")
     check("零业务 import", business == [], str(business))
-    check("无 type 键字典字面量（防协议误报）", event_literals == [], str(event_literals))
-    check("零 IO / 零打印", io_calls == [], str(io_calls))
+    check("无 type 键字典字面量（防协议误报；events.py 除外，信封字段名就叫 type）",
+          event_literals == [], str(event_literals))
+    check("零 IO / 零打印（events.py 除外，它是唯一 IO 模块）",
+          io_calls == [], str(io_calls))
 
     # 状态对象不可变
     st = TaskState()
