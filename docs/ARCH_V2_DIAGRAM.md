@@ -90,6 +90,19 @@ T17  VERIFYING → BLOCKED   reason=retry_exhausted | need_clarification      re
 
 > **教训**：判据「每个 `reason` 都要有产生它的迁移行」（正向）和「每个 `resume_to` 值都要在集合内」（反向）是**两个方向**，我做了第一个就以为覆盖完了。
 
+### 3.5 T19 的第三支（`risk==low` 且有副作用）—— 规范补了，图跟着补
+
+**我初版没画这一支**，因为图 A 里 `ACCEPTED → DELIVERING` 只有一条线，没展开 T19 的条件分支。规范 `6b23691` 之后又有新提交补上了这一支：
+
+原文 T19 只写两支：
+
+- `risk==low` 且无副作用 → 直接进入
+- `risk∈{medium,high}` → 必须 `APPROVE_SIDE_EFFECT`
+
+**`risk==low` 但有副作用**这个组合落在两支之间的缝里，规范没说怎么办。补的判据是：**要不要批准取决于「有没有副作用」，与 `risk` 无关**——`APPROVE_SIDE_EFFECT` 防的是「会改变世界的那一下」，而 `risk` 是按槽位置信度算的，两者是不同维度（§3.4 与 §6.2 各自定义）。
+
+图 A 已在 `ACCEPTED → DELIVERING` 那条边旁标出三支，第三支注明「2026-10-22 补，规范原文两支之间的缝」。
+
 ---
 
 ## 四、草稿 `tmp/arch-v2.html` 为什么没用
