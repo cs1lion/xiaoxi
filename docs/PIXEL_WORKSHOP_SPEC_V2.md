@@ -666,7 +666,12 @@ v2 有 `CANCELLED` / `FAILED` / `TIMEOUT`，台账没有。方案：
 不写取消原因、不区分「用户取消」与「正常归档」。像素世界因此会把取消的单当成「已交付」，
 还给信仰加点（`pixel-world/src/world/simulation.ts` 的交付结算路径）。
 **这是本轮查出来的真实缺陷**，修法就是上表的 `closed_reason`。
-（**2026-10-22 已修**：`fa488ea`。实现用已有的 `audit` JSON 承载 `cancelled` / 原因 / 时刻，**没有新增 `closed_reason` 字段**，因此未触发协议变更。）
+（**2026-10-22 服务端已修**：`fa488ea`。实现用已有的 `audit` JSON 承载 `cancelled` / 原因 / 时刻，**没有新增 `closed_reason` 字段**，因此未触发协议变更。
+　**但世界侧没修**，这一句原先写成「已修」是不准确的，2026-10-22 由 World Builder 实测发现：
+　`pixel-world/src/world/projection.ts` 全文不读 `audit`，`types.ts` 也没有该字段，
+　所以取消单（`status=done`）在世界里仍然 `deliveries.ledger=1`、`faith=1`、日志写「已交付」，
+　与验收通过的单完全相同。要让世界侧认得出取消单，得动 `types.ts` + `projection.ts`，
+　且这两个文件与用户本人的 Claude Code 线地盘重合，须先报批。）
 
 **同类的第二处缺口**：像素世界把 `ready_to_report` 也算作「收工」
 （`pixel-world/src/world/projection.ts` 的 `FINISHED_STATUSES = {ready_to_report, done}`），
@@ -675,7 +680,20 @@ v2 有 `CANCELLED` / `FAILED` / `TIMEOUT`，台账没有。方案：
 台账的 `ready_to_report` 是「等验收」，`done` 才是「验收过」。
 修法：`FINISHED_STATUSES` 只留 `done`；`ready_to_report` 归入「待你过目」，世界显示一个**未盖章的宝箱**停在质检台，
 而不是送出 + 加信仰。这一条只改世界侧，不用动协议。
-（**2026-10-22 已修**：`6473b96`，`FINISHED_STATUSES` 只留 `done`。）
+（**2026-10-22 已修 `FINISHED_STATUSES`**：`6473b96`，只留 `done`。
+　**但只修了 `project()` 这一层**，2026-10-22 由 World Builder 实测发现世界层还漏水：
+　一单在角色**已经进屋干活**时转成 `ready_to_report`，`project()` 会把它从活动集合里剔除，
+　可 `simulation.ts::sync` 的清理只认两个条件——`finishedIds.has(id)` 或 `(complete && !next.has(id))`——
+　增量 sync 时 `complete=false`，而这一单既不在 `finished` 也不在 `next`，两个条件都不成立，
+　于是任务留在 `this.tasks` 里但再也收不到更新：角色永久 `mode=working`、`visible=false`，
+　且 `isFree()`（`:914-915`）只认 `idle`/`sheltering`，她**接不了新活**。实测 120 秒未自愈。
+　**根因不在 `project()`，在 `sync` 的三集合没覆盖「从活动集合消失但没进 finished」这一种。**
+　修法要动 `simulation.ts` 的清理条件，不碰 `types.ts`。）
+
+**待拍（世界侧观察，2026-10-22）**：`ready_to_report` 时**尚在干活的角色**怎么办？
+规范只说了「世界显示一个未盖章的宝箱停在质检台」，没说人怎么办。两个选择：
+(a) 继续在屋里干到底，等老板点头再走交付；(b) 立刻撤出铺子、在质检台旁待命等验收。
+这一条改的是「世界看起来像什么」，必须用户定；定了之后 `simulation.ts` 与 §5 的动画都对不上就是缺陷。
 
 ### 4.10 验收用例（Given / When / Then，可直接进评测集）
 
