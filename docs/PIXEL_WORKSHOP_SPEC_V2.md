@@ -695,19 +695,44 @@ v2 有 `CANCELLED` / `FAILED` / `TIMEOUT`，台账没有。方案：
 修法：`FINISHED_STATUSES` 只留 `done`；`ready_to_report` 归入「待你过目」，世界显示一个**未盖章的宝箱**停在质检台，
 而不是送出 + 加信仰。这一条只改世界侧，不用动协议。
 （**2026-10-22 已修 `FINISHED_STATUSES`**：`6473b96`，只留 `done`。
-　**但只修了 `project()` 这一层**，2026-10-22 由 World Builder 实测发现世界层还漏水：
-　一单在角色**已经进屋干活**时转成 `ready_to_report`，`project()` 会把它从活动集合里剔除，
-　可 `simulation.ts::sync` 的清理只认两个条件——`finishedIds.has(id)` 或 `(complete && !next.has(id))`——
-　增量 sync 时 `complete=false`，而这一单既不在 `finished` 也不在 `next`，两个条件都不成立，
-　于是任务留在 `this.tasks` 里但再也收不到更新：角色永久 `mode=working`、`visible=false`，
-　且 `isFree()`（`:914-915`）只认 `idle`/`sheltering`，她**接不了新活**。实测 120 秒未自愈。
-　**根因不在 `project()`，在 `sync` 的三集合没覆盖「从活动集合消失但没进 finished」这一种。**
+　**世界层还有一个条件性缺陷，2026-10-22 两次实测、结论修正过一次，最终定性如下。**
+
+　**路径**：`ledger.ts:338` 的 `publish()` 必经 `project()`，`projection.ts:97` 把 `ready_to_report`
+　剔出 `tasks`，所以 `onChange` 载荷里 `tasks=[]`、`finished=[]`。此时 `simulation.ts::sync`
+　的清理条件只有两条——`finishedIds.has(id)` 或 `(complete && !next.has(id))`——
+　而 `ready_to_report` 这一单既不在 `finished` 也不在 `next`，两条都不成立。
+
+　**它能否自愈，取决于 `complete`，而 `complete` 取决于台账单数**：
+  - `complete` 只在 REST 全量 `refresh()` 时赋值（`ledger.ts:305`：`items.length < COMMISSIONS_LIMIT`）；
+    `applyPush`（WS 增量）不碰它。
+  - 服务端 `threads.py:794` 把 limit **钳制**到 `MAX_LIST = 100`（`threads.py:40`）。
+  - 所以**单数 < 100 → 满页判 false → `complete=true` → `abandonActiveTask` → 角色正常收手**；
+    **单数 ≥ 100 → REST 返回满页 → `complete=false` → 两个条件都不成立 →
+    任务留在 `this.tasks` 里但再也收不到更新 → 角色永久 `mode=working`、`visible=false`、
+    `isFree()` 不认它 → 接不了新活。**
+
+　**实测**（两种载荷都跑过，2026-10-22）：
+  - REST 返回 0 条（单数少）→ `mode=idle`，**不卡**；
+  - REST 返回 100 条（满页）→ 两条断言全红（`actual: 100` / `不该有角色永久不可见地卡在 working`）→ **卡**。
+
+　**两次结论修正的记录**：World Builder 第一次用**伪造** `incoming` 测出「永久卡死」，
+  被 Chief 指出探针绕过 `ledger.ts`、走了生产不存在的路径；第二次走真实链路测出「不卡」，
+  报「缺陷不成立」——**但那次 REST 只返回 0 条，正好落在能自愈的那一半**。
+  最终定性由 Chief 补测满页载荷得出。**「真实链路」还不够，要选会走到缺陷的那条分支。**
+
+　**回归锁**：`pixel-world/test/ready-to-report-stuck.test.ts`（175 行）。
+  它当前的 REST 夹具返回 0 条，**因此它现在锁的是「不卡」那一半**；
+  要锁缺陷必须让夹具返回满页 100 条，并加一条 `assert.equal(payload.complete, false)` 前提断言
+  （否则将来有人改分页 limit，测试会悄悄滑回能通过的状态）。
+
+　**根因不在 `project()`，在 `sync` 的清理条件没覆盖「从活动集合消失但没进 finished」这一种。**
 　修法要动 `simulation.ts` 的清理条件，不碰 `types.ts`。）
 
 **待拍（世界侧观察，2026-10-22）**：`ready_to_report` 时**尚在干活的角色**怎么办？
-规范只说了「世界显示一个未盖章的宝箱停在质检台」，没说人怎么办。两个选择：
-(a) 继续在屋里干到底，等老板点头再走交付；(b) 立刻撤出铺子、在质检台旁待命等验收。
-这一条改的是「世界看起来像什么」，必须用户定；定了之后 `simulation.ts` 与 §5 的动画都对不上就是缺陷。
+规范只说了「世界显示一个未盖章的宝箱停在质检台」，没说人怎么办。而实测显示当前行为是
+**立刻撤出铺子**（`abandonActiveTask`），且在单数 ≥ 100 时这个撤出会失败、角色卡死。
+两个选择：(a) 继续在屋里干到底，等老板点头再走交付；(b) 立刻撤出铺子、在质检台旁待命等验收。
+这一条改的是「世界看起来像什么」，必须用户定；定了之后 `simulation.ts` 与 §5 的动画对不上就是缺陷。
 
 ### 4.10 验收用例（Given / When / Then，可直接进评测集）
 
