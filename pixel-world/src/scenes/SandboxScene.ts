@@ -21,6 +21,7 @@ import { createGhostView, type GhostView } from '../render/ghost.ts';
 import { createCameraController, type CameraController } from '../render/camera-controller.ts';
 import { createMinimapView, type MinimapView } from '../render/minimap.ts';
 import { createFogView, type FogView } from '../render/fog-view.ts';
+import { bakeLayer, type BakedLayer } from '../render/bake.ts';
 import { fogAt } from '../world/fog.ts';
 import { checkPlacement, hintFor } from '../world/setup.ts';
 import { parsePhaseParam, phaseAt, type PhaseId } from '../render/day-phase.ts';
@@ -79,6 +80,7 @@ export class SandboxScene extends Phaser.Scene {
   private cameraCtl!: CameraController;
   private minimap: MinimapView | null = null;
   private fogView!: FogView;
+  private terrainLayer!: BakedLayer;
   /** 拖拽平移的起点（屏幕坐标）；null 表示没在拖。 */
   private dragFrom: { x: number; y: number } | null = null;
   private lastConstructionKey = '';
@@ -124,7 +126,16 @@ export class SandboxScene extends Phaser.Scene {
     const originY = 0;
     this.cameras.main.setBackgroundColor(WORLD.ink);
 
-    drawTerrain(this, this.world.grid, originX, originY);
+    // 地形烘焙成一张纹理：它每帧要 51 万条绘制指令，而可见区域只占世界 12.5%。
+    // 只在开局画一次，之后每帧只贴一个 quad。
+    this.terrainLayer = bakeLayer(
+      this,
+      'world-terrain',
+      this.world.grid.width * TILE_PX,
+      this.world.grid.height * TILE_PX,
+      -10,
+      (g) => drawTerrain(this, this.world.grid, originX, originY, g),
+    );
     ensureAccentTextures(this);
     this.decor = createDecorView(this, originX, originY);
     this.decor.redrawRoads([]);
@@ -325,6 +336,10 @@ export class SandboxScene extends Phaser.Scene {
   }
 
   shutdown(): void {
+    // 烘焙的纹理不随场景销毁自动释放，必须手动清：否则热更新或重进场景时
+    // 会留下同名旧纹理，下一次 generateTexture 直接复用，画面停在上一版。
+    this.terrainLayer?.destroy();
+    this.fogView?.destroy();
     this.ledger?.stop();
     this.ledger = null;
     this.overlay?.dispose();
@@ -757,6 +772,18 @@ export class SandboxScene extends Phaser.Scene {
       confirmCreation: (): CommandResult => this.confirmCreation(),
       cancelCreation: (): CommandResult => this.cancelCreation(),
       creation: () => this.creating(),
+      /** 渲染统计：排查性能时看每帧有多少绘制指令。 */
+      renderStats: () => {
+        const graphics = this.children.list.filter(
+          (item) => item.type === 'Graphics',
+        ) as Phaser.GameObjects.Graphics[];
+        const counts = graphics.map((g) => g.commandBuffer?.length ?? 0);
+        return {
+          graphicsObjects: graphics.length,
+          totalCommands: counts.reduce((sum, n) => sum + n, 0),
+          largest: [...counts].sort((a, b) => b - a).slice(0, 5),
+        };
+      },
       /** 立刻把镜头中心对准世界坐标（不带动画）。小地图跳转与测试都用它。 */
       centerCameraOn: (x: number, y: number): void => this.cameraCtl.panTo(x, y, 0),
       /** 只查询某处能不能建，不改变任何状态。造物模式与测试都用它。 */
