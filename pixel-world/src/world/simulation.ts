@@ -14,6 +14,7 @@ import { awaitingDecree } from './decree.ts';
 
 import { parseOracle } from './oracle.ts';
 import { parseOracleBuild, type BuildIntent } from './oracle-build.ts';
+import { summarizeWorld } from './world-state.ts';
 import { WILD_PREFABS } from './setup.ts';
 import {
   nextProp,
@@ -577,7 +578,14 @@ export class Simulation {
     // 这比认不出有用：用户知道自己被听懂了，也知道为什么没建。
     const existing = this.buildings.find((b) => b.prefabId === intent.templateId);
     if (existing !== undefined) {
-      const message = `已经有${existing.displayName}了。想扩建的话说「建个工坊」。`;
+      // 说清"已经有了"，并且如果世界有明确缺口，顺带指出该补什么。
+      const gaps = summarizeWorld(this.snapshot()).gaps.missingWild;
+      // 用纸面上的说法（「查资料」），不是内部枚举名（research）。
+      const hint =
+        gaps.length === 0
+          ? '想扩建的话说「建个工坊」。'
+          : `世界还缺${gaps.map((kind) => TASK_PROFILES[kind].label).join('、')}的郊野铺子。`;
+      const message = `已经有${existing.displayName}了。${hint}`;
       this.log('warn', message);
       return { ok: false, message };
     }
