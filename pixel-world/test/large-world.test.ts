@@ -142,3 +142,25 @@ test('空网格：大世界规格能独立构造，不依赖 buildLargeWorld', (
   assert.equal(grid.at({ x: 79, y: 59 }) !== undefined, true);
   assert.equal(grid.at({ x: 80, y: 59 }), undefined);
 });
+
+// ------------------------------------------------------------------ 群落与落位一致
+
+test('镇内铺子落在工坊环内，郊野铺子落在郊野圈外', () => {
+  const world = buildLargeWorld(blueprints);
+  const TOWN = new Set(['code_forge', 'star_archive', 'ink_house']);
+  const problems: string[] = [];
+
+  for (const building of world.buildings) {
+    const biome = biomeAt(building.origin, world.altar);
+    const inside = biome === 'townCore' || biome === 'craftRing';
+    const isTown = TOWN.has(building.prefabId);
+    if (isTown && !inside) {
+      problems.push(`${building.prefabId} 是镇内铺子，却落在 ${biome}`);
+    }
+    if (!isTown && inside) {
+      problems.push(`${building.prefabId} 是郊野铺子，却落在 ${biome}`);
+    }
+  }
+
+  assert.deepEqual(problems, [], `群落与落位不一致：\n${problems.join('\n')}`);
+});

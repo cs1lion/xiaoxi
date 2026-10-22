@@ -150,7 +150,17 @@ export class WorldGrid {
   }
 
   /** 在蓝图允许的分区里按离锚点最近优先找一块合规空地。找不到返回 null。 */
-  findBestSlot(prefab: PrefabBlueprint, anchor: GridPoint): GridPoint | null {
+  /**
+   * 在蓝图允许的分区里按离锚点最近优先找一块合规空地。
+   *
+   * `accept` 是可选的额外筛选：郊野铺子要用它把落点限制在郊野圈内。
+   * 不传时行为与以前完全一致。
+   */
+  findBestSlot(
+    prefab: PrefabBlueprint,
+    anchor: GridPoint,
+    accept?: (origin: GridPoint) => boolean,
+  ): GridPoint | null {
     const { w, h } = prefab.footprint;
     const margin = prefab.clearMargin;
     let best: GridPoint | null = null;
@@ -158,6 +168,7 @@ export class WorldGrid {
     for (let y = 0; y < this.height; y += 1) {
       for (let x = 0; x < this.width; x += 1) {
         const origin = { x, y };
+        if (accept !== undefined && !accept(origin)) continue;
         if (!this.footprintInZone(origin, w, h, prefab.zone)) continue;
         if (!this.canPlace(origin, w, h, margin)) continue;
         const door = { x: origin.x + prefab.door.x, y: origin.y + prefab.door.y };

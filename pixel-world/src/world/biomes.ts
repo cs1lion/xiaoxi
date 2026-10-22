@@ -36,7 +36,8 @@ export const BIOME_LABEL: Readonly<Record<BiomeId, string>> = {
  */
 export const BIOME_RADII: Readonly<Record<Exclude<BiomeId, 'frontier'>, number>> = {
   townCore: 10,
-  craftRing: 20,
+  // 22 而不是 20：镇内四块分区的最远处是 21.3 格，20 会把最外一角的铺子判成郊野。
+  craftRing: 22,
   wilderness: 34,
 };
 

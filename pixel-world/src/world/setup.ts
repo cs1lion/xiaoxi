@@ -7,7 +7,8 @@
 import { WorldGrid, type GridSpec } from './grid.ts';
 import { validateCoverage } from './blueprints.ts';
 import { WORKSHOP_TASKS } from './tasks.ts';
-import type { GridPoint, PlacedBuilding, PrefabBlueprint } from './types.ts';
+import type { GridPoint, PlacedBuilding, PrefabBlueprint, ZoneId } from './types.ts';
+import { BIOME_RADII } from './biomes.ts';
 
 export const TILE_PX = 16;
 export const BORDER = 1;
@@ -65,18 +66,21 @@ export const LARGE_WORLD_SPEC: GridSpec = {
     { id: 'street', x: 38, y: 33, w: 4, h: 26 },
     { id: 'street', x: 1, y: 28, w: 36, h: 4 },
     { id: 'street', x: 43, y: 28, w: 36, h: 4 },
-    // 工坊环：北工业、东书斋、南农田、西生活。
-    // 保持旧规格的相对大小（每块约 12×8），不按地图面积等比放大——
-    // 放大会把铺子之间的空地全吃掉，世界看起来像一块工地。
-    { id: 'industry', x: 32, y: 12, w: 16, h: 9 },
-    { id: 'scholarly', x: 53, y: 25, w: 12, h: 10 },
-    { id: 'agriculture', x: 32, y: 40, w: 16, h: 9 },
-    { id: 'living', x: 15, y: 25, w: 12, h: 10 },
-    // 郊野：外围可建区，比镇内小，让草地与林子占主导
-    { id: 'industry', x: 9, y: 9, w: 14, h: 9 },
-    { id: 'scholarly', x: 57, y: 9, w: 14, h: 9 },
-    { id: 'agriculture', x: 9, y: 42, w: 14, h: 9 },
-    { id: 'living', x: 57, y: 42, w: 14, h: 9 },
+    // 工坊环：四块围着十字街排开，每块 10×12。
+    //
+    // 位置是**按群落半径反推**的：早先的布局让镇内书斋落在 24.5 格、
+    // 郊野磨坊落在 20.8 格——两者交错，任何半径都分不开「镇内」与「郊野」。
+    // 现在镇内四块全部落在 22 格内，郊野四块全部落在 26 格外，中间留出空隙。
+    // 10 格宽是下限：5×4 的工坊加一圈留白需要 7×6 净空。
+    { id: 'industry', x: 26, y: 14, w: 10, h: 12 },
+    { id: 'scholarly', x: 44, y: 14, w: 10, h: 12 },
+    { id: 'agriculture', x: 26, y: 33, w: 10, h: 12 },
+    { id: 'living', x: 44, y: 33, w: 10, h: 12 },
+    // 郊野：四角，全部在 26 格外
+    { id: 'industry', x: 6, y: 8, w: 12, h: 8 },
+    { id: 'scholarly', x: 62, y: 8, w: 12, h: 8 },
+    { id: 'agriculture', x: 6, y: 44, w: 12, h: 8 },
+    { id: 'living', x: 62, y: 44, w: 12, h: 8 },
   ],
 };
 
@@ -90,7 +94,18 @@ export const ALTAR: GridPoint = { x: 15, y: 9 };
  * 扩建样板 `workshop_plot` 不参与开局落位。
  */
 const TOWN_PREFABS = new Set<string>(['code_forge', 'star_archive', 'ink_house']);
-const WILD_PREFABS = new Set<string>(['crawler_mine', 'ink_mill', 'gear_tower']);
+
+/**
+ * 郊野铺子的 prefab id。**唯一来源**。
+ *
+ * `simulation.ts` 的派活规则也读它。早先那里另抄了一份，加第四栋郊野铺子时
+ * 只改一处就会让派活规则静默错位——那不是 bug，是随时会变成 bug 的形状。
+ */
+export const WILD_PREFABS: ReadonlySet<string> = new Set([
+  'crawler_mine',
+  'ink_mill',
+  'gear_tower',
+]);
 const RESIDENT_PREFABS = new Set<string>([...TOWN_PREFABS, ...WILD_PREFABS]);
 
 export class WorldSetupError extends Error {}
@@ -217,12 +232,28 @@ export function buildWorld(
   for (const blueprint of blueprints.values()) {
     if (!RESIDENT_PREFABS.has(blueprint.id)) continue;
     if (WILD_PREFABS.has(blueprint.id) && !wildAllowed) continue;
-    // 郊野铺子锚到地图外侧，镇内铺子锚到祭坛：否则六栋全挤在中心，
-    // 「郊野」只是名义上的（实测离祭坛只有 12–18 格，仍在工坊环里）。
+    // 郊野铺子锚到**分区里离祭坛最远的那个角**，镇内铺子锚到祭坛。
+    //
+    // 早先用 `altar.x ± 26` 猜一个方向，但 findBestSlot 只按距离挑最近的空位，
+    // 实际落点由分区决定——实测郊野铺子落在 14.6 / 17.5 / 21.1 格，
+    // 全都还在工坊环（20 格）里，与「郊野」这个标签对不上。
+    // 取分区最远角，才能让落位真的落到外圈。
     const anchor = WILD_PREFABS.has(blueprint.id)
-      ? { x: altar.x + Math.sign(blueprint.zone === 'living' ? -1 : 1) * 26, y: altar.y }
+      ? wildernessAnchorOf(spec, blueprint.zone, altar)
       : altar;
-    const placed = placeBlueprint(grid, blueprint, `${blueprint.id}#1`, anchor);
+    // 落位必须与群落一致，否则「郊野」只是名义上的：
+    //   - 郊野铺子在郊野圈（craftRing 之外、wilderness 之内）
+    //   - 镇内铺子在工坊环内（否则镇内书斋会落到 23 格外的"郊野"）
+    const accept =
+      spec !== LARGE_WORLD_SPEC
+        ? undefined
+        : (origin: GridPoint): boolean => {
+            const d = Math.hypot(origin.x - altar.x, origin.y - altar.y);
+            return WILD_PREFABS.has(blueprint.id)
+              ? d > BIOME_RADII.craftRing && d <= BIOME_RADII.wilderness
+              : d <= BIOME_RADII.craftRing;
+          };
+    const placed = placeBlueprint(grid, blueprint, `${blueprint.id}#1`, anchor, undefined, undefined, accept);
     if (placed === null) {
       throw new WorldSetupError(`${blueprint.displayName} 在 ${blueprint.zone} 找不到合规空地`);
     }
@@ -231,6 +262,44 @@ export function buildWorld(
 
   assertWorldInvariants(grid, buildings, altar);
   return { grid, buildings, altar };
+}
+
+/**
+ * 某个分区里落在**郊野圈**的那个锚点。
+ *
+ * 同一种分区（如 scholarly）同时供镇内书斋与郊野矿洞使用，差别只在
+ * 「落在这一区的哪一头」。但不能取最远角——实测那样会落到 frontier
+ * （34–37 格），那是未探索区，还被迷雾盖着。
+ *
+ * 取「离祭坛最近、但仍在郊野圈内」的那个点：既保证标签对得上，
+ * 又不至于远到不可达。
+ */
+function wildernessAnchorOf(spec: GridSpec, zone: ZoneId, altar: GridPoint): GridPoint {
+  const candidates: GridPoint[] = [];
+  for (const region of spec.zones) {
+    if (region.id !== zone) continue;
+    // 沿分区四边取样，找落进郊野圈的点。
+    for (let x = region.x; x < region.x + region.w; x += 1) {
+      for (const y of [region.y, region.y + region.h - 1]) candidates.push({ x, y });
+    }
+    for (let y = region.y; y < region.y + region.h; y += 1) {
+      for (const x of [region.x, region.x + region.w - 1]) candidates.push({ x, y });
+    }
+  }
+  if (candidates.length === 0) return altar;
+
+  const inWild = candidates.filter((p) => {
+    const d = Math.hypot(p.x - altar.x, p.y - altar.y);
+    return d > BIOME_RADII.craftRing && d <= BIOME_RADII.wilderness;
+  });
+  const pool = inWild.length > 0 ? inWild : candidates;
+  // 取池里离祭坛**最近**的：够远到进郊野圈，又不至于远得走不到。
+  return pool.reduce((best, p) =>
+    Math.hypot(p.x - altar.x, p.y - altar.y) <
+    Math.hypot(best.x - altar.x, best.y - altar.y)
+      ? p
+      : best,
+  );
 }
 
 /** 生产用的大世界：80×60，常驻铺子按郊野锚点重新落位。 */
@@ -286,10 +355,11 @@ export function placeBlueprint(
   anchor: GridPoint,
   at?: GridPoint,
   source?: { readonly taskId: string; readonly summary: string },
+  accept?: (origin: GridPoint) => boolean,
 ): SpawnResult | null {
   let origin: GridPoint | null;
   if (at === undefined) {
-    origin = grid.findBestSlot(blueprint, anchor);
+    origin = grid.findBestSlot(blueprint, anchor, accept);
   } else {
     const check = checkPlacement(grid, blueprint, at);
     origin = check.ok ? at : null;

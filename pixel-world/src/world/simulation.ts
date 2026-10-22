@@ -11,19 +11,9 @@ import { TASK_PROFILES } from './tasks.ts';
 import { pickVenue, type VenueCandidate } from './venue.ts';
 import { revealedRadiusFor } from './fog.ts';
 import { awaitingDecree } from './decree.ts';
-/**
- * 郊野铺子的 prefab id。
- *
- * 为什么写死在这里而不是从 setup 导入：`venueCandidates` 只关心"这栋楼是不是
- * 郊野的"，不需要知道世界规格；写死一份 id 列表，比把整个 setup 拖进来干净。
- * 加郊野铺子时这里必须同步，`venue.test.ts` 与 `large-world.test.ts` 会提醒。
- */
-const WILD_PREFAB_IDS: ReadonlySet<string> = new Set([
-  'crawler_mine',
-  'ink_mill',
-  'gear_tower',
-]);
+
 import { parseOracle } from './oracle.ts';
+import { WILD_PREFABS } from './setup.ts';
 import {
   nextProp,
   MILESTONE_POINTS,
@@ -719,7 +709,7 @@ export class Simulation {
       boundTask: building.boundTask,
       // 按**身份**判郊野，不按距离：镇内书斋实测落在 23 格外，按距离会被
       // 误判成郊野，于是神谕活全派给了镇内铺子。prefab id 是可靠的来源。
-      isWild: WILD_PREFAB_IDS.has(building.prefabId),
+      isWild: WILD_PREFABS.has(building.prefabId),
       busy:
         this.constructions.has(building.instanceId) ||
         this.activities.get(building.instanceId)?.kind === 'overheating' ||
