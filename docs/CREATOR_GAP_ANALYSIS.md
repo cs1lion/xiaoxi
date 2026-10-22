@@ -59,18 +59,18 @@ LLM 出 JSON → 校验器 → 缓存 → 运行时实例化 → 落进世界记
 （`在 (33,16) 建了新工坊`），日报写成「新工坊（在 (33,16) 建了新工坊）」。
 存档 v2 加两条路径（114 条，指纹 `72c4a6c0f1f444f7`）。
 
-### 2. 定义造物主的 JSON schema（中，但不动运行时）
+### 2. 定义造物主的 JSON schema（**已落地**）
 
-不实现 LLM 调用，只把**校验器**写出来并测：
+见 `docs/CREATOR_SCHEMA.md`，实现在 `src/world/creator-schema.ts`，
+测试 19 项。
 
-```
-{ templateId, slots: {...}, palette, weather }
-```
+实际形状是 `{ templateId, at, palette }`，**不是**设计文档写的
+`{ templateId, slots, palette, weather }`：
 
-先定 schema 的好处是：将来接 LLM 时，校验器已经在那儿了；而且现在就能用它校验
-`prefabs.json` 本身是否合规。
+- 没有 `slots`：世界没有家具层，定义了也没东西能填；
+- 没有 `weather`：天气是世界法则，不是造物的一部分。
 
-代价：需要先给 prefab 加 `slots` 字段（L1 的缺口）。
+这两处偏离都写进了 schema 文档，附理由。
 
 ## 五、不建议现在做的
 

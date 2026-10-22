@@ -241,6 +241,38 @@ export function buildLargeWorld(
 }
 
 /**
+ * 把一份**已通过 schema 校验**的造物意图落进世界。
+ *
+ * 这是 schema 与世界的唯一接缝：意图里的 `templateId` 换成蓝图，
+ * `palette` 覆盖模板配色，位置交给 `placeBlueprint` 走同一套空间校验。
+ *
+ * 调它之前必须先 `parseCreationPlan`。这里不重复校验形状——
+ * 两道校验分开，是因为它们回答的问题不同：形状 vs 空间。
+ */
+export function placeFromPlan(
+  world: BuiltWorld,
+  plan: {
+    readonly templateId: string;
+    readonly at: GridPoint;
+    readonly palette: PrefabBlueprint['palette'];
+  },
+  instanceId: string,
+  blueprints: ReadonlyMap<string, PrefabBlueprint>,
+): SpawnResult | null {
+  const template = blueprints.get(plan.templateId);
+  if (template === undefined) return null;
+
+  // 意图里的配色覆盖模板：模板只提供形状，颜色由造物主决定。
+  return placeBlueprint(
+    world.grid,
+    { ...template, palette: plan.palette },
+    instanceId,
+    world.altar,
+    plan.at,
+  );
+}
+
+/**
  * 造物主的一次落位：选址、占格、铺路。空间不足时返回 null，不改账本。
  *
  * `at` 省略时走 `findBestSlot`（自动选最靠近锚点的合规空地）；
