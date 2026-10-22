@@ -60,6 +60,26 @@
 
 揭示时的扩散动画（迷雾退开时应当有一个可见的扩散过程，而不是瞬间跳变）。
 
+## 持久化的验证陷阱
+
+验证「刷新后状态恢复」时，**不要在每次导航都清 localStorage**：
+
+```js
+// 错：刷新时也会执行，把刚存的档清掉
+await page.addInitScript(() => localStorage.clear());
+
+// 对：只在首次导航前清一次
+await page.addInitScript(() => {
+  if (!sessionStorage.getItem('cleared')) {
+    localStorage.clear();
+    sessionStorage.setItem('cleared', '1');
+  }
+});
+```
+
+这个坑花了不少时间：表面看是「存档写入成功、刷新后丢失」，实际是测试脚本自己
+在刷新时清掉了槽位。产品代码没有问题。
+
 ## 实测记录
 
 | 验证 | 结果 |
