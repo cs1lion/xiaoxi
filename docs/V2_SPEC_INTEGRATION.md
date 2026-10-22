@@ -244,7 +244,34 @@ check("G6 冻结项·乱码等级也放行（不校验等级合法性）",
 升级后这条必挂。**改它是对的**，但要在 `CONTRACT_V2_SCOPE.md` 里把「G6 只校验非空」那条冻结后果标为失效，
 否则下一个人看到测试被改，会以为在放水。
 
-## 四、当前证据（不要当成长期结论）
+## 四、当前 master 的真实状态（2026-10-22 11:5x 取数，Chief 亲自跑）
+
+**先说一件会让下一个人困惑的事：master 上有一个「测不存在模块」的测试。**
+
+```
+git ls-files server/task                         →  空（实现未入库）
+git ls-files scripts/test_task_fsm.py            →  已跟踪
+git ls-files scripts/probe_task_fsm_mutations.py →  已跟踪
+```
+
+`scripts/test_task_fsm.py` 已在 master 上（`9a85df9`，QA 提交），
+但它 `from server.task import ...`，而 `server/task/` **一行都没入库**。
+**新 clone 跑它会得到 `ModuleNotFoundError: No module named 'server.task'`**——
+这不是 master 坏了，是**测试已入库、被测实现还没入库**。
+
+**为什么不等实现一起提交**：测试先行、代码随后是正常顺序（QA 与实现方本来就是两个人）。
+但**这个状态必须显式记录**，否则下一个人会以为 master 是坏的、或者更糟——以为实现不存在而重写一遍。
+
+**为什么不现在就 add `server/task/`**：§4–§9 的实施范围尚未取得用户明确授权
+（见 C2 第 ② 条：「是我做的」只回答归属，不回答开工）。代码写完、测绿、探针有效，
+**但落进 master 要等那一句**。这不是技术阻塞，是范围问题。
+
+**实现现状**（未提交，工作区里）：`server/task/` 10 个文件、24 Task 规则 + 15 Step 规则、
+零业务 import、零 IO。QA 的 460 条断言与 6 条变异探针全绿。
+
+**所以 master 的准确状态是**：规范与测试已入库，实现在工作区，等一句授权。
+
+## 五、当前证据（不要当成长期结论）
 
 取数条件：HEAD `431ca65`、2026-10-22 10:2x 由 Chief 亲自跑，此后只有读操作。
 
@@ -252,6 +279,7 @@ check("G6 冻结项·乱码等级也放行（不校验等级合法性）",
 - `.\.venv\Scripts\python.exe scripts\test_core.py` —— 92 passed / 0 failed，exit 0。
 - `pixel-world`（worktree `tmp/wt-pixel-world`）`npm run test:inprocess` —— 234 tests / 225 pass / 9 skip / 0 fail。
 - `.\.venv\Scripts\python.exe scripts\check_protocol.py` —— exit 0。
+- `.venv\Scripts\python.exe scripts/test_task_fsm.py` —— **460/460，exit 0**（`11:1x` 复跑；实现未入库时它跑不起来）
 
 **解释器必须写 `.venv`，不能写裸 `python`**：本机 PATH 上是 anaconda，
 跑 `python scripts/test_core.py` 会因 `numpy.core.multiarray failed to import`（scipy 冲突）**exit 1**，
@@ -259,7 +287,7 @@ check("G6 冻结项·乱码等级也放行（不校验等级合法性）",
 
 以上都要在合并后重跑，本文件不保证明天还绿。
 
-## 五、这份文件不做什么
+## 六、这份文件不做什么
 
 - 不改规范的技术结论（只修交叉引用、编号、标题与结构）。
 - 不宣布 §5 事件、`app.py` 路由可以改（C11 之外的三道门照旧）。
