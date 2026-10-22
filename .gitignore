@@ -64,3 +64,6 @@ agent-runtime/node_modules/
 
 # literal %SystemDrive% dirs written when a tool passes an unexpanded Windows env var as a path
 %SystemDrive%/
+
+# workflow 工具运行记录（非本项目产出，每次运行都变，无人认领）
+.stepcode/
