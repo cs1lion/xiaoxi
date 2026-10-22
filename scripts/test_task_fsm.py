@@ -1295,10 +1295,14 @@ def test_j_projection() -> None:
     else:
         check("failed_to 非法值抛 ValueError", False, "没有抛")
 
-    # 未知原因是取值域外的输入；实现选了 fail-safe：一切非 clarification 都按 approval，
-    # 宁可多要一次人工批准，也不让未知原因被当成可自动放行。
-    check("blocked_kind_of 未知原因 fail-safe 到 approval",
+    # 取值域外的输入：规范未定义（§6.6 只定义了五个合法 reason 的映射）。
+    # 台账层只接受 clarification/approval（threads.py:694），所以必须二选一。
+    # 取 approval 的依据是失败方向不对称：多要一次点头 < 吞掉真实的授权需求。
+    # 待拍：规范未定义此情形，第一条锁的是「当前判断」，不是规范原文。
+    check("blocked_kind_of 未知原因 fail-safe 到 approval（规范未定义，见注释）",
           blocked_kind_of("nonsense") == "approval", blocked_kind_of("nonsense"))
+    check("blocked_kind_of 未知原因不返回空串（否则台账写库会 ValueError）",
+          blocked_kind_of("nonsense") in ("clarification", "approval"))
     check("台账状态集不含 v2 状态值",
           not (set(TASK_STATES) & set(LEDGER_STATUSES)),
           str(sorted(set(TASK_STATES) & set(LEDGER_STATUSES))))
