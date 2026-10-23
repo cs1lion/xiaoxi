@@ -17,6 +17,7 @@ import { createWorldOverlay, type WorldOverlay } from '../render/world-overlay.t
 import { createAccentEmitter, ensureAccentTextures, type AccentEmitter } from '../render/smoke.ts';
 import { createWeatherView, type WeatherView } from '../render/weather.ts';
 import { createPhaseView, type PhaseView } from '../render/phase-view.ts';
+import { createAmbienceView, type AmbienceView } from '../render/ambience-view.ts';
 import { createGhostView, type GhostView } from '../render/ghost.ts';
 import { createCameraController, type CameraController } from '../render/camera-controller.ts';
 import { createMinimapView, type MinimapView } from '../render/minimap.ts';
@@ -70,6 +71,8 @@ export class SandboxScene extends Phaser.Scene {
   private overlay: WorldOverlay | null = null;
   private weatherView!: WeatherView;
   private phaseView!: PhaseView;
+  /** 白天的鸟、黄昏的蝙蝠。纯画面，不占快照、不进存档。 */
+  private ambienceView!: AmbienceView;
   private nightKeyListener: ((event: KeyboardEvent) => void) | null = null;
   private creationKeyListener: ((event: KeyboardEvent) => void) | null = null;
   /** 真实时间推进用的定时器；?time= 固定某刻时不启动。 */
@@ -171,6 +174,7 @@ export class SandboxScene extends Phaser.Scene {
     };
     this.weatherView = createWeatherView(this, worldPx.w, worldPx.h);
     this.phaseView = createPhaseView(this, worldPx.w, worldPx.h);
+    this.ambienceView = createAmbienceView(this);
     this.ghost = createGhostView(this);
     this.fogView = createFogView(this, this.world.grid.width, this.world.grid.height);
 
@@ -1073,6 +1077,13 @@ export class SandboxScene extends Phaser.Scene {
     }
     this.weatherView.update(this.sim.weatherIntensity(), delta);
     this.phaseView.update(this.snapshot, delta);
+    // 鸟与蝙蝠读模拟时刻而不是墙钟：暂停世界时它们也停，不会出现
+    // 「世界静止但天上还在飞」的穿帮。
+    this.ambienceView.update(
+      this.snapshot.now,
+      this.phaseView.currentPhase(),
+      this.cameras.main.worldView,
+    );
     this.fogView.update(this.snapshot.fog, this.snapshot.now);
 
     // 气泡一出现就出声；同一个角色的同一句话不重复念。
