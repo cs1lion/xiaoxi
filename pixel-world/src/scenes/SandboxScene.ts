@@ -152,7 +152,8 @@ export class SandboxScene extends Phaser.Scene {
       this.world.grid.width * TILE_PX,
       this.world.grid.height * TILE_PX,
       -10,
-      (g) => drawTerrain(this, this.world.grid, originX, originY, g),
+      // 传祭坛坐标：地表细节按群落配方分化，镇内与郊野长得不一样。
+      (g) => drawTerrain(this, this.world.grid, originX, originY, g, this.world.altar),
     );
     ensureAccentTextures(this);
     this.decor = createDecorView(this, originX, originY);

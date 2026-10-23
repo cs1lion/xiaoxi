@@ -15,6 +15,7 @@ import { buildLargeWorld, buildWorld, WILD_PREFABS } from '../src/world/setup.ts
 import { summarizeWorld } from '../src/world/world-state.ts';
 import { litWildLanterns } from '../src/world/wilderness-signal.ts';
 import { biomeAt } from '../src/world/biomes.ts';
+import type { PlacedBuilding } from '../src/world/types.ts';
 
 const blueprints = parseBlueprintTable(
   JSON.parse(
@@ -22,7 +23,7 @@ const blueprints = parseBlueprintTable(
   ) as Record<string, Record<string, unknown>>,
 );
 
-const homesOf = (buildings: readonly { zone: string }[]) =>
+const homesOf = (buildings: readonly PlacedBuilding[]): readonly PlacedBuilding[] =>
   buildings.filter((building) => building.zone === 'living');
 
 test('民居在开局落位：镇内三间、郊野两间', () => {
