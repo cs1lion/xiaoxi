@@ -135,3 +135,17 @@ worktree 里的 `AGENTS.md` 也可能落后（取决于它检出的提交），�
 
 ## 修改本文件
 仅 Role 0 可改。保持在一页内，细节放进 docs/ 并从这里指过去。
+
+## Agent skills
+
+### Issue tracker
+
+Issues and specs live as GitHub issues in `cs1lion/xiaoxi`, via the `gh` CLI. See `docs/agents/issue-tracker.md`.
+
+### Triage labels
+
+Five canonical triage roles, label strings identical to their names. See `docs/agents/triage-labels.md`.
+
+### Domain docs
+
+Single-context: one `GLOSSARY.md` + ADRs at the repo root. See `docs/agents/domain.md`.
