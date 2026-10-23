@@ -10,9 +10,14 @@
  * 判定分两步：
  *   1. 先排除明显不是命令的句子：疑问、否定、叙述。
  *   2. 再看句首是不是祈使动词（可带「帮我 / 请 / 麻烦」这类礼貌前缀）。
+ *
+ * 这套判定与造物 / 神迹两个解析器共用 `imperative.ts`：三条通道对
+ * 「这句话是不是命令」只能有一个口径，否则同一句话在不同通道里会有
+ * 不同结论，接 LLM 时尤其致命。
  */
 
 import type { OracleIntent, TaskKind, Weather } from './types.ts';
+import { hasNarrativeMarker, isImperative, isQuestion } from './imperative.ts';
 
 interface Rule {
   readonly kind: TaskKind;
@@ -35,32 +40,6 @@ const IMPERATIVE_VERBS: readonly string[] = [
   // 英文
   'write', 'search', 'research', 'draft', 'find', 'run', 'build', 'make',
 ];
-
-/**
- * 允许出现在祈使动词前的前缀。
- *
- * 两类：礼貌前缀（帮我 / 请）与承接副词（再 / 继续）。
- * 后者是真实用法：「再整理一份便笺」是在下命令，不是叙述。
- */
-const POLITE_PREFIXES: readonly string[] = [
-  '帮我', '帮忙', '麻烦', '请', '给我', '替我',
-  '再', '继续', '接着', '顺便', '另外',
-];
-
-/** 明显不是命令的句式：疑问、否定、过去叙述。 */
-const NON_IMPERATIVE_MARKERS: readonly string[] = [
-  // 疑问
-  '？', '?', '吗', '呢', '要不要', '能不能', '可不可以', '是不是',
-  // 否定
-  '别', '不用', '不要', '不必',
-  // 过去/进行：叙述语气
-  '昨天', '前天', '刚才', '之前', '已经', '一直', '老是', '总是',
-  // 评价性收尾：写代码真累 / 查资料很烦
-  '真累', '好累', '很累', '真烦', '好烦', '很烦', '有点累', '有点烦',
-];
-
-/** 句首的叙述主语：出现它就不是命令。 */
-const NARRATIVE_SUBJECTS: readonly string[] = ['我', '他', '她', '它', '这', '那', '这个', '那个'];
 
 const TASK_RULES: readonly Rule[] = [
   { kind: 'code', words: ['代码', '写码', '脚本', '程序', '爬虫', '编程', 'code', 'script'] },
@@ -86,13 +65,13 @@ export function parseOracle(raw: string): OracleAction {
   // 世界法则与撤销是**固定短语**，不套祈使判定：说「下雨吧」就是在改天气，
   // 它没有「写 / 查」那样的动词，硬套祈使规则会把合法输入也挡掉。
   // 只排除叙述性的用法（「外面在下雨吗」是提问，不该改天）。
-  if (CLEAR_WORDS.some((word) => lower.includes(word)) && !isQuestionOrNarrative(lower)) {
+  if (CLEAR_WORDS.some((word) => lower.includes(word)) && !isQuestion(lower)) {
     return { kind: 'weather', weather: 'clear' };
   }
-  if (RAIN_WORDS.some((word) => lower.includes(word)) && !isQuestionOrNarrative(lower)) {
+  if (RAIN_WORDS.some((word) => lower.includes(word)) && !isQuestion(lower)) {
     return { kind: 'weather', weather: 'rain' };
   }
-  if (CANCEL_WORDS.some((word) => lower.includes(word)) && !isQuestionOrNarrative(lower)) {
+  if (CANCEL_WORDS.some((word) => lower.includes(word)) && !isQuestion(lower)) {
     return { kind: 'cancelPending' };
   }
 
@@ -102,7 +81,7 @@ export function parseOracle(raw: string): OracleAction {
   }
 
   // 其余派活必须先是祈使句。
-  if (!isImperative(lower)) return { kind: 'unknown', raw };
+  if (!isImperative(lower, IMPERATIVE_VERBS)) return { kind: 'unknown', raw };
 
   for (const rule of TASK_RULES) {
     // 关键词仍要出现（决定**派哪类活**），但「是不是命令」已由 isImperative 判过。
@@ -111,53 +90,4 @@ export function parseOracle(raw: string): OracleAction {
     }
   }
   return { kind: 'unknown', raw };
-}
-
-/**
- * 这句话是不是在命令世界。
- *
- * 三条都要满足：没有疑问/否定/过去标记、不是以叙述主语开头、句首（去掉礼貌前缀后）
- * 是祈使动词。
- */
-function isImperative(lower: string): boolean {
-  if (hasNarrativeMarker(lower)) return false;
-
-  const body = stripPolitePrefix(lower);
-  if (body.length === 0) return false;
-
-  // 句首是叙述主语：「我想写…」「这个 bug 怎么写…」都不是命令。
-  if (NARRATIVE_SUBJECTS.some((subject) => body.startsWith(subject))) return false;
-
-  // 句首必须是祈使动词。
-  return IMPERATIVE_VERBS.some((verb) => body.startsWith(verb));
-}
-
-/** 疑问或叙述：世界法则用它排除「外面在下雨吗」这类问句。 */
-function isQuestionOrNarrative(lower: string): boolean {
-  return QUESTION_MARKERS.some((marker) => lower.includes(marker));
-}
-
-/** 疑问标记。与 `NON_IMPERATIVE_MARKERS` 分开：世界法则只关心"是不是在问"。 */
-const QUESTION_MARKERS: readonly string[] = [
-  '？', '?', '吗', '呢', '要不要', '能不能', '可不可以', '是不是',
-];
-
-function hasNarrativeMarker(lower: string): boolean {
-  return NON_IMPERATIVE_MARKERS.some((marker) => lower.includes(marker));
-}
-
-function stripPolitePrefix(lower: string): string {
-  let body = lower;
-  // 前缀可能叠加（「麻烦帮我」），循环剥到不能再剥。
-  let changed = true;
-  while (changed) {
-    changed = false;
-    for (const prefix of POLITE_PREFIXES) {
-      if (body.startsWith(prefix)) {
-        body = body.slice(prefix.length).trim();
-        changed = true;
-      }
-    }
-  }
-  return body;
 }

@@ -13,26 +13,17 @@
  */
 
 import type { GridPoint, PrefabBlueprint } from './types.ts';
+import {
+  NARRATIVE_SUBJECTS,
+  hasNarrativeMarker,
+  readPoint,
+  stripLeadIns,
+} from './imperative.ts';
 
 /** 建造动词。句首（或去掉礼貌前缀后）是这些词，才当造物。 */
 const BUILD_VERBS = ['建', '盖', '造', '修', '开', '起'];
 /** 拆除动词。与建造共用别名表，方向相反。 */
 const DEMOLISH_VERBS = ['拆', '拆掉', '拆除', '推倒', '铲平'];
-
-/** 礼貌与承接前缀，与 oracle.ts 同口径。 */
-const PREFIXES = [
-  '帮我', '帮忙', '麻烦', '请', '给我', '替我',
-  '再', '继续', '接着', '顺便', '另外',
-];
-
-/** 明显不是命令的标记。 */
-const NON_IMPERATIVE = [
-  '？', '?', '吗', '呢', '要不要', '能不能', '可不可以', '是不是',
-  '别', '不用', '不要', '不必',
-  '昨天', '前天', '刚才', '之前', '已经', '一直', '老是', '总是',
-];
-
-const NARRATIVE_SUBJECTS = ['我', '他', '她', '它', '这', '那', '这个', '那个'];
 
 /**
  * 模板别名：用户嘴里的词 → prefab id。
@@ -77,11 +68,11 @@ export function parseOracleBuild(
   if (text.length === 0) return null;
   const lower = text.toLowerCase();
 
-  if (NON_IMPERATIVE.some((marker) => lower.includes(marker))) return null;
+  if (hasNarrativeMarker(lower)) return null;
 
   // 位置常写在动词前面（「在 (32,14) 建一间书阁」）。先把位置短语剥掉，
   // 否则句首是「在」，「建」就不在开头了。
-  const body = stripPrefixes(stripLocation(lower));
+  const body = stripLeadIns(lower);
   if (NARRATIVE_SUBJECTS.some((subject) => body.startsWith(subject))) return null;
 
   // 句首必须是建造或拆除动词。拆优先：`拆掉` 也以 `拆` 开头，
@@ -100,40 +91,4 @@ export function parseOracleBuild(
     return { action, templateId, at: action === 'build' ? readPoint(lower) : null };
   }
   return null;
-}
-
-/** 从句子里读坐标。认 `(32,14)` 与 `32,14` 两种写法。 */
-function readPoint(lower: string): GridPoint | null {
-  const matched = /(\d{1,3})\s*[,，]\s*(\d{1,3})/.exec(lower);
-  if (matched === null) return null;
-  const x = Number(matched[1]);
-  const y = Number(matched[2]);
-  if (!Number.isInteger(x) || !Number.isInteger(y)) return null;
-  return { x, y };
-}
-
-/**
- * 剥掉句首的位置短语：「在 (32,14)」「(32,14)」「32,14 那边」。
- *
- * 只剥句首那一处，不动句中的坐标——`readPoint` 仍从整句里找。
- */
-function stripLocation(lower: string): string {
-  return lower
-    .replace(/^\s*在?\s*\(?\d{1,3}\s*[,，]\s*\d{1,3}\)?\s*(那里|那边|这儿|这边)?\s*/, '')
-    .replace(/^\s*在\s*/, '');
-}
-
-function stripPrefixes(lower: string): string {
-  let body = lower;
-  let changed = true;
-  while (changed) {
-    changed = false;
-    for (const prefix of PREFIXES) {
-      if (body.startsWith(prefix)) {
-        body = body.slice(prefix.length).trim();
-        changed = true;
-      }
-    }
-  }
-  return body;
 }
