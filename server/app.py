@@ -90,6 +90,9 @@ app.include_router(create_editor_insights_router(editor_insights, tts))
 from .memory.api import create_diary_router, create_starmap_router
 app.include_router(create_diary_router(manager))
 app.include_router(create_starmap_router(manager))
+# 像素世界的意图兜底：规则解析器认不出的话才走到这里，见 docs/WORLD_INTENT.md。
+from .world_intent import create_world_intent_router
+app.include_router(create_world_intent_router(llm))
 _scheduler_task: asyncio.Task | None = None
 _reconcile_task: asyncio.Task | None = None
 # 启动期续跑的督办：create_task 的返回值必须有人拿住，否则可能被回收。

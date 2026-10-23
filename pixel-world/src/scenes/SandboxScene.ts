@@ -37,6 +37,7 @@ import { describePropSource } from '../world/faith.ts';
 import { createLazyAnimalese, type Animalese } from '../audio/animalese.ts';
 import { toWorldCommand, type AgentToWorld } from '../world/bridge.ts';
 import { LedgerClient } from '../world/ledger.ts';
+import { createIntentClient } from '../world/intent-client.ts';
 import { SaveStore } from '../ui/save-store.ts';
 import type { WorldSave } from '../world/save.ts';
 import { CURRENT_SCHEMA_VERSION } from '../world/save.ts';
@@ -313,6 +314,9 @@ export class SandboxScene extends Phaser.Scene {
       villagerName: this.villagerName,
       // 造物神谕（「建一间书阁」）要靠它把词换成模板。
       blueprints: this.blueprints,
+      // 规则认不出的话才问模型。没有 Key 时它会 503，世界照样离线可用。
+      intentModel: createIntentClient(() => this.blueprints),
+      worldSize: { width: this.world.grid.width, height: this.world.grid.height },
       spawnBuilding: (
         prefabId: string,
         instanceId: string,

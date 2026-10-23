@@ -15,6 +15,9 @@ import { awaitingDecree } from './decree.ts';
 import { parseOracle } from './oracle.ts';
 import { parseOracleBuild, type BuildIntent } from './oracle-build.ts';
 import { parseOracleMiracle } from './oracle-miracle.ts';
+import { routeIntent } from './intent-router.ts';
+import type { IntentModel } from './intent-router.ts';
+import type { ParsedIntent } from './intent-schema.ts';
 import { summarizeWorld } from './world-state.ts';
 import { addTrail, visibleTrails, type TrailMap } from './trails.ts';
 import { carryKindFor } from './carry.ts';
@@ -83,6 +86,13 @@ export type WorldCommand =
    * 「你对世界说的话」，不该被记成神谕。
    */
   | { readonly kind: 'oracle'; readonly raw: string }
+  /**
+   * 模型判定的结果，回队结算。
+   *
+   * 为什么不直接调 `applyIntent`：模型是异步的，回来时世界可能已经走了几拍。
+   * 回队让它的时序与玩家同步输入完全一致——石板、事件、排队顺序都不特殊。
+   */
+  | { readonly kind: 'intent'; readonly intent: ParsedIntent; readonly raw: string }
   | { readonly kind: 'dispatch'; readonly taskKind: TaskKind; readonly summary: string }
   | { readonly kind: 'complete'; readonly target?: string }
   | { readonly kind: 'cancelPending'; readonly id?: string }
@@ -181,6 +191,15 @@ export interface SimulationDeps {
   ) => NewBuilding | null;
   /** 本地 wall clock（只给 settled.completedAt 的 mock 来源用，不喂逻辑）。 */
   readonly wallClock?: () => number;
+  /**
+   * 意图模型：规则认不出的话才问它。省略表示纯离线。
+   *
+   * 这里只放**客户端**，不放提示词与校验——那两样在世界侧已经是确定的了
+   * （`intent-prompt.ts` / `intent-schema.ts`），模型只负责产出一份 JSON。
+   */
+  readonly intentModel?: IntentModel;
+  /** 世界尺寸。给意图校验判坐标越界用；省略时从 grid 推。 */
+  readonly worldSize?: { readonly width: number; readonly height: number };
 }
 
 /** 一个角色的完整本地状态。渲染层只读快照，不碰这里。 */
@@ -277,6 +296,10 @@ export class Simulation {
   private readonly settledLog: SettledRecord[] = [];
   private readonly wallClock: () => number;
   private readonly blueprints: ReadonlyMap<string, PrefabBlueprint> | undefined;
+  private readonly intentModel: IntentModel | undefined;
+  private readonly worldSize: { readonly width: number; readonly height: number };
+  /** 正在问模型的句子。防止同一句被重复投递时问两次。 */
+  private readonly pendingClassify = new Set<string>();
   /** 是否已与台账对过账。读档后为 false：对账前不驱动台账单。 */
   private ledgerReconciled = true;
   /** 上游台账是否在线。离线时世界照常过日子，但状态行必须说出来。 */
@@ -303,6 +326,8 @@ export class Simulation {
     this.spawnBuilding = deps.spawnBuilding;
     this.wallClock = deps.wallClock ?? (() => Date.now());
     this.blueprints = deps.blueprints;
+    this.intentModel = deps.intentModel;
+    this.worldSize = deps.worldSize ?? { width: deps.grid.width, height: deps.grid.height };
     this.buildings = [...deps.buildings];
     this.beats = routineBeats(deps.altar, deps.grid);
     const names = deps.villagerNames ?? [deps.villagerName, DEFAULT_ASSISTANT_NAME];
@@ -455,6 +480,8 @@ export class Simulation {
     switch (command.kind) {
       case 'oracle':
         return this.speak(command.raw);
+      case 'intent':
+        return this.applyIntent(command.intent, command.raw);
       case 'dispatch':
         return this.dispatch(command.taskKind, command.summary);
       case 'complete':
@@ -605,6 +632,15 @@ export class Simulation {
 
     const intent = parseOracle(raw);
     if (intent.kind === 'unknown') {
+      // 规则认不出。有模型就异步问一次——但**这一拍不能等网络**。
+      //
+      // 快环纪律：`speak()` 在任何情况下都同步返回。模型的结果回来时
+      // 走 `enqueue({kind:'intent'})` 重新排队，由下一个逻辑拍结算。
+      // 这样世界的时间线不依赖网络延迟，离线时也只是"这句话没听懂"。
+      if (this.intentModel !== undefined) {
+        void this.classifyLater(raw);
+        return { ok: true, message: '这句话规则认不出，正在问模型……' };
+      }
       const message = '没听懂这句，世界没有动。';
       this.log('warn', message);
       return { ok: false, message };
@@ -623,6 +659,88 @@ export class Simulation {
       default:
         command = { kind: 'complete' };
     }
+    const result = this.apply(command);
+    if (result.ok) this.inscribe(raw, result.message);
+    return result;
+  }
+
+  /**
+   * 异步问模型，回来后再排队结算。
+   *
+   * 三条纪律：
+   *
+   * 1. **不 await 在快环里。** 调用方是 `speak()`，它必须同步返回。
+   * 2. **结果回队，不直接改世界。** 模型的结果和玩家的话走同一条命令队列，
+   *    这样时序、石板、事件顺序都与同步输入一致——没有"特权路径"。
+   * 3. **失败只是没听懂。** 超时、网络错、JSON 不合法，全部落到 unknown，
+   *    绝不退而求其次猜一个。
+   */
+  private async classifyLater(raw: string): Promise<void> {
+    const model = this.intentModel;
+    if (model === undefined) return;
+    if (this.pendingClassify.has(raw)) return; // 同一句只问一次
+    this.pendingClassify.add(raw);
+    try {
+      const result = await routeIntent(raw, {
+        templates: this.blueprints ?? new Map(),
+        worldSize: this.worldSize,
+        model,
+      });
+      if (result.intent.kind === 'unknown') {
+        const message = '没听懂这句，世界没有动。';
+        this.log('warn', result.modelError ?? message);
+        this.enqueue({ kind: 'intent', intent: { kind: 'unknown', reason: message }, raw });
+        return;
+      }
+      this.enqueue({ kind: 'intent', intent: result.intent, raw });
+    } finally {
+      this.pendingClassify.delete(raw);
+    }
+  }
+
+  /** 把一份已校验的意图落成世界命令。与 `speak()` 的下半段同一条路。 */
+  private applyIntent(intent: ParsedIntent, raw: string): CommandResult {
+    switch (intent.kind) {
+      case 'dispatch':
+        return this.settleIntent({ kind: 'dispatch', taskKind: intent.taskKind, summary: intent.summary }, raw);
+      case 'setWeather':
+        return this.settleIntent({ kind: 'setWeather', weather: intent.weather }, raw);
+      case 'cancelPending':
+        return this.settleIntent({ kind: 'cancelPending' }, raw);
+      case 'complete':
+        return this.settleIntent({ kind: 'complete' }, raw);
+      case 'build': {
+        const instanceId = `${intent.templateId}#${this.buildings.length + 1}`;
+        return this.settleIntent(
+          { kind: 'build', prefabId: intent.templateId, instanceId, at: intent.at ?? undefined },
+          raw,
+        );
+      }
+      case 'demolish': {
+        const target = this.buildings.find((b) => b.prefabId === intent.templateId);
+        if (target === undefined) {
+          const message = `没有${this.blueprints?.get(intent.templateId)?.displayName ?? intent.templateId}可拆。`;
+          this.log('warn', message);
+          return { ok: false, message };
+        }
+        const result = this.demolish(target.instanceId);
+        if (result.ok) this.inscribe(raw, result.message);
+        return result;
+      }
+      case 'miracle': {
+        const result = this.performMiracle(intent.miracle, intent.at ?? undefined);
+        if (result.ok) this.inscribe(raw, result.message);
+        return result;
+      }
+      case 'unknown': {
+        this.log('warn', intent.reason);
+        return { ok: false, message: '没听懂这句，世界没有动。' };
+      }
+    }
+  }
+
+  /** 走命令、成功就刻石板。`applyIntent` 里几处共用的收尾。 */
+  private settleIntent(command: WorldCommand, raw: string): CommandResult {
     const result = this.apply(command);
     if (result.ok) this.inscribe(raw, result.message);
     return result;
