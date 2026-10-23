@@ -7,7 +7,7 @@
  */
 
 import type { WorldGrid } from './grid.ts';
-import { TASK_PROFILES } from './tasks.ts';
+import { TASK_PROFILES, taskDurationFor } from './tasks.ts';
 import { pickVenue, type VenueCandidate } from './venue.ts';
 import { revealedRadiusFor } from './fog.ts';
 import { awaitingDecree } from './decree.ts';
@@ -1376,7 +1376,8 @@ export class Simulation {
       kind: 'operating',
       taskId: task.id,
       startedAt: this.now,
-      estimateMs: TASK_PROFILES[task.kind].estimateMs,
+      // 郊野的活更久：走那么远，做的活也该更重。
+      estimateMs: taskDurationFor(task.kind, WILD_PREFABS.has(building.prefabId)),
       // 台账的活只有台账知道还要多久；沙盒的活由计时器收尾。
       determinate: task.source === 'sandbox',
     });

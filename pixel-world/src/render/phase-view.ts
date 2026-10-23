@@ -15,6 +15,7 @@ import type { WorldSnapshot } from '../world/types.ts';
 import { WORLD } from '../world/palette-data.ts';
 import { propFootY } from './prop-depth.ts';
 import { PHASES, type PhaseId, type PhaseRecipe } from './day-phase.ts';
+import { isWildLanternOn } from '../world/wilderness-signal.ts';
 
 const DIM_DEPTH = 8009;
 const GLOW_DEPTH = 8010;
@@ -136,7 +137,7 @@ export function createPhaseView(
       const h = building.footprint.h * TILE_PX;
       const roofH = Math.max(10, Math.round(h * 0.34));
 
-      // 亮窗：只有黄昏与夜点亮，且按 litWindows 决定几扇。
+      // 亮窗：黄昏与夜按 litWindows 点亮。
       const windowXs = [px + 6, px + w - 18];
       for (let i = 0; i < view.litWindows && i < windowXs.length; i += 1) {
         addGlow(windowXs[i]! + 4, py + roofH + 11, 13, 9, 0.11);
@@ -146,6 +147,16 @@ export function createPhaseView(
         const dx = building.door.x * TILE_PX + 8;
         const dy = building.door.y * TILE_PX + 8;
         addGlow(dx, dy + 9, 18, 11, 0.1);
+      }
+
+      // 郊野常明灯：**不分时辰**，白天也亮。
+      // 这是郊野的识别信号——荒地里的一个人造光点，说明这里有人在守着。
+      // 与镇内窗灯是两套语义：镇内跟作息走，郊野跟「有人在野外」走。
+      if (isWildLanternOn(building, snapshot)) {
+        // 灯笼挂在门旁，光池比窗灯小一圈：它是一盏灯，不是一屋子光。
+        const lx = building.door.x * TILE_PX + 8;
+        const ly = building.door.y * TILE_PX - 4;
+        addGlow(lx, ly, 10, 8, 0.16 * (0.85 + 0.15 * Math.sin(snapshot.now / 620)));
       }
       // 屋脊受光：黄昏独有，把黄昏和正午分开的主要线索。
       if (view.ridge > 0.001) {
@@ -254,7 +265,11 @@ export function createPhaseView(
           )
           .join('|') +
         '#' +
-        snapshot.props.map((p) => `${p.id}:${p.at.x},${p.at.y},${p.kind}`).join('|');
+        snapshot.props.map((p) => `${p.id}:${p.at.x},${p.at.y},${p.kind}`).join('|') +
+        // 郊野灯的呼吸：按 300ms 一档。不每帧重画——光晕是整片重绘，
+        // 而呼吸只需要看起来在动，300ms 的粒度已经够了。
+        '#' +
+        Math.round(snapshot.now / 300);
       if (key !== glowKey) {
         glowKey = key;
         drawGlows(snapshot, view);
