@@ -1045,6 +1045,7 @@ export class SandboxScene extends Phaser.Scene {
       this.lastRoadCount = snapshot.roads.length;
       this.decor.redrawRoads(snapshot.roads);
     }
+    this.decor.syncTrails(snapshot.trails);
     this.decor.syncProps(snapshot.props);
     this.decor.syncCritters(snapshot.critters);
     const constructionKey = snapshot.constructions

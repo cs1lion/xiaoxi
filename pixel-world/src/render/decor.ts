@@ -16,6 +16,8 @@ export interface DecorView {
   readonly roads: Phaser.GameObjects.Graphics;
   readonly scaffolds: Map<string, Phaser.GameObjects.Container>;
   readonly redrawRoads: (cells: readonly GridPoint[]) => void;
+  /** 走出来的痕迹：一层比路更淡的踩踏。 */
+  readonly syncTrails: (trails: readonly { readonly at: GridPoint; readonly strength: number }[]) => void;
   readonly syncProps: (props: readonly WorldProp[]) => void;
   /** 氛围实体（猫）。只做画面，不参与碰撞与结算。 */
   readonly syncCritters: (critters: readonly Critter[]) => void;
@@ -30,6 +32,10 @@ export function createDecorView(scene: Phaser.Scene, originX: number, originY: n
   // 所以每个道具都是独立顶层对象，各自 setDepth，才能与角色做 Y-Sort。
   const props = new Map<string, Phaser.GameObjects.Graphics>();
   const critters = new Map<string, Phaser.GameObjects.Graphics>();
+  // 痕迹单独一层，压在路下面：踩出来的东西该比铺出来的更轻。
+  const trails = scene.add.graphics();
+  trails.setDepth(0);
+  let lastTrailKey = '';
   const scaffolds = new Map<string, Phaser.GameObjects.Container>();
 
   return {
@@ -74,6 +80,25 @@ export function createDecorView(scene: Phaser.Scene, originX: number, originY: n
             roads.fillStyle(WORLD.grass, 1);
             roads.fillRect(px + sx + 1, py + sy + sh - 2, 2, 1);
           }
+        }
+      }
+    },
+    syncTrails(list) {
+      // 痕迹增长很慢，但每帧重画几百格也不贵。用 key 挡住无变化的帧。
+      const key = list.map((t) => `${t.at.x},${t.at.y}:${t.strength}`).join('|');
+      if (key === lastTrailKey) return;
+      lastTrailKey = key;
+      trails.clear();
+      for (const trail of list) {
+        const px = originX + trail.at.x * TILE_PX;
+        const py = originY + trail.at.y * TILE_PX;
+        // 强度 2：草被踩倒一条；强度 3：露出土色。
+        // 用 soil（W02）而不是新增色——它是现成的"草下的土"。
+        trails.fillStyle(WORLD.soil, trail.strength >= 3 ? 0.5 : 0.28);
+        trails.fillRect(px + 3, py + 11, TILE_PX - 6, 2);
+        if (trail.strength >= 3) {
+          trails.fillStyle(WORLD.soil, 0.32);
+          trails.fillRect(px + 5, py + 8, TILE_PX - 10, 2);
         }
       }
     },

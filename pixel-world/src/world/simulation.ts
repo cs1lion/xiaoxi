@@ -15,6 +15,7 @@ import { awaitingDecree } from './decree.ts';
 import { parseOracle } from './oracle.ts';
 import { parseOracleBuild, type BuildIntent } from './oracle-build.ts';
 import { summarizeWorld } from './world-state.ts';
+import { addTrail, visibleTrails, type TrailMap } from './trails.ts';
 import { WILD_PREFABS } from './setup.ts';
 import {
   nextProp,
@@ -238,6 +239,11 @@ export class Simulation {
   private readonly queue: WorldCommand[] = [];
   private readonly lastResults: CommandResult[] = [];
   private readonly props: WorldProp[] = [];
+  /**
+   * 走出来的痕迹。**不落档**：能从走动重新累积，存起来只会让存档无限膨胀。
+   * 与铺好的 `roads` 是两回事——那个是施工结果，这个是踩踏。
+   */
+  private readonly trails: TrailMap = new Map();
   /** 神谕石板：只记改变了世界的话。旧在前，封顶 ORACLE_SLAB_LIMIT。 */
   private readonly oracleLog: OracleRecord[] = [];
   /** 氛围实体（猫等）。只影响渲染，不参与任何结算。 */
@@ -394,6 +400,7 @@ export class Simulation {
         revealedRadius: revealedRadiusFor(this.ledgerDeliveries + this.mockDeliveries),
       },
       roads: this.roads,
+      trails: visibleTrails(this.trails),
       events: this.events.slice(-12),
       weather: this.weather.kind,
       faith: { points: this.faithPoints, milestones: this.milestones },
@@ -1337,6 +1344,8 @@ export class Simulation {
       const distance = Math.hypot(dx, dy);
       if (distance <= budget) {
         villager.pos = { x: next.x, y: next.y };
+        // 走过一格就踩一次。重复走的格子强度累加，草被踩实。
+        addTrail(this.trails, next);
         budget -= distance;
         villager.path.shift();
         continue;

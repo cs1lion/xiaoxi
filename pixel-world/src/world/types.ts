@@ -320,6 +320,11 @@ export interface WorldSnapshot {
    */
   readonly fog: { readonly center: GridPoint; readonly revealedRadius: number };
   readonly roads: readonly GridPoint[];
+  /**
+   * 走出来的痕迹：人反复走过的地方。强度 2 起才出现在这里。
+   * **不落档**——能从走动重新累积，存起来只会让存档无限膨胀。
+   */
+  readonly trails: readonly { readonly at: GridPoint; readonly strength: number }[];
   readonly altar: GridPoint;
   readonly events: readonly WorldEvent[];
   readonly weather: Weather;
