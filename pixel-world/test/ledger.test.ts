@@ -78,7 +78,7 @@ test('认不出的 Agent 落到写作，不冒充代码', () => {
   assert.equal(kindForAgent(undefined, commission({ id: 'x', title: '莫名其妙' })), 'writing');
 });
 
-test('收工的单不进活动清单，进 finished', () => {
+test('只有 done 进 finished：ready_to_report 是待验收，不是成功', () => {
   const result = project({
     agents: AGENTS,
     commissions: [
@@ -87,8 +87,14 @@ test('收工的单不进活动清单，进 finished', () => {
       commission({ id: 'archived', status: 'done', agent_id: 'scribe' }),
     ],
   });
+  // ready_to_report 既不驱动开工，也不算交付——世界要等老板点头。
   assert.deepEqual(result.tasks.map((t) => t.commissionId), ['live']);
-  assert.deepEqual(result.finished.map((t) => t.commissionId).sort(), ['archived', 'over']);
+  assert.deepEqual(result.finished.map((t) => t.commissionId), ['archived']);
+  // 反例锁：曾经这里把 ready_to_report 也算 finished，导致验收前就加信仰点。
+  assert.ok(
+    !result.finished.some((t) => t.status === 'ready_to_report'),
+    'ready_to_report 不得进 finished（ADR_AGENT_BRIDGE §4.3：待验收不是成功）',
+  );
 });
 
 test('blocked 优先被挑出来，因为它要请示', () => {

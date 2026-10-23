@@ -116,6 +116,11 @@ DEFAULTS: dict[str, Any] = {
     "llm_provider": os.getenv("LLM_PROVIDER", "openai"),
     "llm_base_url": os.getenv("LLM_BASE_URL", "https://api.deepseek.com/v1"),
     "llm_api_key": os.getenv("LLM_API_KEY", ""),
+    # 内部端点（/internal/*）的共享令牌。空 = 不校验（保持旧行为）。
+    # 设了之后每个 /internal/* 请求要带 X-Internal-Token 且相等，否则 401。
+    # 这是为 /internal/telemetry_proxy 加的：它拿 llm_api_key 转发任意 path，
+    # 原先只查 Origin 头，不带 Origin 的本机进程一条 curl 就能白嫖额度。
+    "internal_token": os.getenv("INTERNAL_TOKEN", ""),
     "llm_model": os.getenv("LLM_MODEL", "deepseek-chat"),
     "llm_temperature": float(os.getenv("LLM_TEMPERATURE", "0.9")),
     "llm_max_tokens": int(os.getenv("LLM_MAX_TOKENS", "400")),

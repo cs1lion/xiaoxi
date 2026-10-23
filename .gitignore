@@ -63,3 +63,6 @@ evals/results/
 # 慢环执行内核（2026-10-17 批准由 agent-runtime/ 归属，见 PI_DURABLE_MIGRATION.md）：
 # 源码与测试进版本库，只排掉自带的 node_modules（约 97MB）。
 agent-runtime/node_modules/
+
+# literal %SystemDrive% dirs written when a tool passes an unexpanded Windows env var as a path
+%SystemDrive%/

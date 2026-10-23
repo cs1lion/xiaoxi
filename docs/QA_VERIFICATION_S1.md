@@ -2827,7 +2827,7 @@ Get-NetTCPConnection -LocalPort 5188,5190,8001,8000 -State Listen -ErrorAction S
 | **3a** | **可选路径完整性（重点）** | ✅ 把 Simulation 推进到 fresh→idle→dispatch→走路→开工→交付→下雨→多单→unknown 命令→cancelPending→complete 等 **数百个状态点**，收集去重后所有 save 路径，**越界 0 条**——`SAVE_V1_PATH_SET` 没有漏项 |
 | 4 | `read()` vs `importText()` 等价 | ✅ 7 个用例判定全一致（合法/坏档/形状错/高版本/world 加字段/缺指纹/空文件） |
 | 5a–5h | 原有 task-22 项不回归 | ✅ 导出单槽原文逐字节、内容合规无运行时字段、文件名格式、坏档备份 3 份且主槽不变、高版本只读不误关自动存档、2MB 上限、配额降级只提示一次、导入后自动存档重开 |
-| 门禁 | `check` 0 / `test:inprocess` **180/180** / audit **16/8/1/23** / `--strict` 0 / 整门禁 **exit 0** | ✅（`save-import.test.ts` 单跑 12/12，`save-fingerprint`+`save` 17/17） |
+| 门禁 | `check` 0 / `test:inprocess` **221/221** / audit **24/8/1/31** / `--strict` 0 / 整门禁 **exit 0**（2026-10-21 复跑；本节其余数字为当时快照，见行内日期） | ✅（`save-import.test.ts` 单跑 12/12，`save-fingerprint`+`save` 17/17） |
 
 ### 缺陷与边界
 

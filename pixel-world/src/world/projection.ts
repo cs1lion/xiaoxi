@@ -69,10 +69,19 @@ const KIND_RULES: readonly { readonly kind: WorkshopTask; readonly words: readon
   { kind: 'writing', words: ['写作', '整理', '标题', '摘要', '便笺', '笔记', '文案', '改写', '润色', '文档', '表格', '汇报', '归纳', '总结'] },
 ];
 
-/** 台账状态 → 该不该让她动。ready_to_report 已经是活干完了，不再开工。 */
+/** 台账状态 → 该不该让她动。 */
 const ACTIVE_STATUSES = new Set(['briefing', 'running', 'blocked', 'auditing']);
-/** 这些状态表示这一单已经收工，世界该收尾交付而不是继续开工。 */
-const FINISHED_STATUSES = new Set(['ready_to_report', 'done']);
+/**
+ * 只有台账终态才算「收工」。
+ *
+ * 曾经这里含 `ready_to_report`，导致世界在老板验收前就走完交付、加信仰点。
+ * 这与 ADR_AGENT_BRIDGE §4.3 自己写的「待验收——不是成功」冲突：那一格明确
+ * 说 ready_to_report 只是初审过了、等老板点头，而 `done` 才是唯一终态。
+ *
+ * 所以 `ready_to_report` 现在只算「她不在这单上了」，不算「这单成了」：
+ * 它既不在 ACTIVE（不再开工），也不在 FINISHED（不算交付）。
+ */
+const FINISHED_STATUSES = new Set(['done']);
 
 export function project(input: ProjectionInput): Projection {
   const agents = new Map(input.agents.map((agent) => [agent.id, agent]));
@@ -81,6 +90,10 @@ export function project(input: ProjectionInput): Projection {
   for (const commission of input.commissions) {
     const active = ACTIVE_STATUSES.has(commission.status);
     const done = FINISHED_STATUSES.has(commission.status);
+    // 这里只留一个判断，别再加第二道「parked」兜底：
+    // ready_to_report 既不在 ACTIVE 也不在 FINISHED，自然落到 continue，
+    // 语义已经表达完整。多一层冗余会让单点变异测不出来（试过一次：
+    // 把 ready_to_report 塞回 FINISHED，因为还有 parked 兜着，测试照样绿）。
     if (!active && !done) continue;
     const agent = agents.get(commission.agent_id);
     const task: WorldTask = {

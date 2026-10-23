@@ -157,11 +157,11 @@
 
 ### 技术验收（对照 smoke）
 
-- [ ] 以 `?ledger=off` 跑 `node scripts/smoke.mjs` 全绿（114/114）。
+- [ ] 以 `?ledger=off` 跑 `node scripts/smoke.mjs` 全绿（2026-10-21 实测 118/118；本数字随断言增加而变，以命令输出为准）。
 - [ ] 以 `LEDGER=1 node scripts/smoke.mjs` 跑台账模式全绿（21/21）。
 - [ ] `python scripts/check_protocol.py` PASS。
 - [ ] `python scripts/test_core.py` 64/0。
-- [ ] `npm test` 全绿（180/180）。
+- [ ] `npm test` 全绿（221/221，2026-10-21 复跑）。
 - [ ] `npm run test:inprocess` 全绿（受限环境替代，覆盖核心逻辑与门禁）。
 
 > 注：smoke 需真实浏览器（Playwright / Chromium）；`test:inprocess` 在无浏览器或沙箱受限环境下作为替代。
@@ -301,7 +301,7 @@
 | **派单意图只由正则判定，同义改写静默降级（仅 live 路）** | ✅ **已定稿（双路径已区分）** | `pixel-world/src/world/oracle.ts:23-27`（Mock 路）；`server/dialogue/orchestrator.py:60-65`（live 路）；`docs/DEMO_RUN_EVIDENCE.md` §7.7 | **两条路径不同，不能混为一谈。** ① **Mock 路**（`?ledger=off`）：世界自己的关键词路由器 `TASK_RULES` 里 `writing` 规则含「便笺」「整理」（`oracle.ts:23-27`），所以「帮我把便笺整理成三版标题」被**世界本地接住** → 建 Mock 单 → 正常交付（用户 2026-10-20 实跑确认）。② **live 路**（隔离 8001）：由 server 的 `_DELEGATION` 正则判定（`orchestrator.py:60-65`，第一支要求「去(把\|帮我\|替我)…」开头），「帮我把…」**不命中** → 不建单、无任何提示（静默降级）；live 路世界根本收不到这句话，自然什么都看不到。**要演示这个弱点必须走 live 路，Mock 路看不到。** |
 
 **说明**：
-- 除上表外，其余段落（Mock 跑、存档、调试面板、12fps、DOM overlay）均已通过 `test:inprocess` 180/180 与 smoke 逻辑断言覆盖。
+- 除上表外，其余段落（Mock 跑、存档、调试面板、12fps、DOM overlay）均已通过 `test:inprocess` 与 smoke 逻辑断言覆盖（不写死测试数：该数字随测试增长而变，以 `npm run test:inprocess` 输出为准）。
 - 证据文档已回并已复验：QA 独立复验通过（smoke 114/114、P1 关闭），详见 `docs/DEMO_RUN_EVIDENCE.md`；本剧本据此定稿 v1.0。
 
 ---
@@ -332,9 +332,9 @@
 
 以下数字均已标注来源命令或文档路径，不手填估算：
 
-- **180/180**：`npm run test:inprocess` 测试总数（`docs/DEMO_SCRIPT.md` 技术验收清单）。
-- **16/8/1/23**：调色板审计结果（世界 16 色 / UI 8 色 / 共享 1 色 / 并集 23 色），来源 `docs/ART_PALETTE_AUDIT.md`（已 QA 通过）。
-- **114/114**：smoke 沙盒模式断言总数，来源 `scripts/smoke.mjs` 与 `docs/RUNTIME_VERIFICATION.md`。
+- **221/221**：`npm run test:inprocess` 测试总数（`docs/DEMO_SCRIPT.md` 技术验收清单；2026-10-21 复跑；本节数字随测试增长而变，以实跑为准）。
+- **24/8/1/31**：调色板审计结果（世界 24 色 / UI 8 色 / 共享 1 色 / 并集 31 色）。世界层 2026-10-21 从 16 扩到 24 色，用户批准。来源 `docs/ADR_PALETTE_24.md`、`docs/ART_PALETTE_AUDIT.md`，复跑 `node scripts/audit-palette.mjs --strict`（exit 0）。
+- **118/118**：smoke 沙盒模式断言总数（2026-10-21 实测），来源 `scripts/smoke.mjs` 与 `docs/RUNTIME_VERIFICATION.md`。
 - **21/21**：smoke 台账模式断言总数，来源 `scripts/smoke.mjs`。
 - **64/0**：`python scripts/test_core.py` 通过/失败数，来源 `docs/RUNTIME_VERIFICATION.md`。
 - **139/139**：`npm test` 通过数（S2 基线），来源 `docs/PROJECT_PROGRESS.md` 与 `docs/RUNTIME_VERIFICATION.md`。
@@ -364,4 +364,4 @@
 | 存档 | localStorage 单槽，v1 schema 冻结；task-22 新增导出/导入 | `pixel-world/src/world/save.ts` / `pixel-world/src/ui/save-store.ts` 中 `SaveStore` / `exportFileName` |
 | 调试面板 | 固定右上角，4Hz 刷新，只读 | `pixel-world/src/ui/debug-panel.ts` 中 `bindDebugPanel` / `DEBUG_REFRESH_MS` |
 | 中文策略 | 动态名字/气泡走 DOM overlay，不进 canvas | `pixel-world/src/render/world-overlay.ts` 中 `createWorldOverlay` / `sync` |
-| 调色板 | 世界 16 色 + UI 8 色 + 共享 1 色 = 并集 23 色 | `docs/ART_PALETTE_AUDIT.md`（已 QA 通过） |
+| 调色板 | 世界 24 色 + UI 8 色 + 共享 1 色 = 并集 31 色（2026-10-21 从 16 扩到 24，用户批准） | `docs/ADR_PALETTE_24.md`、`docs/ART_PALETTE_AUDIT.md` |
