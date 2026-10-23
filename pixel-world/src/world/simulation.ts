@@ -9,11 +9,12 @@
 import type { WorldGrid } from './grid.ts';
 import { TASK_PROFILES, taskDurationFor } from './tasks.ts';
 import { pickVenue, type VenueCandidate } from './venue.ts';
-import { revealedRadiusFor } from './fog.ts';
+import { fogAt, revealedRadiusFor } from './fog.ts';
 import { awaitingDecree } from './decree.ts';
 
 import { parseOracle } from './oracle.ts';
 import { parseOracleBuild, type BuildIntent } from './oracle-build.ts';
+import { parseOracleMiracle } from './oracle-miracle.ts';
 import { summarizeWorld } from './world-state.ts';
 import { addTrail, visibleTrails, type TrailMap } from './trails.ts';
 import { carryKindFor } from './carry.ts';
@@ -101,7 +102,11 @@ export type WorldCommand =
    * 神迹：纯世界侧动作，不是你的话，所以不刻石板。
    * 三件：点灯、种树、召唤猫（猫只做氛围，会自己走开）。
    */
-  | { readonly kind: 'miracle'; readonly miracle: MiracleKind }
+  /**
+   * 神迹。`at` 省略时落在祭坛周围；给了就落在指定位置。
+   * 指定位置要过三道：在界内、不在迷雾里、格子空着。
+   */
+  | { readonly kind: 'miracle'; readonly miracle: MiracleKind; readonly at?: GridPoint }
   /**
    * 拆掉一栋楼。
    *
@@ -461,7 +466,7 @@ export class Simulation {
       case 'build':
         return this.build(command.prefabId, command.instanceId, command.at, command.source);
       case 'miracle':
-        return this.performMiracle(command.miracle);
+        return this.performMiracle(command.miracle, command.at);
       case 'demolish':
         return this.demolish(command.instanceId);
       case 'sync':
@@ -476,14 +481,28 @@ export class Simulation {
    *
    * 落点规则与信仰摆件一致：祭坛周围的环上找空格，避开已有摆件。
    */
-  private performMiracle(kind: MiracleKind): CommandResult {
+  private performMiracle(kind: MiracleKind, at?: GridPoint): CommandResult {
     const id = `miracle-${this.nextMiracleNumber}`;
+
+    // 指定了位置就先验：在界内、不在迷雾里、格子空着。
+    if (at !== undefined) {
+      const problem = this.miracleSpotProblem(at);
+      if (problem !== null) {
+        this.log('warn', problem);
+        return { ok: false, message: problem };
+      }
+    }
+
     if (kind === 'cat') {
       this.nextMiracleNumber += 1;
       this.critters.push({
         id,
         kind: 'cat',
-        at: { x: this.altar.x + 2.5, y: this.altar.y + 2.5 },
+        // 指定位置时落在格子中央；不给时仍贴着祭坛。
+        at:
+          at === undefined
+            ? { x: this.altar.x + 2.5, y: this.altar.y + 2.5 }
+            : { x: at.x + 0.5, y: at.y + 0.5 },
         leavesAt: this.now + CAT_DWELL_MS,
       });
       this.log('info', '神迹：一只猫从街角溜达过来。');
@@ -492,7 +511,7 @@ export class Simulation {
 
     const propKind = kind === 'light' ? 'lamp' : 'tree';
     const label = kind === 'light' ? '一盏神迹点的灯' : '一棵神迹种的树';
-    const spot = this.miracleSpot();
+    const spot = at ?? this.miracleSpot();
     if (spot === null) {
       return { ok: false, message: '祭坛周围没有空地了。' };
     }
@@ -509,6 +528,31 @@ export class Simulation {
     });
     this.log('info', `神迹：${label}落在祭坛边。`);
     return { ok: true, message: `${label}落下了。` };
+  }
+
+  /**
+   * 指定落点能不能用。返回 null 表示可以，否则返回给玩家看的原因。
+   *
+   * 三条与建造同一套口径：在界内、不在迷雾里、格子空着。
+   * 神迹不占网格（摆件只是装饰），所以只查这三条，不查留白与门口。
+   */
+  private miracleSpotProblem(at: GridPoint): string | null {
+    if (!this.grid.inBounds(at)) return '那里在世界外面。';
+    // 判「被占」而不是「不能走」：树与树篱不可走但可以放东西，
+    // 建筑不可走且不能放。两者的区别在 occupant。
+    const cell = this.grid.at(at);
+    if (cell === undefined) return '那里在世界外面。';
+    if (cell.occupant !== null) return '那里被建筑占着。';
+    if (fogAt(at, {
+      center: this.altar,
+      revealedRadius: revealedRadiusFor(this.ledgerDeliveries + this.mockDeliveries),
+    })) {
+      return '那里还没长出来。';
+    }
+    if (this.props.some((prop) => prop.at.x === at.x && prop.at.y === at.y)) {
+      return '那里已经有一件神迹了。';
+    }
+    return null;
   }
 
   /** 神迹落点：从祭坛外环开始找，避开已占格与已有摆件。 */
@@ -550,6 +594,14 @@ export class Simulation {
     // （那个的动词表里没有「建 / 盖 / 造」）。
     const buildIntent = this.parseBuildIntent(raw);
     if (buildIntent !== null) return this.buildFromIntent(raw, buildIntent);
+
+    // 神迹：「点灯 / 种树 / 召唤猫」，可带坐标。与造物解析器不抢词。
+    const miracleIntent = parseOracleMiracle(raw);
+    if (miracleIntent !== null) {
+      const result = this.performMiracle(miracleIntent.miracle, miracleIntent.at ?? undefined);
+      if (result.ok) this.inscribe(raw, result.message);
+      return result;
+    }
 
     const intent = parseOracle(raw);
     if (intent.kind === 'unknown') {
