@@ -317,6 +317,74 @@ def check_world_events(problems: list[str]) -> None:
             )
 
 
+V2_SOURCE = ROOT / "server" / "contract" / "events_v2.py"
+
+
+def check_v2_events(problems: list[str]) -> None:
+    """§5 事件协议 v2：九类事件必须在协议文档里写全。
+
+    **这一条补的是第四类检查的单向漏洞。** 上面第 4 类只拦「前端读了、后端没发」；
+    反方向「后端发了、前端没接」原来只 print 一行不报错（`:545`）。那个设计对
+    既有事件是对的（形象层往往有意不关心某些消息），但**对 v2 不能这样**——
+    否则新协议永远没人接也能通过，协议门形同虚设。
+
+    所以 v2 的九类事件走**白名单强校验**：
+      - 协议文档必须写全（否则契约与实现漂移）
+      - 事件常量必须与协议文档逐字一致
+      - 明确禁止的旧名/假字段不得出现
+
+    `events_v2.py` 是名字的单一真相源；PROTOCOL.md 必须独立（它给人读）。
+    这里比对两边。
+    """
+    if not V2_SOURCE.exists():
+        return
+    from server.contract import events_v2 as v2
+
+    protocol_text = (ROOT / "docs" / "PROTOCOL.md").read_text(encoding="utf-8")
+
+    for name in v2.EVENT_TYPES:
+        if name not in protocol_text:
+            problems.append(
+                f"PROTOCOL.md §5 缺 v2 事件 {name!r}（后端发了前端没接，画面与真相不一致）")
+        for field in v2.PAYLOAD_FIELDS.get(name, ()):
+            # 字段名可能以 `field` 或 "field" 形式出现，只查裸词
+            if field not in protocol_text:
+                problems.append(
+                    f"PROTOCOL.md §5 的 {name} 缺 payload 字段 {field!r}")
+
+    for name in v2.COMMAND_TYPES:
+        if name not in protocol_text:
+            problems.append(
+                f"PROTOCOL.md §5 缺前端命令 {name!r}（按钮点了没反应）")
+
+    # 明确不加的东西：有人手滑加回来要红
+    for name in v2.FORBIDDEN_EVENT_TYPES:
+        if name in v2.EVENT_TYPES:
+            problems.append(
+                f"events_v2 里出现了禁止的事件 {name!r}"
+                "（TASK_SNAPSHOT 会造第二个真相源；VOICE_STATE 已改名 AGENT_PRESENCE）")
+    for field in v2.FORBIDDEN_PAYLOAD_FIELDS:
+        if field in v2.PAYLOAD_FIELDS.get(v2.TOOL_EXECUTION, ()):
+            problems.append(
+                f"TOOL_EXECUTION 的 payload 不得含 {field!r}"
+                "（假进度条破坏「画面等于真实状态」，用 steps_done/steps_total）")
+
+    # AGENT_PRESENCE 的四态必须写进协议，且与既有词汇对齐
+    for state in v2.AGENT_PRESENCE_STATES:
+        if state not in protocol_text:
+            problems.append(
+                f"PROTOCOL.md §5 的 AGENT_PRESENCE 缺状态 {state!r}")
+
+    # 投递保障必须覆盖全部九类（漏一个等于没定保障）
+    covered = set(v2.AT_LEAST_ONCE) | set(v2.AT_MOST_ONCE)
+    missing = set(v2.EVENT_TYPES) - covered
+    if missing:
+        problems.append(f"events_v2 有事件没定投递保障：{sorted(missing)}")
+    overlap = set(v2.AT_LEAST_ONCE) & set(v2.AT_MOST_ONCE)
+    if overlap:
+        problems.append(f"events_v2 的事件同时被定为两种保障：{sorted(overlap)}")
+
+
 def check_durable_routes(problems: list[str]) -> None:
     """慢环 sidecar 的路由表：Python 适配器与 Node 侧必须逐项一致。
 
@@ -521,6 +589,8 @@ def main() -> int:
     check_durable_routes(problems)
     # ---- 11. 像素世界事件：协议、服务端、世界客户端三方认账 ----
     check_world_events(problems)
+    # ---- 12. §5 事件协议 v2：九类事件必须写进协议（补第四类的单向漏洞） ----
+    check_v2_events(problems)
     # ---- 10. 同一 (方法, 路径) 只能注册一次：重复注册会让后一个处理函数永不服务 ----
     for (method, route), where in sorted(duplicate_routes().items()):
         problems.append(

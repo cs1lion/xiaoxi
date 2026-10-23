@@ -590,3 +590,126 @@ V3 台前快环（`orchestrator.executive_route`）认出的意图，同时随�
 
 回归：`python scripts/test_executive_v3.py`（路由载荷断言）、`node web/ui_nav.test.mjs`
 （领航纯逻辑 + 心流护栏）、`node scripts/test-ui-nav-browser.mjs`（抽屉自动开合、聚焦、子动作、
+
+## 二十五、事件协议 v2（契约 v2 · 规范 §5）
+
+> **状态：已由 Role 0 于 2026-10-23 确认。** 九类事件与五个前端命令的名字、字段
+> 按本节为准。实现方（后端 / 前端 / 世界）不得自造字段，改动走 `[PROTOCOL_REQUEST]`。
+
+本节的机器可检部分由 `scripts/check_protocol.py` 的第 12 类检查守着：
+`server/contract/events_v2.py` 是名字的单一真相源，本节必须与它逐字一致。
+
+### 25.1 信封
+
+```ts
+interface EventEnvelope<T, P> {
+  v: 2;              // 信封版本，与 v1 并存
+  id: string;        // 全局唯一，消费方按 id 去重（至少一次投递）
+  seq: number;       // 连接级单调递增，断线后按 after_seq 补齐
+  ts: number;        // 服务端时钟，epoch ms
+  type: T;
+  task_id?: string;  // 与任务无关的事件（AGENT_PRESENCE）可省略
+  step_id?: string;  // 仅 STEP_STATE_CHANGE 有
+  session_id?: string;
+  turn_id?: string;
+  payload: P;
+}
+```
+
+三条取舍：
+
+1. `seq` 是**连接级**单调，不是全局单调。多进程写同一 SQLite 时全局单调要么加锁
+   要么引入单写者；单用户本地系统不值得为它付代价。断线补齐靠「`seq` +
+   `after_seq` 查询」，不靠「每个包必达」。
+2. `ts` 用**服务端**时钟。前端时钟不可信（用户可能改系统时间），用它排序会让回放错乱。
+3. `v` 是**信封版本**，不是 schema 版本。演进靠「未知字段忽略、未知 type 整条忽略」，
+   不靠 `v` 递增——否则每加一个字段都要全链路发版。
+
+### 25.2 九类事件
+
+| type | 谁发 | payload 关键字段 | 世界表现 | 投递保障 |
+|---|---|---|---|---|
+| `TASK_STATE_CHANGE` | TaskEngine | `from,to,reason?,resume_to?,attempt,risk` | Task 级动画：接单/开工/打回/归档 | 至少一次 |
+| `STEP_STATE_CHANGE` | TaskEngine | `from,to,agent,station?,attempt` | 小人走到工位、坐下、起身 | 至少一次 |
+| `CONTRACT_PROPOSED` | IntentGate | `contract_id,version,goal,artifact,inputs_kind[],deliver_to_shown?,risk,highlighted_slots[],criteria[],budget` | 弹出《委托卷轴》 | 至少一次 |
+| `ASK_USER` | TaskEngine / Gate | `question,options[],missing[],deadline?` | 头顶感叹号 + 选项胶囊 | 至少一次 |
+| `TOOL_EXECUTION` | Worker 适配器 | `tool,status,steps_done?,steps_total?,detail?` | 屏幕闪烁 / 进度条 / 冒烟 | 至多一次（可丢） |
+| `VERIFICATION_REPORT` | Verifier | `passed,findings[],criteria[{id,kind,passed,evidence?}]` | 质检台绿章 / 红灯黑烟 | 至少一次 |
+| `DELIVERY_EFFECT` | 交付执行器 | `effect_id,type,target_class,status,idempotency_key` | 宝箱送出 / 入库 | 至少一次 |
+| `MEMORY_UPDATE` | MemoryService | `action,memory_ref,source,confidence,provenance` | 档案室书架增删 | 至少一次 |
+| `AGENT_PRESENCE` | 会话层 | `state` | 头顶麦克风 / 气泡 | 至多一次（可丢） |
+
+`AGENT_PRESENCE` 的 `state` 取值只有四个：`idle`、`listening`、`thinking`、`speaking`。
+它与既有 `turn_started` / `thinking` / `done` 语义对齐，不引入第二套词汇。
+它只表达**是否在出声**；不出声的时长由前端自己按音频包判断，不重复发状态。
+
+**投递保障为什么分两档**：标「至少一次」的丢了会让画面与真相不一致，必须断线补齐；
+标「至多一次」的少闪几下无所谓，慢消费者直接丢旧帧，不追补。
+
+### 25.3 前端 → 后端命令
+
+事件与命令成对：只发事件不接命令，前端按钮点了没反应。
+
+```ts
+type Command =
+  | { type: 'CONFIRM_CONTRACT'; task_id; contract_id; version;
+      confirmed_slots: string[]; request_id: string }
+  | { type: 'ANSWER'; task_id; answer: string; option_index?: number;
+      request_id: string }
+  | { type: 'CANCEL_TASK'; task_id; reason?: 'user_abort' | 'wrong_task';
+      request_id: string }
+  | { type: 'APPROVE_SIDE_EFFECT'; task_id; effect_id: string; request_id: string }
+  | { type: 'RETRY_STEP'; task_id; step_id: string; request_id: string }
+```
+
+五个命令的必填字段：
+
+| 命令 | 必填字段 |
+|---|---|
+| `CONFIRM_CONTRACT` | `task_id, contract_id, version, confirmed_slots, request_id` |
+| `ANSWER` | `task_id, answer, request_id` |
+| `CANCEL_TASK` | `task_id, request_id` |
+| `APPROVE_SIDE_EFFECT` | `task_id, effect_id, request_id` |
+| `RETRY_STEP` | `task_id, step_id, request_id` |
+
+`request_id` 是幂等键：同一命令重发（网络重试）不得产生第二次副作用。
+
+### 25.4 明确不加的三样东西
+
+| 不加 | 理由 |
+|---|---|
+| **`TASK_SNAPSHOT` 事件** | 首帧对齐用 REST 全量（见 25.5），再发一份快照就是造第二个真相源 |
+| **`progress`（0-100 百分比）** | 绝大多数工具给不出真实百分比，假进度条破坏「画面等于真实状态」。用 `steps_done` / `steps_total`，或 `indeterminate: true`（世界显示呼吸灯而不是进度条） |
+| **`VOICE_STATE`** | v0.1 旧名，已改名 `AGENT_PRESENCE`。世界前端不一定播语音，把它绑死在「语音状态」上会让视觉通道被迫造第二个事件 |
+
+这三条写在 `server/contract/events_v2.py` 的 `FORBIDDEN_EVENT_TYPES` /
+`FORBIDDEN_PAYLOAD_FIELDS` 里，有人加回来 `check_protocol.py` 会红。
+
+### 25.5 首帧对齐与断线补齐
+
+- **首帧**：客户端连上后先走 REST 全量拉当前状态（`GET /api/executive/commissions`
+  等既有接口），再消费 v2 事件做增量。**不存在快照事件。**
+- **断线补齐**：重连后带 `after_seq` 查询补发。`seq` 只保证连接内单调，
+  跨连接不保证连续——补齐的语义是「把 `after_seq` 之后产生的事件都给你」，
+  不是「一条不丢」。
+- **去重**：消费方按 `id` 去重（至少一次投递意味着可能重复）。
+
+### 25.6 旧客户端零改动
+
+规范 §4 的 13 态只存在于 TaskEngine 与 v2 事件中。没有 v2 事件时，前端退化为
+今天的 `commission_update` + REST 对账，行为与改造前一致。**v2 是加法，不是替换。**
+
+### 25.7 落地顺序（不可跳步）
+
+1. 协议评审（本节的确认）✅
+2. 加事件实现（后端发送点）
+3. **同时改本节与 `check_protocol.py` 的检查**（第 12 类）
+4. 再接前端
+
+第 3 步不可省：`check_protocol.py` 原有的第 4 类检查只拦「前端读了、后端没发」，
+反方向「后端发了、前端没接」只打印一行不报错。那个设计对既有事件是对的，
+但对 v2 不能这样——否则新协议永远没人接也能通过。所以 v2 的九类事件走
+**白名单强校验**：协议文档必须写全，`events_v2.py` 与本文档必须逐字一致。
+
+回归：`python scripts/check_protocol.py`（第 12 类）、
+`python scripts/test_events_v2.py`（常量自洽性与禁止项）。
