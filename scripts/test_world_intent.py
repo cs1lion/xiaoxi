@@ -44,20 +44,27 @@ def check(name: str, condition: bool, detail: str = "") -> None:
 
 
 class FakeLLM:
-    """假客户端：`offline` 与 `complete` 都可控。"""
+    """假客户端：`offline`、正文与 finish_reason 都可控。"""
 
-    def __init__(self, reply: str | Exception = '{"kind":"complete"}', offline: bool = False):
+    def __init__(
+        self,
+        reply: str | Exception = '{"kind":"complete"}',
+        offline: bool = False,
+        finish_reason: str = "stop",
+    ):
         self.reply = reply
         self.offline = offline
+        self.finish_reason = finish_reason
         self.calls: list[list[dict[str, str]]] = []
         self.kwargs: list[dict[str, Any]] = []
 
-    async def complete(self, messages, **kwargs):
+    async def complete_raw(self, messages, **kwargs):
         self.calls.append(messages)
         self.kwargs.append(kwargs)
         if isinstance(self.reply, Exception):
             raise self.reply
-        return self.reply
+        return {"text": self.reply, "finish_reason": self.finish_reason,
+                "usage": {}, "reasoning": ""}
 
 
 def client_for(fake: FakeLLM) -> TestClient:
@@ -137,6 +144,28 @@ def test_upstream_error() -> None:
     check("把原因带出来", "connect timeout" in response.json()["detail"])
 
 
+def test_truncated_output() -> None:
+    print("\n[输出被截断]")
+    # 实测踩过：max_tokens 太小时正文被截成 '{"kind":"dispatch'
+    fake = FakeLLM('{"kind":"dispatch', finish_reason="length")
+    client = client_for(fake)
+    response = client.post("/api/world/intent", json={"utterance": "帮我写个爬虫", "templates": []})
+    check("502", response.status_code == 502, str(response.status_code))
+    detail = response.json()["detail"]
+    check("说清是截断，不是\"没有返回 JSON\"", "截断" in detail, detail)
+    check("把 token 预算带出来，方便定位", "max_tokens" in detail, detail)
+
+
+def test_empty_output() -> None:
+    print("\n[模型没产出正文]")
+    # 实测踩过：推理模型把预算全花在思考上，正文为空。
+    fake = FakeLLM("", finish_reason="length")
+    client = client_for(fake)
+    response = client.post("/api/world/intent", json={"utterance": "帮我写个爬虫", "templates": []})
+    check("502", response.status_code == 502, str(response.status_code))
+    check("说清是没有正文", "没有产出正文" in response.json()["detail"])
+
+
 def test_prompt_carries_templates() -> None:
     print("\n[提示词由请求驱动]")
     prompt = build_prompt([TemplateIn(**t) for t in TEMPLATES])
@@ -167,6 +196,8 @@ def main() -> int:
     test_preamble_json()
     test_bad_json()
     test_upstream_error()
+    test_truncated_output()
+    test_empty_output()
     test_prompt_carries_templates()
     test_validation()
     print(f"\n=== {PASSED} passed, {FAILED} failed ===")

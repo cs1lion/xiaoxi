@@ -36,7 +36,13 @@ logger = logging.getLogger("aqi.world_intent")
 
 # 意图解析不该等太久：世界侧会显示"正在问模型"，超过这个时间就当没听懂。
 INTENT_TIMEOUT_SECONDS = 8.0
-INTENT_MAX_TOKENS = 200
+# 预算给足。实测 200 不够：StepFun 的推理模型会先思考再写正文，
+# 思考吃掉的预算无法从外部预估。一份意图 JSON 本身只有几十 token，
+# 多给的部分是留给思考的——被截断的代价是一次失败的往返，比多花几 token 贵得多。
+INTENT_MAX_TOKENS = 1024
+# 显式压低推理强度。意图解析是分类任务，不需要长思考链；
+# 留空表示不指定，由模型自己决定（不同网关对未知字段的容忍度不同）。
+INTENT_REASONING_EFFORT = "low"
 
 
 class TemplateIn(BaseModel):
@@ -116,8 +122,34 @@ def build_prompt(templates: list[TemplateIn]) -> str:
 2. **只输出 JSON。** 不要解释。
 3. **不要编造字段。** 每种命令能带的字段固定，多一个都会被世界拒掉。
 
+## 判断分寸：分不清细节 = 派活，不是 unknown
+
+「把那份季度报告弄一下」「帮我看看这块代码」这类话，**动作词模糊但意图明确**：
+用户是要派一件活给镇上的铺子。具体是写、是查、还是整理，**由世界自己按关键词归类**，
+不需要你判断。
+
+所以：**当一句话是"让某件东西被处理"时，答 dispatch，把用户原话放进 summary。**
+不要因为「弄」「看看」「处理一下」不够具体就答 unknown——那样用户会觉得你没听懂，
+而他明明说清了要处理什么。
+
+只有**完全没有要处理的对象**时才是 unknown：
+- 「今天好累啊」——没有对象
+- 「你觉得该怎么办」——在征求意见
+- 「外面在下雨吗」——在提问
+- 「这个 bug 怎么写都不对」——在抱怨，没有要求
+
+对照表：
+
+| 用户说 | 答 | 为什么 |
+|---|---|---|
+| 把那份季度报告弄一下 | dispatch（summary 用原话） | 有对象，要派活；具体类型世界自己归类 |
+| 帮我看看这块代码为啥跑不起来 | dispatch | 有对象（代码），要派活 |
+| 今天好累啊 | unknown | 没有对象 |
+| 你觉得该怎么办 | unknown | 征求意见 |
+
 例：「帮我写个爬虫」→ dispatch/code；「建个工坊」→ build；「外面在下雨吗」→ unknown（提问）；
-「这个 bug 怎么写都不对」→ unknown（抱怨）；「今天好累啊」→ unknown（闲聊）。"""
+「这个 bug 怎么写都不对」→ unknown（抱怨）；「今天好累啊」→ unknown（闲聊）；
+「把那份季度报告弄一下」→ dispatch（有对象，要派活）。"""
 
 
 def create_world_intent_router(llm: LLM | None = None) -> APIRouter:
@@ -143,21 +175,48 @@ def create_world_intent_router(llm: LLM | None = None) -> APIRouter:
             {"role": "user", "content": utterance},
         ]
         try:
-            text = await client.complete(
+            result = await client.complete_raw(
                 messages,
                 temperature=0.0,
                 max_tokens=INTENT_MAX_TOKENS,
                 json_mode=True,
+                reasoning_effort=INTENT_REASONING_EFFORT,
             )
         except Exception as error:  # noqa: BLE001 - 上游任何失败都等于"没听懂"
             logger.warning("intent model failed: %s", error)
             raise HTTPException(status_code=502, detail=f"意图模型调用失败：{error}") from error
 
+        text = result.get("text", "")
+        finish = result.get("finish_reason", "")
+
+        # 空输出与截断要分开报，否则线上看起来都是"模型没返回 JSON"，
+        # 分不清是预算太小还是模型真没话说。实测两种都出现过：
+        #   - StepFun 的推理模型会把预算全花在思考上，正文为空（finish=length）
+        #   - 预算刚好够思考、不够写正文时，正文被截成 '{"kind":"dispatch'
+        # 先判空再判截断：空正文比"被截断"更具体，也更能指向真正的病因——
+        # 推理模型可能思考完就没预算写正文了，这时报"截断"会误导排查方向。
+        if not text.strip():
+            raise HTTPException(
+                status_code=502,
+                detail=f"意图模型没有产出正文（finish_reason={finish or '未知'}）",
+            )
+        if finish == "length":
+            raise HTTPException(
+                status_code=502,
+                detail=(
+                    f"意图模型的输出被截断（max_tokens={INTENT_MAX_TOKENS}，"
+                    f"正文 {len(text)} 字符）。推理模型需要更大的预算。"
+                ),
+            )
+
         try:
             intent = _loose_load(text)
         except (json.JSONDecodeError, ValueError) as error:
             logger.warning("intent model returned non-JSON: %r", text[:200])
-            raise HTTPException(status_code=502, detail="意图模型没有返回 JSON") from error
+            raise HTTPException(
+                status_code=502,
+                detail=f"意图模型没有返回 JSON（正文 {len(text)} 字符）",
+            ) from error
 
         if not isinstance(intent, dict):
             raise HTTPException(status_code=502, detail="意图模型返回的不是 JSON 对象")
