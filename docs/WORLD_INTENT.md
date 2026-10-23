@@ -66,12 +66,28 @@ Content-Type: application/json
   "templates": [
     { "id": "workshop_plot", "displayName": "新工坊", "boundTask": null },
     { "id": "crawler_mine",  "displayName": "爬虫矿洞", "boundTask": "research" }
-  ]
+  ],
+  "context": {
+    "built": {
+      "town": [{ "templateId": "code_forge", "name": "炼码工坊" }],
+      "wild": [{ "templateId": "crawler_mine", "name": "爬虫矿洞" }]
+    },
+    "capacity": [{ "taskKind": "code", "count": 2 }],
+    "busy": [{ "name": "莞尔", "taskKind": "code" }],
+    "queued": 0,
+    "weather": "clear",
+    "exhausted": ["code_forge", "crawler_mine"]
+  }
 }
 ```
 
 `templates` 由前端从蓝图注册表现场取，**不是服务端硬编码**。
 世界的能力表只有一份（`prefabs.json`），服务端抄一份必然漂移。
+
+`context` 是**可选**的世界现状。旧客户端不发这个字段时服务端按「没有现状」
+处理（提示词里整段不出现），不是报错。它只描述现状、**不参与校验**：
+「已经有某栋楼」不代表模型该答 unknown，世界仍会在结算时给出准确拒绝。
+不含坐标、占地、任务 id——那些是可推断的细节，给了只会白烧 token。
 
 ### 3.2 响应
 
@@ -135,15 +151,17 @@ Content-Type: application/json
 | prompt | `pixel-world/test/intent-prompt.test.ts` | 8 条：模板表防漂移、纪律措辞 |
 | router | `pixel-world/test/intent-router.test.ts` | 12 条：规则优先、模型兜底、失败落 unknown |
 | 异步链路 | `pixel-world/test/intent-async.test.ts` | 9 条：快环不阻塞、结果回队、去重 |
-| 客户端 | `pixel-world/test/intent-client.test.ts` | 11 条：请求形状、信封、超时、状态码 |
-| 服务端 | `scripts/test_world_intent.py` | 23 条：503、抠 JSON、提示词驱动 |
+| 客户端 | `pixel-world/test/intent-client.test.ts` | 请求形状、信封、超时、状态码 |
+| 世界现状 | `pixel-world/test/intent-context.test.ts` | 摘要形状、不接管判定、省略时不出现 |
+| 服务端 | `scripts/test_world_intent.py` | 503、抠 JSON、提示词驱动、现状形状校验 |
 
 全部离线，不需要 API Key。
 
 ## 七、实测（真实模型）
 
-**语料**：`scripts/eval_world_intent_live.py`，24 条，分三组——
-对照组（规则也认得出）、同义改写（模型该接住）、负例（不该动世界）。
+**语料**：`scripts/eval_world_intent_live.py`，29 条，分四组——
+对照组（规则也认得出）、同义改写（模型该接住）、负例（不该动世界），
+以及组 D「带上世界现状之后的判断」（2026-10-23 新增）。
 
 **模型**：StepFun `step-3.7-flash`（token plan 通道），温度 0，`max_tokens` 1024，
 `reasoning_effort=low`。
@@ -153,9 +171,30 @@ Content-Type: application/json
 | A | 规则也认得出（对照） | **6/6** |
 | B | 同义改写（模型该接住） | **9/9** |
 | C | 不该动世界（负例） | **9/9** |
+| D | 带上世界现状之后（2026-10-23） | **5/5** |
 
-平均 3.3 秒一次。全部 17 条同义改写在模型侧都被正确归类，包括
+平均 3.2 秒一次。全部 17 条同义改写在模型侧都被正确归类，包括
 「那栋抄书斋拆了吧」（名词在前、动词在后）、「把天给我弄晴了」、「这单我验收了」。
+
+### 组 D 逼出来的两处提示词缺口（已修）
+
+接上世界现状之后，模型一度**开始拿现状当判据**：
+
+| 原话 | 接现状前 | 接现状后（首轮） | 修完 |
+|---|---|---|---|
+| 给我整个新铺子 | build | **unknown**（"没有指定铺子类型"） | build |
+| 再盖一间 | build | **unknown**（同上） | build |
+
+这不是模型变笨，是它读到了"已有一间工坊"，就开始替世界判可行性。
+修法是两段**明写规则**，不是调温度：
+
+1. 现状那一段后面接「看到现状之后怎么判断」：**现状不改变你输出的命令**，
+   已有建筑时仍然照常输出 build，让世界拒绝；只有用户在**打听**现状时才答 unknown。
+   口诀：看用户**要你做什么**，不看世界**现在是什么样**。
+2. 「分不清细节 = 派活」那条原本只管 dispatch，补上建造的同一情形：
+   「再盖一间」没说盖什么仍要答 build，挑模板是世界的判断。
+
+两段都在 `intent-prompt.ts` 与 `world_intent.py` 各写一份，测试盯着。
 
 负例组的关键区分（实测都答对）：
 
@@ -188,7 +227,24 @@ Content-Type: application/json
 - **两处提示词实现。** `intent-prompt.ts`（给测试与离线推演）与 `world_intent.py`
   的 `build_prompt`（线上）。两边都由模板表驱动，所以模板变了不会漏改；
   但**措辞改动要两边一起改**。彻底消除重复需要把提示词完全搬到服务端，
-  代价是前端无法离线推演——这一版选了重复。
+  代价是前端无法离线推演——这一版选了重复。世界现状那一段同理：
+  `intent-context.ts` 的 `renderIntentContext` 与 `world_intent.py` 的
+  `_context_section` 也是一处两写。
 - **不做重试。** 重试会让"没听懂"变成"过一会儿突然做了"，比直接失败更困惑。
-- **不带世界状态。** 模型只看到这句话与模板表，不知道镇上现在几栋楼、谁在忙。
-  「建个工坊」若已有工坊，由世界在结算时拒绝并说清，不靠模型判断。
+
+### 世界状态（2026-10-23 补上）
+
+原先写的是「不带世界状态」。现在带上了，但只带**摘要**：已有建筑的 id 与
+显示名、每类活的铺子数、谁在忙、排队数、天气、已建过的模板。
+
+三条边界没变：
+
+- **现状不接管判定。** 可行性仍由世界判（`checkPlacement` / `simulation.ts`
+  的 build 分支）。模型看到「已有工坊」也不会因此把「建个工坊」判成
+  unknown——提示词里明写了这条，测试盯着它。
+- **不含可推断细节。** 不发坐标、占地、任务 id。发一串建筑清单，模型除了
+  复述没有别的用途。
+- **省略时整段不出现。** 不写「世界状态未知」——那句会让模型以为该去猜。
+
+这样做省掉的是一次白跑的往返：「建个工坊」在已有工坊时，模型现在能说清
+「已经有了」，而不是等世界返回拒绝。

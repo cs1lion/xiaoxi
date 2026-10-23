@@ -19,6 +19,7 @@ import { routeIntent } from './intent-router.ts';
 import type { IntentModel } from './intent-router.ts';
 import type { ParsedIntent } from './intent-schema.ts';
 import { summarizeWorld } from './world-state.ts';
+import { summarizeForIntent } from './intent-context.ts';
 import { addTrail, visibleTrails, type TrailMap } from './trails.ts';
 import { carryKindFor } from './carry.ts';
 import { WILD_PREFABS } from './setup.ts';
@@ -685,6 +686,8 @@ export class Simulation {
         templates: this.blueprints ?? new Map(),
         worldSize: this.worldSize,
         model,
+        // 现取快照：这句话进队列时世界的样子。模型据此少犯「已有工坊还要建」这类错。
+        context: summarizeForIntent(this.snapshot()),
       });
       if (result.intent.kind === 'unknown') {
         const message = '没听懂这句，世界没有动。';

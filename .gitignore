@@ -66,3 +66,6 @@ agent-runtime/node_modules/
 
 # literal %SystemDrive% dirs written when a tool passes an unexpanded Windows env var as a path
 %SystemDrive%/
+
+# 意图 live 评测的报告产物（每次跑测重写，不是源码）
+scripts/.intent-live-report.txt

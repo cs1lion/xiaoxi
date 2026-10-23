@@ -12,6 +12,7 @@
 
 import type { IntentModel } from './intent-router.ts';
 import type { PrefabBlueprint } from './types.ts';
+import type { IntentContext } from './intent-context.ts';
 
 /** 超过这个时间就当没听懂。服务端自己有 8s，前端多给 2s 余量。 */
 export const INTENT_TIMEOUT_MS = 10_000;
@@ -33,18 +34,28 @@ export class IntentClientError extends Error {
  *
  * `templates` 在调用时从蓝图注册表取，不是构造时快照——这样世界里加了新模板，
  * 模型下一次问就知道了，不需要重建客户端。
+ *
+ * `context` 同理：每次调用现取世界现状（几栋楼、谁在忙），不是构造时快照。
+ * 省略时请求体里不带这个字段，服务端按「没有现状」处理——旧客户端不会因此报错。
  */
 export function createIntentClient(
   templates: () => ReadonlyMap<string, PrefabBlueprint>,
-  options: { readonly fetchImpl?: typeof fetch; readonly timeoutMs?: number } = {},
+  options: {
+    readonly fetchImpl?: typeof fetch;
+    readonly timeoutMs?: number;
+    readonly context?: () => IntentContext | undefined;
+  } = {},
 ): IntentModel {
   const fetchImpl = options.fetchImpl ?? ((...args: Parameters<typeof fetch>) => fetch(...args));
   const timeoutMs = options.timeoutMs ?? INTENT_TIMEOUT_MS;
+  const contextOf = options.context;
 
   return {
     async classify(utterance: string): Promise<unknown> {
       const controller = new AbortController();
       const timer = setTimeout(() => controller.abort(), timeoutMs);
+      // 每次调用现取：世界在两次问之间可能建了楼、有人开工了。
+      const context = contextOf?.();
       try {
         let response: Response;
         try {
@@ -58,6 +69,9 @@ export function createIntentClient(
                 displayName: template.displayName,
                 boundTask: template.boundTask,
               })),
+              // 没有现状时整个字段省略，不发 null：服务端把它当「没有」处理，
+              // 而 null 会让 pydantic 把可选字段判成显式的 null 再走一遍。
+              ...(context === undefined ? {} : { context }),
             }),
             signal: controller.signal,
           });

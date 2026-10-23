@@ -53,9 +53,47 @@ class TemplateIn(BaseModel):
     boundTask: str | None = None
 
 
+class BuiltEntryIn(BaseModel):
+    """一栋已有的建筑。只要 id 与显示名，不要坐标、不要占地。"""
+
+    templateId: str = Field(min_length=1)
+    name: str = Field(min_length=1)
+
+
+class BuiltIn(BaseModel):
+    town: list[BuiltEntryIn] = Field(default_factory=list)
+    wild: list[BuiltEntryIn] = Field(default_factory=list)
+
+
+class CapacityIn(BaseModel):
+    taskKind: str = Field(min_length=1)
+    count: int = Field(ge=0)
+
+
+class BusyIn(BaseModel):
+    name: str = Field(min_length=1)
+    taskKind: str = Field(min_length=1)
+
+
+class ContextIn(BaseModel):
+    """世界现状。**可选**：旧客户端不发这个字段，服务端按「没有现状」处理。
+
+    这里刻意不校验 taskKind 的取值域：那是世界的枚举，服务端抄一份必然漂移。
+    它只被拼进提示词，不参与任何判定——模型收到什么就描述什么。
+    """
+
+    built: BuiltIn = Field(default_factory=BuiltIn)
+    capacity: list[CapacityIn] = Field(default_factory=list)
+    busy: list[BusyIn] = Field(default_factory=list)
+    queued: int = Field(default=0, ge=0)
+    weather: str = "clear"
+    exhausted: list[str] = Field(default_factory=list)
+
+
 class IntentIn(BaseModel):
     utterance: str = Field(min_length=1)
     templates: list[TemplateIn] = Field(default_factory=list)
+    context: ContextIn | None = None
 
 
 class IntentOut(BaseModel):
@@ -71,8 +109,20 @@ TASK_HINTS = {
     "quick": "顺手的小事，不值得开一间铺子",
 }
 
+# 纸面说法。与 pixel-world 的 `TASK_PROFILES[kind].label` 同源，
+# 改一处要改两处——但它是给模型读的中文，不是枚举，抄一份比跨语言取更简单。
+TASK_LABEL = {
+    "code": "写代码",
+    "research": "查资料",
+    "writing": "整理便笺",
+    "quick": "顺手的活",
+}
 
-def build_prompt(templates: list[TemplateIn]) -> str:
+
+def build_prompt(
+    templates: list[TemplateIn],
+    context: ContextIn | None = None,
+) -> str:
     """拼系统提示词。
 
     与 pixel-world 的 `intent-prompt.ts` 是**同一份契约的两处实现**：
@@ -91,6 +141,8 @@ def build_prompt(templates: list[TemplateIn]) -> str:
         )
     else:
         template_lines = "  （这个世界现在没有可建的模板，不要输出 build）"
+
+    context_section = _context_section(context)
 
     return f"""你是像素世界里那个世界的**意图解析器**。用户对世界说一句话，你把它翻成一条命令。
 
@@ -114,7 +166,7 @@ def build_prompt(templates: list[TemplateIn]) -> str:
 ## 能建的模板
 
 {template_lines}
-
+{context_section}
 ## 三条纪律
 
 1. **听不出就答 unknown。** 闲聊、提问、感叹、抱怨——一律 unknown，并在 reason 里说清是什么。
@@ -131,6 +183,10 @@ def build_prompt(templates: list[TemplateIn]) -> str:
 所以：**当一句话是"让某件东西被处理"时，答 dispatch，把用户原话放进 summary。**
 不要因为「弄」「看看」「处理一下」不够具体就答 unknown——那样用户会觉得你没听懂，
 而他明明说清了要处理什么。
+
+**同一条也管建造。「再盖一间」「给我整个新铺子」没说盖什么，仍要答 build。**
+挑哪个模板是世界的判断（省略 `templateId` 之外的细节，由世界挑），不是你的。
+只有当用户要在**具体坐标**建某样东西时才需要 `at` 与确切的 `templateId`。
 
 只有**完全没有要处理的对象**时才是 unknown：
 - 「今天好累啊」——没有对象
@@ -152,6 +208,73 @@ def build_prompt(templates: list[TemplateIn]) -> str:
 「把那份季度报告弄一下」→ dispatch（有对象，要派活）。"""
 
 
+def _context_section(context: ContextIn | None) -> str:
+    """把世界现状渲染成提示词里的一段。
+
+    与 `intent-context.ts` 的 `renderIntentContext` 是同一份渲染的两处实现，
+    措辞改动要两边一起改。省略时不出现整段，而不是写「世界状态未知」——
+    一句"未知"会让模型以为它该去猜，而它猜不出来。
+    """
+    if context is None:
+        return ""
+
+    if not context.built.town and not context.built.wild:
+        lines = ["世界是空的，一栋楼都没有。"]
+    else:
+        lines = [
+            f"镇内已有：{_names(context.built.town)}",
+            f"郊野已有：{_names(context.built.wild)}",
+        ]
+
+    total = sum(entry.count for entry in context.capacity)
+    per_kind = " / ".join(
+        f"{TASK_LABEL.get(entry.taskKind, entry.taskKind)} {entry.count}"
+        for entry in context.capacity
+    )
+    lines.append(f"能接活的铺子 {total} 栋（{per_kind}）。" if per_kind else f"能接活的铺子 {total} 栋。")
+
+    if context.busy:
+        doing = "、".join(
+            f"{item.name}在做{TASK_LABEL.get(item.taskKind, item.taskKind)}"
+            for item in context.busy
+        )
+        lines.append(f"正在忙：{doing}。")
+    else:
+        lines.append("现在没人干活。")
+
+    if context.queued > 0:
+        lines.append(f"还有 {context.queued} 条神谕在排队。")
+    lines.append("外面在下雨。" if context.weather == "rain" else "天晴。")
+
+    if context.exhausted:
+        lines.append(f"这些模板已经建过，不能再建第二栋：{'、'.join(context.exhausted)}。")
+
+    return f"""
+## 世界现在长什么样
+
+{chr(10).join(lines)}
+
+## 看到现状之后怎么判断
+
+**现状不改变你输出的命令。** 它是背景，不是判据。
+
+- **已经有了某栋楼，仍然照常输出 build。** 「建个工坊」这句话的意思就是要建，
+  世界会拒绝并说明已经有了。你替世界提前判 unknown，用户会以为你没听懂。
+- **已经有活干着，仍然照常输出 dispatch。**
+- **看到「没人干活」不要自己补一句派活。** 用户没说要派，就不要派。
+- **只有用户在问现状时才答 unknown。** 「镇上现在有几栋楼」「已经有个工坊了吧」
+  是在打听，不是在要求改。这两者靠**有没有要求**区分，不靠**世界现在什么样**区分。
+
+判断口诀：看用户**要你做什么**，不看世界**现在是什么样**。
+"""
+
+
+def _names(entries: list[BuiltEntryIn]) -> str:
+    if not entries:
+        return "空着"
+    return "、".join(entry.name for entry in entries)
+
+
 def create_world_intent_router(llm: LLM | None = None) -> APIRouter:
     """构造路由。`llm` 可注入，方便测试不联网。"""
     router = APIRouter(prefix="/api/world", tags=["world"])
@@ -171,7 +294,7 @@ def create_world_intent_router(llm: LLM | None = None) -> APIRouter:
             raise HTTPException(status_code=422, detail="utterance 不能为空")
 
         messages = [
-            {"role": "system", "content": build_prompt(payload.templates)},
+            {"role": "system", "content": build_prompt(payload.templates, payload.context)},
             {"role": "user", "content": utterance},
         ]
         try:
