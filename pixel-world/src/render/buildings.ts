@@ -88,8 +88,9 @@ export function createBuilding(
   progress.setVisible(false);
 
   // 静态招牌：不再画中文，按接的活画一枚像素图标（D5-A）。
+  // 民居不挂牌：招牌是"这栋楼对外承接什么"的招牌，住家没有这回事。
   const sign = scene.add.graphics();
-  drawSignIcon(sign, building, w);
+  if (building.zone !== 'living') drawSignIcon(sign, building, w);
 
   container.add([g, chimney, windowG, progress, sign]);
 
@@ -280,6 +281,12 @@ function drawFacade(
     return;
   }
 
+  // 民居：窗台花箱 + 门边柴堆。没有"承接什么"的立面，只有过日子的痕迹。
+  if (building.zone === 'living') {
+    drawCottageFacade(g, w, h, roofH);
+    return;
+  }
+
   // workshop_plot：木料堆 + 滑轮，蓝顶由 prefab palette 提供。
   g.fillStyle(WORLD.timber, 1);
   g.fillRect(5, h - 12, 14, 3);
@@ -292,6 +299,61 @@ function drawFacade(
   g.fillRect(w - 16, roofH + 3, 5, 2);
   g.fillRect(w - 18, roofH + 13, 9, 1);
   void doorX;
+}
+
+/**
+ * 民居立面：柴堆、花箱、一口水缸。
+ *
+ * 三样东西都是"住着的证据"而不是"干活的证据"——这是民居和铺子在立面上
+ * 唯一需要拉开的地方。全部用现有 24 色，不扩色。
+ */
+function drawCottageFacade(
+  g: Phaser.GameObjects.Graphics,
+  w: number,
+  h: number,
+  roofH: number,
+): void {
+  // 门边柴堆：靠左墙码三根，截面朝外。
+  const sx = 3;
+  const sy = h - 13;
+  g.fillStyle(WORLD.ink, 1);
+  g.fillRect(sx - 1, sy - 1, 9, 11);
+  for (let row = 0; row < 3; row += 1) {
+    const y = sy + row * 3;
+    // 隔行往里缩一格：齐整的方垛读成货箱，错开才读成随手码的柴。
+    const inset = row % 2 === 0 ? 0 : 1;
+    g.fillStyle(WORLD.timber, 1);
+    g.fillRect(sx + inset, y, 7 - inset, 3);
+    g.fillStyle(WORLD.timberDark, 1);
+    g.fillRect(sx + inset, y, 1, 3);
+    g.fillStyle(WORLD.trim, 1);
+    g.fillRect(sx + inset + 1, y, 2, 1);
+  }
+
+  // 窗台花箱：从右墙往里量，避开窗户本体的位置。
+  const fx = w - 20;
+  const fy = roofH + 14;
+  g.fillStyle(WORLD.timberDark, 1);
+  g.fillRect(fx - 1, fy, 12, 3);
+  g.fillStyle(WORLD.ember, 1);
+  for (let i = 0; i < 4; i += 1) g.fillRect(fx + i * 3, fy - 1, 1, 1);
+  g.fillStyle(WORLD.moss, 1);
+  g.fillRect(fx + 1, fy - 1, 1, 1);
+  g.fillRect(fx + 7, fy - 1, 1, 1);
+
+  // 水缸：屋角一口矮缸，缸口压一条亮边。
+  if (w >= 4 * TILE_PX) {
+    const jx = w - 9;
+    const jy = h - 8;
+    g.fillStyle(WORLD.ink, 1);
+    g.fillRect(jx, jy, 6, 6);
+    g.fillStyle(WORLD.charcoal, 1);
+    g.fillRect(jx + 1, jy + 1, 4, 5);
+    g.fillStyle(WORLD.stone, 1);
+    g.fillRect(jx + 1, jy + 1, 4, 1);
+    g.fillStyle(WORLD.water, 1);
+    g.fillRect(jx + 2, jy + 2, 2, 1);
+  }
 }
 
 /** 屋顶：剪影 + 瓦垄 + 屋脊 + 苔。坐标全部取整，避免半像素。 */

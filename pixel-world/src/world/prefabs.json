@@ -229,5 +229,170 @@
       "trim": "pale",
       "window": "amber"
     }
+  },
+  "cottage_oak": {
+    "id": "cottage_oak",
+    "displayName": "橡木小屋",
+    "zone": "living",
+    "footprint": {
+      "w": 4,
+      "h": 3
+    },
+    "clearMargin": 1,
+    "door": {
+      "x": 1,
+      "y": 3
+    },
+    "workSpots": [
+      {
+        "x": 1,
+        "y": 1
+      }
+    ],
+    "chimney": {
+      "x": 3.2,
+      "y": 0.4
+    },
+    "accent": "smoke",
+    "silhouette": "gable",
+    "boundTask": null,
+    "palette": {
+      "body": "timber",
+      "roof": "terracotta",
+      "trim": "trim",
+      "window": "amber"
+    }
+  },
+  "cottage_plaster": {
+    "id": "cottage_plaster",
+    "displayName": "灰泥小屋",
+    "zone": "living",
+    "footprint": {
+      "w": 4,
+      "h": 3
+    },
+    "clearMargin": 1,
+    "door": {
+      "x": 2,
+      "y": 3
+    },
+    "workSpots": [
+      {
+        "x": 2,
+        "y": 1
+      }
+    ],
+    "chimney": {
+      "x": 0.4,
+      "y": 0.4
+    },
+    "accent": "smoke",
+    "silhouette": "flat",
+    "boundTask": null,
+    "palette": {
+      "body": "plaster",
+      "roof": "copper",
+      "trim": "pale",
+      "window": "warmLight"
+    }
+  },
+  "cottage_stone": {
+    "id": "cottage_stone",
+    "displayName": "石砌小屋",
+    "zone": "living",
+    "footprint": {
+      "w": 3,
+      "h": 3
+    },
+    "clearMargin": 1,
+    "door": {
+      "x": 1,
+      "y": 3
+    },
+    "workSpots": [
+      {
+        "x": 1,
+        "y": 1
+      }
+    ],
+    "chimney": {
+      "x": 2.2,
+      "y": 0.4
+    },
+    "accent": "smoke",
+    "silhouette": "tower",
+    "boundTask": null,
+    "palette": {
+      "body": "stone",
+      "roof": "timberDark",
+      "trim": "trim",
+      "window": "amber"
+    }
+  },
+  "homestead_far": {
+    "id": "homestead_far",
+    "displayName": "远郊农舍",
+    "zone": "living",
+    "footprint": {
+      "w": 4,
+      "h": 3
+    },
+    "clearMargin": 1,
+    "door": {
+      "x": 1,
+      "y": 3
+    },
+    "workSpots": [
+      {
+        "x": 1,
+        "y": 1
+      }
+    ],
+    "chimney": {
+      "x": 3.2,
+      "y": 0.4
+    },
+    "accent": "smoke",
+    "silhouette": "gable",
+    "boundTask": null,
+    "palette": {
+      "body": "timber",
+      "roof": "charcoal",
+      "trim": "trim",
+      "window": "amber"
+    }
+  },
+  "homestead_ridge": {
+    "id": "homestead_ridge",
+    "displayName": "山脊农舍",
+    "zone": "living",
+    "footprint": {
+      "w": 3,
+      "h": 3
+    },
+    "clearMargin": 1,
+    "door": {
+      "x": 1,
+      "y": 3
+    },
+    "workSpots": [
+      {
+        "x": 1,
+        "y": 1
+      }
+    ],
+    "chimney": {
+      "x": 2.2,
+      "y": 0.4
+    },
+    "accent": "smoke",
+    "silhouette": "flat",
+    "boundTask": null,
+    "palette": {
+      "body": "plaster",
+      "roof": "timberDark",
+      "trim": "pale",
+      "window": "warmLight"
+    }
   }
 }
