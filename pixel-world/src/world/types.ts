@@ -228,6 +228,12 @@ export interface VillagerDeliveries {
   readonly mock: number;
 }
 
+/**
+ * 从郊野带回来的东西。按活类型分：查资料带卷轴、写代码带石料、
+ * 整理文稿带纸。
+ */
+export type CarryKind = 'scroll' | 'stone' | 'paper';
+
 /** 累积式改变：交付多了，世界多一件东西。不可花掉、不贬值。 */
 export type PropKind = 'lamp' | 'tree' | 'banner';
 
@@ -267,6 +273,11 @@ export interface VillagerSnapshot {
   readonly routine: string | null;
   /** 下雨时渲染层给她打把伞；世界不判断"她淋不淋湿"。 */
   readonly umbrella: boolean;
+  /**
+   * 手上带着的东西。从郊野干完活回来时不为 null。
+   * 纯视觉：它不影响任务结算，只是"跑了一趟，带了东西回来"的读感。
+   */
+  readonly carrying: CarryKind | null;
 }
 
 /**

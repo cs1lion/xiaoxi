@@ -107,11 +107,64 @@ export function updateVillager(
     nowMs,
   );
   if (villager.umbrella) drawUmbrella(view.body, pose.offsetY);
+  if (villager.carrying !== null) drawCarried(view.body, villager.carrying, pose.offsetY);
 
   // 走路时整条阴影（椭圆 + 接触线）一起变淡：抬脚时接触减弱，落地时才压深。
   // 用容器级 alpha 而不是改每个 fillStyle，保证椭圆与接触线的相对深浅不变。
   const walking = villager.mode === 'toWork' || villager.mode === 'toAltar';
   view.shadow.setAlpha(walking ? 0.28 : 0.35);
+}
+
+/**
+ * 从郊野带回来的东西：抱在身前。
+ *
+ * 只画三种，对应三种活。位置在身前偏下——抱着的姿态，不是举着。
+ * 全用现有 24 色：卷轴 parchment 用 plaster、石料用 stone、纸用 pale。
+ */
+function drawCarried(
+  g: Phaser.GameObjects.Graphics,
+  kind: 'scroll' | 'stone' | 'paper',
+  offsetY: number,
+): void {
+  const y = offsetY;
+  // 尺寸都放大过一档：第一版 11×5 在 2 倍显示下只有 22×10 像素，
+  // 与围巾同色，贴着身子完全读不出来。现在 15×7 并加黑轮廓。
+  if (kind === 'scroll') {
+    // 卷轴：浅色横卷 + 两端暗轴头 + 中间一条暗纹（读成"卷起来的纸"）。
+    g.fillStyle(WORLD.ink, 1);
+    g.fillRect(-7, y + 12, 15, 7);
+    g.fillStyle(WORLD.plaster, 1);
+    g.fillRect(-6, y + 13, 13, 5);
+    g.fillStyle(WORLD.trim, 1);
+    g.fillRect(-6, y + 13, 13, 1);
+    g.fillStyle(WORLD.timberDark, 1);
+    g.fillRect(-7, y + 13, 2, 5);
+    g.fillRect(6, y + 13, 2, 5);
+    // 纸面暗纹：两条横线，读成"写过的纸"。
+    g.fillStyle(WORLD.charcoal, 1);
+    g.fillRect(-3, y + 15, 6, 1);
+    g.fillRect(-3, y + 16, 4, 1);
+  } else if (kind === 'stone') {
+    // 石料：带亮面的方石，轮廓更清楚。
+    g.fillStyle(WORLD.ink, 1);
+    g.fillRect(-6, y + 12, 13, 8);
+    g.fillStyle(WORLD.stone, 1);
+    g.fillRect(-5, y + 13, 11, 6);
+    g.fillStyle(WORLD.plaza, 1);
+    g.fillRect(-5, y + 13, 11, 2);
+    g.fillStyle(WORLD.charcoal, 1);
+    g.fillRect(-5, y + 18, 11, 1);
+  } else {
+    // 纸：一叠薄纸，边缘有齿。
+    g.fillStyle(WORLD.ink, 1);
+    g.fillRect(-7, y + 12, 15, 7);
+    g.fillStyle(WORLD.pale, 1);
+    g.fillRect(-6, y + 13, 13, 5);
+    g.fillStyle(WORLD.plaster, 1);
+    g.fillRect(-3, y + 13, 1, 5);
+    g.fillRect(1, y + 13, 1, 5);
+    g.fillRect(4, y + 13, 1, 5);
+  }
 }
 
 /** 伞只在下雨且她在户外时出现；世界给的事实，渲染层不自己判断天气。 */

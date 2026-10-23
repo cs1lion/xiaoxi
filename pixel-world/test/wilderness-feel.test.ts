@@ -133,3 +133,52 @@ test('镇内铺子没有常亮灯：灯的对比才是郊野的识别', () => {
     assert.equal(isWildLanternOn(building, snapshot), false, `${building.prefabId} 不该常亮`);
   }
 });
+
+// ------------------------------------------------------------------ 返程带东西
+
+test('从郊野干完活回来时，角色带着东西', () => {
+  const sim = makeSim();
+  sim.enqueue({ kind: 'dispatch', taskKind: 'research', summary: '查一下' });
+  sim.update(16);
+
+  let sawCarrying = false;
+  for (let i = 0; i < 600; i += 1) {
+    sim.update(100);
+    if (sim.snapshot().villagers.some((v) => v.carrying !== null)) {
+      sawCarrying = true;
+      break;
+    }
+  }
+  assert.ok(sawCarrying, '从郊野回来应当带着东西');
+});
+
+test('带的东西与活类型对应', () => {
+  const sim = makeSim();
+  sim.enqueue({ kind: 'dispatch', taskKind: 'research', summary: '查一下' });
+  sim.update(16);
+
+  for (let i = 0; i < 600; i += 1) {
+    sim.update(100);
+    const carrier = sim.snapshot().villagers.find((v) => v.carrying !== null);
+    if (carrier !== undefined) {
+      assert.equal(carrier.carrying, 'scroll', '查资料带回来的是卷轴');
+      return;
+    }
+  }
+  assert.fail('没找到带东西的角色');
+});
+
+test('镇内干活不背东西：只有去了远处才值得带回来', () => {
+  const sim = makeSim();
+  // 短活原地办，不进铺子。
+  sim.enqueue({ kind: 'dispatch', taskKind: 'quick', summary: '顺手看一眼' });
+  sim.update(16);
+
+  for (let i = 0; i < 100; i += 1) {
+    sim.update(100);
+    assert.ok(
+      sim.snapshot().villagers.every((v) => v.carrying === null),
+      '短活不该让人背东西',
+    );
+  }
+});

@@ -16,6 +16,7 @@ import { parseOracle } from './oracle.ts';
 import { parseOracleBuild, type BuildIntent } from './oracle-build.ts';
 import { summarizeWorld } from './world-state.ts';
 import { addTrail, visibleTrails, type TrailMap } from './trails.ts';
+import { carryKindFor } from './carry.ts';
 import { WILD_PREFABS } from './setup.ts';
 import {
   nextProp,
@@ -33,6 +34,7 @@ import {
 import type {
   CommandResult,
   ConstructionSnapshot,
+  CarryKind,
   Critter,
   Facing,
   GridPoint,
@@ -198,6 +200,8 @@ interface Villager {
   pendingRoute: GridPoint[];
   /** 这一趟要去哪栋楼。台账同步派活时同样走这条路。 */
   pendingBuilding: PlacedBuilding | null;
+  /** 手上带着的东西。郊野返程时非空。 */
+  carrying: CarryKind | null;
 }
 
 interface WorkstationState {
@@ -317,6 +321,7 @@ export class Simulation {
       inPlaceUntil: 0,
       pendingRoute: [],
       pendingBuilding: null,
+      carrying: null,
     }));
     for (const villager of this.villagers) this.pending.set(villager.id, []);
     for (const villager of this.villagers) {
@@ -1219,6 +1224,7 @@ export class Simulation {
       bubble: villager.bubble,
       routine: villager.routineLabel,
       umbrella: this.weather.kind === 'rain' && villager.mode !== 'working',
+      carrying: villager.carrying,
     };
   }
 
@@ -1249,7 +1255,11 @@ export class Simulation {
         return;
       case 'toAltar':
         this.walk(villager, deltaMs);
-        if (villager.path.length === 0) this.arriveAtAltar(villager);
+        if (villager.path.length === 0) {
+          // 到祭坛就把东西放下。
+          villager.carrying = null;
+          this.arriveAtAltar(villager);
+        }
         return;
       case 'bearingDecree':
         this.walk(villager, deltaMs);
@@ -1447,6 +1457,11 @@ export class Simulation {
     villager.mode = 'delivering';
     villager.visible = true;
     villager.facing = 'down';
+    // 郊野干完活：手上多个东西。它是"跑了一趟"的证据，不是奖励。
+    villager.carrying =
+      building !== undefined && WILD_PREFABS.has(building.prefabId)
+        ? carryKindFor(task.kind)
+        : null;
     villager.bubble = '任务交付！';
     villager.bubbleUntil = this.now + DELIVER_MS;
     villager.deliverUntil = this.now + DELIVER_MS;

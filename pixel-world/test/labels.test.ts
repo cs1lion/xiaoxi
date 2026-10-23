@@ -33,6 +33,7 @@ function villager(over: Partial<VillagerSnapshot> = {}): VillagerSnapshot {
     bubble: null,
     routine: null,
     umbrella: false,
+    carrying: null,
     ...over,
   };
 }
