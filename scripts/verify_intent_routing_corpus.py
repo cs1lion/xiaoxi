@@ -102,6 +102,28 @@ C_CHITCHAT = [
     "把第二段改自然一点", "语气轻松一点", "结尾改具体一点",
 ]
 
+# ---------- B' 第 9 步路由层期望：待实现清单，本文件不验 ----------
+# 为什么单列一组，而不是把上面 B 组的期望改成「应转 HIT」：
+#
+# B 组测的是 `delegation_intent(text)` —— orchestrator.py:79 的**正则函数**。
+# 第 9 步换的是 app.py:740 的**路由判断**，正则函数本身既不删也不会变聪明。
+# 把 B 组期望改成 HIT，等于要求一个没被改过的正则变聪明：那条测试永远红，
+# 而永远红的测试不叫「还没实现」，叫「写错了」。
+#
+# 真正的差分在第三层——`executive_route` 对同样这些句子不得再静默落普通对话。
+# 那一层现在**还不能断言**：它要求真实台账（pending_reports/open_commissions），
+# 且改造后入口会换成 IntentGate，接口还没设计。现在写死就是替未定的接线定接口。
+#
+# 所以这里只做一件事：把期望登记成可查的账，让「第 9 步验收时该转 HIT 的是
+# 哪些句子」不再散在文档里。B_ROUTING_TARGET 与 B_DELEGATION_MISS 必须一一对应，
+# 下面有一条断言锁住这件事（少登记一句就会红）。
+B_ROUTING_TARGET = {
+    "layer": "executive_route",          # 不是 delegation_intent
+    "after": "第 9 步 IntentGate 接线",
+    "expect": "hit",                     # 该层不得再落普通对话
+    "texts": list(B_DELEGATION_MISS),
+}
+
 # ---------- D 世界短语：显式点名才路由 ----------
 D_WORLD_POSITIVE = ["去像素世界里看看", "像素世界现在什么情况", "小镇里有人吗"]
 D_WORLD_NEGATIVE = ["世界杯开始了吗", "你的世界观是什么", "昨晚世界杯看了没"]
@@ -132,6 +154,21 @@ def main() -> int:
     # 缺口集也必须落普通对话——否则"未命中快环"却进了 AgentLoop，那是另一回事
     for text in B_DELEGATION_MISS + B_PROGRESS_MISS:
         check(f"gap 落普通对话 {text}", not should_route(text))
+
+    print("[B' 第 9 步路由层期望·只锁登记完整性]")
+    # 本组**不验行为**——路由层还没改，验了也是假的。只锁一件事：
+    # 登记清单与 B 组必须一一对应。少登记一句 → 第 9 步验收时会漏测一句。
+    # 这条断言的可回答性：删掉 B_ROUTING_TARGET 里任意一句，它就红。
+    check("路由层目标清单与 B 组句数一致",
+          len(B_ROUTING_TARGET["texts"]) == len(B_DELEGATION_MISS),
+          f'{len(B_ROUTING_TARGET["texts"])} vs {len(B_DELEGATION_MISS)}')
+    check("路由层目标清单逐句对应 B 组",
+          B_ROUTING_TARGET["texts"] == B_DELEGATION_MISS, "清单与 B 组不一致")
+    check("路由层目标不是 delegation_intent（层级不能混）",
+          B_ROUTING_TARGET["layer"] == "executive_route",
+          B_ROUTING_TARGET["layer"])
+    check("路由层期望是 hit 而非 miss",
+          B_ROUTING_TARGET["expect"] == "hit", B_ROUTING_TARGET["expect"])
 
     print("[C 闲聊·误报锁]")
     for text in C_CHITCHAT:
