@@ -16,6 +16,7 @@ import { WORLD } from '../world/palette-data.ts';
 import { propFootY } from './prop-depth.ts';
 import { PHASES, type PhaseId, type PhaseRecipe } from './day-phase.ts';
 import { isWildLanternOn } from '../world/wilderness-signal.ts';
+import { litWindowCount } from '../world/bustle.ts';
 
 const DIM_DEPTH = 8009;
 const GLOW_DEPTH = 8010;
@@ -137,13 +138,19 @@ export function createPhaseView(
       const h = building.footprint.h * TILE_PX;
       const roofH = Math.max(10, Math.round(h * 0.34));
 
-      // 亮窗：黄昏与夜按 litWindows 点亮。
+      // 亮窗：时辰给的 + 干活给的，取最大值。
+      // 正午本该安静，但工坊在运转，那扇窗就亮着——这是"镇子活着"的读感。
+      const working = snapshot.workstations.some(
+        (station) =>
+          station.buildingId === building.instanceId && station.activity.kind === 'operating',
+      );
+      const lit = litWindowCount(view, working);
       const windowXs = [px + 6, px + w - 18];
-      for (let i = 0; i < view.litWindows && i < windowXs.length; i += 1) {
+      for (let i = 0; i < lit && i < windowXs.length; i += 1) {
         addGlow(windowXs[i]! + 4, py + roofH + 11, 13, 9, 0.11);
       }
-      // 门口光池：黄昏与夜里才有屋里的光漏到门前。
-      if (view.litWindows > 0) {
+      // 门口光池：有窗亮着，就有屋里的光漏到门前。
+      if (lit > 0) {
         const dx = building.door.x * TILE_PX + 8;
         const dy = building.door.y * TILE_PX + 8;
         addGlow(dx, dy + 9, 18, 11, 0.1);
@@ -261,7 +268,13 @@ export function createPhaseView(
         snapshot.buildings
           .map(
             (b) =>
-              `${b.instanceId}:${b.origin.x},${b.origin.y},${b.footprint.w},${b.footprint.h},${b.door.x},${b.door.y}`,
+              `${b.instanceId}:${b.origin.x},${b.origin.y},${b.footprint.w},${b.footprint.h},${b.door.x},${b.door.y}:` +
+              // 干活状态进 key：开工/收工时窗灯要跟着变，否则不会重绘。
+              (snapshot.workstations.some(
+                (st) => st.buildingId === b.instanceId && st.activity.kind === 'operating',
+              )
+                ? 'w'
+                : 'i'),
           )
           .join('|') +
         '#' +
