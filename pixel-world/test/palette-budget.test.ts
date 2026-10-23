@@ -132,7 +132,7 @@ test('render/scenes 里不再有 canvas 颜色字面量（只许引用 WORLD）'
   }
 });
 
-test('4 套蓝图 × 4 槽全部指向 WORLD token', () => {
+test('全部蓝图 × 4 槽都指向 WORLD token', () => {
   const raw = prefabRaw() as Record<string, { palette: Record<string, unknown> }>;
   const names = new Set(Object.keys(WORLD));
   let slots = 0;
@@ -143,7 +143,10 @@ test('4 套蓝图 × 4 槽全部指向 WORLD token', () => {
       assert.ok(names.has(value as string), `${id}.palette.${slot}="${String(value)}" 不在 WORLD 里`);
     }
   }
-  assert.equal(slots, 16, `4 套 × 4 槽 = 16，实际 ${slots}`);
+  // 蓝图套数随世界扩张增加（镇内三 + 郊野三 + 扩建样板），断言从"写死 16"
+  // 改为"槽数必须是套数的 4 倍"，避免每加一栋楼就要改这个数字。
+  const expected = Object.keys(raw).length * 4;
+  assert.equal(slots, expected, `${Object.keys(raw).length} 套 × 4 槽 = ${expected}，实际 ${slots}`);
 });
 
 test('解析器兼容旧值：整数与 "#rrggbb" 都解析回同一个数', () => {

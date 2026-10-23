@@ -7,17 +7,26 @@
 import { WorldGrid, type GridSpec } from './grid.ts';
 import { validateCoverage } from './blueprints.ts';
 import { WORKSHOP_TASKS } from './tasks.ts';
-import type { GridPoint, PlacedBuilding, PrefabBlueprint } from './types.ts';
+import type { GridPoint, PlacedBuilding, PrefabBlueprint, ZoneId } from './types.ts';
+import { BIOME_RADII } from './biomes.ts';
 
 export const TILE_PX = 16;
-export const GRID_WIDTH = 30;
-export const GRID_HEIGHT = 20;
 export const BORDER = 1;
 
-/** 世界尺寸与分区。改这里等于改世界规格，测试会跟着报警。 */
-export const WORLD_SPEC: GridSpec = {
-  width: GRID_WIDTH,
-  height: GRID_HEIGHT,
+/**
+ * 图块尺寸不动，只扩大地图。
+ *
+ * 「把图块放大到 32px」与「扩大世界」互相抵消：同样一块屏幕，图块翻倍就只看得到
+ * 一半的地图内容，还得重画全部地形纹理。所以大世界靠更多格子，不靠更大的格子。
+ */
+
+/**
+ * 旧规格：30×20。**保留为测试夹具**——20 处既有单测依赖它，
+ * 换掉等于把已有验收数字全部作废。生产入口用 `LARGE_WORLD_SPEC`。
+ */
+export const SMALL_WORLD_SPEC: GridSpec = {
+  width: 30,
+  height: 20,
   border: BORDER,
   zones: [
     { id: 'industry', x: 1, y: 1, w: 12, h: 8 },
@@ -30,10 +39,68 @@ export const WORLD_SPEC: GridSpec = {
   ],
 };
 
+/** 兼容旧调用点与旧测试：默认规格仍是 30×20。 */
+export const WORLD_SPEC: GridSpec = SMALL_WORLD_SPEC;
+export const GRID_WIDTH = SMALL_WORLD_SPEC.width;
+export const GRID_HEIGHT = SMALL_WORLD_SPEC.height;
+
+/**
+ * 大世界：80×60 格，1280×960 像素，面积是旧世界的 8 倍。
+ *
+ * 分区是同心圆的近似：中心是祭坛，四角方向各留一条通向郊野的路。
+ * 这里只给矩形分区，群落（离中心多远）由 `biomes.ts` 单独判定——
+ * 两者职责不同：分区决定能建什么，群落决定看起来像哪一带。
+ */
+export const LARGE_WORLD_SPEC: GridSpec = {
+  width: 96,
+  height: 72,
+  border: BORDER,
+  zones: [
+    // 核心：祭坛 + 中心广场。
+    { id: 'altar', x: 45, y: 33, w: 6, h: 6 },
+    // 十字主干道：4 格宽，从镇中心一直铺到地图边缘。
+    { id: 'street', x: 46, y: 1, w: 4, h: 32 },
+    { id: 'street', x: 46, y: 39, w: 4, h: 32 },
+    { id: 'street', x: 1, y: 34, w: 45, h: 4 },
+    { id: 'street', x: 50, y: 34, w: 45, h: 4 },
+    // 工坊环：四块围着十字街排开，每块 10×10。
+    //
+    // 位置按**群落半径反推**：镇内四块全部落在 21 格内。
+    { id: 'industry', x: 35, y: 20, w: 10, h: 10 },
+    { id: 'scholarly', x: 51, y: 20, w: 10, h: 10 },
+    { id: 'agriculture', x: 35, y: 42, w: 10, h: 10 },
+    { id: 'living', x: 51, y: 42, w: 10, h: 10 },
+    // 郊野：四角，全部落在 21..37 格的环带里。
+    { id: 'industry', x: 18, y: 18, w: 9, h: 8 },
+    { id: 'scholarly', x: 69, y: 18, w: 9, h: 8 },
+    { id: 'agriculture', x: 18, y: 46, w: 9, h: 8 },
+    { id: 'living', x: 69, y: 46, w: 9, h: 8 },
+  ],
+};
+
+/** 大世界的祭坛：规格正中心。 */
+export const LARGE_ALTAR: GridPoint = { x: 48, y: 36 };
+
 export const ALTAR: GridPoint = { x: 15, y: 9 };
 
-/** 常驻铺子按活绑定，扩建样板不参与开局落位。 */
-const RESIDENT_PREFABS = new Set<string>(['code_forge', 'star_archive', 'ink_house']);
+/**
+ * 常驻铺子：镇内三栋（本地确定性工作）+ 郊野三栋（探索性工作）。
+ * 扩建样板 `workshop_plot` 不参与开局落位。
+ */
+const TOWN_PREFABS = new Set<string>(['code_forge', 'star_archive', 'ink_house']);
+
+/**
+ * 郊野铺子的 prefab id。**唯一来源**。
+ *
+ * `simulation.ts` 的派活规则也读它。早先那里另抄了一份，加第四栋郊野铺子时
+ * 只改一处就会让派活规则静默错位——那不是 bug，是随时会变成 bug 的形状。
+ */
+export const WILD_PREFABS: ReadonlySet<string> = new Set([
+  'crawler_mine',
+  'ink_mill',
+  'gear_tower',
+]);
+const RESIDENT_PREFABS = new Set<string>([...TOWN_PREFABS, ...WILD_PREFABS]);
 
 export class WorldSetupError extends Error {}
 
@@ -49,37 +116,248 @@ export interface SpawnResult {
   readonly road: readonly GridPoint[];
 }
 
+/** 某处为什么不能建。造物模式的幽灵预览要把原因说给玩家听。 */
+export type PlacementProblem =
+  | 'edge'
+  | 'outOfZone'
+  | 'occupied'
+  | 'margin'
+  | 'doorBlocked';
+
+export type PlacementCheck =
+  | { readonly ok: true }
+  | { readonly ok: false; readonly reason: PlacementProblem };
+
+/** 把拒绝理由翻译成玩家读得懂的一句话。 */
+export function hintFor(reason: PlacementProblem): string {
+  switch (reason) {
+    case 'edge':
+      return '太靠边了，楼会出界。';
+    case 'outOfZone':
+      return '这种铺子不能建在这个区。';
+    case 'occupied':
+      return '这里已经有东西了。';
+    case 'margin':
+      return '离别的建筑太近，得留出空地。';
+    case 'doorBlocked':
+      return '门口被堵住了，人走不进去。';
+  }
+}
+
+/**
+ * 能不能把这份蓝图落在 `origin`。
+ *
+ * 规则与 `findBestSlot` 内部逐条一致——幽灵预览与真实落位必须用同一套判定，
+ * 否则玩家会看到"显示可以、确认却被拒"。
+ *
+ * 先后顺序按"玩家最容易理解"排：先出界，再分区，再占地，再留白，最后门口。
+ */
+export function checkPlacement(
+  grid: WorldGrid,
+  blueprint: PrefabBlueprint,
+  origin: GridPoint,
+): PlacementCheck {
+  const { w, h } = blueprint.footprint;
+  const margin = blueprint.clearMargin;
+
+  // 出界：占地本身必须完整落在世界里。
+  if (
+    origin.x < 0 ||
+    origin.y < 0 ||
+    origin.x + w > grid.width ||
+    origin.y + h > grid.height
+  ) {
+    return { ok: false, reason: 'edge' };
+  }
+
+  // 分区：整块占地都必须在蓝图声明的分区里。
+  for (let y = origin.y; y < origin.y + h; y += 1) {
+    for (let x = origin.x; x < origin.x + w; x += 1) {
+      if (grid.zoneOf({ x, y }) !== blueprint.zone) {
+        return { ok: false, reason: 'outOfZone' };
+      }
+    }
+  }
+
+  // 占地被占：先单独判一次，好给出比"留白不足"更准确的原因。
+  for (let y = origin.y; y < origin.y + h; y += 1) {
+    for (let x = origin.x; x < origin.x + w; x += 1) {
+      if (!grid.isBuildable({ x, y })) return { ok: false, reason: 'occupied' };
+    }
+  }
+
+  // 留白：四周 margin 圈内也必须空着（含越界，边界外不可建）。
+  if (!grid.canPlace(origin, w, h, margin)) {
+    return { ok: false, reason: 'margin' };
+  }
+
+  // 门口：必须可建，否则人走不进去。
+  const door = { x: origin.x + blueprint.door.x, y: origin.y + blueprint.door.y };
+  if (!grid.isBuildable(door)) return { ok: false, reason: 'doorBlocked' };
+
+  return { ok: true };
+}
+
 /** 常驻铺子开局落位。扩建样板不在这里出现。 */
+/**
+ * 建一个世界。
+ *
+ * `spec` 与 `altar` 都省略时用旧规格 30×20——20 处既有测试依赖这个默认值，
+ * 不改它们。生产入口传 `LARGE_WORLD_SPEC` + `LARGE_ALTAR`（见 `buildLargeWorld`）。
+ */
 export function buildWorld(
   blueprints: ReadonlyMap<string, PrefabBlueprint>,
+  spec: GridSpec = SMALL_WORLD_SPEC,
+  altar: GridPoint = ALTAR,
 ): BuiltWorld {
   const coverage = validateCoverage(blueprints);
   if (coverage.length > 0) throw new WorldSetupError(coverage.join('；'));
 
-  const grid = new WorldGrid(WORLD_SPEC);
+  // 大世界才生成郊野林地：旧规格没有"郊野"，也不该突然长树。
+  const grid = new WorldGrid(
+    spec,
+    spec === LARGE_WORLD_SPEC ? { center: altar } : undefined,
+  );
   const buildings: PlacedBuilding[] = [];
 
+  // 小世界放不下六栋：郊野铺子只在大世界里落位。
+  // 小规格继续服务 20 处既有测试，行为与以前完全一致。
+  const wildAllowed = spec === LARGE_WORLD_SPEC;
   for (const blueprint of blueprints.values()) {
     if (!RESIDENT_PREFABS.has(blueprint.id)) continue;
-    const placed = placeBlueprint(grid, blueprint, `${blueprint.id}#1`, ALTAR);
+    if (WILD_PREFABS.has(blueprint.id) && !wildAllowed) continue;
+    // 郊野铺子锚到**分区里离祭坛最远的那个角**，镇内铺子锚到祭坛。
+    //
+    // 早先用 `altar.x ± 26` 猜一个方向，但 findBestSlot 只按距离挑最近的空位，
+    // 实际落点由分区决定——实测郊野铺子落在 14.6 / 17.5 / 21.1 格，
+    // 全都还在工坊环（20 格）里，与「郊野」这个标签对不上。
+    // 取分区最远角，才能让落位真的落到外圈。
+    const anchor = WILD_PREFABS.has(blueprint.id)
+      ? wildernessAnchorOf(spec, blueprint.zone, altar)
+      : altar;
+    // 落位必须与群落一致，否则「郊野」只是名义上的：
+    //   - 郊野铺子在郊野圈（craftRing 之外、wilderness 之内）
+    //   - 镇内铺子在工坊环内（否则镇内书斋会落到 23 格外的"郊野"）
+    const accept =
+      spec !== LARGE_WORLD_SPEC
+        ? undefined
+        : (origin: GridPoint): boolean => {
+            const d = Math.hypot(origin.x - altar.x, origin.y - altar.y);
+            return WILD_PREFABS.has(blueprint.id)
+              ? d > BIOME_RADII.craftRing && d <= BIOME_RADII.wilderness
+              : d <= BIOME_RADII.craftRing;
+          };
+    const placed = placeBlueprint(grid, blueprint, `${blueprint.id}#1`, anchor, undefined, undefined, accept);
     if (placed === null) {
       throw new WorldSetupError(`${blueprint.displayName} 在 ${blueprint.zone} 找不到合规空地`);
     }
     buildings.push(placed.building);
   }
 
-  assertWorldInvariants(grid, buildings);
-  return { grid, buildings, altar: ALTAR };
+  assertWorldInvariants(grid, buildings, altar);
+  return { grid, buildings, altar };
 }
 
-/** 造物主的一次落位：选址、占格、铺路。空间不足时返回 null，不改账本。 */
+/**
+ * 某个分区里落在**郊野圈**的那个锚点。
+ *
+ * 同一种分区（如 scholarly）同时供镇内书斋与郊野矿洞使用，差别只在
+ * 「落在这一区的哪一头」。但不能取最远角——实测那样会落到 frontier
+ * （34–37 格），那是未探索区，还被迷雾盖着。
+ *
+ * 取「离祭坛最近、但仍在郊野圈内」的那个点：既保证标签对得上，
+ * 又不至于远到不可达。
+ */
+function wildernessAnchorOf(spec: GridSpec, zone: ZoneId, altar: GridPoint): GridPoint {
+  const candidates: GridPoint[] = [];
+  for (const region of spec.zones) {
+    if (region.id !== zone) continue;
+    // 沿分区四边取样，找落进郊野圈的点。
+    for (let x = region.x; x < region.x + region.w; x += 1) {
+      for (const y of [region.y, region.y + region.h - 1]) candidates.push({ x, y });
+    }
+    for (let y = region.y; y < region.y + region.h; y += 1) {
+      for (const x of [region.x, region.x + region.w - 1]) candidates.push({ x, y });
+    }
+  }
+  if (candidates.length === 0) return altar;
+
+  const inWild = candidates.filter((p) => {
+    const d = Math.hypot(p.x - altar.x, p.y - altar.y);
+    return d > BIOME_RADII.craftRing && d <= BIOME_RADII.wilderness;
+  });
+  const pool = inWild.length > 0 ? inWild : candidates;
+  // 取池里离祭坛**最近**的：够远到进郊野圈，又不至于远得走不到。
+  return pool.reduce((best, p) =>
+    Math.hypot(p.x - altar.x, p.y - altar.y) <
+    Math.hypot(best.x - altar.x, best.y - altar.y)
+      ? p
+      : best,
+  );
+}
+
+/** 生产用的大世界：80×60，常驻铺子按郊野锚点重新落位。 */
+export function buildLargeWorld(
+  blueprints: ReadonlyMap<string, PrefabBlueprint>,
+): BuiltWorld {
+  return buildWorld(blueprints, LARGE_WORLD_SPEC, LARGE_ALTAR);
+}
+
+/**
+ * 把一份**已通过 schema 校验**的造物意图落进世界。
+ *
+ * 这是 schema 与世界的唯一接缝：意图里的 `templateId` 换成蓝图，
+ * `palette` 覆盖模板配色，位置交给 `placeBlueprint` 走同一套空间校验。
+ *
+ * 调它之前必须先 `parseCreationPlan`。这里不重复校验形状——
+ * 两道校验分开，是因为它们回答的问题不同：形状 vs 空间。
+ */
+export function placeFromPlan(
+  world: BuiltWorld,
+  plan: {
+    readonly templateId: string;
+    readonly at: GridPoint;
+    readonly palette: PrefabBlueprint['palette'];
+  },
+  instanceId: string,
+  blueprints: ReadonlyMap<string, PrefabBlueprint>,
+): SpawnResult | null {
+  const template = blueprints.get(plan.templateId);
+  if (template === undefined) return null;
+
+  // 意图里的配色覆盖模板：模板只提供形状，颜色由造物主决定。
+  return placeBlueprint(
+    world.grid,
+    { ...template, palette: plan.palette },
+    instanceId,
+    world.altar,
+    plan.at,
+  );
+}
+
+/**
+ * 造物主的一次落位：选址、占格、铺路。空间不足时返回 null，不改账本。
+ *
+ * `at` 省略时走 `findBestSlot`（自动选最靠近锚点的合规空地）；
+ * 给了 `at` 就是玩家指定的位置，先过 `checkPlacement`，不合法直接返回 null。
+ * 两条路径最终都经过同一套判定。
+ */
 export function placeBlueprint(
   grid: WorldGrid,
   blueprint: PrefabBlueprint,
   instanceId: string,
   anchor: GridPoint,
+  at?: GridPoint,
+  source?: { readonly taskId: string; readonly summary: string },
+  accept?: (origin: GridPoint) => boolean,
 ): SpawnResult | null {
-  const origin = grid.findBestSlot(blueprint, anchor);
+  let origin: GridPoint | null;
+  if (at === undefined) {
+    origin = grid.findBestSlot(blueprint, anchor, accept);
+  } else {
+    const check = checkPlacement(grid, blueprint, at);
+    origin = check.ok ? at : null;
+  }
   if (origin === null) return null;
 
   const door = { x: origin.x + blueprint.door.x, y: origin.y + blueprint.door.y };
@@ -107,6 +385,8 @@ export function placeBlueprint(
     silhouette: blueprint.silhouette,
     boundTask: blueprint.boundTask,
     palette: blueprint.palette,
+    sourceTaskId: source?.taskId ?? null,
+    sourceSummary: source?.summary ?? null,
   };
 
   const road = paveFrom(grid, door, anchor);
@@ -130,8 +410,11 @@ export function paveFrom(
 }
 
 /** 读档重建网格：只按存档 buildings 顺序重放落位，不存 cells（ADR_SAVE §1.2）。 */
-export function rebuildGridFromPlacements(buildings: readonly PlacedBuilding[]): WorldGrid {
-  const grid = new WorldGrid(WORLD_SPEC);
+export function rebuildGridFromPlacements(
+  buildings: readonly PlacedBuilding[],
+  spec: GridSpec = SMALL_WORLD_SPEC,
+): WorldGrid {
+  const grid = new WorldGrid(spec);
   for (const building of buildings) {
     const placed = grid.place({
       instanceId: building.instanceId,
@@ -167,11 +450,13 @@ function indexBlueprints(blueprints: BlueprintSource): Map<string, PrefabBluepri
 export function buildWorldFromSave(
   buildings: readonly PlacedBuilding[],
   blueprints?: BlueprintSource,
+  spec: GridSpec = SMALL_WORLD_SPEC,
+  altar: GridPoint = ALTAR,
 ): BuiltWorld {
   const resolved = blueprints === undefined ? [...buildings] : rehydratePalettes(buildings, blueprints);
-  const grid = rebuildGridFromPlacements(resolved);
-  assertWorldInvariants(grid, resolved);
-  return { grid, buildings: resolved, altar: ALTAR };
+  const grid = rebuildGridFromPlacements(resolved, spec);
+  assertWorldInvariants(grid, resolved, altar);
+  return { grid, buildings: resolved, altar };
 }
 
 /** 按当前 prefab 表重解每栋楼的 palette；prefab 缺失时保留存档值并告警。 */
@@ -200,14 +485,31 @@ export function rehydratePalettes(
 export function assertWorldInvariants(
   grid: WorldGrid,
   buildings: readonly PlacedBuilding[],
+  altar: GridPoint = ALTAR,
 ): void {
   const problems: string[] = [];
   const workshops = buildings.filter((item) => item.boundTask !== null);
-  if (workshops.length !== WORKSHOP_TASKS.length) {
-    problems.push(`接活的铺子 ${workshops.length} 栋，预算为 ${WORKSHOP_TASKS.length}`);
+  // 每种活 1–2 栋：镇内 + 郊野。总预算随世界规格变化，不再写死。
+  const byKind = new Map<string, number>();
+  for (const building of workshops) {
+    if (building.boundTask === null) continue;
+    byKind.set(building.boundTask, (byKind.get(building.boundTask) ?? 0) + 1);
   }
-  const zones = new Set(workshops.map((item) => item.zone));
-  if (zones.size !== workshops.length) problems.push('两栋铺子挤在同一个分区');
+  for (const kind of WORKSHOP_TASKS) {
+    const count = byKind.get(kind) ?? 0;
+    if (count < 1 || count > 2) {
+      problems.push(`承接 ${kind} 的铺子 ${count} 栋，必须是 1 或 2 栋`);
+    }
+  }
+  // 同分区的两栋必须是「一栋镇内、一栋郊野」：同类铺子挨着会互相抢活，
+  // 而镇内与郊野本就该分开。
+  const zones = new Map<string, number>();
+  for (const building of workshops) {
+    zones.set(building.zone, (zones.get(building.zone) ?? 0) + 1);
+  }
+  for (const [zone, count] of zones) {
+    if (count > 2) problems.push(`分区 ${zone} 里有 ${count} 栋铺子，最多 2 栋`);
+  }
 
   for (const building of buildings) {
     if (grid.zoneOf(building.door) === 'altar') {
@@ -216,7 +518,7 @@ export function assertWorldInvariants(
     if (!grid.isWalkable(building.door)) {
       problems.push(`${building.displayName} 的门口不可通行`);
     }
-    const reachable = grid.path(ALTAR, building.door);
+    const reachable = grid.path(altar, building.door);
     if (reachable.length === 0) {
       problems.push(`${building.displayName} 与祭坛之间没有通路`);
     }

@@ -5,27 +5,41 @@
 
 import Phaser from 'phaser';
 import { TILE_PX } from '../world/setup.ts';
-import { Simulation, type NewBuilding, type WorldCommand } from '../world/simulation.ts';
-import type { CommandResult, WorldSnapshot } from '../world/types.ts';
+import { Simulation, type MiracleKind, type NewBuilding } from '../world/simulation.ts';
+import type { CommandResult, GridPoint, OracleRecord, PrefabBlueprint, WorldSnapshot } from '../world/types.ts';
 import { excerptBlockedQuestion } from '../world/types.ts';
-import { parseOracle } from '../world/oracle.ts';
 import { placeBlueprint, type BuiltWorld } from '../world/setup.ts';
-import type { PrefabBlueprint } from '../world/types.ts';
-import { WORLD } from '../world/palette-data.ts';
+import { WORLD, tokenNameOf } from '../world/palette-data.ts';
 import { drawTerrain } from '../render/tilemap.ts';
 import { createBuilding, updateBuilding, type BuildingView } from '../render/buildings.ts';
 import { createVillager, updateVillager, type VillagerView } from '../render/villager.ts';
 import { createWorldOverlay, type WorldOverlay } from '../render/world-overlay.ts';
 import { createAccentEmitter, ensureAccentTextures, type AccentEmitter } from '../render/smoke.ts';
 import { createWeatherView, type WeatherView } from '../render/weather.ts';
-import { createNightView, type NightView } from '../render/night.ts';
+import { createPhaseView, type PhaseView } from '../render/phase-view.ts';
+import { createGhostView, type GhostView } from '../render/ghost.ts';
+import { createCameraController, type CameraController } from '../render/camera-controller.ts';
+import { createMinimapView, type MinimapView } from '../render/minimap.ts';
+import { createFogView, type FogView } from '../render/fog-view.ts';
+import { bakeLayer, type BakedLayer } from '../render/bake.ts';
+import { shouldAnimateAt, targetFpsFor } from '../render/eco-mode.ts';
+import { fogAt } from '../world/fog.ts';
+import { awaitingDecree } from '../world/decree.ts';
+import { describeWorldState, summarizeWorld } from '../world/world-state.ts';
+import { BIOME_RADII } from '../world/biomes.ts';
+import { WILD_PREFABS } from '../world/setup.ts';
+import { parseCreationPlan } from '../world/creator-schema.ts';
+import { checkPlacement, hintFor } from '../world/setup.ts';
+import { parsePhaseParam, phaseAt, type PhaseId } from '../render/day-phase.ts';
 import { createDecorView, type DecorView } from '../render/decor.ts';
 import { composeReport, type DailyReport } from '../world/report.ts';
+import { describePropSource } from '../world/faith.ts';
 import { createLazyAnimalese, type Animalese } from '../audio/animalese.ts';
 import { toWorldCommand, type AgentToWorld } from '../world/bridge.ts';
 import { LedgerClient } from '../world/ledger.ts';
+import { createIntentClient } from '../world/intent-client.ts';
 import { SaveStore } from '../ui/save-store.ts';
-import type { WorldSaveV1 } from '../world/save.ts';
+import type { WorldSave } from '../world/save.ts';
 import { CURRENT_SCHEMA_VERSION } from '../world/save.ts';
 
 export interface ScenePayload {
@@ -33,7 +47,7 @@ export interface ScenePayload {
   readonly blueprints: ReadonlyMap<string, PrefabBlueprint>;
   readonly villagerName: string;
   readonly saveStore?: SaveStore;
-  readonly save?: WorldSaveV1 | null;
+  readonly save?: WorldSave | null;
   readonly saveNotice?: string | null;
 }
 
@@ -55,8 +69,11 @@ export class SandboxScene extends Phaser.Scene {
   private readonly villagerViews = new Map<string, VillagerView>();
   private overlay: WorldOverlay | null = null;
   private weatherView!: WeatherView;
-  private nightView!: NightView;
+  private phaseView!: PhaseView;
   private nightKeyListener: ((event: KeyboardEvent) => void) | null = null;
+  private creationKeyListener: ((event: KeyboardEvent) => void) | null = null;
+  /** 真实时间推进用的定时器；?time= 固定某刻时不启动。 */
+  private phaseTimer: number | null = null;
   private decor!: DecorView;
   private entries: BuildingEntry[] = [];
   private accumulator = 0;
@@ -64,12 +81,32 @@ export class SandboxScene extends Phaser.Scene {
   private villagerName = '莞尔';
   private lastStatus = '';
   private lastRoadCount = -1;
+  /** 造物模式会话。null 表示不在造物模式里。 */
+  private creation: { readonly prefabId: string; ghostAt: GridPoint | null } | null = null;
+  private ghost!: GhostView;
+  private cameraCtl!: CameraController;
+  private minimap: MinimapView | null = null;
+  private fogView!: FogView;
+  private focusListener: (() => void) | null = null;
+  /** 诊断用：场景 update 被调用过多少次。降频是否生效看它。 */
+  private updateCount = 0;
+  /** 真正推进了世界的帧数。降频是否生效看它。 */
+  private advanceCount = 0;
+  /** 省电模式：窗口不在前台时为 true，渲染与逻辑都按 `minFrameIntervalMs` 跳帧。 */
+  private backgroundMode = false;
+  /** 两帧之间的最小间隔（毫秒）。前台为 1000/60，后台为 1000/12。 */
+  private minFrameIntervalMs = 1000 / 60;
+  /** 上次真正推进世界的时刻（Phaser 的 time 参数）。 */
+  private lastAdvanceAt = 0;
+  private terrainLayer!: BakedLayer;
+  /** 拖拽平移的起点（屏幕坐标）；null 表示没在拖。 */
+  private dragFrom: { x: number; y: number } | null = null;
   private lastConstructionKey = '';
   private readonly lastBubbles = new Map<string, string | null>();
   private readonly animalese: Animalese = createLazyAnimalese();
   private ledger: LedgerClient | null = null;
   private saveStore!: SaveStore;
-  private loadedSave: WorldSaveV1 | null = null;
+  private loadedSave: WorldSave | null = null;
   private saveNotice: string | null = null;
   private lastSaveKey = '';
   private lastSaveAt = Number.NEGATIVE_INFINITY;
@@ -107,7 +144,16 @@ export class SandboxScene extends Phaser.Scene {
     const originY = 0;
     this.cameras.main.setBackgroundColor(WORLD.ink);
 
-    drawTerrain(this, this.world.grid, originX, originY);
+    // 地形烘焙成一张纹理：它每帧要 51 万条绘制指令，而可见区域只占世界 12.5%。
+    // 只在开局画一次，之后每帧只贴一个 quad。
+    this.terrainLayer = bakeLayer(
+      this,
+      'world-terrain',
+      this.world.grid.width * TILE_PX,
+      this.world.grid.height * TILE_PX,
+      -10,
+      (g) => drawTerrain(this, this.world.grid, originX, originY, g),
+    );
     ensureAccentTextures(this);
     this.decor = createDecorView(this, originX, originY);
     this.decor.redrawRoads([]);
@@ -117,9 +163,84 @@ export class SandboxScene extends Phaser.Scene {
       view: createBuilding(this, building, originX, originY),
       emitter: createAccentEmitter(this, building.accent),
     }));
-    this.weatherView = createWeatherView(this);
-    this.nightView = createNightView(this);
-    this.nightView.setEnabled(new URLSearchParams(window.location.search).get('night') === '1');
+    // 覆盖层按**世界**尺寸建，不是画布尺寸：大世界里镜头只是世界的一小块。
+    const worldPx = {
+      w: this.world.grid.width * TILE_PX,
+      h: this.world.grid.height * TILE_PX,
+    };
+    this.weatherView = createWeatherView(this, worldPx.w, worldPx.h);
+    this.phaseView = createPhaseView(this, worldPx.w, worldPx.h);
+    this.ghost = createGhostView(this);
+    this.fogView = createFogView(this, this.world.grid.width, this.world.grid.height);
+
+    // 相机：锁在世界边界内，初始对准祭坛。
+    this.cameraCtl = createCameraController(this, worldPx.w, worldPx.h);
+    // 开局对准祭坛。放在下一帧做：Phaser 在 create() 结束后的首次 preRender
+    // 会用 setBounds 重新夹取镜头，那时 camera.width 才是最终值；
+    // 在 create() 里直接 centerOn 会被这次夹取推回左上角。
+    const focusX = this.world.altar.x * TILE_PX;
+    const focusY = this.world.altar.y * TILE_PX;
+    this.time.delayedCall(0, () => this.cameraCtl.panTo(focusX, focusY, 0));
+    // 自动导播：闲置 15 秒后接管，有活看正在忙的人，没活看祭坛。
+    // 这里只是**登记**目标列表，真正进入导播要等闲置计时到点——
+    // 用户一拖一缩就退出，不会跟人抢镜头。
+    this.cameraCtl.enableDirector(() => this.directorTargets());
+
+    const minimapHost = document.querySelector<HTMLDivElement>('#minimap');
+    if (minimapHost !== null) {
+      this.minimap = createMinimapView(minimapHost, worldPx.w, worldPx.h);
+      this.minimap.paintTerrain(this.world.grid);
+      minimapHost.addEventListener('pointerdown', (event: PointerEvent) => {
+        const point = this.minimap?.toWorld(event.clientX, event.clientY);
+        if (point === null || point === undefined) return;
+        this.cameraCtl.panTo(point.x, point.y, 300);
+      });
+    }
+
+    // 拖拽平移与滚轮缩放。造物模式优先：那时拖拽不移动镜头。
+    this.input.on('pointerdown', (pointer: Phaser.Input.Pointer) => {
+      if (this.creation !== null) return;
+      this.dragFrom = { x: pointer.x, y: pointer.y };
+    });
+    this.input.on('pointerup', () => {
+      this.dragFrom = null;
+    });
+    this.input.on('pointermove', (pointer: Phaser.Input.Pointer) => {
+      if (this.creation !== null || this.dragFrom === null) return;
+      if (!pointer.isDown) {
+        this.dragFrom = null;
+        return;
+      }
+      const dx = pointer.x - this.dragFrom.x;
+      const dy = pointer.y - this.dragFrom.y;
+      this.dragFrom = { x: pointer.x, y: pointer.y };
+      this.cameraCtl.panBy(dx, dy);
+    });
+    this.input.on('wheel', (_p: unknown, _o: unknown, _dx: number, dy: number) => {
+      if (this.creation !== null) return;
+      this.cameraCtl.zoomStep(dy > 0 ? -1 : 1);
+    });
+    // 时相来源：?time= 显式指定（截图与调试用）> ?night=1（旧入口，等价于夜）> 真实本地时间。
+    const params = new URLSearchParams(window.location.search);
+    const forced = parsePhaseParam(params.get('time'));
+    const legacyNight = params.get('night') === '1';
+    const initialPhase: PhaseId = forced ?? (legacyNight ? 'night' : phaseAt(Date.now()));
+    this.phaseView.setPhase(initialPhase);
+    if (forced !== null || legacyNight) {
+      this.phaseView.setAutoAdvance(false);
+    }
+
+    // 定时器**无条件创建**，由 `isAutoAdvancing()` 决定要不要真的切换。
+    //
+    // 早先只在「没有 ?time=」时创建它，于是从 ?time= 进入后再调 setAutoPhase，
+    // 标志变 true 却没有定时器在跑——「交还给真实时间」是个空承诺。
+    // 15 秒对一次表，不是 60 秒：相位边界是整点，60 秒的粒度意味着最多晚
+    // 一分钟才切，而切换本身只有 900ms 渐变——用户会在 17:00 后还看着正午。
+    // 15 秒的代价可以忽略（一次 Date.now 与一次比较）。
+    this.phaseTimer = window.setInterval(() => {
+      if (!this.phaseView.isAutoAdvancing()) return;
+      this.phaseView.setPhase(phaseAt(Date.now()));
+    }, 15_000);
     this.nightKeyListener = (event: KeyboardEvent): void => {
       if (event.key.toLowerCase() !== 'n') return;
       const target = event.target as HTMLElement | null;
@@ -132,9 +253,57 @@ export class SandboxScene extends Phaser.Scene {
       ) {
         return;
       }
-      this.nightView.toggle();
+      // N 键在黄昏/夜之间切换，保留旧的「按 N 看夜景」习惯。
+      this.phaseView.setPhase(
+        this.phaseView.currentPhase() === 'night' ? 'dusk' : 'night',
+      );
+      this.phaseView.setAutoAdvance(false);
     };
     window.addEventListener('keydown', this.nightKeyListener);
+
+    // 造物模式的指针与键盘。指针只在造物模式里有用，所以这里不注册常驻
+    // 监听器，而是在 beginCreation 里挂、endCreation 里摘——避免平时每帧
+    // 做一次无意义的坐标换算。
+    this.input.on('pointermove', (pointer: Phaser.Input.Pointer) => {
+      if (this.creation === null) return;
+      // 用 worldX/worldY 而不是 positionToCamera：造物模式暂停了 update，
+      // 相机矩阵可能停在上一帧，换算出来的世界坐标会偏。worldX 是事件派发时
+      // 由输入插件按当前相机算好的。
+      this.hoverCell({
+        x: Math.floor(pointer.worldX / TILE_PX),
+        y: Math.floor(pointer.worldY / TILE_PX),
+      });
+    });
+    // 用 DOM 层的 keydown 而不是 Phaser 的键盘插件：Phaser 只在自己获得焦点时
+    // 派发按键，而页面里输入框、按钮都可能抢焦点，造物模式会因此"回车没反应"。
+    // 这里与 N 键用同一套判定：输入框里打字不算。
+    this.creationKeyListener = (event: KeyboardEvent): void => {
+      if (this.creation === null) return;
+      const target = event.target as HTMLElement | null;
+      if (
+        target !== null &&
+        (target.tagName === 'INPUT' ||
+          target.tagName === 'TEXTAREA' ||
+          target.tagName === 'SELECT' ||
+          target.isContentEditable)
+      ) {
+        return;
+      }
+      if (event.key === 'Enter') {
+        // 焦点常在按钮上（刚点完「造物模式」）。此时浏览器的默认行为是
+        // 再点一次那个按钮，于是模式刚确认又重新打开。必须在这里拦掉：
+        // 造物模式下回车只表示「就建在这里」。
+        event.preventDefault();
+        (target as HTMLElement | null)?.blur?.();
+        const result = this.confirmCreation();
+        if (!result.ok) this.publishCreationHint(result.message);
+      } else if (event.key === 'Escape') {
+        event.preventDefault();
+        this.cancelCreation();
+      }
+    };
+    // 捕获阶段先拦：按钮的默认点击发生在冒泡之后，冒泡阶段拦住也晚了。
+    window.addEventListener('keydown', this.creationKeyListener, true);
 
     this.drawAltar(originX, originY);
 
@@ -143,10 +312,27 @@ export class SandboxScene extends Phaser.Scene {
       buildings: this.world.buildings,
       altar: this.world.altar,
       villagerName: this.villagerName,
-      spawnBuilding: (prefabId: string, instanceId: string): NewBuilding | null => {
+      // 造物神谕（「建一间书阁」）要靠它把词换成模板。
+      blueprints: this.blueprints,
+      // 规则认不出的话才问模型。没有 Key 时它会 503，世界照样离线可用。
+      intentModel: createIntentClient(() => this.blueprints),
+      worldSize: { width: this.world.grid.width, height: this.world.grid.height },
+      spawnBuilding: (
+        prefabId: string,
+        instanceId: string,
+        at?: GridPoint,
+        source?: { readonly taskId: string; readonly summary: string },
+      ): NewBuilding | null => {
         const blueprint = this.blueprints.get(prefabId);
         if (blueprint === undefined) return null;
-        return placeBlueprint(this.world.grid, blueprint, instanceId, this.world.altar);
+        return placeBlueprint(
+          this.world.grid,
+          blueprint,
+          instanceId,
+          this.world.altar,
+          at,
+          source,
+        );
       },
     };
     // 有档就重建世界；读档后台账标未对账，等首个 sync 走 reconcile。
@@ -158,6 +344,26 @@ export class SandboxScene extends Phaser.Scene {
     const overlayRoot = document.querySelector<HTMLDivElement>('#world-overlay');
     if (overlayRoot !== null) this.overlay = createWorldOverlay(this, overlayRoot);
     this.lastSaveKey = this.saveStateKey();
+    // 省电模式：切到后台就降频。这是常驻窗口能不能长期开着的前提——
+    // 用户写代码时如果它还跑满 60fps，笔记本会发烫。
+    // 用 visibilitychange 而不是 hasFocus：后者在无头环境与部分浏览器里
+    // 不随标签页切换变化（实测切到后台仍报 focused=true）。
+    // 页面被遮挡或切走时 visibilityState 一定会变。
+    this.focusListener = (): void => {
+      const focused = document.visibilityState === 'visible' && document.hasFocus();
+      // 不碰 Phaser 的限帧机制：它的 `step` / `stepLimitFPS` 回调在 `start()`
+      // 时就绑定死了，运行时切换要 sleep + start，而 sleep 会停掉 raf、
+      // start 又因 `started` 标志不重启——实测结果是直接归零。
+      // 改成自己控制：记下后台模式与最小帧间隔，在 `update()` 里跳帧。
+      this.backgroundMode = !focused;
+      this.minFrameIntervalMs = 1000 / targetFpsFor(focused);
+    };
+    document.addEventListener('visibilitychange', this.focusListener);
+    window.addEventListener('focus', this.focusListener);
+    window.addEventListener('blur', this.focusListener);
+    // 初始状态也按当前焦点设一次。
+    this.focusListener();
+
     this.onPageHide = () => {
       this.saveStore.write(this.sim.toSave());
     };
@@ -191,6 +397,10 @@ export class SandboxScene extends Phaser.Scene {
   }
 
   shutdown(): void {
+    // 烘焙的纹理不随场景销毁自动释放，必须手动清：否则热更新或重进场景时
+    // 会留下同名旧纹理，下一次 generateTexture 直接复用，画面停在上一版。
+    this.terrainLayer?.destroy();
+    this.fogView?.destroy();
     this.ledger?.stop();
     this.ledger = null;
     this.overlay?.dispose();
@@ -198,6 +408,20 @@ export class SandboxScene extends Phaser.Scene {
     if (this.nightKeyListener !== null) {
       window.removeEventListener('keydown', this.nightKeyListener);
       this.nightKeyListener = null;
+    }
+    if (this.phaseTimer !== null) {
+      window.clearInterval(this.phaseTimer);
+      this.phaseTimer = null;
+    }
+    if (this.creationKeyListener !== null) {
+      window.removeEventListener('keydown', this.creationKeyListener, true);
+      this.creationKeyListener = null;
+    }
+    if (this.focusListener !== null) {
+      document.removeEventListener('visibilitychange', this.focusListener);
+      window.removeEventListener('focus', this.focusListener);
+      window.removeEventListener('blur', this.focusListener);
+      this.focusListener = null;
     }
     if (this.onPageHide !== null) {
       window.removeEventListener('pagehide', this.onPageHide);
@@ -291,7 +515,28 @@ export class SandboxScene extends Phaser.Scene {
   }
 
   update(_time: number, delta: number): void {
-    this.accumulator += Math.min(delta, 250);
+    this.updateCount += 1;
+
+    // 省电：后台时按最小间隔跳帧。**跳过的是这一帧的渲染与逻辑推进**，
+    // 世界本身不会错乱——逻辑时钟按真实经过的时间推进，只是推得粗一些。
+    //
+    // 用真实经过的时间而不是上一帧的 delta：跳帧后 delta 只有 16ms，
+    // 直接累加会让世界时钟在后台越走越慢。
+    const elapsed = this.lastAdvanceAt === 0 ? delta : _time - this.lastAdvanceAt;
+    if (this.backgroundMode && elapsed < this.minFrameIntervalMs) return;
+    this.lastAdvanceAt = _time;
+    // 真正推进过的帧才计数：`updateCount` 统计的是 Phaser 的调用次数，
+    // 跳帧时它仍然每帧加一，看不出降频。
+    this.advanceCount += 1;
+    this.accumulator += Math.min(elapsed, 250);
+    // 造物模式暂停世界：幽灵预览期间不该有人走动或收工。
+    // 只暂停推进，不清空累加器——退出后不会一次性补跑一大段。
+    if (this.creation !== null) {
+      this.accumulator = 0;
+      this.snapshot = this.sim.snapshot();
+      this.renderSnapshot(delta);
+      return;
+    }
     let steps = 0;
     while (this.accumulator >= LOGIC_STEP_MS && steps < MAX_STEPS_PER_FRAME) {
       this.accumulator -= LOGIC_STEP_MS;
@@ -304,34 +549,24 @@ export class SandboxScene extends Phaser.Scene {
     }
     this.snapshot = this.sim.snapshot();
     this.renderSnapshot(delta);
+    this.cameraCtl.update(delta);
+    this.minimap?.update(this.snapshot, this.cameraCtl.viewportRect());
     // 只在 update() 返回后写档（命令已结算，ADR_SAVE §4）。
     this.maybeAutoSave();
   }
 
   // ------------------------------------------------------------------ input
 
-  /** 网页与终端共用这一个口子。文本 → 意图 → 命令，全部在这里收敛。 */
+  /**
+   * 网页与终端共用这一个口子。原话整句交给世界，解析与刻石板都在 `Simulation` 里。
+   *
+   * 这里只负责投递：认不认得出要等下一拍结算，所以本地只挡空句子，
+   * 其余一律投递并返回"已投递"。真正的回执走 `onResult`。
+   */
   say(text: string): CommandResult {
-    const intent = parseOracle(text);
-    if (intent.kind === 'unknown') {
-      return { ok: false, message: '没听懂这句，世界没有动。' };
-    }
-    let command: WorldCommand;
-    switch (intent.kind) {
-      case 'dispatch':
-        command = { kind: 'dispatch', taskKind: intent.taskKind, summary: intent.summary };
-        break;
-      case 'weather':
-        command = { kind: 'setWeather', weather: intent.weather };
-        break;
-      case 'cancelPending':
-        command = { kind: 'cancelPending' };
-        break;
-      default:
-        command = { kind: 'complete' };
-    }
+    if (text.trim() === '') return { ok: false, message: '说点什么吧。' };
     // 命令不直接改世界，排进队列，由下一个逻辑步统一结算。
-    this.sim.enqueue(command);
+    this.sim.enqueue({ kind: 'oracle', raw: text });
     return { ok: true, message: '神谕已投递，随下一拍生效。' };
   }
 
@@ -347,6 +582,185 @@ export class SandboxScene extends Phaser.Scene {
   build(prefabId: string): void {
     const instanceId = `${prefabId}#${this.snapshot.buildings.length + 1}`;
     this.sim.enqueue({ kind: 'build', prefabId, instanceId });
+  }
+
+  // -------------------------------------------------------------- 造物模式
+
+  /**
+   * 进入造物模式。世界就此暂停，直到确认或取消。
+   *
+   * 模式只活在场景层：`Simulation` 不知道有这回事，存档里也没有它的位置。
+   */
+  beginCreation(prefabId: string): CommandResult {
+    const blueprint = this.blueprints.get(prefabId);
+    if (blueprint === undefined) return { ok: false, message: '没有这份蓝图。' };
+    if (this.snapshot.buildings.some((building) => building.prefabId === prefabId)) {
+      return { ok: false, message: '这种铺子已经有一栋了。' };
+    }
+    this.creation = { prefabId, ghostAt: null };
+    this.ghost.hide();
+    // 把焦点从按钮上拿走：否则回车会被浏览器当成「再点一次那个按钮」，
+    // 模式刚确认又重新打开。焦点交给 body，键盘事件才由页面统一处理。
+    (document.activeElement as HTMLElement | null)?.blur?.();
+    return { ok: true, message: '选个位置：移动指针，回车确认，Esc 取消。' };
+  }
+
+  /** 指针移到某格时更新幽灵。不在造物模式里就什么也不做。 */
+  hoverCell(cell: GridPoint): void {
+    const session = this.creation;
+    if (session === null) return;
+    const blueprint = this.blueprints.get(session.prefabId);
+    if (blueprint === undefined) return;
+    this.creation = { ...session, ghostAt: cell };
+    const check = this.canPlaceBlueprintHere(blueprint, cell);
+    this.ghost.show(cell, blueprint, check.ok);
+    this.publishCreationHint(check.ok ? '可以建在这里，回车确认。' : check.message);
+  }
+
+  /** 确认施工。没有幽灵位置时拒绝，不猜一个地方。 */
+  confirmCreation(): CommandResult {
+    const session = this.creation;
+    if (session === null) return { ok: false, message: '不在造物模式。' };
+    if (session.ghostAt === null) {
+      return { ok: false, message: '先把指针移到想建的位置。' };
+    }
+    const blueprint = this.blueprints.get(session.prefabId);
+    if (blueprint === undefined) return { ok: false, message: '没有这份蓝图。' };
+    const check = this.canPlaceBlueprintHere(blueprint, session.ghostAt);
+    if (!check.ok) {
+      // 留在造物模式里让玩家换个位置，并说明为什么这里不行。
+      return { ok: false, message: check.message };
+    }
+    const instanceId = `${session.prefabId}#${this.snapshot.buildings.length + 1}`;
+
+    // 玩家的选择先拼成一份**造物意图**，过 schema 再落位。
+    // 这样手动造物与将来的 LLM 输出走同一条校验，schema 不是死代码。
+    const intent = {
+      templateId: session.prefabId,
+      at: session.ghostAt,
+      palette: {
+        body: tokenNameOf(blueprint.palette.body),
+        roof: tokenNameOf(blueprint.palette.roof),
+        trim: tokenNameOf(blueprint.palette.trim),
+        window: tokenNameOf(blueprint.palette.window),
+      },
+    };
+    try {
+      parseCreationPlan(intent, this.blueprints, {
+        width: this.world.grid.width,
+        height: this.world.grid.height,
+      });
+    } catch (error) {
+      // schema 不过就是玩家的选择有问题：留在模式里，说清哪里不对。
+      return {
+        ok: false,
+        message: error instanceof Error ? error.message : '造物意图不合法。',
+      };
+    }
+
+    this.sim.enqueue({
+      kind: 'build',
+      prefabId: session.prefabId,
+      instanceId,
+      at: session.ghostAt,
+      // 记下来由：这栋楼是你在造物模式里点出来的。纸面据此说得出它的来历。
+      source: {
+        taskId: `creation-${instanceId}`,
+        summary: `在 (${session.ghostAt.x},${session.ghostAt.y}) 建了${blueprint.displayName}`,
+      },
+    });
+    this.endCreation();
+    return { ok: true, message: '动工了。' };
+  }
+
+  /**
+   * 造物落位校验：迷雾、空间、群落三道。
+   *
+   * 三处调用（hover / confirm / canPlaceAt）必须共用这一份——
+   * 各写一遍就会漏掉其中一条，而漏掉的那条会在真机上表现为
+   * 「预览说可以，确认却建到了不该建的地方」。
+   */
+  private canPlaceBlueprintHere(
+    blueprint: PrefabBlueprint,
+    cell: GridPoint,
+  ): { ok: true } | { ok: false; message: string } {
+    if (fogAt(cell, this.snapshot.fog)) {
+      return { ok: false, message: '那里还没长出来，先让世界走到那儿。' };
+    }
+    const check = checkPlacement(this.world.grid, blueprint, cell);
+    if (!check.ok) return { ok: false, message: hintFor(check.reason) };
+
+    // 群落：郊野铺子必须在郊野圈，镇内铺子在工坊环内。
+    // 与开局落位同一套规则（setup.ts 的 accept 谓词），否则拆了重建会把
+    // 郊野铺子建到镇里——实测 crawler_mine 曾被建到 15.5 格的 craftRing。
+    const distance = Math.hypot(cell.x - this.world.altar.x, cell.y - this.world.altar.y);
+    const isWild = WILD_PREFABS.has(blueprint.id);
+    if (isWild && distance <= BIOME_RADII.craftRing) {
+      return { ok: false, message: '这种铺子要建在郊野，离镇子远一点。' };
+    }
+    if (!isWild && distance > BIOME_RADII.craftRing) {
+      return { ok: false, message: '这种铺子要建在镇子里。' };
+    }
+    return { ok: true };
+  }
+
+  /** 取消：世界没有任何变化，恢复推进。 */
+  cancelCreation(): CommandResult {
+    if (this.creation === null) return { ok: false, message: '不在造物模式。' };
+    this.endCreation();
+    return { ok: true, message: '取消了，世界没动。' };
+  }
+
+  creating(): { readonly prefabId: string; readonly ghostAt: GridPoint | null } | null {
+    return this.creation;
+  }
+
+  private endCreation(): void {
+    this.creation = null;
+    this.ghost.hide();
+    this.publishCreationHint('');
+  }
+
+  /**
+   * 导播要看的地方。
+   *
+   * 排序即优先级：正在忙的人 → 正在运转的铺子 → 祭坛 → 其它铺子。
+   *
+   * 为什么要把空闲铺子也列进来：两个角色都闲在祭坛时，候选只剩祭坛一个点，
+   * 导播"接管"了却无处可去，镜头一动不动——看起来像坏了。
+   * 有铺子做候选，镜头才会真的在镇子里游走。
+   */
+  private directorTargets(): readonly { x: number; y: number }[] {
+    const targets: { x: number; y: number }[] = [];
+    for (const villager of this.snapshot.villagers) {
+      if (villager.mode === 'idle') continue;
+      targets.push({ x: villager.pos.x * TILE_PX, y: villager.pos.y * TILE_PX });
+    }
+
+    const operating: { x: number; y: number }[] = [];
+    const idle: { x: number; y: number }[] = [];
+    for (const building of this.snapshot.buildings) {
+      const station = this.snapshot.workstations.find(
+        (item) => item.buildingId === building.instanceId,
+      );
+      const point = {
+        x: (building.origin.x + building.footprint.w / 2) * TILE_PX,
+        y: (building.origin.y + building.footprint.h / 2) * TILE_PX,
+      };
+      if (station?.activity.kind === 'operating') operating.push(point);
+      else idle.push(point);
+    }
+    targets.push(...operating);
+
+    // 祭坛是世界的心跳，空镜头也该回到它。
+    targets.push({ x: this.world.altar.x * TILE_PX, y: this.world.altar.y * TILE_PX });
+    targets.push(...idle);
+    return targets;
+  }
+
+  private publishCreationHint(line: string): void {
+    if (line === '') return;
+    for (const listener of this.resultListeners) listener({ ok: true, message: line });
   }
 
   /** 手动存档：立即把当前世界写进单槽。 */
@@ -431,17 +845,55 @@ export class SandboxScene extends Phaser.Scene {
     };
   }
 
-  /** 夜景是纯渲染态：不写世界、不写台账；页面按 N 或 ?night=1 切换。 */
-  setNight(enabled: boolean): void {
-    this.nightView.setEnabled(enabled);
+  /** 时相是纯渲染态：不写世界、不写台账。 */
+  setPhase(phase: PhaseId): void {
+    this.phaseView.setPhase(phase);
+    this.phaseView.setAutoAdvance(false);
   }
 
+  currentPhase(): PhaseId {
+    return this.phaseView.currentPhase();
+  }
+
+  /** 真实时间此刻对应的刻。用于验证「交还给真实时间」真的落对了。 */
+  realPhase(): PhaseId {
+    return phaseAt(Date.now());
+  }
+
+  /** 是否按真实时间自动推进。 */
+  isAutoPhase(): boolean {
+    return this.phaseView.isAutoAdvancing();
+  }
+
+  /** 恢复按真实时间推进。 */
+  setAutoPhase(): void {
+    this.phaseView.setAutoAdvance(true);
+    this.phaseView.setPhase(phaseAt(Date.now()));
+  }
+
+  /** 旧入口保留语义：setNight(true) 等于跳到夜，false 等于回到真实时间。 */
+  setNight(enabled: boolean): void {
+    if (enabled) this.setPhase('night');
+    else this.setAutoPhase();
+  }
+
+  /**
+   * 在夜与昼之间切换，返回切换后是否为夜。
+   *
+   * 「离开夜」回到的是真实时间那一刻，而不是写死正午——否则早上按一下会跳到中午，
+   * 世界就跟你的作息脱节了。
+   */
   toggleNight(): boolean {
-    return this.nightView.toggle();
+    if (this.phaseView.currentPhase() === 'night') {
+      this.setAutoPhase();
+      return this.phaseView.currentPhase() === 'night';
+    }
+    this.setPhase('night');
+    return true;
   }
 
   nightEnabled(): boolean {
-    return this.nightView.isEnabled();
+    return this.phaseView.currentPhase() === 'night';
   }
 
   private registerOracleApi(): void {
@@ -451,6 +903,90 @@ export class SandboxScene extends Phaser.Scene {
         this.dispatch(kind, summary),
       finish: (target?: string): void => this.finish(target),
       build: (prefabId: string): void => this.build(prefabId),
+      beginCreation: (prefabId: string): CommandResult => this.beginCreation(prefabId),
+      hoverCell: (cell: GridPoint): void => this.hoverCell(cell),
+      confirmCreation: (): CommandResult => this.confirmCreation(),
+      cancelCreation: (): CommandResult => this.cancelCreation(),
+      creation: () => this.creating(),
+      /**
+       * 调试注入：造一条 blocked 的台账督办，用来验证急件流程。
+       * 只供调试面板与浏览器回归用，正常路径不会有调用方。
+       */
+      injectBlocked: (commissionId: string, title: string, question: string): void => {
+        this.sim.enqueue({
+          kind: 'sync',
+          tasks: [
+            {
+              commissionId,
+              kind: 'code',
+              title,
+              agentName: '甲',
+              status: 'blocked',
+              blockedQuestion: question,
+            },
+          ],
+          finished: [],
+          connected: true,
+        });
+      },
+      /** 世界状态摘要：界面据此显示"世界缺什么"。 */
+      worldState: () => {
+        const state = summarizeWorld(this.snapshot);
+        return {
+          line: describeWorldState(state),
+          missingWild: state.gaps.missingWild,
+        };
+      },
+      /** 当前该呈给用户的急件；没有则为 null。 */
+      decree: () => awaitingDecree(this.snapshot),
+      /** 省电模式状态：当前帧率上限与焦点。 */
+      ecoState: () => ({
+        fpsLimit: this.game.loop.fpsLimit,
+        hasFpsLimit: this.game.loop.hasFpsLimit,
+        /** Phaser 实际渲染帧率：这是降频有没有生效的真正指标。 */
+        actualFps: this.game.loop.actualFps,
+        updateCount: this.updateCount,
+        advanceCount: this.advanceCount,
+        backgroundMode: this.backgroundMode,
+        minFrameIntervalMs: this.minFrameIntervalMs,
+        limitRate: (this.game.loop as unknown as { _limitRate: number })._limitRate,
+        hasCallback: (this.game.loop as unknown as { callback?: unknown }).callback !== undefined,
+        focused: document.visibilityState === 'visible' && document.hasFocus(),
+      }),
+      /** 渲染统计：排查性能时看每帧有多少绘制指令。 */
+      renderStats: () => {
+        const graphics = this.children.list.filter(
+          (item) => item.type === 'Graphics',
+        ) as Phaser.GameObjects.Graphics[];
+        const counts = graphics.map((g) => g.commandBuffer?.length ?? 0);
+        return {
+          graphicsObjects: graphics.length,
+          totalCommands: counts.reduce((sum, n) => sum + n, 0),
+          largest: [...counts].sort((a, b) => b - a).slice(0, 5),
+        };
+      },
+      /** 立刻把镜头中心对准世界坐标（不带动画）。小地图跳转与测试都用它。 */
+      centerCameraOn: (x: number, y: number): void => this.cameraCtl.panTo(x, y, 0),
+      /** 只查询某处能不能建，不改变任何状态。造物模式与测试都用它。 */
+      canPlaceAt: (cell: GridPoint): boolean => {
+        const session = this.creation;
+        if (session === null) return false;
+        const blueprint = this.blueprints.get(session.prefabId);
+        if (blueprint === undefined) return false;
+        return this.canPlaceBlueprintHere(blueprint, cell).ok;
+      },
+      camera: () => ({
+        scrollX: this.cameras.main.scrollX,
+        scrollY: this.cameras.main.scrollY,
+        zoom: this.cameras.main.zoom,
+        width: this.cameras.main.width,
+        height: this.cameras.main.height,
+        worldViewX: this.cameras.main.worldView.x,
+        mode: this.cameraCtl.mode(),
+      }),
+      miracle: (kind: MiracleKind): void => {
+        this.sim.enqueue({ kind: 'miracle', miracle: kind });
+      },
       feed: (message: AgentToWorld): CommandResult => this.feed(message),
       pushLedger: (commission: unknown): void => this.pushLedger(commission),
       onResult: (listener: (result: CommandResult) => void): (() => void) => {
@@ -463,7 +999,13 @@ export class SandboxScene extends Phaser.Scene {
         return () => this.statusListeners.delete(listener);
       },
       report: (): DailyReport => composeReport(this.snapshot),
+      slab: (): readonly OracleRecord[] => this.snapshot.oracle,
       view: (): WorldSnapshot => this.view(),
+      setPhase: (phase: PhaseId): void => this.setPhase(phase),
+      currentPhase: (): PhaseId => this.currentPhase(),
+      realPhase: (): PhaseId => this.realPhase(),
+      isAutoPhase: (): boolean => this.isAutoPhase(),
+      setAutoPhase: (): void => this.setAutoPhase(),
       setNight: (enabled: boolean): void => this.setNight(enabled),
       toggleNight: (): boolean => this.toggleNight(),
       nightEnabled: (): boolean => this.nightEnabled(),
@@ -493,8 +1035,13 @@ export class SandboxScene extends Phaser.Scene {
       const operating = workstation?.activity.kind === 'operating';
       const broken = workstation?.activity.kind === 'overheating';
       if ((operating || broken) && this.tick % 3 === 0) {
-        const intensity = operating ? 1 + Math.min(2, (workstation?.progress ?? 0) * 2) : 2.5;
-        entry.emitter.emitAt(entry.view.chimneyWorld.x, entry.view.chimneyWorld.y, intensity * 0.7);
+        // 视野外的烟不发射：逻辑照常结算，只是看不见就不必画。
+        const chimney = entry.view.chimneyWorld;
+        const view = this.cameras.main.worldView;
+        if (shouldAnimateAt({ x: chimney.x, y: chimney.y }, view)) {
+          const intensity = operating ? 1 + Math.min(2, (workstation?.progress ?? 0) * 2) : 2.5;
+          entry.emitter.emitAt(chimney.x, chimney.y, intensity * 0.7);
+        }
       }
     }
 
@@ -502,7 +1049,9 @@ export class SandboxScene extends Phaser.Scene {
       this.lastRoadCount = snapshot.roads.length;
       this.decor.redrawRoads(snapshot.roads);
     }
+    this.decor.syncTrails(snapshot.trails);
     this.decor.syncProps(snapshot.props);
+    this.decor.syncCritters(snapshot.critters);
     const constructionKey = snapshot.constructions
       .map((item) => `${item.buildingId}:${Math.ceil(item.remainingMs / 100)}`)
       .join('|');
@@ -522,7 +1071,8 @@ export class SandboxScene extends Phaser.Scene {
       updateVillager(view, villager, snapshot.now, 0, 0, ALTITUDE);
     }
     this.weatherView.update(this.sim.weatherIntensity(), delta);
-    this.nightView.update(this.snapshot, delta);
+    this.phaseView.update(this.snapshot, delta);
+    this.fogView.update(this.snapshot.fog, this.snapshot.now);
 
     // 气泡一出现就出声；同一个角色的同一句话不重复念。
     for (const villager of snapshot.villagers) {
@@ -612,6 +1162,7 @@ export class SandboxScene extends Phaser.Scene {
           delivering: '正在交付',
           toAltar: '回到祭坛',
           sheltering: '跑到屋檐下躲雨',
+          bearingDecree: '举着急件跑向祭坛',
         };
         return `${villager.name}：${modeLabel[villager.mode]}`;
       })
@@ -646,7 +1197,10 @@ export class SandboxScene extends Phaser.Scene {
     );
     const finishHint =
       defaultWorker === undefined ? '' : `　　默认交付：${defaultWorker.name}的单`;
-    return `${summary}　　${weather}　　${ledger}　　台账交付 ${ledgerDelivered} 单 · Mock 交付 ${mockDelivered} 单　　神恩 ${faith.points}/${3}${waiting}${queue}${finishHint}${saveNote}`;
+    // 最近落下的那件摆件写清来路：这是"被记住"在纸面上唯一的具体落点。
+    const latestProp = this.snapshot.props[this.snapshot.props.length - 1];
+    const memory = latestProp === undefined ? '' : `　　${describePropSource(latestProp)}`;
+    return `${summary}　　${weather}　　${ledger}　　台账交付 ${ledgerDelivered} 单 · Mock 交付 ${mockDelivered} 单　　神恩 ${faith.points}/${3}${memory}${waiting}${queue}${finishHint}${saveNote}`;
   }
 
   private buildingName(id: string | null): string | null {

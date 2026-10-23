@@ -7,11 +7,25 @@
  */
 
 import type { WorldGrid } from './grid.ts';
-import { TASK_PROFILES } from './tasks.ts';
+import { TASK_PROFILES, taskDurationFor } from './tasks.ts';
+import { pickVenue, type VenueCandidate } from './venue.ts';
+import { fogAt, revealedRadiusFor } from './fog.ts';
+import { awaitingDecree } from './decree.ts';
+
+import { parseOracle } from './oracle.ts';
+import { parseOracleBuild, type BuildIntent } from './oracle-build.ts';
+import { parseOracleMiracle } from './oracle-miracle.ts';
+import { routeIntent } from './intent-router.ts';
+import type { IntentModel } from './intent-router.ts';
+import type { ParsedIntent } from './intent-schema.ts';
+import { summarizeWorld } from './world-state.ts';
+import { addTrail, visibleTrails, type TrailMap } from './trails.ts';
+import { carryKindFor } from './carry.ts';
+import { WILD_PREFABS } from './setup.ts';
 import {
   nextProp,
   MILESTONE_POINTS,
-  milestoneFor,
+  describePropSource,
   POINTS_PER_TASK,
 } from './faith.ts';
 import { routineBeats, routineFor, shelterTarget, type RoutineBeat } from './routines.ts';
@@ -24,10 +38,14 @@ import {
 import type {
   CommandResult,
   ConstructionSnapshot,
+  CarryKind,
+  Critter,
   Facing,
   GridPoint,
+  OracleRecord,
   PendingDispatch,
   PlacedBuilding,
+  PrefabBlueprint,
   TaskRecord,
   TaskKind,
   Vec2,
@@ -40,9 +58,9 @@ import type {
   WorldProp,
   WorldSnapshot,
 } from './types.ts';
-import { excerptBlockedQuestion } from './types.ts';
-import type { SavedVillager, SettledRecord, WorldSaveV1 } from './save.ts';
-import { SCHEMA_V1_FINGERPRINT } from './save.ts';
+import { excerptBlockedQuestion, ORACLE_SLAB_LIMIT } from './types.ts';
+import type { SavedVillager, SettledRecord, WorldSave } from './save.ts';
+import { SCHEMA_V2_FINGERPRINT } from './save.ts';
 
 /**
  * 台账事件时间 → settled 用的 epoch 毫秒。协议 §19 给的是秒（×1000）；
@@ -54,12 +72,58 @@ export function ledgerCompletedAtMs(value: number | null | undefined): number | 
   return Math.round(value > 1e12 ? value : value * 1000);
 }
 
+/** 三件神迹。纯世界侧动作，不是你的话。 */
+export type MiracleKind = 'light' | 'tree' | 'cat';
+
+/** 猫在世界里待多久。到点自己走开，不占位。 */
+const CAT_DWELL_MS = 20_000;
+
 export type WorldCommand =
+  /**
+   * 一句神谕的原文。世界自己解析，解析结果再落到下面的具体命令上。
+   *
+   * 只有走这条入口才会进石板：外部 Agent 的 `feed`、台账的 `sync` 都不是
+   * 「你对世界说的话」，不该被记成神谕。
+   */
+  | { readonly kind: 'oracle'; readonly raw: string }
+  /**
+   * 模型判定的结果，回队结算。
+   *
+   * 为什么不直接调 `applyIntent`：模型是异步的，回来时世界可能已经走了几拍。
+   * 回队让它的时序与玩家同步输入完全一致——石板、事件、排队顺序都不特殊。
+   */
+  | { readonly kind: 'intent'; readonly intent: ParsedIntent; readonly raw: string }
   | { readonly kind: 'dispatch'; readonly taskKind: TaskKind; readonly summary: string }
   | { readonly kind: 'complete'; readonly target?: string }
   | { readonly kind: 'cancelPending'; readonly id?: string }
   | { readonly kind: 'setWeather'; readonly weather: Weather }
-  | { readonly kind: 'build'; readonly prefabId: string; readonly instanceId: string }
+  /**
+   * 造物。`at` 省略时自动选址（旧行为）；给了就是玩家在造物模式里指定的位置。
+   */
+  | {
+      readonly kind: 'build';
+      readonly prefabId: string;
+      readonly instanceId: string;
+      readonly at?: GridPoint;
+      /** 这次建造的来由，写进建筑的来源字段。省略表示"没有来由"。 */
+      readonly source?: { readonly taskId: string; readonly summary: string };
+    }
+  /**
+   * 神迹：纯世界侧动作，不是你的话，所以不刻石板。
+   * 三件：点灯、种树、召唤猫（猫只做氛围，会自己走开）。
+   */
+  /**
+   * 神迹。`at` 省略时落在祭坛周围；给了就落在指定位置。
+   * 指定位置要过三道：在界内、不在迷雾里、格子空着。
+   */
+  | { readonly kind: 'miracle'; readonly miracle: MiracleKind; readonly at?: GridPoint }
+  /**
+   * 拆掉一栋楼。
+   *
+   * 三条拒绝：找不到、正在施工、有人在里面干活。
+   * 后者不是为了保护建筑，是为了保护正在干的活——拆了会让那单悬空。
+   */
+  | { readonly kind: 'demolish'; readonly instanceId: string }
   /** 台账快照。这是世界接真实工作的唯一入口。 */
   | {
       readonly kind: 'sync';
@@ -110,10 +174,32 @@ export interface SimulationDeps {
    * 传 3 个名字即可扩到 3 人，逻辑不需要再改。
    */
   readonly villagerNames?: readonly string[];
-  /** 造物主：把一栋新楼落进世界。返回 null 表示空间不够。 */
-  readonly spawnBuilding?: (prefabId: string, instanceId: string) => NewBuilding | null;
+  /**
+   * 蓝图注册表。造物神谕（「建一间书阁」）要用它把词换成模板。
+   * 省略时造物神谕一律认不出——那是安全的降级，不是错误。
+   */
+  readonly blueprints?: ReadonlyMap<string, PrefabBlueprint>;
+  /**
+   * 造物主：把一栋新楼落进世界。返回 null 表示落不下。
+   * `at` 省略时自动选址；给了就是玩家指定的位置。
+   */
+  readonly spawnBuilding?: (
+    prefabId: string,
+    instanceId: string,
+    at?: GridPoint,
+    source?: { readonly taskId: string; readonly summary: string },
+  ) => NewBuilding | null;
   /** 本地 wall clock（只给 settled.completedAt 的 mock 来源用，不喂逻辑）。 */
   readonly wallClock?: () => number;
+  /**
+   * 意图模型：规则认不出的话才问它。省略表示纯离线。
+   *
+   * 这里只放**客户端**，不放提示词与校验——那两样在世界侧已经是确定的了
+   * （`intent-prompt.ts` / `intent-schema.ts`），模型只负责产出一份 JSON。
+   */
+  readonly intentModel?: IntentModel;
+  /** 世界尺寸。给意图校验判坐标越界用；省略时从 grid 推。 */
+  readonly worldSize?: { readonly width: number; readonly height: number };
 }
 
 /** 一个角色的完整本地状态。渲染层只读快照，不碰这里。 */
@@ -138,6 +224,8 @@ interface Villager {
   pendingRoute: GridPoint[];
   /** 这一趟要去哪栋楼。台账同步派活时同样走这条路。 */
   pendingBuilding: PlacedBuilding | null;
+  /** 手上带着的东西。郊野返程时非空。 */
+  carrying: CarryKind | null;
 }
 
 interface WorkstationState {
@@ -162,7 +250,14 @@ const FAITH_MILESTONE = MILESTONE_POINTS;
 export class Simulation {
   private readonly grid: WorldGrid;
   private readonly altar: GridPoint;
-  private readonly spawnBuilding: ((prefabId: string, instanceId: string) => NewBuilding | null) | undefined;
+  private readonly spawnBuilding:
+    | ((
+        prefabId: string,
+        instanceId: string,
+        at?: GridPoint,
+        source?: { readonly taskId: string; readonly summary: string },
+      ) => NewBuilding | null)
+    | undefined;
 
   private readonly buildings: PlacedBuilding[];
   private readonly villagers: Villager[];
@@ -172,6 +267,19 @@ export class Simulation {
   private readonly queue: WorldCommand[] = [];
   private readonly lastResults: CommandResult[] = [];
   private readonly props: WorldProp[] = [];
+  /**
+   * 走出来的痕迹。**不落档**：能从走动重新累积，存起来只会让存档无限膨胀。
+   * 与铺好的 `roads` 是两回事——那个是施工结果，这个是踩踏。
+   */
+  private readonly trails: TrailMap = new Map();
+  /** 神谕石板：只记改变了世界的话。旧在前，封顶 ORACLE_SLAB_LIMIT。 */
+  private readonly oracleLog: OracleRecord[] = [];
+  /** 氛围实体（猫等）。只影响渲染，不参与任何结算。 */
+  private critters: Critter[] = [];
+  /** 神迹编号：世界内自增，不用时间戳/随机数，保证可回放。 */
+  private nextMiracleNumber = 1;
+  /** 正在举急件的那位角色；null 表示没有急件在呈。 */
+  private decreeBearer: string | null = null;
   private readonly roads: GridPoint[] = [];
   private readonly constructions = new Map<string, WorkstationState>();
 
@@ -187,6 +295,11 @@ export class Simulation {
   /** 私有结算日志：save-only，不入快照（ADR_SAVE §2.1）。 */
   private readonly settledLog: SettledRecord[] = [];
   private readonly wallClock: () => number;
+  private readonly blueprints: ReadonlyMap<string, PrefabBlueprint> | undefined;
+  private readonly intentModel: IntentModel | undefined;
+  private readonly worldSize: { readonly width: number; readonly height: number };
+  /** 正在问模型的句子。防止同一句被重复投递时问两次。 */
+  private readonly pendingClassify = new Set<string>();
   /** 是否已与台账对过账。读档后为 false：对账前不驱动台账单。 */
   private ledgerReconciled = true;
   /** 上游台账是否在线。离线时世界照常过日子，但状态行必须说出来。 */
@@ -212,6 +325,9 @@ export class Simulation {
     this.altar = deps.altar;
     this.spawnBuilding = deps.spawnBuilding;
     this.wallClock = deps.wallClock ?? (() => Date.now());
+    this.blueprints = deps.blueprints;
+    this.intentModel = deps.intentModel;
+    this.worldSize = deps.worldSize ?? { width: deps.grid.width, height: deps.grid.height };
     this.buildings = [...deps.buildings];
     this.beats = routineBeats(deps.altar, deps.grid);
     const names = deps.villagerNames ?? [deps.villagerName, DEFAULT_ASSISTANT_NAME];
@@ -235,6 +351,7 @@ export class Simulation {
       inPlaceUntil: 0,
       pendingRoute: [],
       pendingBuilding: null,
+      carrying: null,
     }));
     for (const villager of this.villagers) this.pending.set(villager.id, []);
     for (const villager of this.villagers) {
@@ -264,6 +381,8 @@ export class Simulation {
     this.stepConstructions(deltaMs);
     for (const villager of this.villagers) this.stepVillager(villager, deltaMs);
     this.stepWorkstations();
+    this.stepDecrees();
+    this.stepCritters();
     for (const villager of this.villagers) this.expireBubble(villager);
     // 固定步长的最后一拍：每个空闲角色先接台账的活，再轮到自己队列里的神谕。
     this.pumpPending();
@@ -308,7 +427,15 @@ export class Simulation {
       tasks: this.tasks.map((task) => ({ ...task })),
       pending: this.allPending(),
       props: this.props,
+      oracle: this.oracleLog,
+      critters: this.critters,
+      // 揭示半径由交付数决定：用得越久，迷雾退得越多。
+      fog: {
+        center: this.altar,
+        revealedRadius: revealedRadiusFor(this.ledgerDeliveries + this.mockDeliveries),
+      },
       roads: this.roads,
+      trails: visibleTrails(this.trails),
       events: this.events.slice(-12),
       weather: this.weather.kind,
       faith: { points: this.faithPoints, milestones: this.milestones },
@@ -351,6 +478,10 @@ export class Simulation {
 
   private apply(command: WorldCommand): CommandResult {
     switch (command.kind) {
+      case 'oracle':
+        return this.speak(command.raw);
+      case 'intent':
+        return this.applyIntent(command.intent, command.raw);
       case 'dispatch':
         return this.dispatch(command.taskKind, command.summary);
       case 'complete':
@@ -360,10 +491,322 @@ export class Simulation {
       case 'setWeather':
         return this.setWeather(command.weather);
       case 'build':
-        return this.build(command.prefabId, command.instanceId);
+        return this.build(command.prefabId, command.instanceId, command.at, command.source);
+      case 'miracle':
+        return this.performMiracle(command.miracle, command.at);
+      case 'demolish':
+        return this.demolish(command.instanceId);
       case 'sync':
         return this.sync(command.tasks, command.finished, command.connected,
           command.complete ?? true, command.order ?? [], command.finishedAt ?? []);
+    }
+  }
+
+  /**
+   * 神迹：直接在世界里多一样东西。不刻石板（这不是你说的那句话），
+   * 也不发货币、没有冷却——那会把神迹变成资源管理。
+   *
+   * 落点规则与信仰摆件一致：祭坛周围的环上找空格，避开已有摆件。
+   */
+  private performMiracle(kind: MiracleKind, at?: GridPoint): CommandResult {
+    const id = `miracle-${this.nextMiracleNumber}`;
+
+    // 指定了位置就先验：在界内、不在迷雾里、格子空着。
+    if (at !== undefined) {
+      const problem = this.miracleSpotProblem(at);
+      if (problem !== null) {
+        this.log('warn', problem);
+        return { ok: false, message: problem };
+      }
+    }
+
+    if (kind === 'cat') {
+      this.nextMiracleNumber += 1;
+      this.critters.push({
+        id,
+        kind: 'cat',
+        // 指定位置时落在格子中央；不给时仍贴着祭坛。
+        at:
+          at === undefined
+            ? { x: this.altar.x + 2.5, y: this.altar.y + 2.5 }
+            : { x: at.x + 0.5, y: at.y + 0.5 },
+        leavesAt: this.now + CAT_DWELL_MS,
+      });
+      this.log('info', '神迹：一只猫从街角溜达过来。');
+      return { ok: true, message: '一只猫来了，它会自己走开。' };
+    }
+
+    const propKind = kind === 'light' ? 'lamp' : 'tree';
+    const label = kind === 'light' ? '一盏神迹点的灯' : '一棵神迹种的树';
+    const spot = at ?? this.miracleSpot();
+    if (spot === null) {
+      return { ok: false, message: '祭坛周围没有空地了。' };
+    }
+    this.nextMiracleNumber += 1;
+    this.props.push({
+      id,
+      kind: propKind,
+      at: spot,
+      label,
+      sourceTaskKind: null,
+      sourceTaskId: null,
+      // 神迹不是任务换来的；摘要写明来源，纸面据此区分"神迹"与"哪一单"。
+      sourceSummary: kind === 'light' ? '神迹：点灯' : '神迹：种树',
+    });
+    this.log('info', `神迹：${label}落在祭坛边。`);
+    return { ok: true, message: `${label}落下了。` };
+  }
+
+  /**
+   * 指定落点能不能用。返回 null 表示可以，否则返回给玩家看的原因。
+   *
+   * 三条与建造同一套口径：在界内、不在迷雾里、格子空着。
+   * 神迹不占网格（摆件只是装饰），所以只查这三条，不查留白与门口。
+   */
+  private miracleSpotProblem(at: GridPoint): string | null {
+    if (!this.grid.inBounds(at)) return '那里在世界外面。';
+    // 判「被占」而不是「不能走」：树与树篱不可走但可以放东西，
+    // 建筑不可走且不能放。两者的区别在 occupant。
+    const cell = this.grid.at(at);
+    if (cell === undefined) return '那里在世界外面。';
+    if (cell.occupant !== null) return '那里被建筑占着。';
+    if (fogAt(at, {
+      center: this.altar,
+      revealedRadius: revealedRadiusFor(this.ledgerDeliveries + this.mockDeliveries),
+    })) {
+      return '那里还没长出来。';
+    }
+    if (this.props.some((prop) => prop.at.x === at.x && prop.at.y === at.y)) {
+      return '那里已经有一件神迹了。';
+    }
+    return null;
+  }
+
+  /** 神迹落点：从祭坛外环开始找，避开已占格与已有摆件。 */
+  private miracleSpot(): GridPoint | null {
+    const taken = new Set(this.props.map((prop) => `${prop.at.x},${prop.at.y}`));
+    for (let radius = 2; radius <= 6; radius += 1) {
+      for (let dx = -radius; dx <= radius; dx += 1) {
+        for (const dy of [-radius, radius]) {
+          const p = { x: this.altar.x + dx, y: this.altar.y + dy };
+          if (!this.grid.isWalkable(p)) continue;
+          if (this.grid.zoneOf(p) === 'altar') continue;
+          if (taken.has(`${p.x},${p.y}`)) continue;
+          return p;
+        }
+      }
+      for (let dy = -radius + 1; dy <= radius - 1; dy += 1) {
+        for (const dx of [-radius, radius]) {
+          const p = { x: this.altar.x + dx, y: this.altar.y + dy };
+          if (!this.grid.isWalkable(p)) continue;
+          if (this.grid.zoneOf(p) === 'altar') continue;
+          if (taken.has(`${p.x},${p.y}`)) continue;
+          return p;
+        }
+      }
+    }
+    return null;
+  }
+
+  /**
+   * 一句神谕：解析 → 落到具体命令 → **只有世界真的变了才刻上石板**。
+   *
+   * 判据是「回执说成功」，而不是「认出了意图」。认得出但没改变世界的
+   * （撤销时没有排队单、本来就在下雨）不算世界事件，记下来就是噪音。
+   *
+   * 认不出的输入不落石板，回执里明说没听懂：石板不是聊天记录。
+   */
+  private speak(raw: string): CommandResult {
+    // 先试造物：它认「建一间书阁」这类话，与派活解析器不重叠
+    // （那个的动词表里没有「建 / 盖 / 造」）。
+    const buildIntent = this.parseBuildIntent(raw);
+    if (buildIntent !== null) return this.buildFromIntent(raw, buildIntent);
+
+    // 神迹：「点灯 / 种树 / 召唤猫」，可带坐标。与造物解析器不抢词。
+    const miracleIntent = parseOracleMiracle(raw);
+    if (miracleIntent !== null) {
+      const result = this.performMiracle(miracleIntent.miracle, miracleIntent.at ?? undefined);
+      if (result.ok) this.inscribe(raw, result.message);
+      return result;
+    }
+
+    const intent = parseOracle(raw);
+    if (intent.kind === 'unknown') {
+      // 规则认不出。有模型就异步问一次——但**这一拍不能等网络**。
+      //
+      // 快环纪律：`speak()` 在任何情况下都同步返回。模型的结果回来时
+      // 走 `enqueue({kind:'intent'})` 重新排队，由下一个逻辑拍结算。
+      // 这样世界的时间线不依赖网络延迟，离线时也只是"这句话没听懂"。
+      if (this.intentModel !== undefined) {
+        void this.classifyLater(raw);
+        return { ok: true, message: '这句话规则认不出，正在问模型……' };
+      }
+      const message = '没听懂这句，世界没有动。';
+      this.log('warn', message);
+      return { ok: false, message };
+    }
+    let command: WorldCommand;
+    switch (intent.kind) {
+      case 'dispatch':
+        command = { kind: 'dispatch', taskKind: intent.taskKind, summary: intent.summary };
+        break;
+      case 'weather':
+        command = { kind: 'setWeather', weather: intent.weather };
+        break;
+      case 'cancelPending':
+        command = { kind: 'cancelPending' };
+        break;
+      default:
+        command = { kind: 'complete' };
+    }
+    const result = this.apply(command);
+    if (result.ok) this.inscribe(raw, result.message);
+    return result;
+  }
+
+  /**
+   * 异步问模型，回来后再排队结算。
+   *
+   * 三条纪律：
+   *
+   * 1. **不 await 在快环里。** 调用方是 `speak()`，它必须同步返回。
+   * 2. **结果回队，不直接改世界。** 模型的结果和玩家的话走同一条命令队列，
+   *    这样时序、石板、事件顺序都与同步输入一致——没有"特权路径"。
+   * 3. **失败只是没听懂。** 超时、网络错、JSON 不合法，全部落到 unknown，
+   *    绝不退而求其次猜一个。
+   */
+  private async classifyLater(raw: string): Promise<void> {
+    const model = this.intentModel;
+    if (model === undefined) return;
+    if (this.pendingClassify.has(raw)) return; // 同一句只问一次
+    this.pendingClassify.add(raw);
+    try {
+      const result = await routeIntent(raw, {
+        templates: this.blueprints ?? new Map(),
+        worldSize: this.worldSize,
+        model,
+      });
+      if (result.intent.kind === 'unknown') {
+        const message = '没听懂这句，世界没有动。';
+        this.log('warn', result.modelError ?? message);
+        this.enqueue({ kind: 'intent', intent: { kind: 'unknown', reason: message }, raw });
+        return;
+      }
+      this.enqueue({ kind: 'intent', intent: result.intent, raw });
+    } finally {
+      this.pendingClassify.delete(raw);
+    }
+  }
+
+  /** 把一份已校验的意图落成世界命令。与 `speak()` 的下半段同一条路。 */
+  private applyIntent(intent: ParsedIntent, raw: string): CommandResult {
+    switch (intent.kind) {
+      case 'dispatch':
+        return this.settleIntent({ kind: 'dispatch', taskKind: intent.taskKind, summary: intent.summary }, raw);
+      case 'setWeather':
+        return this.settleIntent({ kind: 'setWeather', weather: intent.weather }, raw);
+      case 'cancelPending':
+        return this.settleIntent({ kind: 'cancelPending' }, raw);
+      case 'complete':
+        return this.settleIntent({ kind: 'complete' }, raw);
+      case 'build': {
+        const instanceId = `${intent.templateId}#${this.buildings.length + 1}`;
+        return this.settleIntent(
+          { kind: 'build', prefabId: intent.templateId, instanceId, at: intent.at ?? undefined },
+          raw,
+        );
+      }
+      case 'demolish': {
+        const target = this.buildings.find((b) => b.prefabId === intent.templateId);
+        if (target === undefined) {
+          const message = `没有${this.blueprints?.get(intent.templateId)?.displayName ?? intent.templateId}可拆。`;
+          this.log('warn', message);
+          return { ok: false, message };
+        }
+        const result = this.demolish(target.instanceId);
+        if (result.ok) this.inscribe(raw, result.message);
+        return result;
+      }
+      case 'miracle': {
+        const result = this.performMiracle(intent.miracle, intent.at ?? undefined);
+        if (result.ok) this.inscribe(raw, result.message);
+        return result;
+      }
+      case 'unknown': {
+        this.log('warn', intent.reason);
+        return { ok: false, message: '没听懂这句，世界没有动。' };
+      }
+    }
+  }
+
+  /** 走命令、成功就刻石板。`applyIntent` 里几处共用的收尾。 */
+  private settleIntent(command: WorldCommand, raw: string): CommandResult {
+    const result = this.apply(command);
+    if (result.ok) this.inscribe(raw, result.message);
+    return result;
+  }
+
+  /** 试着把这句话认成造物意图。认不出返回 null，交给别的解析器。 */
+  private parseBuildIntent(raw: string): BuildIntent | null {
+    if (this.blueprints === undefined) return null;
+    return parseOracleBuild(raw, this.blueprints);
+  }
+
+  /**
+   * 把造物意图落成一次建造。
+   *
+   * 位置：说了就用说的；没说就由 `findBestSlot` 挑——那是世界的判断，
+   * 不是模型的。校验仍走 `build` 那一套（重复检查、施工、铺路）。
+   */
+  private buildFromIntent(raw: string, intent: BuildIntent): CommandResult {
+    // 拆：同一份意图，方向相反。找到那栋楼再走 demolish 的三条拒绝。
+    if (intent.action === 'demolish') {
+      const target = this.buildings.find((b) => b.prefabId === intent.templateId);
+      if (target === undefined) {
+        const message = `没有${this.blueprints?.get(intent.templateId)?.displayName ?? intent.templateId}可拆。`;
+        this.log('warn', message);
+        return { ok: false, message };
+      }
+      const result = this.demolish(target.instanceId);
+      if (result.ok) this.inscribe(raw, result.message);
+      return result;
+    }
+
+    const blueprint = this.blueprints?.get(intent.templateId);
+    if (blueprint === undefined) {
+      const message = `没有 ${intent.templateId} 这份蓝图。`;
+      this.log('warn', message);
+      return { ok: false, message };
+    }
+    // 世界里的每种铺子只有一栋。认出了意图，但要说清"已经有了"——
+    // 这比认不出有用：用户知道自己被听懂了，也知道为什么没建。
+    const existing = this.buildings.find((b) => b.prefabId === intent.templateId);
+    if (existing !== undefined) {
+      // 说清"已经有了"，并且如果世界有明确缺口，顺带指出该补什么。
+      const gaps = summarizeWorld(this.snapshot()).gaps.missingWild;
+      // 用纸面上的说法（「查资料」），不是内部枚举名（research）。
+      const hint =
+        gaps.length === 0
+          ? '想扩建的话说「建个工坊」。'
+          : `世界还缺${gaps.map((kind) => TASK_PROFILES[kind].label).join('、')}的郊野铺子。`;
+      const message = `已经有${existing.displayName}了。${hint}`;
+      this.log('warn', message);
+      return { ok: false, message };
+    }
+    const instanceId = `${intent.templateId}#${this.buildings.length + 1}`;
+    const result = this.build(intent.templateId, instanceId, intent.at ?? undefined, {
+      taskId: `oracle-build-${instanceId}`,
+      summary: `按神谕建了${blueprint.displayName}`,
+    });
+    if (result.ok) this.inscribe(raw, result.message);
+    return result;
+  }
+
+  /** 刻石板。只记真正改变了世界的那句话；超出上限丢最旧。 */
+  private inscribe(raw: string, receipt: string): void {
+    this.oracleLog.push({ raw, receipt, at: this.now });
+    if (this.oracleLog.length > ORACLE_SLAB_LIMIT) {
+      this.oracleLog.splice(0, this.oracleLog.length - ORACLE_SLAB_LIMIT);
     }
   }
 
@@ -498,14 +941,14 @@ export class Simulation {
     // 读档后对账前：台账单只读展示，不派活。
     if (!this.ledgerReconciled) return;
     for (const task of this.nextLedgerTasks()) {
-      const building = this.buildings.find((item) => item.boundTask === task.kind);
-      if (building === undefined) {
-        this.log('warn', `没有承接 ${task.kind} 的铺子，「${task.summary}」派不下去。`);
+      // 台账活只去镇内铺子：那是本地确定性工作。郊野留给探索性的神谕活。
+      const chosen = pickVenue(this.venueCandidates(), task.kind, 'ledger');
+      if (chosen === null) {
+        this.log('warn', `没有空闲的镇内铺子承接 ${task.kind}，「${task.summary}」先等着。`);
         continue;
       }
-      if (this.constructions.has(building.instanceId)) continue;
-      if (this.activities.get(building.instanceId)?.kind === 'overheating') continue;
-      if (this.buildingBusy(building)) continue;
+      const building = this.buildings.find((item) => item.instanceId === chosen.instanceId);
+      if (building === undefined) continue;
       const path = this.grid.path(this.cellOf(villager.pos), building.door);
       if (path.length === 0) continue;
       task.buildingId = building.instanceId;
@@ -514,6 +957,26 @@ export class Simulation {
       this.log('oracle', `台账派活：${task.summary} → ${building.displayName}（${villager.name}）`);
       return;
     }
+  }
+
+  /**
+   * 当前所有铺子的候选视图，供 `pickVenue` 挑。
+   *
+   * 「郊野」按离祭坛的距离判，而不是按分区名：镇内与郊野的铺子可能同属
+   * `industry`，只有位置能区分。
+   */
+  private venueCandidates(): readonly VenueCandidate[] {
+    return this.buildings.map((building) => ({
+      instanceId: building.instanceId,
+      boundTask: building.boundTask,
+      // 按**身份**判郊野，不按距离：镇内书斋实测落在 23 格外，按距离会被
+      // 误判成郊野，于是神谕活全派给了镇内铺子。prefab id 是可靠的来源。
+      isWild: WILD_PREFABS.has(building.prefabId),
+      busy:
+        this.constructions.has(building.instanceId) ||
+        this.activities.get(building.instanceId)?.kind === 'overheating' ||
+        this.buildingBusy(building),
+    }));
   }
 
   /** 按台账给的优先级排好的、还没人接的台账单。 */
@@ -592,7 +1055,8 @@ export class Simulation {
 
   private setWeather(weather: Weather): CommandResult {
     if (weather === this.weather.kind && this.weather.remainingMs !== null) {
-      return { ok: true, message: '天已经在下雨了。' };
+      // `ok: false` 表示"世界没变"，与"命令被拒"是两回事；调用方只把 ok 当"变了"用。
+      return { ok: false, message: '天已经在下雨了。' };
     }
     if (weather === 'rain') {
       this.weather = rainWeather(this.now);
@@ -647,26 +1111,16 @@ export class Simulation {
       return { ok: true, message: '这点小事她当场就办。' };
     }
 
-    const building = this.buildings.find((item) => item.boundTask === taskKind);
+    // 你派的活优先去郊野：那是探索性的外部工作。
+    const chosen = pickVenue(this.venueCandidates(), taskKind, 'oracle');
+    if (chosen === null) {
+      const message = `没有空闲的 ${taskKind} 铺子。`;
+      this.log('warn', message);
+      return { ok: false, message };
+    }
+    const building = this.buildings.find((item) => item.instanceId === chosen.instanceId);
     if (building === undefined) {
-      const message = `没有承接 ${taskKind} 的铺子。`;
-      this.log('warn', message);
-      return { ok: false, message };
-    }
-    if (this.constructions.has(building.instanceId)) {
-      const message = `${building.displayName} 还在施工，接不了活。`;
-      this.log('warn', message);
-      return { ok: false, message };
-    }
-    if (this.activities.get(building.instanceId)?.kind === 'overheating') {
-      const message = `${building.displayName} 还没修好。`;
-      this.log('warn', message);
-      return { ok: false, message };
-    }
-    if (this.buildingBusy(building)) {
-      const message = `${building.displayName} 正忙，这单得等它空出来。`;
-      this.log('warn', message);
-      return { ok: false, message };
+      return { ok: false, message: `找不到那栋铺子。` };
     }
     const path = this.grid.path(this.cellOf(villager.pos), building.door);
     if (path.length === 0) {
@@ -875,16 +1329,25 @@ export class Simulation {
     return { ok: true, message: `成果已交付（${villager.name}，${label}，不计入台账）。` };
   }
 
-  private build(prefabId: string, instanceId: string): CommandResult {
+  private build(
+    prefabId: string,
+    instanceId: string,
+    at?: GridPoint,
+    source?: { readonly taskId: string; readonly summary: string },
+  ): CommandResult {
     if (this.spawnBuilding === undefined) {
       return { ok: false, message: '这个世界没有造物主。' };
     }
     if (this.buildings.some((item) => item.prefabId === prefabId)) {
       return { ok: false, message: '这种铺子已经有一栋了。' };
     }
-    const spawned = this.spawnBuilding(prefabId, instanceId);
+    const spawned = this.spawnBuilding(prefabId, instanceId, at, source);
     if (spawned === null) {
-      return { ok: false, message: '分区里已经没有合规空地。' };
+      return {
+        ok: false,
+        // 指定位置时要说清是"这里不行"，不是"没地方了"。
+        message: at === undefined ? '分区里已经没有合规空地。' : '这个位置放不下。',
+      };
     }
     this.buildings.push(spawned.building);
     this.activities.set(spawned.building.instanceId, { kind: 'idle' });
@@ -931,6 +1394,7 @@ export class Simulation {
       bubble: villager.bubble,
       routine: villager.routineLabel,
       umbrella: this.weather.kind === 'rain' && villager.mode !== 'working',
+      carrying: villager.carrying,
     };
   }
 
@@ -961,7 +1425,21 @@ export class Simulation {
         return;
       case 'toAltar':
         this.walk(villager, deltaMs);
-        if (villager.path.length === 0) this.arriveAtAltar(villager);
+        if (villager.path.length === 0) {
+          // 到祭坛就把东西放下。
+          villager.carrying = null;
+          this.arriveAtAltar(villager);
+        }
+        return;
+      case 'bearingDecree':
+        this.walk(villager, deltaMs);
+        // 走到祭坛就停下举牌，等用户点开。**不自己回去**：
+        // 问题没答完之前，急件一直呈在那里。
+        if (villager.path.length === 0) {
+          villager.mode = 'idle';
+          villager.bubble = '有急件请旨';
+          villager.bubbleUntil = this.now + 4000;
+        }
         return;
       case 'sheltering':
         this.walk(villager, deltaMs);
@@ -999,7 +1477,7 @@ export class Simulation {
     villager.bubbleUntil = this.now + QUICK_DONE_MS;
     villager.nextRoutineAt = this.now + 1800;
     villager.routineLabel = null;
-    this.accrueFaith();
+    this.accrueFaith(task);
     this.log('done', `${task.summary} 办完了（${villager.name}）。`);
   }
 
@@ -1008,6 +1486,10 @@ export class Simulation {
       this.walk(villager, deltaMs);
       return;
     }
+    // 举着急件的人不走作息：他得守在祭坛等答复。
+    // 不加这条，他一到祭坛就被作息带走，急件呈不出来（实测 v1 在祭坛
+    // 停一拍就溜去农田）。
+    if (this.decreeBearer === villager.id && this.hasDecree()) return;
     if (this.now < villager.nextRoutineAt) return;
 
     // 已经站在这一拍的落点上就跳过它，否则开局会在祭坛上干坐一轮。
@@ -1042,6 +1524,8 @@ export class Simulation {
       const distance = Math.hypot(dx, dy);
       if (distance <= budget) {
         villager.pos = { x: next.x, y: next.y };
+        // 走过一格就踩一次。重复走的格子强度累加，草被踩实。
+        addTrail(this.trails, next);
         budget -= distance;
         villager.path.shift();
         continue;
@@ -1081,7 +1565,8 @@ export class Simulation {
       kind: 'operating',
       taskId: task.id,
       startedAt: this.now,
-      estimateMs: TASK_PROFILES[task.kind].estimateMs,
+      // 郊野的活更久：走那么远，做的活也该更重。
+      estimateMs: taskDurationFor(task.kind, WILD_PREFABS.has(building.prefabId)),
       // 台账的活只有台账知道还要多久；沙盒的活由计时器收尾。
       determinate: task.source === 'sandbox',
     });
@@ -1142,11 +1627,16 @@ export class Simulation {
     villager.mode = 'delivering';
     villager.visible = true;
     villager.facing = 'down';
+    // 郊野干完活：手上多个东西。它是"跑了一趟"的证据，不是奖励。
+    villager.carrying =
+      building !== undefined && WILD_PREFABS.has(building.prefabId)
+        ? carryKindFor(task.kind)
+        : null;
     villager.bubble = '任务交付！';
     villager.bubbleUntil = this.now + DELIVER_MS;
     villager.deliverUntil = this.now + DELIVER_MS;
     villager.path = [];
-    this.accrueFaith();
+    this.accrueFaith(task);
     this.log('done', `${task.summary} 已交付（${villager.name}）。`);
   }
 
@@ -1176,17 +1666,113 @@ export class Simulation {
     return this.settledLog.some((record) => record.id === taskId);
   }
 
-  /** 攒够一个里程碑，世界多一件东西；不够就只是点数。 */
-  private accrueFaith(): void {
+  /** 攒够一个里程碑，世界多一件东西；不够就只是点数。
+   *
+   * `task` 是刚刚交付、把点数推过线的那一单：摆件的来源就记它。
+   * 落不下（周围没空地）时点数保留，不吞掉。
+   */
+  private accrueFaith(task: TaskRecord): void {
     this.faithPoints += POINTS_PER_TASK;
     if (this.faithPoints < FAITH_MILESTONE) return;
     this.faithPoints -= FAITH_MILESTONE;
-    const prop = nextProp(this.milestones, this.altar, (p) => this.grid.isWalkable(p));
+    const prop = nextProp(
+      this.milestones,
+      this.altar,
+      (p) => this.grid.isWalkable(p),
+      { kind: task.kind, taskId: task.id, summary: task.summary },
+      this.props.map((item) => item.at),
+    );
     if (prop === null) return;
     this.props.push(prop);
     this.milestones += 1;
-    const name = milestoneFor(this.milestones - 1).label;
-    this.log('info', `神恩落地：祭坛边多了${name}。`);
+    // 日志写清是哪一单换的：这是"被记住"在事件流里的第一次落地。
+    this.log('info', `神恩落地：${describePropSource(prop)}。`);
+  }
+
+  /**
+   * 有 blocked 单就派一个人把急件送到祭坛。
+   *
+   * 只在没人已经举着的时候派：一次只呈一张，同时三个人举牌会把祭坛变收件箱。
+   * 送件的人挑第一个空闲的；都忙就等下一拍——不打断正在干的活。
+   */
+  private stepDecrees(): void {
+    const decree = awaitingDecree(this.snapshotForDecree());
+    if (decree === null) {
+      this.decreeBearer = null;
+      return;
+    }
+    if (this.decreeBearer !== null) {
+      const bearer = this.villagers.find((item) => item.id === this.decreeBearer);
+      // 已在位：正在跑，或者已经到了并站在祭坛旁。
+      // 判「到没到」用位置而不是 bubble——bubble 会过期，过期后这里会
+      // 误判成"没人送"再派一次，把已经举着的人重新派出去。
+      if (bearer !== undefined) {
+        const atAltar =
+          Math.abs(bearer.pos.x - this.altar.x) < 1.5 &&
+          Math.abs(bearer.pos.y - this.altar.y) < 1.5;
+        if (bearer.mode === 'bearingDecree' || atAltar) return;
+      }
+      this.decreeBearer = null;
+    }
+
+    const free = this.villagers.find((item) => item.mode === 'idle' && item.path.length === 0);
+    if (free === undefined) return;
+
+    const path = this.grid.path(this.cellOf(free.pos), this.altar);
+    if (path.length === 0) return;
+    free.mode = 'bearingDecree';
+    free.path = path;
+    free.bubble = '急件！';
+    free.bubbleUntil = this.now + 3000;
+    this.decreeBearer = free.id;
+    this.log('warn', `急件请旨：${decree.title}`);
+  }
+
+  /** 当前是否有待答复的急件。 */
+  private hasDecree(): boolean {
+    return awaitingDecree(this.snapshotForDecree()) !== null;
+  }
+
+  /** 造一个只含台账单的视图给 `awaitingDecree` 用。 */
+  private snapshotForDecree(): WorldSnapshot {
+    return { ...this.snapshot(), tasks: this.tasks };
+  }
+
+  /** 到点的猫自己走开。猫不参与任何结算，这里只做退场。 */
+  private stepCritters(): void {
+    if (this.critters.length === 0) return;
+    this.critters = this.critters.filter((critter) => critter.leavesAt > this.now);
+  }
+
+  /** 拆一栋楼。见 `WorldCommand.demolish` 的三条拒绝。 */
+  private demolish(instanceId: string): CommandResult {
+    const building = this.buildings.find((item) => item.instanceId === instanceId);
+    if (building === undefined) {
+      const message = `没有 ${instanceId} 这栋楼。`;
+      this.log('warn', message);
+      return { ok: false, message };
+    }
+    if (this.constructions.has(instanceId)) {
+      const message = `${building.displayName} 还在施工，拆不了。`;
+      this.log('warn', message);
+      return { ok: false, message };
+    }
+    const busy = this.activities.get(instanceId);
+    if (busy !== undefined && busy.kind === 'operating') {
+      const message = `${building.displayName} 里有人在干活，等这单收工再拆。`;
+      this.log('warn', message);
+      return { ok: false, message };
+    }
+
+    // 释放网格占用。门口的路保留——那是铺过的路，拆楼不铲路。
+    this.grid.remove(instanceId, building.origin, building.footprint.w, building.footprint.h);
+    const index = this.buildings.findIndex((item) => item.instanceId === instanceId);
+    if (index >= 0) this.buildings.splice(index, 1);
+    this.activities.delete(instanceId);
+
+    const message = `${building.displayName} 拆掉了。`;
+    this.log('info', message);
+    return { ok: true, message };
   }
 
   private stepConstructions(deltaMs: number): void {
@@ -1221,7 +1807,7 @@ export class Simulation {
   // ---------------------------------------------------------------- save
 
   /** 序列化世界自有事实；台账链接态与派生计数不入档（ADR_SAVE §1）。 */
-  toSave(): WorldSaveV1 {
+  toSave(): WorldSave {
     const villagers: SavedVillager[] = this.villagers.map((villager) => ({
       id: villager.id,
       name: villager.name,
@@ -1243,13 +1829,15 @@ export class Simulation {
       pendingBuildingId: villager.pendingBuilding?.instanceId ?? null,
     }));
     return {
-      schemaVersion: 1,
+      schemaVersion: 2,
       world: {
         now: this.now,
         villagers,
         buildings: this.buildings.map((building) => ({ ...building })),
         roads: this.roads.map((cell) => ({ x: cell.x, y: cell.y })),
         props: this.props.map((prop) => ({ ...prop })),
+        oracle: this.oracleLog.map((record) => ({ ...record })),
+        critters: this.critters.map((critter) => ({ ...critter, at: { ...critter.at } })),
         // 运行时字段不落盘：ledgerCompletedAt 只服务 settled；v1 schema 已冻结、样例无此键。
         tasks: this.tasks.map((task) => {
           const saved: TaskRecord = { ...task };
@@ -1275,7 +1863,7 @@ export class Simulation {
       meta: {
         savedAtWallClock: this.wallClock(),
         savedReconciled: this.ledgerReconciled,
-        schemaFingerprint: SCHEMA_V1_FINGERPRINT,
+        schemaFingerprint: SCHEMA_V2_FINGERPRINT,
       },
     };
   }
@@ -1285,7 +1873,7 @@ export class Simulation {
    * （`rebuildGridFromPlacements`），deps.buildings 用存档里的那批。
    * 读档后台账一律标记未对账，等首个成功 sync 走 reconcile。
    */
-  static fromSave(save: WorldSaveV1, deps: SimulationDeps): Simulation {
+  static fromSave(save: WorldSave, deps: SimulationDeps): Simulation {
     const names = save.world.villagers.map((villager) => villager.name);
     const sim = new Simulation({
       ...deps,
@@ -1360,6 +1948,11 @@ export class Simulation {
     sim.weather = { ...world.weather };
     sim.faithPoints = world.faith.points;
     sim.milestones = world.faith.milestones;
+
+    sim.oracleLog.length = 0;
+    for (const record of world.oracle) sim.oracleLog.push({ ...record });
+
+    sim.critters = world.critters.map((critter) => ({ ...critter, at: { ...critter.at } }));
 
     // settled 是分账唯一真相：由它重建私有日志与交付统计（不持久化计数）。
     sim.settledLog.length = 0;

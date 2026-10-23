@@ -90,10 +90,16 @@ export function createWorldOverlay(scene: Phaser.Scene, root: HTMLElement): Worl
     const camera = scene.cameras.main;
     const viewport: OverlayViewport = {
       rect: { left: 0, top: 0, width: canvasRect.width, height: canvasRect.height },
-      gameWidth: camera.width,
-      gameHeight: camera.height,
-      cameraWorldX: camera.worldView.x,
-      cameraWorldY: camera.worldView.y,
+      // gameWidth 必须是**画布的逻辑像素**（480×320），不是显示像素（960×640）。
+      // 传错的话 rect/gameWidth 恒为 1，overlay 会按世界像素直接摆放，
+      // 在 2 倍显示下正好偏一半——实测偏 486px。
+      gameWidth: canvas.width,
+      gameHeight: canvas.height,
+      // 用 scrollX/Y 而不是 worldView：worldView 由相机的 preRender 更新，
+      // 而场景 update 在 preRender 之前跑，拿到的会是上一帧的值——开局第一帧
+      // 就是 (0,0)，overlay 会整整错开一个屏幕。scroll 是即时值。
+      cameraWorldX: camera.scrollX,
+      cameraWorldY: camera.scrollY,
       cameraZoom: camera.zoom,
     };
     const dpr = window.devicePixelRatio || 1;

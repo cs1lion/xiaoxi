@@ -4,7 +4,7 @@ import { readFileSync } from 'node:fs';
 import { parseBlueprintTable } from '../src/world/blueprints.ts';
 import { ALTAR, buildWorld } from '../src/world/setup.ts';
 import { Simulation } from '../src/world/simulation.ts';
-import { SAVE_STORAGE_KEY, SETTLED_WARN_THRESHOLD, type WorldSaveV1 } from '../src/world/save.ts';
+import { SAVE_STORAGE_KEY, SETTLED_WARN_THRESHOLD, type WorldSave } from '../src/world/save.ts';
 import { SaveStore, type StorageLike } from '../src/ui/save-store.ts';
 
 const raw = JSON.parse(
@@ -48,7 +48,7 @@ class FakeStorage implements StorageLike {
   }
 }
 
-function makeSave(): WorldSaveV1 {
+function makeSave(): WorldSave {
   const world = buildWorld(blueprints);
   let clock = 1000;
   const sim = new Simulation({

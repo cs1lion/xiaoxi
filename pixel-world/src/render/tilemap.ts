@@ -23,8 +23,11 @@ export function drawTerrain(
   grid: WorldGrid,
   originX: number,
   originY: number,
+  target?: Phaser.GameObjects.Graphics,
 ): void {
-  const g = scene.add.graphics();
+  // 给了 target 就画进它：烘焙到纹理时用同一个 Graphics，
+  // 否则每次子绘制都会多创建一个对象。
+  const g = target ?? scene.add.graphics();
 
   // pass 1：底色。先全部铺满，后面的纹理才不会被邻格底色覆盖。
   for (let y = 0; y < grid.height; y += 1) {
@@ -60,9 +63,9 @@ export function drawTerrain(
     }
   }
 
-  drawPlantingBeds(scene, grid, originX, originY);
-  drawFarmFence(scene, grid, originX, originY);
-  drawDressing(scene, grid, originX, originY);
+  drawPlantingBeds(scene, grid, originX, originY, g);
+  drawFarmFence(scene, grid, originX, originY, g);
+  drawDressing(scene, grid, originX, originY, g);
 
   // 网格线只是排查落位用的辅助层，默认不画：铺满全屏的细线会把地形纹理与轮廓压成
   // “表格纸”，也会让建筑/道路的边线失去对比。需要时用 ?debug-grid=1 打开。
@@ -343,8 +346,9 @@ function drawPlantingBeds(
   grid: WorldGrid,
   originX: number,
   originY: number,
+  target?: Phaser.GameObjects.Graphics,
 ): void {
-  const g = scene.add.graphics();
+  const g = target ?? scene.add.graphics();
   const streetX = Math.floor(grid.width / 2) - 2;
   const streetW = 4;
   let plazaTop = grid.height;
@@ -422,8 +426,9 @@ function drawFarmFence(
   grid: WorldGrid,
   originX: number,
   originY: number,
+  target?: Phaser.GameObjects.Graphics,
 ): void {
-  const g = scene.add.graphics();
+  const g = target ?? scene.add.graphics();
   for (let y = 0; y < grid.height; y += 1) {
     for (let x = 0; x < grid.width; x += 1) {
       if (grid.at({ x, y })?.terrain !== 'farm') continue;
@@ -460,12 +465,14 @@ function drawFarmFence(
 }
 
 /** 草地/农田的贴边草与少量石子。纯装饰，不参与碰撞。 */
-function drawDressing(  scene: Phaser.Scene,
+function drawDressing(
+  scene: Phaser.Scene,
   grid: WorldGrid,
   originX: number,
   originY: number,
+  target?: Phaser.GameObjects.Graphics,
 ): void {
-  const g = scene.add.graphics();
+  const g = target ?? scene.add.graphics();
   for (let y = 0; y < grid.height; y += 1) {
     for (let x = 0; x < grid.width; x += 1) {
       const cell = grid.at({ x, y });

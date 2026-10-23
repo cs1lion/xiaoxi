@@ -55,6 +55,33 @@
           8px 8px 0 0 color-mix(in srgb, var(--base) 22%, transparent);
       }
       #app canvas { display: block; image-rendering: pixelated; }
+      /* 小地图：叠在舞台右上角，不挡世界主体。点它跳转镜头。 */
+      #minimap {
+        position: absolute;
+        top: 8px;
+        right: 8px;
+        z-index: 5;
+        line-height: 0;
+        border: 1px solid var(--line);
+        background: var(--base);
+        cursor: crosshair;
+        /* 与 #app 同一套硬投影语言，不引入模糊。 */
+        box-shadow:
+          2px 2px 0 0 color-mix(in srgb, var(--base) 55%, transparent);
+      }
+      #minimap canvas { display: block; image-rendering: pixelated; }
+      /* 世界状态：造物区上方一行，说清镇内郊野与缺口。
+         用纸面底色 + 琥珀左边线，让它读成"一块状态"，而不是一行灰字。 */
+      .world-state {
+        color: var(--ink);
+        font-size: 12px;
+        line-height: 1.7;
+        padding: 6px 10px;
+        margin: 2px 0 4px;
+        background: color-mix(in srgb, var(--base) 60%, transparent);
+        border-left: 2px solid var(--amber);
+        letter-spacing: 0.02em;
+      }
       /* 动态中文 DOM overlay（D5-A）：按 canvas 实际位置换算，不遮输入/纸面。 */
       #world-overlay {
         position: absolute;
@@ -196,6 +223,91 @@
         line-height: 1.85;
       }
       #paper li::marker { color: rgba(36, 33, 27, 0.45); }
+      /* 急件：琥珀色边框，比石板更抢眼——它在等你。 */
+      #decree {
+        width: 720px;
+        max-width: 100%;
+        padding: 12px 18px 14px;
+        background: var(--ink);
+        color: var(--paper-ink);
+        font-family: "Noto Serif SC", Songti SC, serif;
+        border-top: 3px solid var(--amber);
+        box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--amber) 45%, transparent);
+      }
+      #decree[hidden] { display: none; }
+      #decree .masthead {
+        display: flex;
+        align-items: baseline;
+        justify-content: space-between;
+        padding-bottom: 5px;
+        border-bottom: 1px solid rgba(36, 33, 27, 0.25);
+      }
+      #decree .name {
+        font-family: var(--font-pixel);
+        font-size: 12px;
+        font-weight: 400;
+        letter-spacing: 0.24em;
+      }
+      #decree .date { font-size: 11px; color: rgba(36, 33, 27, 0.65); }
+      #decree .decree-note {
+        margin: 8px 0 6px;
+        font-size: 11px;
+        color: rgba(36, 33, 27, 0.6);
+      }
+      #decree blockquote {
+        margin: 0 0 8px;
+        padding: 8px 10px;
+        border-left: 3px solid var(--amber);
+        background: rgba(227, 161, 60, 0.12);
+        font-size: 13px;
+        line-height: 1.7;
+        /* 完整原文，允许换行，不截断 */
+        white-space: pre-wrap;
+        overflow-wrap: anywhere;
+      }
+      #decree .decree-hint {
+        margin: 0;
+        font-size: 11px;
+        color: rgba(36, 33, 27, 0.6);
+      }
+      /* 石板：纸面深一档，读成"刻着的"而不是"印着的"。 */
+      #slab {
+        width: 720px;
+        max-width: 100%;
+        padding: 12px 18px 14px;
+        background: var(--ink);
+        color: var(--paper-ink);
+        font-family: "Noto Serif SC", Songti SC, serif;
+        border-top: 3px solid var(--amber);
+      }
+      #slab .masthead {
+        display: flex;
+        align-items: baseline;
+        justify-content: space-between;
+        padding-bottom: 5px;
+        border-bottom: 1px solid rgba(36, 33, 27, 0.25);
+      }
+      #slab .name {
+        font-family: var(--font-pixel);
+        font-size: 12px;
+        font-weight: 400;
+        letter-spacing: 0.24em;
+      }
+      #slab .date { font-size: 11px; color: rgba(36, 33, 27, 0.65); }
+      #slab .slab-note {
+        margin: 8px 0 4px;
+        font-size: 11px;
+        color: rgba(36, 33, 27, 0.6);
+      }
+      #slab ol {
+        margin: 0;
+        padding-left: 1.4em;
+        font-size: 12px;
+        line-height: 1.75;
+      }
+      #slab li::marker { color: rgba(227, 161, 60, 0.9); }
+      #slab .receipt { color: rgba(36, 33, 27, 0.62); }
+      #slab .empty { list-style: none; margin-left: -1.4em; color: rgba(36, 33, 27, 0.55); }
       footer { color: rgba(142, 150, 140, 0.8); font-size: 12px; text-align: center; max-width: 480px; }
       /* 调试面板：只读浮层，不遮挡世界主舞台，390px 也不横向溢出。 */
       #debug-toggle { position: fixed; top: 10px; right: 10px; z-index: 50; }
@@ -265,6 +377,7 @@
     <div id="stage">
       <div id="app"></div>
       <div id="world-overlay"></div>
+      <div id="minimap" role="group" aria-label="世界小地图"></div>
     </div>
 
     <div id="status" role="status">世界正在醒来…</div>
@@ -301,10 +414,16 @@
         <button type="button" data-kind="quick">顺手看一眼</button>
         <button type="button" id="finish">现实完成：交付</button>
       </div>
-      <div class="row">
+      <div class="world-state" id="world-state" aria-live="polite">世界正在醒来…</div>
+      <div class="row" id="build-row">
         <button type="button" data-build="workshop_plot">世界法则：扩建一栋工坊</button>
+        <button type="button" data-create="workshop_plot">造物模式：选位置扩建</button>
         <button type="button" id="rain">世界法则：下雨</button>
         <button type="button" id="clear">世界法则：放晴</button>
+        <button type="button" data-miracle="light">神迹：点灯</button>
+        <button type="button" data-miracle="tree">神迹：种树</button>
+        <button type="button" data-miracle="cat">神迹：召唤猫</button>
+        <button type="button" id="phase-auto">时辰：跟随真实时间</button>
       </div>
       <div class="row">
         <button type="button" id="save-now">存档：写入单槽</button>
@@ -327,6 +446,25 @@
       </div>
       <h2 id="paper-headline">世界刚醒来</h2>
       <ul id="paper-lines"></ul>
+    </section>
+
+    <section id="decree" aria-live="polite" hidden>
+      <div class="masthead">
+        <span class="name">急件请旨</span>
+        <span class="date" id="decree-title"></span>
+      </div>
+      <p class="decree-note">这一单在等你答复。世界不会替你做决定。</p>
+      <blockquote id="decree-question"></blockquote>
+      <p class="decree-hint">在主产品的督办界面答复这一单；答复后台账会把状态改回去，急件自动收回。</p>
+    </section>
+
+    <section id="slab" aria-live="polite">
+      <div class="masthead">
+        <span class="name">神谕石板</span>
+        <span class="date" id="slab-count"></span>
+      </div>
+      <p class="slab-note">只刻真正改变过世界的话。</p>
+      <ol id="slab-lines"></ol>
     </section>
 
     <footer>

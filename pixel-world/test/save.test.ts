@@ -4,7 +4,8 @@ import { readFileSync } from 'node:fs';
 import { parseBlueprintTable } from '../src/world/blueprints.ts';
 import { ALTAR, buildWorld, buildWorldFromSave, placeBlueprint } from '../src/world/setup.ts';
 import { Simulation } from '../src/world/simulation.ts';
-import { assertSaveV1, MIGRATIONS, SAVE_SETTLED_KEYS, SAVE_TASK_KEYS, type WorldSaveV1 } from '../src/world/save.ts';
+import { assertSave, migrateSave, SAVE_SETTLED_KEYS, SAVE_TASK_KEYS, type WorldSave } from '../src/world/save.ts';
+import type { PlacedBuilding, WorldProp } from '../src/world/types.ts';
 
 const raw = JSON.parse(
   readFileSync(new URL('../src/world/prefabs.json', import.meta.url), 'utf8'),
@@ -27,7 +28,7 @@ function makeSim(wallClock: () => number = () => 1000): Simulation {
   });
 }
 
-function depsFromSave(save: WorldSaveV1, wallClock: () => number = () => 1000) {
+function depsFromSave(save: WorldSave, wallClock: () => number = () => 1000) {
   const world = buildWorldFromSave(save.world.buildings);
   return {
     grid: world.grid,
@@ -38,8 +39,8 @@ function depsFromSave(save: WorldSaveV1, wallClock: () => number = () => 1000) {
   };
 }
 
-function fromSave(save: WorldSaveV1): Simulation {
-  const clone = JSON.parse(JSON.stringify(save)) as WorldSaveV1;
+function fromSave(save: WorldSave): Simulation {
+  const clone = JSON.parse(JSON.stringify(save)) as WorldSave;
   return Simulation.fromSave(clone, depsFromSave(clone));
 }
 
@@ -113,9 +114,9 @@ test('settled 时钟不混用：mock=local/wall clock，ledger=ledger/null', () 
 
 test('对账：已结算不重复、不复活；缺席且完整不复活；不完整则保留', () => {
   const sample = JSON.parse(
-    readFileSync(new URL('../../docs/save-v1.sample.json', import.meta.url), 'utf8'),
-  ) as WorldSaveV1;
-  assertSaveV1(sample);
+    readFileSync(new URL('../../docs/save-v2.sample.json', import.meta.url), 'utf8'),
+  ) as WorldSave;
+  assertSave(sample);
   const demo = 'c_demo000001';
   const settledLedger = 'c_000000000001';
   // 样例里有一个已超过工时的 operating 单：先跑一拍把计时器落定，再作为计数基准。
@@ -199,17 +200,82 @@ test('对账：已结算不重复、不复活；缺席且完整不复活；不�
   assert.equal(overwritten.snapshot().ledger.reconciled, true);
 });
 
-test('v1→v2 迁移样例：补 completedAtClock，不重复不丢', () => {
-  const migrated = MIGRATIONS[1]?.({
-    schemaVersion: 1,
-    world: {
-      settled: [{ id: 't0', source: 'mock', workerId: 'v1', completedAt: 123 }],
-    },
-  }) as { schemaVersion: number; world: { settled: { id: string; completedAtClock: string }[] } };
+test('v1→v2 迁移：样例级旧档完整可迁移，迁移后能过当前校验', () => {
+  const v1 = JSON.parse(
+    readFileSync(new URL('../../docs/save-v1.sample.json', import.meta.url), 'utf8'),
+  ) as Record<string, unknown>;
+  const migrated = migrateSave(v1);
+
+  assert.doesNotThrow(() => assertSave(migrated), '迁移产物必须直接过 v2 校验');
   assert.equal(migrated.schemaVersion, 2);
-  assert.equal(migrated.world.settled.length, 1);
-  assert.equal(migrated.world.settled[0]?.id, 't0');
-  assert.equal(migrated.world.settled[0]?.completedAtClock, 'local');
+});
+
+test('v1→v2 迁移：老摆件没有来源，记 null 而不是编造', () => {
+  const v1 = JSON.parse(
+    readFileSync(new URL('../../docs/save-v1.sample.json', import.meta.url), 'utf8'),
+  ) as Record<string, unknown>;
+  const migrated = migrateSave(v1) as unknown as WorldSave;
+
+  assert.ok(migrated.world.props.length > 0, 'v1 样例里有摆件可供断言');
+  for (const prop of migrated.world.props) {
+    assert.equal(prop.sourceTaskKind, null, '迁移不得给老摆件编造来源类型');
+    assert.equal(prop.sourceTaskId, null, '迁移不得给老摆件编造来源单号');
+    assert.ok(prop.label.length > 0, '原有字段不能在迁移里丢');
+  }
+});
+
+test('v1→v2 迁移：石板从无到空数组，不是缺字段', () => {
+  const v1 = JSON.parse(
+    readFileSync(new URL('../../docs/save-v1.sample.json', import.meta.url), 'utf8'),
+  ) as Record<string, unknown>;
+  const migrated = migrateSave(v1) as unknown as WorldSave;
+
+  assert.deepEqual(migrated.world.oracle, [], 'v1 没有石板，迁移后是空数组');
+  assert.equal(Object.prototype.hasOwnProperty.call(migrated.world, 'oracle'), true);
+});
+
+test('v1→v2 迁移：除新增字段外，世界状态逐字段不变', () => {
+  const v1 = JSON.parse(
+    readFileSync(new URL('../../docs/save-v1.sample.json', import.meta.url), 'utf8'),
+  ) as unknown as WorldSave;
+  const migrated = migrateSave(v1 as unknown as Record<string, unknown>) as unknown as WorldSave;
+
+  const {
+    oracle: _oracle,
+    critters: _critters,
+    props: migratedProps,
+    buildings: migratedBuildings,
+    ...migratedRest
+  } = migrated.world;
+  const { props: v1Props, buildings: v1Buildings, ...v1Rest } = v1.world;
+  assert.deepEqual(migratedRest, v1Rest, '迁移不能顺手改动别的世界状态');
+
+  const stripBuildings = (list: readonly PlacedBuilding[]): unknown[] =>
+    list.map((building) => {
+      const { sourceTaskId: _id, sourceSummary: _summary, ...rest } = building;
+      return rest;
+    });
+  assert.deepEqual(
+    stripBuildings(migratedBuildings),
+    stripBuildings(v1Buildings),
+    '建筑除来源外必须逐字段一致',
+  );
+
+  const strip = (props: readonly WorldProp[]): unknown[] =>
+    props.map((prop) => {
+      const { sourceTaskKind: _kind, sourceTaskId: _id, sourceSummary: _sum, ...rest } = prop;
+      return rest;
+    });
+  assert.deepEqual(strip(migratedProps), strip(v1Props), '摆件除来源外必须逐字段一致');
+});
+
+test('迁移前的旧档要自证：被改过的假 v1 档不能靠迁移洗白', () => {
+  const v1 = JSON.parse(
+    readFileSync(new URL('../../docs/save-v1.sample.json', import.meta.url), 'utf8'),
+  ) as Record<string, unknown> & { world: Record<string, unknown> };
+  v1.world.smuggledField = 1;
+
+  assert.throws(() => migrateSave(v1), /字段漂移/, '越界的旧档必须在迁移前被拒');
 });
 
 // ---------------------------------------- v1 存档字段漂移防线（task-24）
@@ -238,7 +304,7 @@ test('toSave 剥离运行时字段：tasks[] 键集合=样例、done⊆settled�
   assert.deepEqual(Object.keys(midTask).sort(), [...SAVE_TASK_KEYS].sort(),
     'tasks[] 键集合必须与 v1 冻结样例一致');
   assert.equal('ledgerCompletedAt' in midTask, false, '运行时字段 ledgerCompletedAt 不得落盘');
-  assert.doesNotThrow(() => assertSaveV1(midSave), '中途存档必须通过 v1 嵌套校验');
+  assert.doesNotThrow(() => assertSave(midSave), '中途存档必须通过 v1 嵌套校验');
 
   sim.enqueue({
     kind: 'sync',
@@ -276,22 +342,22 @@ test('toSave 剥离运行时字段：tasks[] 键集合=样例、done⊆settled�
   for (const record of save.world.settled) {
     assert.deepEqual(Object.keys(record).sort(), [...SAVE_SETTLED_KEYS].sort());
   }
-  assert.doesNotThrow(() => assertSaveV1(save), '运行时存档必须通过 v1 嵌套校验');
+  assert.doesNotThrow(() => assertSave(save), '运行时存档必须通过 v1 嵌套校验');
 });
 
-test('嵌套漂移防线：tasks[] 加字段 / done 缺 settled → assertSaveV1 必红，还原后恢复', () => {
+test('嵌套漂移防线：tasks[] 加字段 / done 缺 settled → assertSave 必红，还原后恢复', () => {
   const sim = makeSim();
   sim.enqueue({ kind: 'dispatch', taskKind: 'quick', summary: '顺手看一眼' });
   sim.update(16);
   const save = sim.toSave();
-  assertSaveV1(save);
+  assertSave(save);
 
-  type MutableSave = WorldSaveV1 & { world: { tasks: Record<string, unknown>[] } };
+  type MutableSave = WorldSave & { world: { tasks: Record<string, unknown>[] } };
   const withExtraKey = JSON.parse(JSON.stringify(save)) as MutableSave;
   withExtraKey.world.tasks[0].runtimeOnly = 1;
-  assert.throws(() => assertSaveV1(withExtraKey), /键集合与 v1 样例不一致/);
+  assert.throws(() => assertSave(withExtraKey), /键集合与 v1 样例不一致/);
   delete withExtraKey.world.tasks[0].runtimeOnly;
-  assertSaveV1(withExtraKey);
+  assertSave(withExtraKey);
 
   // done 必须能在 settled 找到：伪造一个「完成了但没结算」的任务。
   // task-32 后有两层都会拦：字段级校验先发现「done 却没有 completedAt」，
@@ -301,7 +367,7 @@ test('嵌套漂移防线：tasks[] 加字段 / done 缺 settled → assertSaveV1
   };
   missingSettled.world.tasks[0].status = 'done';
   missingSettled.world.settled = [];
-  assert.throws(() => assertSaveV1(missingSettled), /done 任务必须有完成时间/);
+  assert.throws(() => assertSave(missingSettled), /done 任务必须有完成时间/);
 
   const doneWithoutSettled = JSON.parse(JSON.stringify(save)) as MutableSave & {
     world: { settled: unknown[]; tasks: Record<string, unknown>[] };
@@ -309,24 +375,24 @@ test('嵌套漂移防线：tasks[] 加字段 / done 缺 settled → assertSaveV1
   doneWithoutSettled.world.tasks[0].status = 'done';
   doneWithoutSettled.world.tasks[0].completedAt = 5000;
   doneWithoutSettled.world.settled = [];
-  assert.throws(() => assertSaveV1(doneWithoutSettled), /缺少 settled 记录/);
+  assert.throws(() => assertSave(doneWithoutSettled), /缺少 settled 记录/);
 });
 
 // P2：指纹重算不能与「空数组」冲突——还没发生过 tasks/settled 的正常存档必须继续通过。
-test('P2 契约：fresh toSave（空数组）与运行中 toSave 都通过 assertSaveV1', () => {
+test('P2 契约：fresh toSave（空数组）与运行中 toSave 都通过 assertSave', () => {
   const fresh = makeSim();
   fresh.update(16);
   const save = fresh.toSave();
   assert.equal(save.world.settled.length, 0);
-  assert.doesNotThrow(() => assertSaveV1(save), '空 tasks/settled 的正常存档不能判成坏档');
+  assert.doesNotThrow(() => assertSave(save), '空 tasks/settled 的正常存档不能判成坏档');
 
   const running = makeSim();
   running.enqueue({ kind: 'dispatch', taskKind: 'quick', summary: '顺手看一眼' });
   running.update(16);
-  assert.doesNotThrow(() => assertSaveV1(running.toSave()));
+  assert.doesNotThrow(() => assertSave(running.toSave()));
 });
 
-test('P2 契约：小人走路中（villagers[].path 非空）的存档仍通过 assertSaveV1', () => {
+test('P2 契约：小人走路中（villagers[].path 非空）的存档仍通过 assertSave', () => {
   const sim = makeSim();
   sim.enqueue({ kind: 'dispatch', taskKind: 'code', summary: '写脚本' });
   let guard = 0;
@@ -336,10 +402,10 @@ test('P2 契约：小人走路中（villagers[].path 非空）的存档仍通过
   }
   const save = sim.toSave();
   assert.ok(save.world.villagers.some((villager) => villager.path.length > 0), '样例里没有的 path[].x/y 必须被允许');
-  assert.doesNotThrow(() => assertSaveV1(save));
+  assert.doesNotThrow(() => assertSave(save));
 });
 
-test('P2 契约：满数据存档（settled / constructions / 队列非空）通过 assertSaveV1', () => {
+test('P2 契约：满数据存档（settled / constructions / 队列非空）通过 assertSave', () => {
   const sim = makeSim();
   sim.enqueue({ kind: 'dispatch', taskKind: 'quick', summary: '顺手看一眼' });
   let guard = 0;
@@ -354,5 +420,5 @@ test('P2 契约：满数据存档（settled / constructions / 队列非空）通
   const save = sim.toSave();
   assert.ok(save.world.settled.length > 0, '满数据档应有 settled');
   assert.ok(save.world.constructions.length > 0, '满数据档应有 constructions');
-  assert.doesNotThrow(() => assertSaveV1(save));
+  assert.doesNotThrow(() => assertSave(save));
 });

@@ -95,3 +95,16 @@ export const TERRAIN_SPECK = {
   farm: WORLD.soil,
   tree: WORLD.grass,
 } as const;
+
+/**
+ * 色值 → token 名。找不到时抛错而不是编一个。
+ *
+ * 用途：把已有的色值（比如模板自带的配色）反查回 token 名，
+ * 好喂给造物主 schema——它只接受 token 名，不接受色值。
+ */
+export function tokenNameOf(color: number): string {
+  for (const [name, value] of Object.entries(WORLD)) {
+    if (value === color) return name;
+  }
+  throw new Error(`色值 ${color} 不在 24 色表里，无法反查 token 名`);
+}

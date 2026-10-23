@@ -5,6 +5,7 @@
  */
 
 import type { WorldEvent, WorldSnapshot } from './types.ts';
+import { describePropSource } from './faith.ts';
 
 export interface DailyReport {
   readonly headline: string;
@@ -55,11 +56,22 @@ export function composeReport(snapshot: WorldSnapshot): DailyReport {
 
   const newBuildings = snapshot.buildings.filter((building) => building.boundTask === null);
   if (newBuildings.length > 0) {
-    lines.push(`造物主新起 ${newBuildings.length} 栋楼：${newBuildings.map((b) => b.displayName).join('、')}`);
+    // 有来由的楼写清来由：那是"被记住"在建筑上的落点。
+    const described = newBuildings.map((building) =>
+      building.sourceSummary === null || building.sourceSummary === undefined
+        ? building.displayName
+        : `${building.displayName}（${building.sourceSummary}）`,
+    );
+    lines.push(`造物主新起 ${newBuildings.length} 栋楼：${described.join('、')}`);
   }
 
   if (snapshot.props.length > 0) {
-    lines.push(`${snapshot.props.map((prop) => prop.label).join('、')} 已经落在祭坛边。`);
+    // 最新那件写清来路，早先的只列名字：一行里挤不下全部来源。
+    const latest = snapshot.props[snapshot.props.length - 1];
+    const earlier = snapshot.props.slice(0, -1).map((prop) => prop.label);
+    const latestLine = latest === undefined ? '' : describePropSource(latest);
+    const head = earlier.length > 0 ? `${earlier.join('、')}、${latestLine}` : latestLine;
+    lines.push(`${head} 已经落在祭坛边。`);
   }
 
   if (failed.length > 0) {
