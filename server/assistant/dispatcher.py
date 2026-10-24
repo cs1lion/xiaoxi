@@ -19,6 +19,7 @@ import time
 from dataclasses import dataclass, field
 from typing import Any, Callable
 
+from ..contract.broadcast import publish_tool_execution
 from ..memory.commission_context import gather as gather_memory
 from ..memory.commission_context import memory_refs, render_memory_block
 from .adapters import (UnknownAdapterError, adapter_types, create_adapter_for,
@@ -455,6 +456,13 @@ class Dispatcher:
                 step_idx = int(event.get("step_idx") or 0)
                 if kind == "progress":
                     self.commissions.record_step(commission_id, step_idx or 1)
+                    # §25.2 TOOL_EXECUTION（至多一次）：一条进展就是一次真实工具
+                    # 执行的可观测信号。tool 如实写执行者（agent_id），适配器事件
+                    # 没带的 steps_total / 状态名不编造。发布失败不冒泡（旁路）。
+                    publish_tool_execution(
+                        task_id=commission_id, tool=str(agent_id), status="running",
+                        steps_done=step_idx or 1,
+                        detail=str(event.get("text") or event.get("detail") or ""))
                     signature = normalize_signature(event)
                     tripped = self._spinning(signatures, commission_id, signature,
                                              agent_id, max_identical)

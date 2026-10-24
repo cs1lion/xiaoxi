@@ -68,6 +68,12 @@ orchestrator.executive = executive
 # sidecar 的 /internal/durable 与老板工作台的 /api/executive/durable 必须看到
 # 同一份 lease/确认单/提议；否则老板批的确认号没有任何派单会消费。
 durable_state = DurableState(executive.ledger)
+# §25 事件协议 v2：发射层（emitter）之上的线上广播。hub 是连接级 seq 的持有者，
+# /ws 端点 attach sink；五命令的动作路由在这里组（动作本体接 executive 门面）。
+from .contract.broadcast import (V2CommandActions, publish_presence, v2_bridge,
+                                 v2_hub)
+from .contract.events_v2 import COMMAND_TYPES as V2_COMMAND_TYPES
+v2_command_actions = V2CommandActions(executive)
 app.include_router(create_router(assistant))
 app.include_router(create_executive_router(executive, durable_state=durable_state))
 app.include_router(create_telemetry_proxy_router(executive))
@@ -106,6 +112,8 @@ _startup_tasks: set[asyncio.Task] = set()
 _connections: set["Connection"] = set()
 # 台账订阅的取消函数。shutdown 时解绑，避免测试里残留订阅者。
 _commission_unsubscribe = None
+# §25 事件协议 v2 的台账订阅取消函数（v2_bridge 六类委托事件），同一对待。
+_v2_unsubscribe = None
 # startup 时抓住的主事件循环。台账回调可能来自别的线程，靠它转回事件循环。
 _loop: asyncio.AbstractEventLoop | None = None
 # 慢环执行内核（agent-runtime sidecar）。默认不启用，见 config 的 durable 段。
@@ -439,11 +447,13 @@ async def _present_reply(conn: Connection, turn: VoiceTurn, text: str, emotion: 
                 break
             payload = dict(event)
             if event['type'] == 'audio':
+                _v2_presence(conn, "speaking")
                 audio = payload.pop('audio')
                 payload = {**payload, 'type': 'audio', 'data': base64.b64encode(audio).decode('ascii')}
             if event['type'] == 'done':
                 payload['latency_ms'] = int((time.monotonic() - started) * 1000)
                 await conn.finish(turn, payload)
+                _v2_presence(conn, "idle")
                 return
             await conn.send_turn(turn, payload)
     finally:
@@ -804,7 +814,10 @@ async def _run_turn(conn: Connection, text: str, mode: str, turn: VoiceTurn | No
                 return
             kind = event["type"]
             payload = dict(event)
-            if kind == "audio":
+            if kind == "thinking":
+                _v2_presence(conn, "thinking")
+            elif kind == "audio":
+                _v2_presence(conn, "speaking")
                 # Preserve the sentence's validated performance plan and any
                 # provider word timings through the WebSocket boundary.
                 payload["data"] = base64.b64encode(payload.pop("audio")).decode("ascii")
@@ -816,14 +829,17 @@ async def _run_turn(conn: Connection, text: str, mode: str, turn: VoiceTurn | No
                     payload.setdefault("message", "error")
                     payload["terminal"] = True
                 await conn.finish(turn, payload)
+                _v2_presence(conn, "idle")
                 conn.spawn(_maybe_diary(conn))
                 return
             await conn.send_turn(turn, payload)
         # A provider that ends without a terminal event must not leave a live turn.
         conn.spawn(_maybe_diary(conn))
         await conn.finish(turn, {"type": "done", "text": "", "latency_ms": 0})
+        _v2_presence(conn, "idle")
     except asyncio.CancelledError:
         await conn.finish(turn, {"type": "interrupted"})
+        _v2_presence(conn, "idle")
         raise
     except Exception as exc:  # pragma: no cover - defensive
         await conn.finish(turn, {"type": "error", "message": str(exc), "terminal": True})
@@ -1051,6 +1067,47 @@ def _spawn_broadcast(commission: dict[str, Any]) -> None:
     task.add_done_callback(_startup_tasks.discard)
 
 
+# ---------------------------------------------------------------- 事件协议 v2（§25）
+
+def _spawn_v2_send(conn: Connection, envelope: dict[str, Any]) -> None:
+    """把一条 v2 信封排给连接发送（事件循环线程内执行，conn.send 自带锁保序）。"""
+    if conn.closed:
+        return
+    task = asyncio.create_task(conn.send(envelope))
+    conn.tasks.add(task)
+    task.add_done_callback(conn._settled)
+
+
+def _make_v2_sink(conn: Connection, loop: asyncio.AbstractEventLoop):
+    """给 v2 hub 的连接 sink：台账回调可能来自任意线程，经 call_soon_threadsafe
+    转回事件循环（FIFO 保序；seq 已在 hub 扇出时按连接盖好）。"""
+    def sink(envelope: dict[str, Any]) -> bool:
+        if conn.closed:
+            return False
+        try:
+            loop.call_soon_threadsafe(_spawn_v2_send, conn, envelope)
+        except RuntimeError:
+            return False  # 循环已关：服务在关闭途中，这条留给 REST 对账
+        return True
+    return sink
+
+
+def _v2_presence(conn: Connection, state: str) -> None:
+    """AGENT_PRESENCE（§25.2 至多一次）：少一帧无所谓，失败静默。"""
+    try:
+        publish_presence(state, session_id=conn.session_id)
+    except Exception:
+        return
+
+
+def _v2_reply(conn: Connection):
+    """v2 命令的错误回执：走既有 v1 error 帧形状（code 前缀 v2_，不新造事件名）。"""
+    async def reply(code: str, message: str) -> None:
+        await conn.send({"type": "error", "code": code, "recoverable": True,
+                         "message": message})
+    return reply
+
+
 @app.websocket("/ws")
 async def websocket_endpoint(ws: WebSocket) -> None:
     # 同源校验：只挡浏览器页面，规则与 Connection.bind_editor_insight 的 netloc 比对一致。
@@ -1080,6 +1137,8 @@ async def websocket_endpoint(ws: WebSocket) -> None:
     await ws.accept()
     conn = Connection(ws)
     _connections.add(conn)
+    # §25：这条连接进 v2 广播名单；seq 从 1 起在本连接内单调（§25.1 取舍 1）。
+    detach_v2 = v2_hub.attach(conn.session_id, _make_v2_sink(conn, asyncio.get_running_loop()))
     store.start_session(conn.session_id)
     await conn.send(
         {
@@ -1121,6 +1180,7 @@ async def websocket_endpoint(ws: WebSocket) -> None:
                 if not await conn.bind_editor_insight(turn, event):
                     continue
                 conn.recording = True
+                _v2_presence(conn, "listening")
                 await conn.send_turn(turn, {"type": "recording", "state": True})
             elif kind == "audio_end":
                 if not conn.matches(event) or not conn.recording:
@@ -1129,6 +1189,7 @@ async def websocket_endpoint(ws: WebSocket) -> None:
                 conn.recording = False
                 data = bytes(conn.buffer)
                 conn.buffer.clear()
+                _v2_presence(conn, "thinking")
                 conn.spawn(_transcribe_turn(conn, turn, data))
             elif kind == "text":
                 if not isinstance(event.get("text"), str):
@@ -1139,11 +1200,17 @@ async def websocket_endpoint(ws: WebSocket) -> None:
                 turn = await conn.begin(event.get("turn_id"))
                 if not await conn.bind_editor_insight(turn, event):
                     continue
+                _v2_presence(conn, "thinking")
                 await conn.send_turn(turn, {"type": "asr", "text": text, "duration_ms": 0})
                 conn.spawn(_run_turn(conn, text, "text", turn))
             elif kind == "barge_in":
                 if conn.matches(event) or (conn.turn is None and event.get("turn_id") is None):
                     await conn.cancel(playback=True)
+                    _v2_presence(conn, "idle")
+            elif kind in V2_COMMAND_TYPES:
+                # §25.3 五命令：校验 + request_id 幂等 + 动作路由都在
+                # V2CommandActions 里；错误回执走 _v2_reply（v1 error 帧形状）。
+                await v2_command_actions.handle(event, _v2_reply(conn))
             elif kind == "narrate":
                 node_id = event.get("node_id")
                 if not isinstance(node_id, str) or not 0 < len(node_id) <= 100:
@@ -1274,6 +1341,7 @@ async def websocket_endpoint(ws: WebSocket) -> None:
     except WebSocketDisconnect:
         pass
     finally:
+        detach_v2()
         _connections.discard(conn)
         await conn.close()
         store.end_session(conn.session_id)
@@ -1515,7 +1583,7 @@ async def _start_durable_if_enabled() -> None:
 
 @app.on_event("startup")
 async def startup() -> None:
-    global _scheduler_task, _loop, _commission_unsubscribe
+    global _scheduler_task, _loop, _commission_unsubscribe, _v2_unsubscribe
     _loop = asyncio.get_running_loop()
     # 协议 §17：本地覆盖与原子热重载。不装快照的话 `config_hot.snapshot()` 恒为
     # None，`config._live()` 永远回落启动加载的基础配置——`config/*.local.yaml`
@@ -1524,6 +1592,9 @@ async def startup() -> None:
     config_hot.start_watcher()
     # 督办状态变化是旁路推送：台账写成功后通知所有在线连接（协议 §19）。
     _commission_unsubscribe = executive.ledger.subscribe(_commission_changed)
+    # §25 事件协议 v2：同一个台账订阅点 diff 出六类委托事件（TASK/STEP/CONTRACT/
+    # ASK/VERIFICATION/DELIVERY）。与 v1 commission_update 并存，v2 是加法不是替换。
+    _v2_unsubscribe = executive.ledger.subscribe(v2_bridge.on_commission)
     orchestrator.set_proactivity(False)
     # 先把执行内核绑好，再收口续跑；否则重派出去的 durable 单没有端点可用。
     await _start_durable_if_enabled()
@@ -1540,11 +1611,15 @@ async def startup() -> None:
 
 @app.on_event("shutdown")
 async def shutdown() -> None:
-    global _durable_supervisor, _commission_unsubscribe, _loop, _reconcile_task
+    global _durable_supervisor, _commission_unsubscribe, _loop, _reconcile_task, _v2_unsubscribe
     # 台账订阅解绑：旁路推送的订阅者必须清掉，否则测试里会残留（协议 §19）。
     if _commission_unsubscribe is not None:
         _commission_unsubscribe()
         _commission_unsubscribe = None
+    if _v2_unsubscribe is not None:
+        _v2_unsubscribe()
+        _v2_unsubscribe = None
+    await v2_command_actions.close()
     _loop = None
     editor_insights.close()
     # 与 startup 的 start_watcher 配对。停掉轮询线程，否则测试进程里会残留

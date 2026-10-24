@@ -6,10 +6,15 @@ import re
 from typing import Any
 
 from ..config import memory_cfg
+from ..contract.broadcast import publish_memory_update
 from .extractor import MAX_EVIDENCE_QUOTE_CHARS, MAX_KEY_CHARS, extract_memories, is_direct_user_evidence
 from .retriever import MemoryRetriever
 from .preference import normalize_preference, PreferenceValidationError
 from .store import KINDS, SOURCES, Memory, MemoryStore, store as default_store
+
+# 批量删除前最多枚举多少行来逐条发 MEMORY_UPDATE：个人记忆库远低于这个量级；
+# 超限时多出来的行不再发事件（store 仍是真相），不为此做无界查询。
+_BULK_EVENT_LIMIT = 1000
 
 
 # Change words are a conservative gate, not proof of semantic entailment.
@@ -29,6 +34,21 @@ def _score(value: Any) -> float | None:
     except (TypeError, ValueError, OverflowError):
         return None
     return number if math.isfinite(number) and 0 <= number <= 1 else None
+
+
+def _publish_memory_event(action: str, memory: Memory, *, provenance: str) -> None:
+    """§5.6 MEMORY_UPDATE（至少一次）：一次真实的记忆写入/纠正/删除就是一次
+    档案室增删。action 语义表与真实操作一一对应（promoted=更强来源 upsert、
+    corrected=新值 supersede 旧值、deleted=物理硬删），不猜别的动作名。
+
+    发布失败不冒泡：记忆以 store 为真相，事件是旁路通知（协议 §19 同口径）。
+    """
+    try:
+        publish_memory_update(action=action, memory_ref=f"{memory.kind}:{memory.key}",
+                              source=memory.source, confidence=float(memory.confidence),
+                              provenance=provenance)
+    except Exception:
+        return
 
 
 class MemoryManager:
@@ -223,12 +243,16 @@ class MemoryManager:
         if importance is None or confidence is None:
             return None
         self.store.invalidate_pending()
-        return self._persist({
+        memory = self._persist({
             "kind": kind, "subject": subject, "source": source,
             "key": key.strip().lower(), "value": " ".join(value.strip().split()),
             "importance": importance, "confidence": confidence,
             "evidence_state": "manual", "evidence_message_id": None, "evidence_quote": "",
         }, session_id=item.get("session_id"))
+        if memory is not None:
+            # §5.6：显式 stated 写入 = 来源升级（promoted）
+            _publish_memory_event("promoted", memory, provenance="manual")
+        return memory
 
     def correct(self, memory_id: int, value: str, *, source: str = "stated") -> Memory | None:
         memory = self.store.get(memory_id)
@@ -244,7 +268,11 @@ class MemoryManager:
             identity_slot=memory.identity_slot,
             force_revision=True,
         )
-        return self.store.get(new_id) if new_id is not None else None
+        updated = self.store.get(new_id) if new_id is not None else None
+        if updated is not None:
+            # §5.6：用户当场纠正 = 新值 supersede 旧值（corrected）
+            _publish_memory_event("corrected", updated, provenance="corrected")
+        return updated
 
     def forget(self, memory_id: int, *, purge_history: bool = True) -> int:
         """Delete this fact's complete identity chain unless explicitly limited."""
