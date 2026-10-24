@@ -57,6 +57,14 @@ export interface Projection {
   readonly active: WorldTask | null;
   /** 台账里已经收工、世界还没交付的那几条。 */
   readonly finished: readonly WorldTask[];
+  /**
+   * 初审过了、等老板点头的那几条。
+   *
+   * 与 `finished` 分开放：`finished` 是「成了」，这些是「还差你一句」。
+   * 曾经把 ready_to_report 归进 finished，世界于是在老板验收前就走完交付、
+   * 加了信仰点。混在一起的代价是错的奖励，所以宁可多一个字段。
+   */
+  readonly awaiting: readonly WorldTask[];
 }
 
 /** 能力关键词 → 三类活。顺序即优先级，先命中的算数。 */
@@ -83,18 +91,26 @@ const ACTIVE_STATUSES = new Set(['briefing', 'running', 'blocked', 'auditing']);
  */
 const FINISHED_STATUSES = new Set(['done']);
 
+/**
+ * 初审过了、等老板点头。
+ *
+ * 它既不是「她还在这单上」（不派活），也不是「成了」（不加信仰、不算交付）。
+ * 世界要知道它，是因为祭坛上得摆一只宝箱——否则老板根本看不到有东西等他批。
+ */
+const AWAITING_STATUSES = new Set(['ready_to_report']);
+
 export function project(input: ProjectionInput): Projection {
   const agents = new Map(input.agents.map((agent) => [agent.id, agent]));
   const tasks: WorldTask[] = [];
   const finished: WorldTask[] = [];
+  const awaiting: WorldTask[] = [];
   for (const commission of input.commissions) {
     const active = ACTIVE_STATUSES.has(commission.status);
     const done = FINISHED_STATUSES.has(commission.status);
-    // 这里只留一个判断，别再加第二道「parked」兜底：
-    // ready_to_report 既不在 ACTIVE 也不在 FINISHED，自然落到 continue，
-    // 语义已经表达完整。多一层冗余会让单点变异测不出来（试过一次：
-    // 把 ready_to_report 塞回 FINISHED，因为还有 parked 兜着，测试照样绿）。
-    if (!active && !done) continue;
+    const waiting = AWAITING_STATUSES.has(commission.status);
+    // 三个集合互斥且覆盖全部七种状态：不在任何一个里的状态（如 drafting）世界不认识，
+    // 直接跳过。别加第四道兜底——多一层冗余会让单点变异测不出来。
+    if (!active && !done && !waiting) continue;
     const agent = agents.get(commission.agent_id);
     const task: WorldTask = {
       commissionId: commission.id,
@@ -108,10 +124,11 @@ export function project(input: ProjectionInput): Projection {
       finished: done,
     };
     if (done) finished.push(task);
+    else if (waiting) awaiting.push(task);
     else tasks.push(task);
   }
   const ordered = orderActive(tasks);
-  return { tasks, ordered, active: ordered[0] ?? null, finished };
+  return { tasks, ordered, active: ordered[0] ?? null, finished, awaiting };
 }
 
 /**
