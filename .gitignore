@@ -72,3 +72,6 @@ agent-runtime/node_modules/
 
 # 意图 live 评测的报告产物（每次跑测重写，不是源码）
 scripts/.intent-live-report.txt
+
+# mattpocock/skills 的 vendored 副本（skills-lock 安装产物，与产品链路零耦合）
+agent/
