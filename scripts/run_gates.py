@@ -335,6 +335,12 @@ GATES: dict[str, dict[str, object]] = {
         "cmd": ["node", "scripts/test-voice-browser.mjs"],
         "skip_regex": r"^\s*SKIP",
     },
+    "step8_e2e_browser": {
+        # T3（#23）：§25 慢环垂直切片 e2e。自起独立端口真实服务（默认 8021，
+        # E2E_PORT 可覆盖），不依赖也不占用 8000/8010，无 Key 走 Mock 全链。
+        "cmd": ["node", "scripts/test-step8-e2e-browser.mjs"],
+        "skip_regex": r"^\s*SKIP",
+    },
 }
 
 # 这些门禁的本体是纯逻辑单测，不需要本地服务，永远必须真跑。
