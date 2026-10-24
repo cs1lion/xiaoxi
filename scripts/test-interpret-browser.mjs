@@ -4,6 +4,8 @@ import { readFile } from 'node:fs/promises';
 import path from 'node:path';
 import assert from 'node:assert/strict';
 const root = path.resolve(import.meta.dirname, '..');
+let health = { ok: true, llm: { provider: 'test', model: 'test-model', offline: false }, asr: { engine: 'whisper', model: 'small' } };
+let healthMode = 'ok';
 const browser = await chromium.launch({ headless: true });
 const errors = [];
 const page = await browser.newPage();
@@ -19,6 +21,11 @@ await page.route('http://localhost/**', async route => {
       if (h.holdCapture) await new Promise(resolve => h.releaseCapture = resolve);
       return capture;
     }` });
+  if (pathname === '/api/health') {
+    return healthMode === 'ok'
+      ? route.fulfill({ contentType: 'application/json', body: JSON.stringify(health) })
+      : route.abort();
+  }
   const relative = pathname === '/interpret' ? 'interpret.html' : pathname.replace(/^\/static\//, '');
   if (!['interpret.html','interpret.js','interpret.css','voice/pcm.js'].includes(relative)) return route.abort();
   const body = await readFile(path.join(root, 'web', relative));
@@ -246,6 +253,27 @@ try {
   assert.equal(selected.context[0].translation,'天气可能好转。');
   assert.ok(!JSON.stringify(selected).includes('Do not import me'));
   checks.push('selected original plus bounded same-session confirmed neighbors handoff; unstable partials excluded');
+  await fresh();
+  await page.waitForFunction(() => !document.getElementById('start').disabled);
+  assert.equal(await page.locator('#status').textContent(), '未开始');
+  assert.equal(await page.locator('#empty').textContent(), '开始后，已识别原文与完成的译文会按片段编号显示在这里。');
+  checks.push('health precheck re-enables start and leaves status/empty untouched when translation is online');
+  health = { ...health, llm: { ...health.llm, offline: true } };
+  await fresh();
+  await page.waitForFunction(() => /服务端未配置/.test(document.getElementById('status').textContent));
+  assert.match(await page.locator('#status').innerText(), /服务端未配置可用的翻译服务（当前离线）/);
+  assert.match(await page.locator('#empty').textContent(), /服务端翻译服务未启用/);
+  assert.equal(await page.locator('#start').isDisabled(), true);
+  assert.equal(await page.evaluate(() => h.ws === undefined && h.contexts.length === 0 && h.permissionCalls === undefined), true);
+  health = { ...health, llm: { ...health.llm, offline: false } };
+  healthMode = 'fail';
+  await fresh();
+  await page.waitForFunction(() => /无法确认/.test(document.getElementById('status').textContent));
+  assert.match(await page.locator('#status').innerText(), /无法确认翻译服务状态/);
+  assert.match(await page.locator('#empty').textContent(), /未能读到服务端状态/);
+  assert.equal(await page.evaluate(() => h.ws === undefined && h.contexts.length === 0 && h.permissionCalls === undefined), true);
+  healthMode = 'ok';
+  checks.push('health precheck disables start with factual status/empty copy when translation is offline or unconfirmed');
   assert.deepEqual(errors,[]);
   console.log(JSON.stringify({ok:true,checks},null,2));
 } finally { await browser.close(); }

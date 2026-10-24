@@ -43,6 +43,8 @@ async def serve_stream_interpretation(ws: Any, llm: Any, stream_factory: Any) ->
     normally 3200-byte/100ms frames (maximum 32000 bytes), without segments.
     Audio overflow is fatal. Translation backlog is two plus one active; finals
     beyond that backlog produce a gap with the exact item_id, never a guess.
+    An offline language model ends the session at start, before any adapter is
+    created, because a mock reply must never reach the subtitle as a translation.
     """
     await ws.accept()
     session = None
@@ -196,6 +198,11 @@ async def serve_stream_interpretation(ws: Any, llm: Any, stream_factory: Any) ->
     async def setup(gen: int) -> None:
         nonlocal adapter, ready
         try:
+            # An offline LLM only answers with persona lines; refuse before opening
+            # the provider stream so a mock reply is never shown as a translation.
+            if llm is None or getattr(llm, "offline", False):
+                await fail("llm_failed", gen)
+                return
             adapter = stream_factory()
             # open gets its own task: stop never waits for cancellation acknowledgement.
             async def opening() -> None:

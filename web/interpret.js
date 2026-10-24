@@ -248,3 +248,22 @@ $('clear').addEventListener('click', () => {
   rows.clear(); $('rows').replaceChildren(); $('empty').hidden = false;
 });
 window.addEventListener('pagehide', () => stop('页面已离开，音频已释放'));
+// Capability precheck, same shape as music.js: /api/health answers whether this server can
+// translate at all, so the page says so before it asks for the microphone. Nothing is stored.
+$('start').disabled = true; // Optimistic HTML; pessimistic until the server answers.
+try {
+  const response = await fetch('/api/health', { signal: AbortSignal.timeout(8000) });
+  const health = response.ok ? await response.json() : null;
+  if (health?.llm?.offline === false) {
+    $('start').disabled = false;
+  } else if (response.ok && health?.llm?.offline === true) {
+    status('服务端未配置可用的翻译服务（当前离线）：开始已禁用，不会请求麦克风。刷新本页重新检测。');
+    $('empty').textContent = '服务端翻译服务未启用，本页现在不识别、不翻译音频。';
+  } else {
+    status('无法确认翻译服务状态：开始已禁用，不会请求麦克风。刷新本页重新检测。');
+    $('empty').textContent = '未能读到服务端状态，本页现在不识别、不翻译音频。';
+  }
+} catch {
+  status('无法确认翻译服务状态：开始已禁用，不会请求麦克风。刷新本页重新检测。');
+  $('empty').textContent = '未能读到服务端状态，本页现在不识别、不翻译音频。';
+}

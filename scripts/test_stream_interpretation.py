@@ -233,6 +233,22 @@ class StreamingTests(unittest.IsolatedAsyncioTestCase):
         self.assertNotIn("SECRET", json.dumps(self.ws.out))
         await self.task
 
+    async def test_offline_llm_fails_before_adapter_without_translation(self):
+        self.llm.offline = True
+        await self.start(False)
+        error = await self.ws.wait("error")
+        self.assertEqual(error["code"], "llm_failed")
+        self.assertEqual(error["message"], "Translation failed.")
+        self.assertEqual(error["session_id"], "test")
+        self.assertFalse(self.adapter.opened.is_set())
+        self.adapter.emit("final")
+        await asyncio.wait_for(self.task, 1)
+        self.assertEqual(self.llm.calls, [])
+        self.assertEqual(self.adapter.closed, 0)
+        self.assertFalse(any(x["type"] == "ready" for x in self.ws.out))
+        self.assertFalse(any(x["type"] in ("source_partial", "source_final", "translation")
+                             for x in self.ws.out))
+
     async def test_translation_timeout_is_bounded(self):
         self.llm.gate = asyncio.Event()
         self.llm.resistant = True
