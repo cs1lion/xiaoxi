@@ -55,6 +55,7 @@ function boundedSource(value, handoff = false) {
  * onSwitch runs once per confirmed apply, before sendConfig, so the parent can cancel a turn.
  * importSelection consumes a one-shot sessionStorage handoff (timestamp: Date.now()).
  * Mount/import never send, cancel, or apply. activeMode reports only server-acknowledged mode.
+ * reveal expands and focuses the mounted panel; it never selects or applies a mode.
  * Parent calls onDisconnect when this connection closes; refresh mounts a new session.
  */
 export function mountExperience({ sendConfig, sendText, onSwitch }) {
@@ -460,5 +461,10 @@ export function mountExperience({ sendConfig, sendText, onSwitch }) {
   }
   renderActiveSource();
   controls();
-  return { onAck, onDisconnect, importSelection, activeMode: () => active };
+  function reveal() {
+    panel.open = true;
+    panel.scrollIntoView({ block: "nearest" });
+    panel.querySelector("summary")?.focus({ preventScroll: true });
+  }
+  return { onAck, onDisconnect, importSelection, activeMode: () => active, reveal };
 }

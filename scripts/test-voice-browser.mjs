@@ -398,7 +398,7 @@ try {
   const evidenceQuote = '  我常喝绿茶。<img src="x" onerror="window.memoryEvidenceExecuted=true">\n<script>window.memoryEvidenceExecuted=true</script>  ';
   memoryRecords = [
     { id: 81, kind: 'fact', source: 'stated', status: 'active', key: '饮品', value: '常喝绿茶', evidence_state: 'linked', evidence_quote: evidenceQuote,
-      preference_target: '绿茶', preference_level: 'favorite', preference_scope: 'long_term', preference_as_of: 1704067200 },
+      preference_target: '绿茶', preference_level: 'favorite', preference_scope: 'long_term', preference_as_of: 1704067200, created_at: 1704153600, use_count: 3, last_used_at: 1717286400, identity_slot: 'model-owned', session_id: 'sess-secret' },
     { id: 82, kind: 'fact', source: 'stated', status: 'active', key: '饮品', value: '最近也喜欢红茶', evidence_state: 'linked', evidence_quote: '我最近也喜欢红茶',
       preference_target: '<img src="x" onerror="window.memoryPreferenceExecuted=true">红茶', preference_level: 'like', preference_scope: 'recent', preference_as_of: 1717200000 },
     { id: 203, kind: 'fact', source: 'stated', status: 'active', key: '日常', value: '偏好晚间散步', evidence_state: 'manual' },
@@ -417,6 +417,10 @@ try {
   assert.equal(await linkedMemory.locator('blockquote').textContent(), evidenceQuote, 'evidence keeps exact whitespace and HTML-looking text');
   assert.equal(await page.locator('#memList img, #memList script').count(), 0, 'evidence text never creates HTML nodes');
   assert.equal(await page.evaluate(() => window.memoryEvidenceExecuted), undefined, 'evidence text cannot execute script or event handlers');
+  assert.match(await linkedMemory.innerText(), /记于 2024-01-02（UTC）/);
+  assert.match(await linkedMemory.innerText(), /提供为上下文 3 次（不代表模型引用正确）/);
+  assert.match(await linkedMemory.innerText(), /上次作为上下文 2024-06-02（UTC）/);
+  assert.doesNotMatch(await linkedMemory.innerText(), /model-owned|sess-secret/);
   checks.push('linked memory reveals exact evidence as safe text, including whitespace and HTML-looking content');
   const recentMemory = page.locator('#memList .mem').filter({ hasText: '最近也喜欢红茶' });
   assert.match(await recentMemory.innerText(), /喜欢：.*红茶/);
@@ -435,6 +439,8 @@ try {
   assert.doesNotMatch(await manualMemory.innerText(), /你说过|有原话证据/);
   assert.doesNotMatch(await legacyMemory.innerText(), /你说过|有原话证据/);
   assert.doesNotMatch(await manualMemory.innerText(), /当时自述|未确认延续至今|原话日期/);
+  assert.doesNotMatch(await manualMemory.innerText(), /记于|提供为上下文/);
+  assert.doesNotMatch(await legacyMemory.innerText(), /记于|提供为上下文/);
   assert.equal(await page.locator('#memList .mem').count(), 4, 'default list excludes history and conflicts');
   assert.equal(await page.locator('#memCount').textContent(), '4 条当前记忆');
   checks.push('manual and legacy memories use honest labels without invented original quotes');
@@ -476,6 +482,8 @@ try {
   await correctedPreference.waitFor();
   assert.match(await correctedPreference.innerText(), /手动保存/);
   assert.doesNotMatch(await correctedPreference.locator('.meta').innerText(), /最喜欢：|长期自述|原话日期/);
+  assert.match(await correctedPreference.innerText(), /提供为上下文 3 次（不代表模型引用正确）/);
+  assert.doesNotMatch(await correctedPreference.locator('.meta').innerText(), /最喜欢：|长期自述|原话日期|未确认延续至今/);
   assert.equal(await correctedPreference.locator('details').count(), 0);
   assert.match(await recentMemory.innerText(), /最近自述/);
   checks.push('manual correction refresh clears derived preference/time labels while retaining the other preference member');

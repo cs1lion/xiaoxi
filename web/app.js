@@ -208,6 +208,13 @@ const drawer = mountWorkDrawer(el("workDrawer"), {
     section?.scrollIntoView({ block: "nearest" });
     el("practiceMode")?.focus({ preventScroll: true });
   },
+  onExperience: () => {
+    /* 陪伴面板是侧栏既有区域（#experienceMount）：移动端先拉开侧栏浮层，
+       再展开并聚焦面板。只替她点掉本来要点的几下——不代选模式、不代应用。 */
+    const side = el("sidePanel");
+    if (side && !side.classList.contains("is-open")) el("sidebarToggle")?.click();
+    experienceUI.reveal();
+  },
 });
 
 let selectedExternalModel = "";
@@ -1432,6 +1439,27 @@ async function loadMemories() {
       label.className = className;
       label.textContent = text;
       meta.append(label);
+    }
+    if (Number.isFinite(m.created_at)) {
+      const created = new Date(m.created_at * 1000);
+      if (Number.isFinite(created.getTime())) {
+        const when = document.createElement("span");
+        when.textContent = `记于 ${created.toISOString().slice(0, 10)}（UTC）`;
+        meta.append(when);
+      }
+    }
+    if (Number.isFinite(m.use_count)) {
+      const used = document.createElement("span");
+      used.textContent = `提供为上下文 ${m.use_count} 次（不代表模型引用正确）`;
+      meta.append(used);
+      if (Number.isFinite(m.last_used_at)) {
+        const last = new Date(m.last_used_at * 1000);
+        if (Number.isFinite(last.getTime())) {
+          const stamp = document.createElement("span");
+          stamp.textContent = `上次作为上下文 ${last.toISOString().slice(0, 10)}（UTC）`;
+          meta.append(stamp);
+        }
+      }
     }
     if (m.source === 'stated' && m.evidence_state === 'linked' && typeof m.preference_target === 'string' && m.preference_target &&
         Object.hasOwn(PREFERENCE_LEVEL_LABEL, m.preference_level) && Object.hasOwn(PREFERENCE_SCOPE_LABEL, m.preference_scope)) {

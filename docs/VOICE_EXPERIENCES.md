@@ -63,6 +63,7 @@ WebSocket断开后，体验生效状态与预览清除，原句草稿仍留在�
 - `python scripts/test_experience.py`：纯会话、来源精确传递、模式提示、虚构隔离、取消、时限、音频边界。
 - `python scripts/test_experience_websocket.py`：AST抽取真实路由，验证配置原子性、互斥、不进入工具/消息存储、ASR语言及晚到事件；请求编号成功/拒绝回传、普通设置不混入编号、旧客户端兼容和无效编号原子拒绝。
 - `node scripts/test-experience-browser.mjs`：面板确认、服务器ack门控、单次选句交接、过期、收藏和安全文本；生效预览与草稿门控、失败/迟到确认、明确关系提问、断线失效。
+- `node scripts/test-experience-entry-browser.mjs`：抽屉「陪伴体验」入口——导航切到说明视图不应用任何模式、「打开陪伴体验面板」收起抽屉并展开聚焦侧栏面板且零 config 帧、移动端自动拉开侧栏浮层且聊天区宽度不变、模式片仍为主舞台只读 span。
 - `node scripts/test-interpret-browser.mjs`：字幕确认后交接，继续覆盖原分段/流式采集清理。
 - `node scripts/test-voice-browser.mjs`：主页面真实体验入口使用原语音控制；关系问题沿用带turn_id的文本轮次，断线清理生效片段。
 

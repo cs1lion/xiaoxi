@@ -10,7 +10,7 @@ const FULLVIEW_EVENT = "aqi-fullview";
 
 export function mountWorkDrawer(root, deps = {}) {
   if (!root) return null;
-  const { onWriting, onCompanion, onPractice } = deps;
+  const { onWriting, onCompanion, onPractice, onExperience } = deps;
   const toggle = el("drawerToggle");
   const closeBtn = el("drawerClose");
   const nav = [...root.querySelectorAll(".drawer-nav button")];
@@ -21,6 +21,7 @@ export function mountWorkDrawer(root, deps = {}) {
     music: el("drawerViewMusic"),
     interpret: el("drawerViewInterpret"),
     practice: el("drawerViewPractice"),
+    experience: el("drawerViewExperience"),
     ops: el("drawerViewOps"),
   };
   let opened = false;
@@ -99,6 +100,11 @@ export function mountWorkDrawer(root, deps = {}) {
   el("drawerPracticeOpen")?.addEventListener("click", () => {
     close(false);
     onPractice?.();
+  });
+  el("drawerExperience")?.addEventListener("click", () => selectView("experience"));
+  el("drawerExperienceOpen")?.addEventListener("click", () => {
+    close(false);
+    onExperience?.();
   });
 
   window.addEventListener("keydown", (event) => {
