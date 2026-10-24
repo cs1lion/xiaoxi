@@ -376,6 +376,11 @@ GATES: dict[str, dict[str, object]] = {
         "cmd": ["node", "scripts/drill-s3-ws-reconnect.mjs"],
         "skip_regex": r"^\s*SKIP",
     },
+    "db_sentinel": {
+        # #39：测试进程 DB_PATH 指向仓库 data/ 时启动即失败（隔离的机械保证）。
+        "cmd": [str(PY), "scripts/test_db_sentinel.py"],
+        "skip_regex": r"^\s*SKIP",
+    },
 }
 
 # 这些门禁的本体是纯逻辑单测，不需要本地服务，永远必须真跑。
