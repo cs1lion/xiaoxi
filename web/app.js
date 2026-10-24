@@ -1154,6 +1154,7 @@ function onWsOpen() {
   disposed = false;
   reconnect.reset();
   setStatus("在线", "on");
+  subtitle.classList.remove("is-offline");
   v2Hub.resetConnection();
   if (lastSessionId) ws.send(JSON.stringify({ type: "resume", session_id: lastSessionId }));
   ws.send(JSON.stringify({ type: "config", proactivity: el("proactiveToggle").checked, memory: el("memoryToggle").checked }));
@@ -1405,8 +1406,11 @@ function onWsClose() {
   experienceUI.onDisconnect();
   if (proactiveHeartbeat) { clearInterval(proactiveHeartbeat); proactiveHeartbeat = null; }
   cleanupVoice();
-  setStatus("断开", "");
+  // S3 断线口径不变（文案 drill-s3 断言）；reconnecting 只点亮 CSS 状态
+  // （朱砂呼吸点 + 字幕朱砂，见 almanac.css），interaction 映射与 "" 档相同。
+  setStatus("断开", "reconnecting");
   subtitle.textContent = "连接已断开，麦克风已释放；正在自动重连……";
+  subtitle.classList.add("is-offline");
   // 服务可能只是重启：指数退避探活（1s 起、15s 封顶），连上后 onWsOpen 复位。
   setTimeout(connectWs, reconnect.next());
 }

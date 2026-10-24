@@ -1,4 +1,4 @@
-.shared-workspace{background:linear-gradient(145deg,var(--panel),var(--raise));border:1px solid var(--line);border-radius:var(--r-panel);box-shadow:inset 0 1px #ffffff0d,0 10px 25px -20px #060a1466;padding:14px}/* 选中指示是一块会移动的底板，不是旧的熄灭、新的点亮；三栏等分，滑块按整栏平移 */
+.shared-workspace{background:linear-gradient(145deg,var(--panel),var(--raise));border:1px solid var(--line);border-radius:var(--r-panel);box-shadow:inset 0 1px #ffffff0d,0 10px 25px -20px rgba(33,28,22,.4);padding:14px}/* 选中指示是一块会移动的底板，不是旧的熄灭、新的点亮；三栏等分，滑块按整栏平移 */
 .shared-workspace>[role=tablist]{position:relative;display:grid;grid-template-columns:repeat(3,1fr);gap:0;border-bottom:1px solid var(--line);margin-bottom:16px}
 .shared-workspace [role=tab]{border:0;border-radius:0;background:transparent;padding:12px 8px;color:var(--muted);min-height:44px;justify-content:center;text-align:center;transition:color .2s var(--ease),background .2s var(--ease)}
 .shared-workspace [role=tab]:hover{color:var(--text);background:var(--sunken)}
