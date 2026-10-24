@@ -12,6 +12,7 @@
 
 import type { PrefabBlueprint } from './types.ts';
 import type { TaskKind } from './types.ts';
+import { renderIntentContext, type IntentContext } from './intent-context.ts';
 
 /** 每类活的说明。模型靠它把「查一下资料」映射到 research。 */
 const TASK_HINTS: Readonly<Record<TaskKind, string>> = {
@@ -30,7 +31,10 @@ const TASK_HINTS: Readonly<Record<TaskKind, string>> = {
  * 2. **不要解释。** 只输出 JSON，多一个字就多一次解析失败。
  * 3. **不要编造字段。** 校验器会拒，但拒一次就浪费一次往返。
  */
-export function buildIntentPrompt(templates: ReadonlyMap<string, PrefabBlueprint>): string {
+export function buildIntentPrompt(
+  templates: ReadonlyMap<string, PrefabBlueprint>,
+  context?: IntentContext,
+): string {
   const taskLines = (Object.keys(TASK_HINTS) as TaskKind[])
     .map((kind) => `  - ${kind}：${TASK_HINTS[kind]}`)
     .join('\n');
@@ -41,6 +45,30 @@ export function buildIntentPrompt(templates: ReadonlyMap<string, PrefabBlueprint
       return `  - ${template.id}（${template.displayName}，${takes}）`;
     })
     .join('\n');
+
+  // 世界现状：省略时整段不出现，而不是写「世界状态未知」——
+  // 一句"未知"会让模型以为它该去猜，而它猜不出来。
+  const contextSection =
+    context === undefined
+      ? ''
+      : `
+## 世界现在长什么样
+
+${renderIntentContext(context)}
+
+## 看到现状之后怎么判断
+
+**现状不改变你输出的命令。** 它是背景，不是判据。
+
+- **已经有了某栋楼，仍然照常输出 build。** 「建个工坊」这句话的意思就是要建，
+  世界会拒绝并说明已经有了。你替世界提前判 unknown，用户会以为你没听懂。
+- **已经有活干着，仍然照常输出 dispatch。**
+- **看到「没人干活」不要自己补一句派活。** 用户没说要派，就不要派。
+- **只有用户在问现状时才答 unknown。** 「镇上现在有几栋楼」「已经有个工坊了吧」
+  是在打听，不是在要求改。这两者靠**有没有要求**区分，不靠**世界现在什么样**区分。
+
+判断口诀：看用户**要你做什么**，不看世界**现在是什么样**。
+`;
 
   return `你是像素世界里那个世界的**意图解析器**。用户对世界说一句话，你把它翻成一条命令。
 
@@ -64,7 +92,7 @@ ${taskLines}
 ## 能建的模板（只有这些，不能发明）
 
 ${templateLines}
-
+${contextSection}
 ## 三条纪律
 
 1. **听不出就答 unknown。** 闲聊、提问、感叹、抱怨——一律 unknown，并在 reason 里说清是什么。
@@ -81,6 +109,10 @@ ${templateLines}
 所以：**当一句话是"让某件东西被处理"时，答 dispatch，把用户原话放进 summary。**
 不要因为「弄」「看看」「处理一下」不够具体就答 unknown——那样用户会觉得你没听懂，
 而他明明说清了要处理什么。
+
+**同一条也管建造。「再盖一间」「给我整个新铺子」没说盖什么，仍要答 build。**
+挑哪个模板是世界的判断（省略 \`templateId\` 之外的细节，由世界挑），不是你的。
+只有当用户要在**具体坐标**建某样东西时才需要 \`at\` 与确切的 \`templateId\`。
 
 只有**完全没有要处理的对象**时才是 unknown。
 
@@ -114,9 +146,10 @@ ${templateLines}
 export function buildIntentMessages(
   templates: ReadonlyMap<string, PrefabBlueprint>,
   utterance: string,
+  context?: IntentContext,
 ): { role: 'system' | 'user'; content: string }[] {
   return [
-    { role: 'system', content: buildIntentPrompt(templates) },
+    { role: 'system', content: buildIntentPrompt(templates, context) },
     { role: 'user', content: utterance },
   ];
 }

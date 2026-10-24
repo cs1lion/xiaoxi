@@ -834,14 +834,25 @@ try {
   check(errors.length === 0, '页面加载无 JS 报错');
 
   const opening = await state();
-  // 大世界开局：镇内三栋 + 郊野三栋。小世界只剩镇内三栋。
-  const expectedBuildings = await page.evaluate(() =>
-    window.Oracle.view().buildings.filter((b) => b.boundTask !== null).length,
-  );
+  // 大世界开局：镇内三铺 + 郊野三铺 + 五间民居。小世界只剩镇内三铺。
+  //
+  // 原来这条断言写成「建筑总数 == 接活的铺子数」，它默认世界里没有不接活的
+  // 建筑。民居进来之后这个前提就不成立了——那不是数字过期，是断言的前提被
+  // 推翻。所以拆成两条：铺子数与建筑总数各自校验，谁也不依赖谁。
+  const counts = await page.evaluate(() => {
+    const buildings = window.Oracle.view().buildings;
+    return {
+      total: buildings.length,
+      workshops: buildings.filter((b) => b.boundTask !== null).length,
+      homes: buildings.filter((b) => b.zone === 'living').length,
+    };
+  });
+  check(counts.workshops >= 3, `世界里摆好了铺子（${counts.workshops} 栋接活）`);
   check(
-    opening.buildings.length === expectedBuildings && expectedBuildings >= 3,
-    `世界里摆好了铺子（${opening.buildings.length} 栋）`,
+    counts.total === counts.workshops + counts.homes,
+    `建筑总数对得上（${counts.total} = ${counts.workshops} 铺 + ${counts.homes} 屋）`,
   );
+  check(opening.buildings.length === counts.total, '快照与统计同源');
   check(opening.villager.mode === 'idle', '开局她在闲逛');
 
   if (LEDGER) {

@@ -188,6 +188,93 @@ def test_validation() -> None:
     check("缺 utterance 被拒", response.status_code == 422, str(response.status_code))
 
 
+CONTEXT = {
+    "built": {
+        "town": [{"templateId": "code_forge", "name": "炼码工坊"}],
+        "wild": [{"templateId": "crawler_mine", "name": "爬虫矿洞"}],
+    },
+    "capacity": [
+        {"taskKind": "code", "count": 2},
+        {"taskKind": "research", "count": 1},
+        {"taskKind": "writing", "count": 0},
+    ],
+    "busy": [{"name": "莞尔", "taskKind": "code"}],
+    "queued": 1,
+    "weather": "rain",
+    "exhausted": ["code_forge", "crawler_mine"],
+}
+
+
+def test_context_in_prompt() -> None:
+    print("\n[世界现状进提示词]")
+    from server.world_intent import ContextIn
+
+    prompt = build_prompt([TemplateIn(**t) for t in TEMPLATES], ContextIn(**CONTEXT))
+    check("镇内建筑在提示词里", "炼码工坊" in prompt)
+    check("郊野建筑在提示词里", "爬虫矿洞" in prompt)
+    check("谁在忙写出来了", "莞尔在做写代码" in prompt)
+    check("排队数写出来了", "还有 1 条神谕在排队" in prompt)
+    check("天气写出来了", "外面在下雨" in prompt)
+    check("已建过的模板写出来了", "不能再建第二栋" in prompt)
+    # 这几条是实测逼出来的：接上现状后模型一度开始替世界判可行性，
+    # 「给我整个新铺子」从 build 退成 unknown（理由："没有指定铺子类型"）。
+    check(
+        "明确说了现状不改变输出的命令",
+        "现状不改变你输出的命令" in prompt,
+        "少了这句，模型会拿现状当判据",
+    )
+    check(
+        "明说已有建筑时仍输出 build",
+        "仍然照常输出 build" in prompt,
+        "要让它把拒绝交给世界，而不是自己提前拒",
+    )
+    check(
+        "分清「打听现状」与「要求做事」",
+        "只有用户在问现状时才答 unknown" in prompt,
+    )
+
+    # 省略 context 时整段不出现：写「未知」会让模型以为该去猜。
+    plain = build_prompt([TemplateIn(**t) for t in TEMPLATES])
+    check("没有现状时整段不出现", "世界现在长什么样" not in plain)
+    check("没有现状时不写『未知』", "世界状态未知" not in plain)
+
+
+def test_context_optional_in_request() -> None:
+    print("\n[旧客户端不发 context 也能用]")
+    fake = FakeLLM('{"kind":"unknown","reason":"闲聊"}')
+    client = client_for(fake)
+    response = client.post("/api/world/intent", json={"utterance": "今天好累", "templates": []})
+    check("不带 context 时 200", response.status_code == 200, str(response.status_code))
+    # 带了也要能解析。
+    fake2 = FakeLLM('{"kind":"unknown","reason":"闲聊"}')
+    client2 = client_for(fake2)
+    response2 = client2.post(
+        "/api/world/intent",
+        json={"utterance": "今天好累", "templates": [], "context": CONTEXT},
+    )
+    check("带 context 时 200", response2.status_code == 200, str(response2.status_code))
+    # FakeLLM 记录的是完整 messages；system 是第一条。
+    system = fake2.calls[-1][0]["content"] if fake2.calls else ""
+    check(
+        "带 context 时它真的进了提示词",
+        "炼码工坊" in system,
+        "注入的 prompt 里应当有世界现状",
+    )
+
+
+def test_context_rejects_bad_shape() -> None:
+    print("\n[现状形状校验]")
+    fake = FakeLLM()
+    client = client_for(fake)
+    # count 为负：世界不可能有负的铺子数，说明请求方算错了。
+    bad = {**CONTEXT, "capacity": [{"taskKind": "code", "count": -1}]}
+    response = client.post(
+        "/api/world/intent",
+        json={"utterance": "建个工坊", "templates": [], "context": bad},
+    )
+    check("负数 count 被拒", response.status_code == 422, str(response.status_code))
+
+
 def main() -> int:
     print("世界意图端点 · 离线测试")
     test_offline_refuses()
@@ -200,6 +287,9 @@ def main() -> int:
     test_empty_output()
     test_prompt_carries_templates()
     test_validation()
+    test_context_in_prompt()
+    test_context_optional_in_request()
+    test_context_rejects_bad_shape()
     print(f"\n=== {PASSED} passed, {FAILED} failed ===")
     return 1 if FAILED else 0
 

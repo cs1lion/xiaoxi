@@ -128,13 +128,15 @@ test('默认 buildWorld 仍用旧规格：20 处既有调用点行为不变', ()
   assert.equal(world.grid.height, 20);
 });
 
-test('大世界与小世界可以并存：小世界只放镇内三栋，大世界放六栋', () => {
+test('大世界与小世界可以并存：小世界只放镇内三栋，大世界还有郊野铺子与民居', () => {
   const small = buildWorld(blueprints);
   const large = buildLargeWorld(blueprints);
   assert.equal(small.grid.width, 30);
   assert.equal(large.grid.width, 96);
-  assert.equal(small.buildings.length, 3, '小世界放不下郊野铺子');
-  assert.equal(large.buildings.length, 6, '大世界有郊野铺子');
+  assert.equal(small.buildings.length, 3, '小世界放不下郊野铺子，也不放民居');
+  // 大世界 = 镇内三铺 + 郊野三铺 + 镇内三屋 + 郊野两屋。
+  // 数字写死是刻意的：它同时锁住「民居确实落位了」和「没有悄悄多放」。
+  assert.equal(large.buildings.length, 11, '大世界有郊野铺子与民居');
 });
 
 test('空网格：大世界规格能独立构造，不依赖 buildLargeWorld', () => {
@@ -147,20 +149,28 @@ test('空网格：大世界规格能独立构造，不依赖 buildLargeWorld', (
 
 // ------------------------------------------------------------------ 群落与落位一致
 
-test('镇内铺子落在工坊环内，郊野铺子落在郊野圈外', () => {
+test('镇内建筑落在工坊环内，郊野建筑落在郊野圈外', () => {
   const world = buildLargeWorld(blueprints);
   const TOWN = new Set(['code_forge', 'star_archive', 'ink_house']);
+  // 民居走同一套圈层规矩，但不接活，所以既不是 TOWN 也不是 WILD。
+  const WILD = new Set(['crawler_mine', 'ink_mill', 'gear_tower']);
+  const WILD_HOMES = new Set(['homestead_far', 'homestead_ridge']);
   const problems: string[] = [];
 
   for (const building of world.buildings) {
     const biome = biomeAt(building.origin, world.altar);
     const inside = biome === 'townCore' || biome === 'craftRing';
-    const isTown = TOWN.has(building.prefabId);
-    if (isTown && !inside) {
-      problems.push(`${building.prefabId} 是镇内铺子，却落在 ${biome}`);
+    const isTown = TOWN.has(building.prefabId) || building.prefabId.startsWith('cottage_');
+    const isWild = WILD.has(building.prefabId) || WILD_HOMES.has(building.prefabId);
+    if (!isTown && !isWild) {
+      problems.push(`${building.prefabId} 既不在镇内集合也不在郊野集合，这套断言管不到它`);
+      continue;
     }
-    if (!isTown && inside) {
-      problems.push(`${building.prefabId} 是郊野铺子，却落在 ${biome}`);
+    if (isTown && !inside) {
+      problems.push(`${building.prefabId} 是镇内建筑，却落在 ${biome}`);
+    }
+    if (isWild && inside) {
+      problems.push(`${building.prefabId} 是郊野建筑，却落在 ${biome}`);
     }
   }
 

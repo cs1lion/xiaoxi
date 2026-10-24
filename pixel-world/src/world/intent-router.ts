@@ -26,6 +26,7 @@
 
 import type { PrefabBlueprint } from './types.ts';
 import type { ParsedIntent } from './intent-schema.ts';
+import type { IntentContext } from './intent-context.ts';
 import { IntentSchemaError, parseIntent } from './intent-schema.ts';
 import { parseOracle } from './oracle.ts';
 import { parseOracleBuild } from './oracle-build.ts';
@@ -34,8 +35,13 @@ import type { MiracleKind } from './oracle-miracle.ts';
 
 /** 模型客户端。只有这一个方法——接缝越窄，换实现越容易。 */
 export interface IntentModel {
-  /** 问一句，拿回原始 JSON（已解析）。失败时抛错，调用方决定怎么兜。 */
-  readonly classify: (utterance: string) => Promise<unknown>;
+  /**
+   * 问一句，拿回原始 JSON（已解析）。失败时抛错，调用方决定怎么兜。
+   *
+   * `context` 是世界现状（几栋楼、谁在忙）。**只用来让模型少犯错**，
+   * 不参与校验：可行性仍由世界在结算时判。省略时客户端不发这个字段。
+   */
+  readonly classify: (utterance: string, context?: IntentContext) => Promise<unknown>;
 }
 
 export interface RouteOptions {
@@ -43,6 +49,8 @@ export interface RouteOptions {
   readonly worldSize: { readonly width: number; readonly height: number };
   /** 省略表示纯离线：只用规则，认不出就是 unknown。 */
   readonly model?: IntentModel;
+  /** 世界现状。只喂模型做上下文，不参与校验。 */
+  readonly context?: IntentContext;
 }
 
 /** 意图从哪来。用于 UI 提示与调试，不参与世界逻辑。 */
@@ -91,7 +99,7 @@ export async function routeIntent(
   }
 
   try {
-    const rawIntent = await options.model.classify(text);
+    const rawIntent = await options.model.classify(text, options.context);
     const intent = parseIntent(rawIntent, options.templates, options.worldSize);
     return { intent, source: 'model', modelError: null };
   } catch (error) {

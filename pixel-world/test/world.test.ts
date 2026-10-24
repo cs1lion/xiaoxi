@@ -65,14 +65,20 @@ function makeRig(): Rig {
 
 // ------------------------------------------------------------------ blueprints
 
-test('生产蓝图表能解析，每种活 1–2 栋铺子，扩建样板不占名额', () => {
-  // 镇内三栋 + 郊野三栋 + 扩建样板一栋
-  assert.equal(blueprints.size, 7);
+test('生产蓝图表能解析，每种活 1–2 栋铺子，扩建样板与民居不占名额', () => {
+  // 镇内三铺 + 郊野三铺 + 扩建样板一栋 + 镇内三屋 + 郊野两屋
+  assert.equal(blueprints.size, 12);
   assert.deepEqual(validateCoverage(blueprints), []);
   assert.equal(blueprints.get('workshop_plot')?.boundTask, null);
   for (const kind of ['code', 'research', 'writing']) {
     const matches = [...blueprints.values()].filter((bp) => bp.boundTask === kind);
     assert.equal(matches.length, 2, `${kind} 应有镇内与郊野各一栋`);
+  }
+  // 民居的配额独立于铺子：加多少间屋子都不该改变「每种活两栋」这条预算。
+  const homes = [...blueprints.values()].filter((bp) => bp.zone === 'living');
+  assert.equal(homes.length, 5, '五间民居');
+  for (const home of homes) {
+    assert.equal(home.boundTask, null, `${home.id} 是民居，不该接活`);
   }
 });
 

@@ -94,13 +94,46 @@ const TOWN_PREFABS = new Set<string>(['code_forge', 'star_archive', 'ink_house']
  *
  * `simulation.ts` 的派活规则也读它。早先那里另抄了一份，加第四栋郊野铺子时
  * 只改一处就会让派活规则静默错位——那不是 bug，是随时会变成 bug 的形状。
+ *
+ * **只收接活的铺子。** 郊野民居不走这里：常明灯、派活分流、郊野辨识都以为
+ * 「郊野 = 有人在外面干活」，把住家塞进来会让每间农舍白天也亮着守夜灯。
  */
 export const WILD_PREFABS: ReadonlySet<string> = new Set([
   'crawler_mine',
   'ink_mill',
   'gear_tower',
 ]);
-const RESIDENT_PREFABS = new Set<string>([...TOWN_PREFABS, ...WILD_PREFABS]);
+
+/**
+ * 民居：不接活，只占地方，让镇子看起来是有人住的。
+ *
+ * 为什么单开一组而不是塞进 TOWN_PREFABS / WILD_PREFABS：那两个集合的语义是
+ * 「接活的铺子」，派活分流、郊野常明灯、世界状态统计都按这个语义工作。
+ * 民居 `boundTask` 是 null，本来就不进 `validateCoverage` 的铺子预算，
+ * 混进铺子集合会让计数与灯光一起错。
+ *
+ * 只在大世界落位：旧规格 30×20 是 20 处既有测试的夹具，那里凭空多出房子
+ * 会让「小世界三栋」这条验收数字全部作废。
+ */
+const TOWN_HOMES = new Set<string>(['cottage_oak', 'cottage_plaster', 'cottage_stone']);
+const WILD_HOMES = new Set<string>(['homestead_far', 'homestead_ridge']);
+const HOME_PREFABS = new Set<string>([...TOWN_HOMES, ...WILD_HOMES]);
+
+const RESIDENT_PREFABS = new Set<string>([
+  ...TOWN_PREFABS,
+  ...WILD_PREFABS,
+  ...HOME_PREFABS,
+]);
+
+/**
+ * 这栋建筑是不是长在郊野那一侧。
+ *
+ * 铺子与民居都要答这个问题，但两边的判断依据不同（铺子按 prefab 集合，
+ * 民居按所属集合）。合成一处，免得落位锚点与群落校验各写一份、慢慢漂移。
+ */
+function isWildSide(prefabId: string): boolean {
+  return WILD_PREFABS.has(prefabId) || WILD_HOMES.has(prefabId);
+}
 
 export class WorldSetupError extends Error {}
 
@@ -220,30 +253,47 @@ export function buildWorld(
   );
   const buildings: PlacedBuilding[] = [];
 
-  // 小世界放不下六栋：郊野铺子只在大世界里落位。
+  // 小世界放不下六栋：郊野铺子与民居只在大世界里落位。
   // 小规格继续服务 20 处既有测试，行为与以前完全一致。
   const wildAllowed = spec === LARGE_WORLD_SPEC;
+
+  // 同一个分区里放多栋民居，要各给一个锚点，否则 findBestSlot 每轮都挑
+  // 离锚点最近的那块空地，第二栋会紧贴第一栋，第三栋再贴上去——三间农舍
+  // 挤成一个角落，比空着更难看。按**集合内的序号**取分区的一个角，
+  // 顺序固定所以落位可复现。
+  const homeCursor = new Map<string, number>();
+
   for (const blueprint of blueprints.values()) {
     if (!RESIDENT_PREFABS.has(blueprint.id)) continue;
-    if (WILD_PREFABS.has(blueprint.id) && !wildAllowed) continue;
-    // 郊野铺子锚到**分区里离祭坛最远的那个角**，镇内铺子锚到祭坛。
+    const wild = isWildSide(blueprint.id);
+    const isHome = HOME_PREFABS.has(blueprint.id);
+    // 小世界只放镇内三栋铺子，与以前逐位一致：郊野铺子和所有民居都不进。
+    if (!wildAllowed && (wild || isHome)) continue;
+
+    // 郊野建筑锚到**分区里离祭坛最远的那一侧**，镇内建筑锚到祭坛。
     //
     // 早先用 `altar.x ± 26` 猜一个方向，但 findBestSlot 只按距离挑最近的空位，
     // 实际落点由分区决定——实测郊野铺子落在 14.6 / 17.5 / 21.1 格，
     // 全都还在工坊环（20 格）里，与「郊野」这个标签对不上。
-    // 取分区最远角，才能让落位真的落到外圈。
-    const anchor = WILD_PREFABS.has(blueprint.id)
-      ? wildernessAnchorOf(spec, blueprint.zone, altar)
-      : altar;
+    // 取分区外缘，才能让落位真的落到外圈。
+    let anchor: GridPoint;
+    if (isHome) {
+      const index = homeCursor.get(blueprint.zone) ?? 0;
+      homeCursor.set(blueprint.zone, index + 1);
+      anchor = homeAnchorOf(spec, blueprint.zone, altar, index);
+    } else {
+      anchor = wild ? wildernessAnchorOf(spec, blueprint.zone, altar) : altar;
+    }
+
     // 落位必须与群落一致，否则「郊野」只是名义上的：
-    //   - 郊野铺子在郊野圈（craftRing 之外、wilderness 之内）
-    //   - 镇内铺子在工坊环内（否则镇内书斋会落到 23 格外的"郊野"）
+    //   - 郊野建筑在郊野圈（craftRing 之外、wilderness 之内）
+    //   - 镇内建筑在工坊环内（否则镇内书斋会落到 23 格外的"郊野"）
     const accept =
       spec !== LARGE_WORLD_SPEC
         ? undefined
         : (origin: GridPoint): boolean => {
             const d = Math.hypot(origin.x - altar.x, origin.y - altar.y);
-            return WILD_PREFABS.has(blueprint.id)
+            return wild
               ? d > BIOME_RADII.craftRing && d <= BIOME_RADII.wilderness
               : d <= BIOME_RADII.craftRing;
           };
@@ -256,6 +306,33 @@ export function buildWorld(
 
   assertWorldInvariants(grid, buildings, altar);
   return { grid, buildings, altar };
+}
+
+/**
+ * 民居的锚点：同一个分区里第 `index` 栋落在哪里。
+ *
+ * 民居和铺子不同，它们要挤在同一个分区里（`living` 镇上只有一块 10×10），
+ * 所以不能都锚到祭坛——那样每栋都会挑离祭坛最近的空地，最后叠成一摞。
+ * 按序号绕分区四个角走，落点分散且可复现。
+ *
+ * 四个角轮流而不是按黄金角散开：10×10 的分区塞三栋 4×3 带留白的房子，
+ * 角位是唯一还剩得开的摆法。
+ */
+function homeAnchorOf(
+  spec: GridSpec,
+  zone: ZoneId,
+  altar: GridPoint,
+  index: number,
+): GridPoint {
+  const region = spec.zones.find((item) => item.id === zone);
+  if (region === undefined) return altar;
+  const corners: readonly GridPoint[] = [
+    { x: region.x, y: region.y },
+    { x: region.x + region.w - 1, y: region.y + region.h - 1 },
+    { x: region.x + region.w - 1, y: region.y },
+    { x: region.x, y: region.y + region.h - 1 },
+  ];
+  return corners[index % corners.length]!;
 }
 
 /**
