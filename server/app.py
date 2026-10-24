@@ -716,6 +716,17 @@ async def _run_turn(conn: Connection, text: str, mode: str, turn: VoiceTurn | No
         await conn.send_turn(turn, {"type": "turn_started", "source": mode})
     if not conn.current(turn):
         return
+    # B2（issue #43）：意图二分预判**现在就起**，与后续所有工作并行跑。
+    # 实测 p50 2.48s / max 5.47s——串行会把普通对话拖慢一倍，所以不能等它。
+    # 只有正则判成「疑似委托」时才会 await 它（见下方 delegation 分支）；
+    # 其余路径这个任务白跑一次、被丢弃，代价是一个后台请求。
+    intent_probe = None
+    if mode in ("text", "voice") and llm is not None and not getattr(llm, "offline", False):
+        try:
+            from .contract.bridge import classify_intent
+            intent_probe = asyncio.create_task(classify_intent(text, llm))
+        except Exception:
+            intent_probe = None
     try:
         async def _notice(memories: list[Any]) -> None:
             await conn.send_turn(turn, {
@@ -800,6 +811,18 @@ async def _run_turn(conn: Connection, text: str, mode: str, turn: VoiceTurn | No
         # 全部用配置样本或真实台账数据回答，不发第二次模型请求；慢环另起后台任务。
         route = orchestrator.executive_route(text, executive,
                                               memory_enabled=manager.enabled)
+        # B2（#43）：正则把这句话判成委托后，用**并行预判**做二次确认。
+        # 正则 85% / LLM 预判实测 20/20，两者的错法不重叠——所以让预判能否决
+        # 正则，但不让预判单独建单（预判漏判时正则仍是唯一依据）。
+        # 预判没答案（超时/离线/空串）时按原行为走，不因预判故障丢单。
+        # 放在 executive_route **之后**取结果：失败/取消等早退路径不会白等。
+        if route is not None and route.get("kind") == "delegation" and intent_probe is not None:
+            from .contract.bridge import classification_verdict
+            verdict = classification_verdict(await intent_probe)
+            if verdict is False:
+                # 模型明确说「这不是一单」：撤掉接单台词，落普通对话。
+                # 这一条正是「别在我随口评价时接单」的机械保证。
+                route = None
         if route is not None:
             from .dialogue.orchestrator import store_message
             store_message(conn.session_id, "user", text, mode)
@@ -891,6 +914,11 @@ async def _run_turn(conn: Connection, text: str, mode: str, turn: VoiceTurn | No
         raise
     except Exception as exc:  # pragma: no cover - defensive
         await conn.finish(turn, {"type": "error", "message": str(exc), "terminal": True})
+    finally:
+        # B2：预判任务在早退路径（打断/异常/普通对话未 await）上必须取消，
+        # 否则每轮留一个悬空请求，长会话会把连接池和额度吃光。
+        if intent_probe is not None and not intent_probe.done():
+            intent_probe.cancel()
 
 
 def _transcribe_error_message(exc: Exception) -> str:

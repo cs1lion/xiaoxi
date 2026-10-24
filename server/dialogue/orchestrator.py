@@ -1550,7 +1550,13 @@ class Orchestrator:
         if delegation_intent(text):
             line = commission_accept_line()
             if not line:
-                return None  # no real sample: fall through to normal dialogue
+                # #12（B2 收口）：样本池空时**不能说「接单了」**。
+                # 此前这里 `return None` 落普通对话，而 persona 指令写着
+                # 「接到委托只说一句接单了」——模型于是照说，台账里却一单没有。
+                # 现在显式给一句真话：这单没派出去。宁可承认不会，也不虚报。
+                return {"kind": "delegation_unavailable",
+                        "text": "这单我没派出去——接单台词库是空的，先别等我。",
+                        "ui_nav": self._ui_nav("clarify", {})}
             strip = compose_progress_strip(running)
             route = {"kind": "delegation", "text": line, "brief": text,
                      # 协议 §23：派单成功自动滑出战况抽屉，老板直接看见新单落位。

@@ -66,6 +66,40 @@ def parse_binary_answer(text: str) -> bool | None:
     return None
 
 
+async def classify_intent(text: str, llm: Any, *, timeout_s: float = 4.0) -> str:
+    """二分预判：这句话是不是一单。返回模型的**原始回答**（"1"/"0"/空串）。
+
+    B2（issue #43）：这个函数在本文档里被列为三大件之一，但此前从未实现。
+    实现要点：
+
+    - 返回原始字符串而不是 bool：`decide()` 需要区分「明确不是」（"0"）与
+      「没拿到答案」（空串/超时）——后者要退回正则，不能当成不是一单。
+    - 自带超时：实测 p50 2.48s、max 5.47s（真实语料 20 条，2026-10-24）。
+      超时返回空串 → 调用方退回正则，**绝不阻塞**语音轮。
+    - **必须与其他工作并行**。串行会把普通对话拖慢一倍（本文档顶部实测）。
+
+    调用方怎么用：`asyncio.create_task(classify_intent(...))` 起一个任务，
+    在真正需要这个判断的地方（正则判定为疑似委托之后）再 await 它。
+    """
+    import asyncio
+
+    async def _ask() -> str:
+        return await llm.complete(
+            [{"role": "system", "content": BINARY_PROMPT},
+             {"role": "user", "content": text}],
+            temperature=0, max_tokens=BINARY_MAX_TOKENS)
+
+    try:
+        return await asyncio.wait_for(_ask(), timeout=timeout_s)
+    except (asyncio.TimeoutError, Exception):  # noqa: BLE001 - 预判失败不该影响对话
+        return ""
+
+
+def classification_verdict(raw: str) -> bool | None:
+    """预判结果的语义封装：True=是委托，False=不是，None=没答案（退回正则）。"""
+    return parse_binary_answer(raw)
+
+
 @dataclass
 class GateSession:
     """一个会话的追问状态。**按 session_id 分开存**，别挂 Connection。

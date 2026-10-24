@@ -314,15 +314,42 @@ def test_boundary() -> None:
                 name = func.attr
             if name:
                 called.append(name)
-    # bridge 是纯逻辑层：模型调用由调用方做，它只解析答案
-    check("不发起模型调用（不调 complete/complete_raw）",
-          "complete" not in called and "complete_raw" not in called, str(called))
+    # bridge 的**纯逻辑函数**（decide / parse / fill_slot）不发起模型调用：
+    # 模型调用由调用方做，它只解析答案。
+    # 例外是 B2 新增的 classify_intent——它是显式提供给调用方的预判 API，
+    # 本来就该调 complete（带超时、失败返回空串）。所以只看纯逻辑函数的调用面。
+    logic_calls = _calls_outside(tree, {"classify_intent"})
+    check("纯逻辑函数不发起模型调用（不调 complete/complete_raw）",
+          "complete" not in logic_calls and "complete_raw" not in logic_calls,
+          str([n for n in logic_calls if "complete" in n]))
+    check("classify_intent 确实调了 complete（它是预判 API）",
+          "complete" in called, "没调")
+    check("classify_intent 带超时（不阻塞语音轮）",
+          "wait_for" in called, "没超时保护")
     check("不碰网络（无 httpx/requests）",
           "httpx" not in source and "requests" not in source)
     check("不调 freeze（冻结是闸门的事）", "freeze" not in called, "调了")
 
     # 允许调 evaluate —— 这是它必须做的（合成决定要跑闸门）
     check("确实调了 evaluate（这是它的职责）", "evaluate" in called, "没调")
+
+
+def _calls_outside(tree: ast.AST, excluded_functions: set[str]) -> list[str]:
+    """收集模块里**除指定函数之外**的所有被调用名。"""
+    excluded: set[int] = set()
+    for node in ast.walk(tree):
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) and node.name in excluded_functions:
+            excluded.update(id(child) for child in ast.walk(node))
+    calls = []
+    for node in ast.walk(tree):
+        if id(node) in excluded or not isinstance(node, ast.Call):
+            continue
+        func = node.func
+        if isinstance(func, ast.Name):
+            calls.append(func.id)
+        elif isinstance(func, ast.Attribute):
+            calls.append(func.attr)
+    return calls
 
 
 def main() -> int:
