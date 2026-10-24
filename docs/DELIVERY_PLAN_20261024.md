@@ -20,11 +20,13 @@
 
 ## Phase 0 — 版本收敛与真相对齐（可逆，随时开工）
 
-- [ ] 0.1 主仓在飞批验证后落袋：跑黄金命令（check_protocol / test_core / npm test / run_evals 离线层）全绿后，按逻辑拆分提交（interpret 闸门 / 陪伴入口 / 记忆展示 / 新测试入册）。确认后丢弃同内容的 stash@{0}。
-- [ ] 0.2 推送 master 到 origin（67 个提交，2026-10-24 口径）。外发动作，计划获批即视为放行。
-- [ ] 0.3 合并五条 ahead 分支（均为 docs 或单提交，合并后跑门禁再推）；已并入的分支与 tmp/wt-* worktree 清理；tmp/head-check（detached）确认后移除；backup/* 与 stash@{1} 保留。
-- [ ] 0.4 文档真相对齐：TASKS.md 打磨轮复选框回填或改口径；三份 10-19 审计加「已过期，以最新核验为准」横幅；测试计数改为指向命令输出（AGENTS.md 数字三分法）；DEMO_ART_SPEC_TODO 标注已被覆盖项。
-- [ ] 0.5 残件处置（默认值已给，异议随时提）：CONTRACT_V2_SCOPE.md.chief-bak 归档进 docs/history/ 不删；web/style.css.bak 删；scripts/.dialogue-regression-10136-eyes.mjs 入册或删；agent/（vendored mattpocock skills，与产品零耦合）加 gitignore；未跟踪测试随 0.1 入册。
+- [x] 0.1 主仓在飞批验证后落袋：四门禁全绿后按逻辑拆成六个提交（interpret 离线闸门 / 陪伴入口 / 上下文预算护栏 / config §17 热重载 / 状态文档 / 残件处置）。npm 红点系 node_modules 丢失 three（环境问题，`npm install` 补齐）。stash@{0} 核验为已落地内容的旧形态（pixel-world 部分被 bba023d 演进版取代），已弃。
+- [x] 0.2 推送 master 到 origin。
+- [x] 0.3 五条 ahead 分支全并入（UIUX_AUDIT 冲突取 HEAD 侧：对家是带本机绝对路径的旧版，`git cherry` 证实补丁已在 master）；合并后四门禁复跑全绿再推；已并入分支与 tmp/wt-* worktree 清理，远端同步删除；backup/* 与 stash@{1} 保留。**例外**：`.claude/worktrees/confident-roentgen-3771a9` 里有 8 个文件的真实未提交工作（另一 session 在飞），保留不动，待其认领或过期后再议。
+- [x] 0.4 文档真相对齐：三份 10-19 审计加过期横幅；TASKS.md 打磨轮加口径说明（不追溯补勾，对账归 Phase 3）；README 计数改「以运行输出为准」；DEMO_ART_SPEC_TODO 加覆盖标注。
+- [x] 0.5 残件处置：chief-bak 归档 `docs/history/`；`web/style.css.bak` 删；一次性采集点文件移 `tmp/` 停车；`agent/`（vendored skills 副本）加 gitignore；四个新测试随 0.1 入册。
+
+**执行记录（2026-10-24）**：HEAD `e91bf3d` 起收口；四门禁（check_protocol / test_core 92 / npm test / evals 离线 6）全绿；origin/master 同步。
 
 **出口条件：** 工作区干净、origin 同步、文档与代码一致、run_gates 全绿。
 

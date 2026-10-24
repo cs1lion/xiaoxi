@@ -1,5 +1,7 @@
 # DEMO_SCRIPT.md / ART_SPEC.md 待完善事项
 
+> **2026-10-24 标注**：开列本文时 DEMO_SCRIPT.md / ART_SPEC.md 尚未存在，两文件现已入库；A/B 清单各项的当前覆盖未逐条复核，盘点归入交付计划 Phase 3 前置，D1-D4 裁决项仍待用户拍板。
+
 > 作者：像素美术导演（Pixel Art Director，teammate `art-director`）
 > 日期：2026-10-19
 > 任务：`task-4`（演示与美术：DEMO_SCRIPT.md / ART_SPEC.md 待完善事项）

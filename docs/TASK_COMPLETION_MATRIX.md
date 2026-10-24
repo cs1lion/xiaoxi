@@ -1,5 +1,7 @@
 # TASK_COMPLETION_MATRIX.md
 
+> **⚠️ 过期快照（2026-10-24 回填标注）**：本文审计基线是 2026-10-19 的 HEAD `9cd0c5a`。其后文中多条 MISSING / PARTIAL / P0 结论已被 master 修复（多角色 villagers、JSON 存档、调试面板、adapters strengths、ledger 心跳等；逐项对账未做）。**现状以代码与门禁命令输出为准**，本文只作历史存档；现行交付状态见 `docs/DELIVERY_PLAN_20261024.md`。
+
 > 只读代码审计（task-3）。审计对象：`pixel-agent-chief-starter/docs/PROJECT_PROGRESS.md` 的进度声称、`PROJECT_BRIEF.md` 的 MVP 1.0 九项要求，以及 `PIXEL_WORLD_ROUND1/2/3` 的完成声明，对照 `pixel-world/src`、`pixel-world/test`、`pixel-world/index.html`、`pixel-world/scripts/smoke.mjs` 与主仓库 `server/`。
 >
 > - 路径基准：`D:\project\neurosama\`，下表证据均为该根目录下的相对路径 + 行号。

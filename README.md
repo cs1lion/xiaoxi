@@ -97,7 +97,7 @@ npm test                         # 前端单测（无浏览器依赖）
 cd pixel-world
 npm install
 npm run dev                      # http://127.0.0.1:5188（独立沙盒）
-npm test                         # 221 项纯逻辑测试，不需要浏览器
+npm test                         # 纯逻辑测试，不需要浏览器；项数以运行输出为准
 ```
 
 同源部署时不用单独起前端：服务端检测到 `pixel-world/dist` 就把它挂在 `/world`。

@@ -1,5 +1,7 @@
 # ARCHITECTURE_GAPS — 像素世界架构核验报告
 
+> **⚠️ 过期快照（2026-10-24 回填标注）**：本文核验基线是 2026-10-19 的 HEAD `9cd0c5a`。其后文中多条缺口结论已被 master 修复（多角色、存档、调试面板、strengths、心跳等；逐项对账未做）。**现状以代码与门禁命令输出为准**，本文只作历史存档；现行交付状态见 `docs/DELIVERY_PLAN_20261024.md`。
+
 > 核验人：Arch（Team `architect`，任务 task-1）｜日期：2026-10-19
 > 范围：`D:\project\neurosama`，分支 `feat/pixel-world-oracle-world`，HEAD `9cd0c5a`
 > 纪律：只读核验；未修改任何源码、配置、测试或已有文档。本文件为唯一新增交付。
