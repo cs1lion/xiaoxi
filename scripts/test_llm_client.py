@@ -35,6 +35,8 @@ settings.db_path = ":memory:"
 from server.llm import LLM, LLMError, _loose_json, _strip_fence  # noqa: E402
 from types import SimpleNamespace  # noqa: E402
 
+import httpx  # noqa: E402
+
 passed = 0
 failed: list[str] = []
 
@@ -296,6 +298,90 @@ def test_missing_choices_fails_loudly() -> None:
     check("错误信息点名失败类型", "IndexError" in name or "KeyError" in name, name)
 
 
+class FakeStreamResponse:
+    """httpx stream() 的最小桩：按状态码回包；200 吐一条 data 行后 [DONE]。"""
+
+    def __init__(self, status: int):
+        self.status_code = status
+        self._lines = (['data: {"choices":[{"delta":{"content":"hi"}}]}', "data: [DONE]"]
+                       if status == 200 else [""])
+
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, *exc):
+        return False
+
+    def raise_for_status(self):
+        if self.status_code >= 400:
+            raise httpx.HTTPStatusError(f"{self.status_code} error",
+                                        request=None, response=None)
+
+    async def aiter_lines(self):
+        for line in self._lines:
+            yield line
+
+
+class FakeStreamClient:
+    """stream() 路径的假 transport：记录调用次数，按脚本回状态码。"""
+
+    def __init__(self, statuses):
+        self.statuses = list(statuses)
+        self.calls = 0
+
+    def stream(self, method, url, json=None, **kwargs):
+        self.calls += 1
+        status = self.statuses.pop(0) if self.statuses else 200
+        return FakeStreamResponse(status)
+
+    async def aclose(self):
+        return None
+
+
+def test_stream_4xx_fails_fast() -> None:
+    """S3 演练②：坏 Key 401 在 stream 路径也必须一次失败，不退避重试。"""
+    print("[stream 4xx]")
+    import asyncio
+
+    llm = LLM(config=live_config())
+    client = FakeStreamClient([401, 401, 401])
+    llm._client = client
+    chunks: list[str] = []
+    error = None
+
+    async def run():
+        nonlocal error
+        try:
+            async for piece in llm.stream([{"role": "user", "content": "a"}]):
+                chunks.append(piece)
+        except LLMError as exc:
+            error = exc
+
+    asyncio.run(run())
+    check("stream 4xx 抛 LLMError", error is not None)
+    check("错误信息只有状态码，不带上游响应体",
+          error is not None and "HTTP 401" in str(error) and "upstream" not in str(error), str(error))
+    check("4xx 只请求一次（不退避重试）", client.calls == 1, str(client.calls))
+
+
+def test_stream_5xx_is_retried() -> None:
+    print("[stream 5xx]")
+    import asyncio
+
+    llm = LLM(config=live_config())
+    client = FakeStreamClient([500, 200])
+    llm._client = client
+    chunks: list[str] = []
+
+    async def run():
+        async for piece in llm.stream([{"role": "user", "content": "a"}]):
+            chunks.append(piece)
+
+    asyncio.run(run())
+    check("5xx 后第二次成功拿到增量", chunks == ["hi"], "".join(chunks))
+    check("5xx 恰好请求两次", client.calls == 2, str(client.calls))
+
+
 def main() -> int:
     test_offline_mode_needs_no_network()
     test_metadata_survives_empty_text()
@@ -303,6 +389,8 @@ def main() -> int:
     test_complete_json_recovers_from_wrapped_output()
     test_complete_json_retries_then_raises()
     test_4xx_is_not_retried()
+    test_stream_4xx_fails_fast()
+    test_stream_5xx_is_retried()
     test_penalty_fields_stay_off_by_default()
     test_reasoning_effort_override_reaches_payload()
     test_strip_and_loose_json()
