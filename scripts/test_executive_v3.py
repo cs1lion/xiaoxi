@@ -305,6 +305,104 @@ def test_code_tasks_route_to_low_token_worker() -> None:
           f"实际 {research_best["id"] if research_best else None}")
 
 
+def test_sandbox_routing_follows_s5d_split() -> None:
+    """T2（issue #21）：sandbox 只接打样/沙盒/校验类受控小活，不得抢 dsh 的代码长任务。
+
+    s5-d 分工（db82169）：代码/脚本/测试/实现/重构归 dsh——它的 session +
+    compaction 把同一代码任务的单次 prompt 压到 Claude Code 的 1/59。sandbox
+    若拿走这些关键词，低 token 优势就废了，预算闸会重新爆，所以像锁 claude
+    一样锁 roster 分工本身，而不是只断言「这回选中了谁」。
+    """
+    print("[sandbox routing split]")
+    roster = load_roster()
+    workers = {worker["id"]: worker for worker in roster_agents(roster)}
+    check("花名册登记了 sandbox 执行者", "sandbox" in workers)
+    entry = workers.get("sandbox") or {}
+    check("sandbox 绑 cli_subproc", entry.get("adapter") == "cli_subproc",
+          str(entry.get("adapter")))
+    dsh_words = set(workers["dsh"].get("strengths") or [])
+    sandbox_words = set(entry.get("strengths") or [])
+    overlap = sorted(dsh_words & sandbox_words)
+    check("sandbox 不持有 dsh 的长任务关键词", not overlap, f"重叠 {overlap}")
+    best, _ = select_agent(roster, "沙盒打样：受控生成并校验一个小文件")
+    check("打样类受控小活路由到 sandbox", best is not None and best["id"] == "sandbox",
+          f"实际 {best['id'] if best else None}")
+    code_best, _ = select_agent(roster, "写一个 Python 脚本，统计某个目录下所有 .py 文件的行数")
+    check("代码长任务仍归 dsh（s5-d 分工不受影响）",
+          code_best is not None and code_best["id"] == "dsh",
+          f"实际 {code_best['id'] if code_best else None}")
+
+
+def _ordered_subsequence(expected: list[str], actual: list[str]) -> bool:
+    iterator = iter(actual)
+    return all(any(item == step for item in iterator) for step in expected)
+
+
+def test_sandbox_cli_worker_real_subprocess_chain() -> None:
+    """T2（issue #21）验收主链：受控小任务真子进程执行全链，不经人工逐步确认。
+
+    调度（delegate）-> 真子进程（cli_subproc + sandbox_worker.py）-> 遥测落
+    span -> 初审（acceptance 回查真实文件）-> 台账记账（ready_to_report ->
+    done）-> commission_update 广播（CommissionStore.subscribe）。全程没有
+    Mock 适配器：roster 条目就是 YAML 里那一条，只把 executable/args 换成当前
+    解释器绝对路径、工作目录指到临时根，让测试不依赖 PATH 与 cwd。
+    """
+    print("[sandbox real subprocess chain]")
+    roster = load_roster()
+    entry = next(dict(item) for item in roster_agents(roster) if item.get("id") == "sandbox")
+    entry["executable"] = sys.executable
+    entry["args"] = [str(ROOT / "scripts" / "worker_shims" / "sandbox_worker.py")]
+    entry["env"] = {**(entry.get("env") or {}),
+                    "AQI_WORKSPACE_ROOT": tempfile.mkdtemp(prefix="sandbox-ws-")}
+    roster["agents"] = [entry]
+    service = ExecutiveService(Path(tempfile.mkdtemp(prefix="executive-sandbox-")), roster=roster)
+    seen: list[dict] = []
+    service.ledger.subscribe(seen.append)
+    result = asyncio.run(service.delegate(
+        "沙盒打样：受控生成并校验一个小文件",
+        acceptance=[{"kind": "artifact_json", "name": "verify_report.json",
+                     "expect": {"status": "verified"}},
+                    {"kind": "artifact_max_bytes", "name": "verify_report.json",
+                     "bytes": 4096}]))
+    commission_id = result["commission_id"]
+    check("真子进程跑完进待验收", result["status"] == "ready_to_report",
+          f"{result['status']}｜{service.commission(commission_id).get('blocked_question', '')}")
+    check("来源是真执行（sandbox，非 manual）", result["agent_id"] == "sandbox",
+          str(result["agent_id"]))
+    commission = service.commission(commission_id)
+    delivery = commission.get("delivery") or {}
+    files = [item for item in delivery.get("artifacts", []) if item.get("kind") == "file"]
+    check("三句话卡带真文件成果", bool(files), str(delivery))
+    if files:
+        report = Path(files[0]["ref"])
+        check("成果文件真实存在", report.is_file(), str(report))
+        if report.is_file():
+            check("成果内容落了本单号", commission_id in report.read_text(encoding="utf-8"))
+    audit = commission.get("audit") or {}
+    check("初审通过（acceptance 回查真文件）", audit.get("passed") is True,
+          str(audit.get("findings")))
+    usage = audit.get("usage") or {}
+    check("遥测进初审且预算已核对",
+          usage.get("budget_checked") is True and usage.get("calls") == 1, str(usage))
+    spans = service.telemetry.store.spans(commission_id=commission_id)
+    check("遥测落盘可回看", len(spans) == 1 and spans[0]["model"] == "sandbox-worker",
+          str(spans))
+    if spans:
+        check("无模型调用不编造 token",
+              spans[0]["prompt_tokens"] == 0 and spans[0]["status_code"] == 0, str(spans[0]))
+    check("本单无熔断告警", not [item for item in service.telemetry_summary()["spinning_alerts"]
+                                if item["commission_id"] == commission_id])
+    service.accept(commission_id)
+    check("收工归档（台账一单真实完成）",
+          service.commission(commission_id)["status"] == "done")
+    statuses = [row["status"] for row in seen if row["id"] == commission_id]
+    check("commission_update 广播覆盖全链",
+          _ordered_subsequence(["drafting", "briefing", "running", "auditing",
+                                "ready_to_report", "done"], statuses), str(statuses))
+    check("广播行是已投影形状", all("delivery" in row and "id" in row for row in seen))
+    service.close()
+
+
 def test_memory_block_is_framed() -> None:
     print("[memory framing]")
     from server.memory.commission_context import gather, render_memory_block
@@ -965,6 +1063,8 @@ def main() -> int:
                  test_evaluator_self_evolution, test_dispatcher_lifecycle,
                  test_dispatcher_retry_cap, test_answer_starts_a_new_attempt,
                  test_boss_rejection_learns, test_code_tasks_route_to_low_token_worker,
+                 test_sandbox_routing_follows_s5d_split,
+                 test_sandbox_cli_worker_real_subprocess_chain,
                  test_delegate_without_worker, test_real_usage_and_partial_failure,
                  test_spinning_alert_lands_in_telemetry, test_front_intents,
                  test_front_samples_and_report, test_orchestrator_route_needs_real_state,

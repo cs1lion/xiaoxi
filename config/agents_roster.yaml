@@ -159,6 +159,26 @@ agents:
     max_concurrent: 1
     eval_commands: [required_fields, artifacts_exist, token_budget, acceptance_met]
 
+  # T2（issue #21）CLI 打样执行者：纯标准库确定性脚本，不接模型网关，专门
+  # 打通「调度 -> 子进程 -> 遥测 -> 验收 -> 台账 -> commission_update 广播」
+  # 全链。沙盒边界：不联网、不删除既有文件，只在每单独立工作目录新增一个
+  # 校验产物。路由遵循 s5-d 分工（db82169）：代码/脚本/测试/实现/重构归
+  # dsh，这里只接打样/沙盒/校验类受控小活，关键词不与 dsh/claude 重叠。
+  - id: sandbox
+    name: 沙盒打样工
+    adapter: cli_subproc
+    executable: "python"
+    args: ["scripts/worker_shims/sandbox_worker.py"]
+    timeout: 60
+    env:
+      AQI_WORKSPACE_ROOT: "data/commissions"
+    summary: 沙盒打样：受控小任务真子进程执行（生成并回读校验一个小文件）；不联网、不删数据
+    strengths: [打样, 沙盒, 校验, 演练, 受控]
+    weaknesses: [不联网, 不删除既有文件, 只做受控小任务]
+    cost_tier: cheap
+    max_concurrent: 1
+    eval_commands: [required_fields, artifacts_exist, token_budget, acceptance_met]
+
   # Codex 已接通（15722 的 /v1/responses 透传到 15721），但 Windows 上
   # workspace-write 沙箱起不来，只能 danger-full-access。按 Phase A 的 D-13，
   # 生产隔离没定之前不放进默认选将池；把 enabled 改成 true 即可启用。
