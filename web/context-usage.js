@@ -4,8 +4,8 @@ const reasons = {query_retrieval:'按当前问题检索',scene_scope:'符合当�
 const purposes = {draft:'当前稿',reference:'参考资料',artifact:'成果'};
 const states = {missing:'关联资料已缺失，未自动换用其他资料。',source_changed:'原资料关联已变化，请核对后重新提出请求。',unavailable:'本轮资料详情暂不可用。'};
 const node = (tag, text) => { const element = document.createElement(tag); if (text !== undefined) element.textContent = text; return element; };
-const validId = value => (typeof value === 'string' && value.trim() && value.length <= 256 && !value.includes('\0')) || (Number.isSafeInteger(value) && value > 0);
-const validCount = value => Number.isSafeInteger(value) && value >= 0;
+export const validId = value => (typeof value === 'string' && value.trim() && value.length <= 256 && !value.includes('\0')) || (Number.isSafeInteger(value) && value > 0);
+export const validCount = value => Number.isSafeInteger(value) && value >= 0;
 function link(text, path, query) {
   const element = node('a', text); element.href = `${path}?${new URLSearchParams(query)}`;
   element.target = '_blank'; element.rel = 'noopener noreferrer'; return element;

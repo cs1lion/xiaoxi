@@ -46,6 +46,8 @@ export async function bootPreferences(mount) {
       const scope=claim.scope||{};
       card.append(create('p',`范围：${activities[scope.activity||'']||scope.activity}${scope.session_id?' · 指定会话 '+scope.session_id:''}${scope.topic?' · 主题 '+scope.topic:''}`));
       card.append(create('small',`来源：${{explicit_user:'用户明确设置',manual:'手动设置',inferred:'推测候选'}[claim.source]||claim.source}${claim.valid_until?'；到期 '+new Date(claim.valid_until*1000).toLocaleString():''}`));
+      if(claim.status==='superseded') card.append(create('small','已被明确变化退役'));
+      else if(!claim.valid_until) card.append(create('small','未确认延续至今，未设定过期日'));
       const details=create('div');card.append(details);
       card.append(action('查看来源证据',async()=>{
         details.replaceChildren();
