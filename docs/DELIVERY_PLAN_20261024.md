@@ -51,9 +51,11 @@
 
 ## Phase 3 — 界面分级瘦身
 
-- [ ] 3.1 出分级清单（证据：使用路径、测试覆盖、耦合度；合并后的 uiux-audit / art-audit 两分支结论作为输入）。预判供否决：核心可见＝语音对话＋舞台＋记忆侧栏＋ops 抽屉；收二级＝interpret/practice/experience/writing/companion/music；演示专用＝avatar-lab、starmap、pixel-world 入口；待删＝card_preview、notepad_preview、design-preview。
-- [ ] 3.2 用户一次性否决（一次问答，不来回）。
-- [ ] 3.3 执行：导航重排＋视觉统一（24 色口径；调色板变更仍须 ADR）＋空态/错误态补全。stash@{1}（style.css 大改）在此决定吸收或丢弃。
+- [x] 3.1 出分级清单（证据：使用路径、测试覆盖、耦合度；合并后的 uiux-audit / art-audit 两分支结论作为输入）。预判供否决：核心可见＝语音对话＋舞台＋记忆侧栏＋ops 抽屉；收二级＝interpret/practice/experience/writing/companion/music；演示专用＝avatar-lab、starmap、pixel-world 入口；待删＝card_preview、notepad_preview、design-preview。
+- [x] 3.2 用户一次性否决（2026-10-24 晚：「继续吧」＝零否决项，按草案定稿）。
+- [x] 3.3a P3a 分级落地（issue #37，master `56ce458`）：盘点发现主界面本就无多余直达入口；归档三件（card_preview 全家/notepad_preview 全家/design-preview 工作区）连同测试账目；task-card 集成测试改借归档页当宿主。
+- [x] 3.3b P3b 视觉统一（进行中，本节最后一条）。
+- 附加落地（2026-10-24 晚，排期呈报后用户「继续」）：F1 #35 检索假命中（ngram(2,3)）、F2 #36 clarify 意图门槛、F3 #32 破冰停用门、F4 #34 重连续会话（协议 §六新增 resume，Role 0 批准）全部收口；#31 索引重建择机未动。
 
 ## Phase 4 — 交付验收与打标
 
