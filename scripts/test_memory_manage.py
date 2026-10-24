@@ -81,12 +81,14 @@ class StoreRetrievalTests(unittest.TestCase):
     def test_build_context_reports_not_found_when_only_hit_is_disabled(self):
         memory_id = self.add("用户养了一只猫叫旺财", key="宠物:猫")
         self.assertTrue(self.store.set_disabled(memory_id, True))
-        block, used, found = self.retriever.build_context("养猫")
+        # 查询用带真实二元桥的整句短语（F1 起 ngram 从 2 起，电报式两字查询
+        # 「养猫」在存文「养了一只猫」里没有连续二元，会按设计落空）。
+        block, used, found = self.retriever.build_context("用户养了什么宠物")
         # 检索为空必须是显式的「没找到」，不是空串静默：found=False 由上游
         # 注入负向约束，防止脑补共同经历。
         self.assertEqual((block, used, found), ("", [], False))
         self.assertTrue(self.store.set_disabled(memory_id, False))
-        block, used, found = self.retriever.build_context("养猫")
+        block, used, found = self.retriever.build_context("用户养了什么宠物")
         self.assertTrue(found)
         self.assertEqual(used, [memory_id])
         self.assertIn("旺财", block)

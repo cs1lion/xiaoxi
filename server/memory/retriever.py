@@ -65,7 +65,14 @@ class MemoryRetriever:
         corpus = [f"{key} {value}" for _mid, key, value in content]
         # Chinese phrases have no word boundaries. char_wb adds shared padding
         # spaces, which can give completely unrelated queries a false similarity.
-        vec = TfidfVectorizer(analyzer="char", ngram_range=(1, 3), min_df=1, sublinear_tf=True)
+        # ngram starts at 2 for the same reason (issue #30 / F-1): a single shared
+        # character -- function words like 的, or any lone content char -- carries
+        # no disambiguating context, yet on a small corpus its TF-IDF unigram can
+        # bridge unrelated topics at sim 0.1-0.35, above min_similarity. Relevance
+        # needs at least a bigram bridge; a one-character query therefore behaves
+        # as an explicit miss (single chars have no 2-grams), which is the safe
+        # side for the negative-constraint path.
+        vec = TfidfVectorizer(analyzer="char", ngram_range=(2, 3), min_df=1, sublinear_tf=True)
         matrix = vec.fit_transform(corpus)
         self._ids = [mid for mid, _key, _value in content]
         self._matrix = matrix
