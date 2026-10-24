@@ -230,7 +230,7 @@ README 原文坦白：demo 的 `openai-realtime-api-beta` 目录是「基于 Ope
   - SDK 的 `cancelResponse(id, sampleCount)` 会发 `response.cancel`，然后**照 OpenAI 协议发 `conversation.item.truncate{item_id, content_index, audio_end_ms}`**，其中 `audio_end_ms = sampleCount / 24000 * 1000` — [client.js:651-662](https://github.com/stepfun-ai/Step-Realtime-Console/blob/0812a2dd82b94602ea380c73468abb1718e28053/src/lib/openai-realtime-api-beta/lib/client.js#L651)
   - `conversation.item.truncated` 收到后按 `audio_end_ms * 24000/1000` 切掉本地音频 — [conversation.js:80-90](https://github.com/stepfun-ai/Step-Realtime-Console/blob/0812a2dd82b94602ea380c73468abb1718e28053/src/lib/openai-realtime-api-beta/lib/conversation.js#L80)
   - 页面在 `speech_started` 触发 `conversation.interrupted` → `wavStreamPlayer.interrupt()` 本地停播清缓冲，再 `cancelResponse(trackId, offset)` — [+page.svelte:374-377](https://github.com/stepfun-ai/Step-Realtime-Console/blob/0812a2dd82b94602ea380c73468abb1718e28053/src/routes/%2Bpage.svelte#L374)
-  - **即：截断偏移完全由客户端自己算（本地播放进度 + 24kHz 样本数换算），不来自服务端**。该 truncate 请求在阶跃服务端是否被接受，文档未说明、demo 也未证明其生效。
+  - **即：截断偏移完全由客户端自己算（本地播放进度 + 24kHz 样本数换算），不来自服务端**。该 truncate 请求在阶跃服务端是否被接受，文档未说明、demo 也未证明其生效。**〔2026-10-24 实跑补充：服务端接受该请求并回 `conversation.item.truncated`，但只把我方传入的 `audio_end_ms` 原样回显，零信息增量——「被接受」≠「服务端知道播放位置」。〕**
 - 因此「用户实际听到哪里」**服务端不提供**；「在途音频块是否作废」也**文档未说明**（客户端只能自己丢缓冲）。
 - 本项目 `PROTOCOL.md` 第十一节「打断契约」以及 `playback_stopped` / `interrupted` 事件需要知道客户端真实播放位置——这一位置 realtime 侧只能自测。
 
@@ -256,7 +256,7 @@ README 原文坦白：demo 的 `openai-realtime-api-beta` 目录是「基于 Ope
 | VAD 字段 | `turn_detection.{type,silence_duration_ms,threshold}`，`threshold` 0–1 示例 0.6 | `turn_detection.{type,prefix_padding_ms,silence_duration_ms,energy_awakeness_threshold}`，能量 0–5000 | **字段名/值域/语义三者全变**；`threshold` 在 realtime 不存在 |
 | `silence_duration_ms` 默认 | 800（文档示例值，未标默认） | **100（文档标默认）** | 默认值差 8 倍 |
 | `session.created/updated` 结构 | 带 `meta:{session_id,timestamp}` | **无 `meta`**，带 `session.id/object/model/max_response_output_tokens` | 响应体不同构 |
-| 转录增量 | `…transcription.delta` 有 `text`/`stash`/`words`（字级时间戳） | **无 `.delta`**，只有 `…transcription.completed`，**无 `words`** | **本项目已在用的 stash 纠错与字级时间戳在 realtime 不存在** |
+| 转录增量 | `…transcription.delta` 有 `text`/`stash`/`words`（字级时间戳） | 有 `…transcription.delta`/`.completed`，**但无 `stash`、无 `words`**（2026-10-24 实跑修正：单轮收到 21 个 `.delta`，原写「无 `.delta`」不准） | **本项目依赖的 stash 区间纠错与字级时间戳在 realtime 不存在**；delta 有，但只给累计文本 |
 | `speech_started` | 带 `meta` + `audio_start_ms` + `item_id` | `audio_start_ms` + `item_id`（无 `meta`） | 少一层 `meta` |
 | `speech_stopped` | 带 `audio_start_ms` + `item_id`（原文字段名如此） | 正文写 `response_id`+`item_id`，sample 给 `audio_end_ms` | **两代字段含义/命名都不一致** |
 | 事件面额外能力 | 无 assistant 输出事件 | 多 `response.audio.delta`、`response.audio_transcript.*`、`response.text.*`、`response.thinking.*`、`response.function_call_arguments.*`、`conversation.item.create/delete`、`response.create/cancel` | realtime 事件面大一圈 |
