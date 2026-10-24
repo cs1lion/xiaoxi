@@ -125,7 +125,10 @@ class AssistantService:
     _DELEGATE_DOMAIN = ('沙盒', '打样')
     _DELEGATE_VERBS = ('整理', '安排', '计划', '起草', '生成', '校验',
                        '做个', '搞个', '跑个', '写份', '写个', '写一篇', '写一段')
+    # 产物类名词：动词 + 产物是「派活」的强信号，单独一条（动词打头或
+    # 句中都可以）。表和正则共用同一个常量，避免两处宾语集合漂移。
     _DELEGATE_OBJECTS = ('文件', '报告', '清单', '表格', '脚本', '文档', '纪要')
+    _DELEGATE_ACTION_VERBS = ('生成', '校验', '整理', '起草', '写', '做')
 
     def _delegation_request(self, text: str) -> bool:
         """这条输入是不是在派活（工具路径的入口，非普通闲聊）。"""
@@ -137,8 +140,9 @@ class AssistantService:
         head = re.sub(r'^(?:帮我|麻烦你?|请)', '', text.strip())
         if any(head.startswith(verb) for verb in self._DELEGATE_VERBS):
             return True
-        return bool(re.search(r'(?:生成|校验|整理|起草)[^，。！？]{0,6}?'
-                              r'(?:文件|报告|清单|表格|脚本|文档)', text))
+        verbs = "|".join(self._DELEGATE_ACTION_VERBS)
+        objects = "|".join(self._DELEGATE_OBJECTS)
+        return bool(re.search(rf'(?:{verbs})[^，。！？]{{0,6}}?(?:{objects})', text))
 
     def should_route(self, text: str, session_id: str = '') -> bool:
         return bool(self.note_conversation.should_route(text, session_id, enabled=self._activity_enabled())

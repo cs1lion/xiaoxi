@@ -17,23 +17,28 @@ AUDIO_DIR = DATA_DIR / "audio"
 # 2026-10-24 清理真实台账时发现：10-21~24 期间有 379 条测试样式委托
 # （「重复触发」×158、「去把这个整理一下」×181、沙盒打样×32、演练③×6）
 # 打进了 data/commissions.db。执行套件自身用 tempdir 隔离，但存在把执行
-# 路径跑在真实库上的通道；约定拦不住，所以在这里做成机械保证：
-# 进程一旦显式声明「我是测试」（TEST_SENTINEL=1，scripts/test_*.py 统一设置），
-# DB_PATH 就不许指向仓库 data/ 下的任何文件，启动即失败。
-# 只认显式开关，不靠 pytest 环境探测——生产进程永远不该因为某个变量名而改行为。
+# 路径跑在真实库上的通道；约定拦不住，所以做成机械保证：
+# 进程一旦显式声明「我是测试」（TEST_SENTINEL=1），**真正打开数据库**时
+# 若目标是仓库 data/ 下的文件就地失败。统一注入点在 scripts/run_gates.py
+# （所有门禁子进程都带这个变量）；单个测试脚本要自证隔离时也设它。
+#
+# 为什么检查放在「打开数据库」而不是 import 时：静态检查器（check_protocol
+# 等）只 import 配置、从不建连接，import 即抛会误伤它们；而任何真的写库的
+# 路径都绕不开 MemoryStore/CommissionStore 的构造。
 _TEST_SENTINEL = os.getenv("TEST_SENTINEL") == "1"
 
 
-def _production_db_guard(path: str) -> None:
+def guard_sqlite_path(path: str) -> None:
+    """测试进程要打开仓库 data/ 下的数据库时，就地抛错（#39）。"""
     if not _TEST_SENTINEL or not path:
         return
     try:
         target = Path(path).resolve()
     except (OSError, ValueError):
         return
-    if target == (DATA_DIR / "memory.db").resolve() or DATA_DIR.resolve() in target.parents:
+    if DATA_DIR.resolve() in target.parents:
         raise RuntimeError(
-            f"测试进程的 DB_PATH 指向真实数据目录：{target}。"
+            f"测试进程的数据库路径指向真实数据目录：{target}。"
             "测试必须用临时库（tempfile / :memory:），见 issue #39。")
 
 
@@ -136,7 +141,6 @@ def seeds_cfg() -> dict[str, Any]:
 
 
 _DB_PATH = os.getenv("DB_PATH", str(DATA_DIR / "memory.db"))
-_production_db_guard(_DB_PATH)
 
 DEFAULTS: dict[str, Any] = {
     "db_path": _DB_PATH,

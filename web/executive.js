@@ -533,7 +533,20 @@ export function mountExecutive() {
   function sendV2Command(type, fields, key) {
     if (key && sentCommands.has(key)) return;
     const result = v2Hub.sendCommand(type, fields);
-    if (!result.ok || !key) return;
+    if (!result.ok) return;
+    if (!result.sent) {
+      /* 通道未就绪（断线中）：命令没发出去，按钮不能标成已确认并永久禁用——
+       * 那会让老板以为批过了（story 22）。用抽屉内的状态行提示（不跨模块摸
+       * app.js 的 subtitle），按钮保留可点，重连后再点即可。 */
+      const note = el("opsEvents");
+      if (note) {
+        const row = node("p", "ops-v2-presence");
+        row.append(node("span", "ops-pill", "连接未就绪：这条命令没发出去，重连后再点一次。"));
+        note.prepend(row);
+      }
+      return;
+    }
+    if (!key) return;
     sentCommands.add(key);
     renderV2(v2Hub.snapshot());
   }

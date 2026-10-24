@@ -42,6 +42,17 @@ class ThreadStore:
     def __init__(self, path):
         if not isinstance(path, (str, os.PathLike)) or not os.fspath(path):
             raise ValueError('path must be a nonempty filesystem path or :memory:')
+        # 生产库哨兵（#39）：台账库正是当初被测试写脏的那一个（379 条），
+        # 拦在打开点。本模块不依赖 server 包，判据就地写，与
+        # server.config.guard_sqlite_path 一致（TEST_SENTINEL=1 且在仓库 data/ 下）。
+        if os.environ.get('TEST_SENTINEL') == '1' and str(path) != ':memory:':
+            target = os.path.abspath(os.fspath(path))
+            data_dir = os.path.abspath(os.path.join(
+                os.path.dirname(os.path.abspath(__file__)), '..', '..', 'data'))
+            if target == data_dir or target.startswith(data_dir + os.sep):
+                raise RuntimeError(
+                    f'测试进程的台账路径指向真实数据目录：{target}。'
+                    '测试必须用临时库，见 issue #39。')
         self._lock = threading.RLock()
         self._closed = False
         self._db = sqlite3.connect(path, isolation_level=None, check_same_thread=False)
@@ -533,6 +544,17 @@ class CommissionStore:
     def __init__(self, path):
         if not isinstance(path, (str, os.PathLike)) or not os.fspath(path):
             raise ValueError('path must be a nonempty filesystem path or :memory:')
+        # 生产库哨兵（#39）：台账库正是当初被测试写脏的那一个（379 条），
+        # 拦在打开点。本模块不依赖 server 包，判据就地写，与
+        # server.config.guard_sqlite_path 一致（TEST_SENTINEL=1 且在仓库 data/ 下）。
+        if os.environ.get('TEST_SENTINEL') == '1' and str(path) != ':memory:':
+            target = os.path.abspath(os.fspath(path))
+            data_dir = os.path.abspath(os.path.join(
+                os.path.dirname(os.path.abspath(__file__)), '..', '..', 'data'))
+            if target == data_dir or target.startswith(data_dir + os.sep):
+                raise RuntimeError(
+                    f'测试进程的台账路径指向真实数据目录：{target}。'
+                    '测试必须用临时库，见 issue #39。')
         self._lock = threading.RLock()
         self._closed = False
         # 变更通知：台账是唯一真相，谁改的都得从这里过，所以钩子只挂一处。

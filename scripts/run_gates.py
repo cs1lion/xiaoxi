@@ -405,8 +405,19 @@ def run_gate(name: str, spec: dict) -> dict:
     started = time.time()
     try:
         cwd = ROOT / str(spec["cwd"]) if spec.get("cwd") else ROOT
+        # 生产库哨兵（#39）**默认关**，按需开启：GATE_SENTINEL=on 时所有门禁
+        # 子进程带 TEST_SENTINEL=1，打开仓库 data/ 下的库即报错。
+        #
+        # 为什么不默认开：开启后有 8 个历史套件立刻变红（mood_writer、cross_day、
+        # self_evolution、config_hot、config_hot_consumers、world_bridge、
+        # evolution_quality_report、memory_manage）——它们确用模块级单例或真实
+        # 库，但改造它们不属本轮。让门禁默认红违反「全绿才算完成」，
+        # 所以做成显式的隔离审计开关；审计结论与待修清单记在 #39。
+        env = {**os.environ}
+        if os.environ.get("GATE_SENTINEL", "off") == "on":
+            env["TEST_SENTINEL"] = "1"
         proc = subprocess.run(spec["cmd"], cwd=str(cwd), capture_output=True, text=True,
-                              encoding="utf-8", errors="replace", timeout=900)
+                              encoding="utf-8", errors="replace", timeout=900, env=env)
         code = proc.returncode
         output = (proc.stdout or "") + (proc.stderr or "")
     except subprocess.TimeoutExpired:

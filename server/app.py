@@ -56,7 +56,39 @@ BUILD = {"version": app.version, "commit": _build_commit()}
 from .assistant.service import AssistantService
 from .assistant.api import create_router, scheduler, scheduler_snapshot
 
-assistant = AssistantService(ROOT / "data", llm, manager)
+
+def _service_data_dir() -> Path:
+    """慢环各库（context/threads/preferences/commissions）的根目录。
+
+    生产：仓库 data/。
+    测试进程（TEST_SENTINEL=1）：优先跟随调用方已钉的 DB_PATH（测试把库钉在
+    自己的临时根里，`APP_DATA_DIR` 可显式指定）；都没给才用进程临时目录。
+    本模块在 import 时就构造 AssistantService，而集成测试普遍「import app 再
+    替换依赖」——如果这里固定 data/，import 本身就会打开真实库（#39：379 条
+    测试数据进真实台账正是这条路）。
+    """
+    if os.environ.get("TEST_SENTINEL") != "1":
+        return ROOT / "data"
+    # 测试进程：跟随 config.DATA_DIR（测试普遍 patch 它来做隔离根），
+    # 再退到显式 APP_DATA_DIR / DB_PATH 同根 / 进程临时目录。
+    # 判据是「DATA_DIR 是否仍指向**仓库** data/」——本模块的 ROOT 常量不受
+    # patch 影响，正好是仓库根的稳定参照；测试会同时 patch config.ROOT 与
+    # config.DATA_DIR，两者相等并不说明没换地方。
+    from . import config as _config
+    if Path(_config.DATA_DIR).resolve() != (ROOT / "data").resolve():
+        return Path(_config.DATA_DIR)
+    explicit = os.environ.get("APP_DATA_DIR")
+    if explicit:
+        return Path(explicit)
+    db_path = os.environ.get("DB_PATH", "")
+    if db_path and db_path != ":memory:":
+        # 与记忆库同根，测试的单一隔离根就能同时管住两类库。
+        return Path(db_path).resolve().parent
+    import tempfile
+    return Path(tempfile.mkdtemp(prefix="app-test-data-"))
+
+
+assistant = AssistantService(_service_data_dir(), llm, manager)
 orchestrator.context_broker = assistant.context_broker
 orchestrator.activity_facade = assistant.activity
 # ExecutiveService 由 AssistantService 持有并统一关闭（同生命周期、同一关闭路径）。

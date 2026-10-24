@@ -11,7 +11,7 @@ from dataclasses import dataclass, asdict
 from pathlib import Path
 from typing import Any, Iterable
 
-from ..config import settings
+from ..config import guard_sqlite_path, settings
 
 SPARK_STATES = ("latent", "surfaced", "spent")
 SPARK_TRANSITIONS = {("latent", "surfaced"), ("surfaced", "spent")}
@@ -331,6 +331,10 @@ class Memory:
 class MemoryStore:
     def __init__(self, db_path: str | None = None) -> None:
         self.db_path = db_path or settings.db_path
+        # 生产库哨兵（#39）：测试进程（TEST_SENTINEL=1）打开仓库 data/ 下的库
+        # 就地失败。检查在构造点而不是 import 点——静态检查器只 import 配置，
+        # 任何真的读写记忆的路径都绕不开这里。
+        guard_sqlite_path(self.db_path)
         self._lock = threading.RLock()
         self._closed = False
         # 与 AssistantStore 一致：父目录不存在就建出来。否则全新检出（data/ 被
@@ -1493,4 +1497,8 @@ class MemoryStore:
                 self._closed = True
 
 
+# 生产库哨兵（#39）落在 MemoryStore/__init__ 的 guard_sqlite_path 与
+# CommissionStore 的同类检查上：测试态下打开仓库 data/ 下的库即报错。
+# 模块级单例照常创建（生产路径零变化）——测试只要钉了临时库就不受影响，
+# 没钉的会在真正打开库时被拦。
 store = MemoryStore()

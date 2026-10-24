@@ -12,10 +12,6 @@ from .retriever import MemoryRetriever
 from .preference import normalize_preference, PreferenceValidationError
 from .store import KINDS, SOURCES, Memory, MemoryStore, store as default_store
 
-# 批量删除前最多枚举多少行来逐条发 MEMORY_UPDATE：个人记忆库远低于这个量级；
-# 超限时多出来的行不再发事件（store 仍是真相），不为此做无界查询。
-_BULK_EVENT_LIMIT = 1000
-
 
 # Change words are a conservative gate, not proof of semantic entailment.
 # Ambiguous changes remain conflicts; users can correct them in the memory UI.
@@ -229,7 +225,19 @@ class MemoryManager:
                 if not explicit_update:
                     item["status"] = "conflict"
         new_id = self.store.upsert(session_id=session_id, expected_write_epoch=expected_write_epoch, **item)
-        return self.store.get(new_id) if new_id is not None else None
+        memory = self.store.get(new_id) if new_id is not None else None
+        if memory is not None:
+            # §5.6 MEMORY_UPDATE 发在**唯一写入出口**：自动抽取（observe_turn）、
+            # 手动写入（remember）、纠正（correct）全部经过 `_persist`，挂在这里
+            # 才不会有「某条写入路径忘了发」的第二个真相源。此前只有 remember/
+            # correct 发事件，真实的对话抽取主路径一条都不发（review 抓到）。
+            # action 只能取规范 §5.6 的闭集（corrected/deleted/promoted）：
+            # 纠正与显式 stated 写入都是 promoted 家族，自动抽取的 inferred 没有
+            # 独立 action 名——按「来源更强的 upsert」口径归 promoted，不新造词。
+            action = "corrected" if operation == "update" else "promoted"
+            _publish_memory_event(action, memory,
+                                  provenance=f"session:{session_id or '-'}")
+        return memory
 
     def remember(self, **item: Any) -> Memory | None:
         """Explicit manual write. Never pretend it was extracted from a chat."""
@@ -279,10 +287,14 @@ class MemoryManager:
         memory = self.store.get(memory_id)
         if memory is None:
             return 0
-        if purge_history:
-            return self.store.delete_key(memory.key, kind=memory.kind, subject=memory.subject,
+        removed = (self.store.delete_key(memory.key, kind=memory.kind, subject=memory.subject,
                                          identity_slot=memory.identity_slot)
-        return 1 if self.store.delete(memory_id) else 0
+                   if purge_history else (1 if self.store.delete(memory_id) else 0))
+        if removed:
+            # §5.6 deleted：物理硬删是唯一会发 deleted 的路径（软停用不发，
+            # 它是可逆的检索静音，见 set_disabled）。
+            _publish_memory_event("deleted", memory, provenance="forget")
+        return removed
 
     def forget_all(self, **filters: Any) -> int:
         return self.store.delete_all(**filters)
