@@ -370,6 +370,8 @@ def test_b_task_edges() -> None:
                     TaskFacts(blocked_reason="retry_exhausted"), target="BLOCKED")
     if res is not None:
         check("T13 resume_to=EXECUTING", res.state.resume_to == "EXECUTING", res.state.resume_to)
+        check("T13 带上 blocked_reason（收口轮补：原实现落空串）",
+              res.state.blocked_reason == "retry_exhausted", res.state.blocked_reason)
     expect_ok("T13 允许：需授权", M, task("EXECUTING"), "T13",
               TaskFacts(blocked_reason="need_authorization"), target="BLOCKED")
     expect_guard("T13 拒绝：原因不合法", lambda: M.transition(
@@ -462,6 +464,15 @@ def test_b_task_edges() -> None:
     expect_guard("T19 拒绝：high 未批准（SM-10）", lambda: M.transition(
         task("ACCEPTED"), "T19", TaskFacts(risk="high", side_effects=(eff(),))),
         contains="APPROVE_SIDE_EFFECT")
+    # 第三支（§4.4 T19 下注，2026-10-22 补）：risk=low 但有副作用 → 按「有副作用」
+    # 处理，必须 APPROVE_SIDE_EFFECT。规范判据是枚举式三支，改 guard 要回来对这
+    # 三支；low+副作用 这支原先没有回归锁（收口轮补）。
+    expect_guard("T19 拒绝：low 有副作用未批准（第三支）", lambda: M.transition(
+        task("ACCEPTED"), "T19", TaskFacts(risk="low", side_effects=(eff(),))),
+        contains="APPROVE_SIDE_EFFECT")
+    expect_ok("T19 允许：low 有副作用但已 APPROVE（第三支）", M, task("ACCEPTED"), "T19",
+              TaskFacts(risk="low", side_effects=(eff(),), approve_side_effect=True),
+              target="DELIVERING")
 
     # T20 DELIVERING -> DELIVERED
     # 只数 status=done 的记录。三种失败必须报三种不同文案——排查时分得清是哪一种。
@@ -562,6 +573,32 @@ def test_b_task_edges() -> None:
     expect_guard("T22 拒绝：授权对象不匹配", lambda: M.transition(
         task("BLOCKED", resume_to="DELIVERING"), "T22",
         TaskFacts(authorization_effect_id="e2", blocked_effect_id="e1")))
+    # §4.2 非法状态组合（收口轮补）：resume_to 只能是 RESUME_TARGETS 里的值。
+    # 机器自己产不出坏 resume_to（五条入 BLOCKED 的 patch 全部显式写值），
+    # 这里锁的是入口——坏状态进来必须被拒，不能迁去一个非法恢复目标。
+    # CLARIFYING/ACCEPTED 都是合法 Task 状态但不是合法恢复目标，最容易被放过。
+    for bad_target in ("CLARIFYING", "PROPOSED", "ACCEPTED", "DELIVERED", "garbage"):
+        expect_guard(f"T22 拒绝：resume_to={bad_target!r} 不在值域", lambda t=bad_target: M.transition(
+            task("BLOCKED", resume_to=t, blocked_reason="retry_exhausted"), "T22",
+            TaskFacts(answer_text="继续")), contains="非法状态组合")
+    # attempt 点名的目标与 resume_to 不一致：按守卫拒绝（不是悄悄改道）
+    expect_guard("T22 拒绝：attempt 目标与 resume_to 不一致", lambda: M.attempt(
+        task("BLOCKED", resume_to="VERIFYING", blocked_reason="retry_exhausted"),
+        "EXECUTING", TaskFacts(answer_text="继续")), contains="不能回到")
+    # 空 resume_to：直连 T22 拒绝（黑洞状态没有唯一去向）；attempt 由点名目标补位
+    # （既有设计，见 _apply 注释），两条都锁住。
+    expect_guard("T22 拒绝：空 resume_to 直连没有去向", lambda: M.transition(
+        task("BLOCKED", blocked_reason="retry_exhausted"), "T22", TaskFacts(answer_text="继续")))
+    try:
+        res = M.attempt(task("BLOCKED", blocked_reason="retry_exhausted"), "EXECUTING",
+                        TaskFacts(answer_text="继续"))
+    except TransitionError as exc:
+        check("T22 补位：空 resume_to 由 attempt 点名的目标补上", False,
+              f"{type(exc).__name__}: {exc}")
+    else:
+        check("T22 补位：空 resume_to 由 attempt 点名的目标补上",
+              res.state.status == "EXECUTING" and res.state.resume_to == "",
+              f"{res.state.status}/{res.state.resume_to!r}")
 
     # T23 BLOCKED -> CANCELLED
     res = expect_ok("T23 允许：阻塞中取消", M, task("BLOCKED", resume_to="EXECUTING"), "T23",
@@ -583,6 +620,38 @@ def test_b_task_edges() -> None:
     for src in sorted(TASK_TERMINAL):
         expect_illegal(f"T24 拒绝：终态 {src} 没有出边", lambda s=src: M.transition(
             task(s), "T24", TaskFacts()))
+
+    # §4.2 reason 产生者表（收口轮补）：五个取值**每个都要有产生它的迁移行**。
+    # 逐条驱动产生 BLOCKED 的迁移，断言产出的 reason 都在值域内、且五个值
+    # 全部被覆盖——缺一个就是「有 reason 没有产生者」的黑洞（2026-10-22 前
+    # need_clarification 就这么空过，规范为此补了 T17 的 human 分支）。
+    produced_reasons = set()
+    for label, state_, rule_id_, facts_ in (
+        ("T9 need_authorization", task("SPEC_LOCKED"), "T9",
+         TaskFacts(blocked_reason="need_authorization", resume_to="SPEC_LOCKED")),
+        ("T9 need_approval", task("SPEC_LOCKED"), "T9",
+         TaskFacts(blocked_reason="need_approval", resume_to="SPEC_LOCKED")),
+        ("T11 ambiguous_result", task("DISPATCHED"), "T11",
+         TaskFacts(dispatch_receipts=0, ack_timed_out=True)),
+        ("T13 retry_exhausted", task("EXECUTING"), "T13",
+         TaskFacts(blocked_reason="retry_exhausted")),
+        ("T13 need_authorization", task("EXECUTING"), "T13",
+         TaskFacts(blocked_reason="need_authorization")),
+        ("T17 retry_exhausted", task("VERIFYING", attempt=3), "T17",
+         TaskFacts(failed_required=True, failure_signature="S9", max_retries=3)),
+        ("T17 need_clarification（human）", task("VERIFYING"), "T17",
+         TaskFacts(failed_required=True, failure_signature="S1", human_required_count=1)),
+        ("T21 need_approval", task("DELIVERING"), "T21",
+         TaskFacts(blocked_reason="need_approval")),
+    ):
+        r = M.transition(state_, rule_id_, facts_)
+        check(f"reason 产生者·{label} 产出值域内 reason",
+              r.state.status == "BLOCKED" and r.state.blocked_reason in BLOCKED_REASONS,
+              f"{r.state.status}/{r.state.blocked_reason}")
+        produced_reasons.add(r.state.blocked_reason)
+    check("reason 产生者·五个取值全部有产生它的迁移",
+          produced_reasons == set(BLOCKED_REASONS),
+          str(sorted(set(BLOCKED_REASONS) - produced_reasons)))
 
 
 # ---------- C Step 迁移表（S1–S15）----------
@@ -834,6 +903,67 @@ def test_d_exhaustive() -> None:
     check("Task 规则 id 无重复定义", unique_rules(t_all), f"{len({r.rule_id for r in t_all})} ids")
     check("Step 规则 id 无重复定义", unique_rules(s_all), f"{len({r.rule_id for r in s_all})} ids")
 
+    # 收口锁：规范 §4.4/§4.5 迁移表逐条硬编码成边集，与 edges() 要求**完全相等**。
+    # D 节其余断言对照的是实现自己的 edges()（自洽）；这一块对照的是规范原文
+    # （对表）——多一条边等于自造迁移，少一条等于漏实现，两个方向都要红。
+    # T22 展开为 5 个 resume 目标；T24/S15 的通配源展开为全部非终态。
+    spec_task_edges = {
+        ("CLARIFYING", "CLARIFYING"),   # T1
+        ("CLARIFYING", "PROPOSED"),     # T2
+        ("CLARIFYING", "CANCELLED"),    # T3
+        ("PROPOSED", "CLARIFYING"),     # T4
+        ("PROPOSED", "SPEC_LOCKED"),    # T5 / T6
+        ("PROPOSED", "CANCELLED"),      # T7
+        ("SPEC_LOCKED", "DISPATCHED"),  # T8
+        ("SPEC_LOCKED", "BLOCKED"),     # T9
+        ("DISPATCHED", "EXECUTING"),    # T10
+        ("DISPATCHED", "BLOCKED"),      # T11
+        ("EXECUTING", "VERIFYING"),     # T12
+        ("EXECUTING", "BLOCKED"),       # T13
+        ("EXECUTING", "FAILED"),        # T14
+        ("EXECUTING", "TIMEOUT"),       # T15
+        ("VERIFYING", "EXECUTING"),     # T16
+        ("VERIFYING", "BLOCKED"),       # T17
+        ("VERIFYING", "ACCEPTED"),      # T18
+        ("ACCEPTED", "DELIVERING"),     # T19
+        ("DELIVERING", "DELIVERED"),    # T20
+        ("DELIVERING", "BLOCKED"),      # T21
+        ("BLOCKED", "CANCELLED"),       # T23
+    }
+    for resume_target in RESUME_TARGETS:                    # T22 展开
+        spec_task_edges.add(("BLOCKED", resume_target))
+    for src in TASK_STATES:                                 # T24 通配展开
+        if src not in TASK_TERMINAL:
+            spec_task_edges.add((src, "CANCELLED"))
+    missing_t = sorted(spec_task_edges - t_edges)
+    extra_t = sorted(t_edges - spec_task_edges)
+    check("Task 边集与规范 §4.4 完全一致（不多不少）", not missing_t and not extra_t,
+          f"缺 {missing_t} / 多 {extra_t}")
+
+    spec_step_edges = {
+        ("CREATED", "READY"),        # S1
+        ("CREATED", "SKIPPED"),      # S2
+        ("READY", "DISPATCHED"),     # S3
+        ("DISPATCHED", "RUNNING"),   # S4
+        ("DISPATCHED", "UNKNOWN"),   # S5
+        ("RUNNING", "OBSERVED"),     # S6
+        ("RUNNING", "FAILED"),       # S7
+        ("RUNNING", "UNKNOWN"),      # S8
+        ("OBSERVED", "VERIFIED"),    # S9
+        ("OBSERVED", "REJECTED"),    # S10
+        ("REJECTED", "READY"),       # S11
+        ("REJECTED", "FAILED"),      # S12
+        ("UNKNOWN", "OBSERVED"),     # S13
+        ("UNKNOWN", "READY"),        # S14
+    }
+    for src in STEP_STATES:                                 # S15 通配展开
+        if src not in STEP_TERMINAL:
+            spec_step_edges.add((src, "CANCELLED"))
+    missing_s = sorted(spec_step_edges - s_edges)
+    extra_s = sorted(s_edges - spec_step_edges)
+    check("Step 边集与规范 §4.5 完全一致（不多不少）", not missing_s and not extra_s,
+          f"缺 {missing_s} / 多 {extra_s}")
+
 
 # ---------- E 属性测试 ----------
 
@@ -924,6 +1054,7 @@ def test_e_property() -> None:
     ok_hits = 0
     terminal_violation = 0
     blocked_without_resume = 0
+    blocked_bad_reason = 0
     for _ in range(2000):
         state = TaskState()
         for _ in range(rng.randint(1, 12)):
@@ -949,10 +1080,15 @@ def test_e_property() -> None:
             # 属性 (3)：BLOCKED 必带 resume_to
             if new.status == "BLOCKED" and not new.resume_to:
                 blocked_without_resume += 1
+            # 属性 (3b)：BLOCKED 的 reason 必在 §4.2 五值闭集内（收口轮补）
+            if new.status == "BLOCKED" and new.blocked_reason not in BLOCKED_REASONS:
+                blocked_bad_reason += 1
             state = new
     check("随机序列 no 未列出迁移", terminal_violation == 0, str(terminal_violation))
     check("随机序列 BLOCKED 必带 resume_to", blocked_without_resume == 0,
           str(blocked_without_resume))
+    check("随机序列 BLOCKED.reason 必在五值闭集", blocked_bad_reason == 0,
+          str(blocked_bad_reason))
     check("随机序列确实走到过成功迁移", ok_hits > 0, str(ok_hits))
     check("随机序列确实触发过守卫拒绝", guard_hits > 0, str(guard_hits))
 
@@ -978,6 +1114,8 @@ def test_e_property() -> None:
         if (state.status, new.status) not in _task_edges():
             invalid += 1
         if new.status == "BLOCKED" and not new.resume_to:
+            invalid += 1
+        if new.status == "BLOCKED" and new.blocked_reason not in BLOCKED_REASONS:
             invalid += 1
         state = new
         steps += 1

@@ -340,7 +340,10 @@ def _patch_t11(state: TaskState, facts: TaskFacts) -> dict:
 
 
 def _patch_t13(state: TaskState, facts: TaskFacts) -> dict:
-    return {"resume_to": "EXECUTING"}
+    # blocked_reason 必须带上：守卫已限定它 ∈ {retry_exhausted, need_authorization}，
+    # 不带的话 BLOCKED 会落成空 reason（§4.2 非法组合），台账投影也拿不到
+    # blocked_kind。2026-10-24 收口轮由「reason 产生者」回归锁抓出。
+    return {"blocked_reason": facts.blocked_reason, "resume_to": "EXECUTING"}
 
 
 def _patch_t5(state: TaskState, facts: TaskFacts) -> dict:
@@ -728,6 +731,17 @@ class _MachineBase:
         requested: str = "",
     ) -> TransitionResult:
         target = cls._expand(rule, state)
+        if rule.target == RESUME_PLACEHOLDER and target and target not in RESUME_TARGETS:
+            # §4.2：resume_to 的值域就是 RESUME_TARGETS，「必须显式给出」。
+            # 展开到值域外的目标（如 CLARIFYING——它是合法 Task 状态，但不是
+            # 合法的恢复目标）属于非法状态组合：state 本身坏了，迁过去等于
+            # 把坏状态洗白。空串不算坏值，走下面的补位 / 不可用分支。
+            raise GuardRejected(
+                state.status,
+                target,
+                (rule.rule_id,),
+                (f"resume_to {target!r} 不在 {RESUME_TARGETS} 里（§4.2 非法状态组合）",),
+            )
         if requested in RESUME_TARGETS:
             if target and target != requested:
                 raise GuardRejected(

@@ -425,6 +425,41 @@ def test_c_risk():
     check("取最高值·[medium, low]=medium", mixed2.level == "medium", mixed2.level)
     check("汇总·每条副作用都有理由", len(mixed.reasons) == 2)
 
+    # §6.2 跨字段硬断言（3b，2026-10-24 接入）：「permissions_required 里的最高等级，
+    # 本身就是 risk 的下界——L5/L6 出现在契约里，risk 不得低于 high。
+    # 这条是硬断言，不是建议：风险规则算漏了，权限表兜住。」
+    r = compute_risk((), permissions_required=("L6",))
+    check("3b·L6 无副作用也从 low 抬到 high", r.level == "high", r.level)
+    check("3b·理由点名 §6.2 下界", any("§6.2" in item for item in r.reasons), str(r.reasons))
+    r = compute_risk((), permissions_required=("L5",))
+    check("3b·L5 同样抬到 high", r.level == "high", r.level)
+    r = compute_risk((), permissions_required=("L0", "L4"))
+    check("3b·L4 及以下不抬（规范只操作化了 L5/L6）", r.level == "low", r.level)
+    # 下界只兜不降：副作用已算出的 high 不因权限低而拉下来
+    r = compute_risk((mk_effect(type_="delete"),), permissions_required=("L0",))
+    check("3b·下界不降级（delete 仍 high）", r.level == "high", r.level)
+    # medium 副作用 + L6 → 抬到 high
+    r = compute_risk((mk_effect(type_="send_message", target_class="self", reversible=True),),
+                     permissions_required=("L6",))
+    check("3b·medium 副作用遇 L6 抬到 high", r.level == "high", r.level)
+    # 多等级取最高
+    r = compute_risk((), permissions_required=("L0", "L6"))
+    check("3b·多等级取最高（L0+L6 → high）", r.level == "high", r.level)
+    # 等级名合法性归 G6；这里对乱码不抬也不炸
+    r = compute_risk((), permissions_required=("NONSENSE",))
+    check("3b·乱码等级不炸不抬（合法性归 G6）", r.level == "low", r.level)
+    # 不传权限保持既有行为（向后兼容：旧调用点等于不启用兜底）
+    r = compute_risk(())
+    check("3b·不传 permissions_required 时行为不变（low）", r.level == "low", r.level)
+
+    # 冻结路径（gate.freeze → parse_contract）：「L6 权限配低风险的委托」进不了契约。
+    # 规范 §6.2 给的验证手法就是这个：构造 L6 + 想要 low 的契约，看它能否被冻进去。
+    frozen = freeze(mk_draft(permissions_required=("L6",), side_effects=()))
+    check("3b·freeze 后 L6 无副作用的契约 risk=high（L6+low 组合被拒绝）",
+          frozen.risk.level == "high", frozen.risk.level)
+    check("3b·freeze 的理由里有 §6.2 下界说明",
+          any("§6.2" in item for item in frozen.risk.reasons), str(frozen.risk.reasons))
+
 
 # ---------- D. 确认策略 ----------
 
@@ -861,18 +896,26 @@ def test_h_spec_example():
     contract = outcome.contract
     check("示例·契约已冻结", isinstance(contract, TaskContract))
     if contract is not None:
-        check("示例·risk=medium（send_message 给自己且不可逆）",
-              contract.risk.level == "medium", contract.risk.level)
+        # §6.2 vs §3.6 的规范内冲突（3b 接入后按 §6.2 收口）：示例权限表含 L5
+        # （发消息按 §6.2 就是 L5 能力），副作用规则算出 medium，但 §6.2 硬断言
+        # 「L5/L6 出现在契约里，risk 不得低于 high——风险规则算漏了，权限表兜住」
+        # 写于 §3.6 之后且自我声明为硬断言，故示例实际冻结结果是 high，不是
+        # §3.6 原文写的 medium。这条变化本身就是 3b 的回归锁。
+        check("示例·risk=high（副作用算 medium，但 §6.2 权限下界 L5 兜到 high）",
+              contract.risk.level == "high", contract.risk.level)
         check("示例·risk 理由非空", len(contract.risk.reasons) >= 1)
+        check("示例·risk 理由点名 §6.2 下界",
+              any("§6.2" in item for item in contract.risk.reasons), str(contract.risk.reasons))
         check("示例·deliver_to 高亮（副作用槽位，c=0.88 也要展示）",
               "deliver_to" in outcome.high_lighted_slots,
               str(outcome.high_lighted_slots))
         policy = effective_start_policy(outcome)
-        check("示例·medium 风险不走倒计时", policy["countdown_allowed"] is False)
-        check("示例·medium 风险必须显式确认", policy["start"] == EXPLICIT_CONFIRM)
-        policy_direct = confirmation_policy("medium")
-        check("示例·交付前需要确认（展示动作与预览）",
-              policy_direct["delivery_confirmation"] == "required_show_actions_and_preview")
+        check("示例·high 风险不走倒计时", policy["countdown_allowed"] is False)
+        check("示例·high 风险必须显式确认并逐项点头高亮槽位",
+              policy["start"] == EXPLICIT_CONFIRM_WITH_SLOT_ACK, policy["start"])
+        policy_direct = confirmation_policy("high")
+        check("示例·交付前需要确认（展示目的地与内容摘要）",
+              policy_direct["delivery_confirmation"] == "required_show_destination_and_summary")
         check("示例·验收标准 4 条全部可解析", len(contract.acceptance) == 4)
         check("示例·C1 默认 promotion_weight=1.0（deterministic）",
               contract.acceptance[0].promotion_weight == 1.0)
@@ -1050,6 +1093,22 @@ def test_j_parse_contract():
                                "idempotency_key": "k"}]
     check("§3.2·手填 high 也被重算（send_message 给自己=medium）",
           parse_contract(honest).risk.level == "medium")
+
+    # §6.2（3b）跨字段：手填 low + L6 权限 → 重算为 high。
+    # L6+low 这种自相矛盾的组合（等级说「要花钱/安装/写工作区外」，
+    # 风险说「低，可自动开工」）从此进不了任何一条冻结路径。
+    l6_low = dict(base)
+    l6_low["risk"] = {"level": "low", "reasons": ["手填的"]}
+    l6_low["permissions_required"] = ["L6"]
+    check("§6.2·手填 low 配 L6 被重算为 high（L6+low 组合被拒绝）",
+          parse_contract(l6_low).risk.level == "high",
+          parse_contract(l6_low).risk.level)
+    l5_low = dict(base)
+    l5_low["risk"] = {"level": "low", "reasons": ["手填的"]}
+    l5_low["permissions_required"] = ["L0", "L5"]
+    check("§6.2·L5 混在低等级里同样被重算为 high",
+          parse_contract(l5_low).risk.level == "high",
+          parse_contract(l5_low).risk.level)
 
     # to_mapping 回写（docstring 声称「回写成规范形状的 dict，便于测试断言与日志」）
     round_tripped = contract.to_mapping()

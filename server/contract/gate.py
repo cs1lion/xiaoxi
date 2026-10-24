@@ -517,7 +517,10 @@ def _draft_payload(draft: Draft) -> dict[str, Any]:
             "idempotency_key": getattr(effect, "idempotency_key", ""),
         })
 
-    risk = compute_risk(tuple(draft.side_effects))
+    # §6.2（3b）：权限等级是 risk 的下界（L5/L6 → 至少 high），
+    # 冻结时必须把 permissions_required 一起喂给风险计算。
+    risk = compute_risk(tuple(draft.side_effects),
+                        permissions_required=tuple(draft.permissions_required))
     budget = draft.budget
     budget_payload = None
     if budget is not None:

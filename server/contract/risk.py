@@ -19,6 +19,13 @@
 | delete、spend_money、install | 无 | high |
 
 兜底：任何 reversible 为 false 的副作用，风险至少为 medium。
+
+§6.2 跨字段硬断言（3b，2026-10-24 接入）：「permissions_required 里的最高等级，
+本身就是 risk 的下界——L5/L6 出现在契约里，risk 不得低于 high。这条是硬断言，
+不是建议：风险规则算漏了，权限表兜住。」所以本函数同时读权限等级；
+规范只把 L5/L6 这一档操作化成了「至少 high」，L0–L4 没给映射，不擅自发明。
+等级名是否合法（L0–L6 闭集）仍是 G6 的职责，这里不重复判——
+出现别的字符串时不抬也不炸，交给 G6 去问。
 """
 from __future__ import annotations
 
@@ -72,21 +79,38 @@ def risk_of_side_effect(effect: SideEffect) -> tuple[str, str]:
     return level, reason
 
 
-def compute_risk(side_effects: tuple[SideEffect, ...] | list[SideEffect]) -> RiskAssessment:
-    """把一组副作用汇总成一个风险等级。
+def compute_risk(
+    side_effects: tuple[SideEffect, ...] | list[SideEffect],
+    *,
+    permissions_required: tuple[str, ...] | list[str] | None = None,
+) -> RiskAssessment:
+    """把一组副作用（与权限等级，§6.2）汇总成一个风险等级。
 
-    没有任何副作用 = 只读 = low（规范表第一行）。
+    没有任何副作用 = 只读 = low（规范表第一行）——但 L5/L6 在权限表里时
+    仍要抬到 high：花钱/对外写/安装的权限本身就已经不是「低风险只读」了。
     """
     effects = tuple(side_effects)
-    if not effects:
-        return RiskAssessment(level="low", reasons=("没有副作用（只读）",))
-
-    level = "low"
     reasons: list[str] = []
-    for effect in effects:
-        effect_level, reason = risk_of_side_effect(effect)
-        level = _bump(level, effect_level)
-        reasons.append(f"{effect.id}（{effect.type}）: {reason} → {effect_level}")
+    if not effects:
+        level = "low"
+        reasons.append("没有副作用（只读）")
+    else:
+        level = "low"
+        for effect in effects:
+            effect_level, reason = risk_of_side_effect(effect)
+            level = _bump(level, effect_level)
+            reasons.append(f"{effect.id}（{effect.type}）: {reason} → {effect_level}")
+
+    # §6.2 硬断言：权限等级是 risk 的下界，L5/L6 → 至少 high。
+    # 只兜下界，不做降级：副作用算出的 high 不会因为权限低而被拉下来。
+    elevated = sorted({item for item in (permissions_required or ()) if item in ("L5", "L6")})
+    if elevated:
+        if RISK_RANK[level] < RISK_RANK["high"]:
+            level = "high"
+        reasons.append(
+            f"permissions_required 含 {'/'.join(elevated)}：权限等级是 risk 的下界"
+            "（§6.2 硬断言），risk 不得低于 high"
+        )
     return RiskAssessment(level=level, reasons=tuple(reasons))
 
 

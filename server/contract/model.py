@@ -761,9 +761,10 @@ def parse_contract(raw: Any) -> TaskContract:
         raise ContractShapeError(problems)
 
     # §3.2：不允许手填降级。重算覆盖，不采信传入值。
+    # §6.2（3b）：重算时把权限等级一起读进去——L5/L6 在契约里，risk 不得低于 high。
     from .risk import compute_risk as _compute_risk
 
-    risk = _compute_risk(tuple(side_effects))
+    risk = _compute_risk(tuple(side_effects), permissions_required=tuple(permissions))
 
     assert goal is not None and artifact is not None and budget is not None
     return TaskContract(
