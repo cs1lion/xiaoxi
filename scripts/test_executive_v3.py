@@ -871,6 +871,38 @@ def test_starmap_notes_intent_routes() -> None:
     service.close()
 
 
+def test_orchestrator_clarify_needs_intent() -> None:
+    """F2（issue #36/#33）：clarify 分支必须有意图门槛。
+
+    两单待验收时（DRIFT_DRILLS 场景②的复现），普通对话曾被全量截断成
+    「你手上等着验收的有 N 单」——违反 executive_route 自己的
+    「Intent alone never routes」原则。门槛 = 与单在途分支同一个
+    acceptance_intent 判定。
+    """
+    print("[orchestrator clarify gate]")
+    from server.dialogue.orchestrator import Orchestrator
+
+    service = build_service()
+    orchestrator = Orchestrator()
+    for title in ("整理《七月选题》标题", "整理《八月选题》标题"):
+        commission = service.open(title, "三版标题")
+        service.dispatch(commission["id"], intent="整理便笺标题")
+        service.start(commission["id"])
+        service.submit(commission["id"], GOOD_ARTIFACT)
+    pending = service.pending_reports()
+    check("夹具就位：两单待验收", len(pending) == 2, f"{len(pending)} 单")
+
+    chat = orchestrator.executive_route("还记得我的猫叫什么名字吗", service)
+    check("多单待验收不截普通对话", chat is None, f"got {chat!r}")
+
+    clarify = orchestrator.executive_route("收工", service)
+    check("验收输入仍进 clarify 问哪单",
+          clarify is not None and clarify["kind"] == "clarify"
+          and len(clarify.get("commission_ids") or []) == 2,
+          f"got {clarify!r}")
+    service.close()
+
+
 def test_ui_nav_value_domain() -> None:
     """§二十四：ui_nav 载荷的取值域——前后端必须对着这份白名单走。"""
     print("[ui_nav value domain]")
@@ -1068,6 +1100,7 @@ def main() -> int:
                  test_delegate_without_worker, test_real_usage_and_partial_failure,
                  test_spinning_alert_lands_in_telemetry, test_front_intents,
                  test_front_samples_and_report, test_orchestrator_route_needs_real_state,
+                 test_orchestrator_clarify_needs_intent,
                  test_starmap_notes_intent_routes, test_ui_nav_value_domain,
                  test_ambient_supervisor_check, test_rest_seam):
         test()

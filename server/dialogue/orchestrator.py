@@ -1495,8 +1495,11 @@ class Orchestrator:
             return None
         if pending:
             verdict = acceptance_intent(text)
-            if len(pending) > 1:
+            if len(pending) > 1 and verdict:
                 # 手上不止一单时，凭"最近更新那一单"下手很容易砍错人：不猜，问一句。
+                # 但只有验收/督办相关的输入（acceptance_intent 命中）才值得问哪一单
+                # （#33）：普通对话必须照常落回闲聊，否则"Intent alone never routes"
+                # 被本分支独自违反——两单待验收时连"还记得我的猫吗"都被截成催验收。
                 titles = "、".join(f"《{item.get('title') or '未命名'}》" for item in pending[:3])
                 more = "等" if len(pending) > 3 else ""
                 choice = compose_choice(pending)
