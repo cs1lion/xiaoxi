@@ -1366,14 +1366,17 @@ class Orchestrator:
         experiences, so they must not be written into user memory.
         """
         try:
-            todos = manager.store.list_memories(kind="todo", limit=1)
+            # 走 retriever 的列表模式（空查询）而不是直读 store：停用门在
+            # search 里（#32）——直读会把老板刚停用的待办又拿出来搭话，
+            # 「停用」对破冰也得算数。顺带拿到 importance/recency 排序。
+            todos = manager.retriever.search("", kinds=("todo",), top_k=1)
         except Exception:
             todos = []
         if todos:
-            value = (getattr(todos[0], "value", "") or "").strip()
+            value = (getattr(todos[0][0], "value", "") or "").strip()
             if value:
                 return (f"（翻出小本本）你之前记的「{value[:24]}」，不急，哪天想推进了跟我说一声。",
-                        [f"memory:{todos[0].id}"])
+                        [f"memory:{todos[0][0].id}"])
         line = stage_sample_line("idle_proactive")
         if line:
             return line, ["config:response_examples.json"]

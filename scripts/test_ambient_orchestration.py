@@ -15,6 +15,7 @@ from types import SimpleNamespace
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from server.dialogue import orchestrator as O
+from server.memory.retriever import MemoryRetriever
 from server.memory.store import MemoryStore
 
 
@@ -22,7 +23,10 @@ class AmbientOrchestrationTest(unittest.TestCase):
     def setUp(self):
         self.store = MemoryStore(str(Path(tempfile.mkdtemp(prefix="amborch-")) / "memory.db"))
         self._orig_manager = O.manager
-        O.manager = SimpleNamespace(enabled=True, store=self.store)
+        # 破冰走 manager.retriever 的列表模式（#32：停用门在 search 里），
+        # 替身因此要带一个绑到临时库的 retriever，与真装配同构。
+        O.manager = SimpleNamespace(enabled=True, store=self.store,
+                                    retriever=MemoryRetriever(self.store))
         orch = O.orchestrator
         orch.state["proactivity_enabled"] = True
         orch.state["proactive_suppressed_until"] = 0.0
@@ -97,6 +101,20 @@ class AmbientOrchestrationTest(unittest.TestCase):
         self.assertEqual(event["type"], "mumble")
         self.assertIn("周报", event["text"])
         self.assertIn(f"memory:{todo_id}", event["source_refs"])
+
+    def test_cold_start_icebreaker_respects_disabled_todo(self):
+        """F3（#32）：停用对破冰也算数——老板停掉的待办不能被主动搭话翻出来。"""
+        todo_id = self.store.upsert(kind="todo", value="把周报改成三句话", key="todo:weekly")
+        self.store.set_disabled(todo_id, True)
+        self._reset_dedup()
+        event = O.orchestrator.ambient_event(idle_seconds=28, now=1000.0)
+        self.assertEqual(event["type"], "mumble")
+        self.assertNotIn("周报", event["text"], "停用的待办不该被破冰翻出来")
+        self.assertNotIn(f"memory:{todo_id}", event["source_refs"])
+        self.store.set_disabled(todo_id, False)
+        self._reset_dedup()
+        again = O.orchestrator.ambient_event(idle_seconds=28, now=1500.0)
+        self.assertIn("周报", again["text"], "重新启用即恢复可翻")
 
     def test_voice_backoff_then_cycle_reset(self):
         self.store.save_mood(narrative="余温", state="active")
