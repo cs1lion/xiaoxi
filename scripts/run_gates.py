@@ -381,6 +381,16 @@ GATES: dict[str, dict[str, object]] = {
         "cmd": [str(PY), "scripts/test_db_sentinel.py"],
         "skip_regex": r"^\s*SKIP",
     },
+    "intent_normalize": {
+        # B1（#42）：意图输入归一化（礼貌前缀/语气词/ASR 同音字）。
+        "cmd": [str(PY), "scripts/test_intent_normalize.py"],
+        "skip_regex": r"^\s*SKIP",
+    },
+    "intent_corpus": {
+        # B1（#42）：语料格式校验 + 判定器在语料上的测量（基线落 eval/intent/）。
+        "cmd": [str(PY), "scripts/measure_intent_corpus.py"],
+        "skip_regex": r"^\s*SKIP",
+    },
 }
 
 # 这些门禁的本体是纯逻辑单测，不需要本地服务，永远必须真跑。

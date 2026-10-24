@@ -1,0 +1,258 @@
+{"text": "帮我整理一下周报", "label": "delegate", "source": "handwritten", "target": "writing"}
+{"text": "麻烦你写一份会议纪要", "label": "delegate", "source": "handwritten", "target": "writing"}
+{"text": "帮我生成一个校验报告", "label": "delegate", "source": "handwritten", "target": "file"}
+{"text": "帮我安排一个沙盒打样", "label": "delegate", "source": "handwritten", "target": "sandbox"}
+{"text": "请把上周的讨论整理成要点", "label": "delegate", "source": "handwritten", "target": "writing"}
+{"text": "帮我写个脚本把这批文件重命名", "label": "delegate", "source": "handwritten", "target": "code"}
+{"text": "麻烦查一下这个库的文档", "label": "delegate", "source": "handwritten", "target": "research"}
+{"text": "帮我做个表格统计每天的用量", "label": "delegate", "source": "handwritten", "target": "file"}
+{"text": "请起草一封回复邮件", "label": "delegate", "source": "handwritten", "target": "writing"}
+{"text": "帮我研究一下这几个方案哪个更稳", "label": "delegate", "source": "handwritten", "target": "research"}
+{"text": "帮我跑一下测试看看有没有挂", "label": "delegate", "source": "handwritten", "target": "code"}
+{"text": "麻烦整理一下下载文件夹", "label": "delegate", "source": "handwritten", "target": "file"}
+{"text": "帮我把这段话翻译成英文", "label": "delegate", "source": "handwritten", "target": "writing"}
+{"text": "帮我看看这个报错是怎么来的", "label": "delegate", "source": "handwritten", "target": "code"}
+{"text": "帮我搜一下最近的会议记录", "label": "delegate", "source": "handwritten", "target": "research"}
+{"text": "请帮我把这单标记为完成", "label": "delegate", "source": "handwritten", "target": "file"}
+{"text": "帮我生成一份月度总结", "label": "delegate", "source": "handwritten", "target": "writing"}
+{"text": "麻烦把这几个文件按日期分类", "label": "delegate", "source": "handwritten", "target": "file"}
+{"text": "帮我写一个小工具做格式转换", "label": "delegate", "source": "handwritten", "target": "code"}
+{"text": "帮我查查这个接口的参数含义", "label": "delegate", "source": "handwritten", "target": "research"}
+{"text": "整理一下周报", "label": "delegate", "source": "handwritten", "target": "writing", "note": "掉「帮我」"}
+{"text": "写一份会议纪要", "label": "delegate", "source": "handwritten", "target": "writing", "note": "掉「麻烦你」"}
+{"text": "生成一个校验报告", "label": "delegate", "source": "handwritten", "target": "file", "note": "掉「帮我」"}
+{"text": "安排一个沙盒打样，生成并校验一个小文件吧", "label": "delegate", "source": "handwritten", "target": "sandbox", "note": "dogfood 实测原句：#40 的触发样本"}
+{"text": "把上周的讨论整理成要点", "label": "delegate", "source": "handwritten", "target": "writing"}
+{"text": "写个脚本把这批文件重命名", "label": "delegate", "source": "handwritten", "target": "code"}
+{"text": "查一下这个库的文档", "label": "delegate", "source": "handwritten", "target": "research"}
+{"text": "做个表格统计每天的用量", "label": "delegate", "source": "handwritten", "target": "file"}
+{"text": "起草一封回复邮件", "label": "delegate", "source": "handwritten", "target": "writing"}
+{"text": "研究一下这几个方案哪个更稳", "label": "delegate", "source": "handwritten", "target": "research"}
+{"text": "跑一下测试看看有没有挂", "label": "delegate", "source": "handwritten", "target": "code"}
+{"text": "整理一下下载文件夹", "label": "delegate", "source": "handwritten", "target": "file"}
+{"text": "把这段话翻译成英文", "label": "delegate", "source": "handwritten", "target": "writing"}
+{"text": "看看这个报错是怎么来的", "label": "delegate", "source": "handwritten", "target": "code"}
+{"text": "搜一下最近的会议记录", "label": "delegate", "source": "handwritten", "target": "research"}
+{"text": "生成一份月度总结", "label": "delegate", "source": "handwritten", "target": "writing"}
+{"text": "把这几个文件按日期分类", "label": "delegate", "source": "handwritten", "target": "file"}
+{"text": "写一个小工具做格式转换", "label": "delegate", "source": "handwritten", "target": "code"}
+{"text": "查查这个接口的参数含义", "label": "delegate", "source": "handwritten", "target": "research"}
+{"text": "做个沙盒打样验证一下", "label": "delegate", "source": "handwritten", "target": "sandbox"}
+{"text": "你觉得写代码累吗", "label": "chat", "source": "handwritten", "note": "有「写」但是提问"}
+{"text": "这家店的安排真不错", "label": "chat", "source": "handwritten", "note": "有「安排」但是评价"}
+{"text": "我最近在学写诗", "label": "chat", "source": "handwritten", "note": "有「写」但是自述"}
+{"text": "整理真的很难坚持", "label": "chat", "source": "handwritten", "note": "有「整理」但是感慨"}
+{"text": "帮我看看今天几号", "label": "chat", "source": "handwritten", "note": "有「帮我」但只是问日期"}
+{"text": "你能陪我聊会儿吗", "label": "chat", "source": "handwritten", "note": "有「你能」但是求陪聊"}
+{"text": "生成式模型现在进步好快", "label": "chat", "source": "handwritten", "note": "有「生成」但是议论"}
+{"text": "我上次查资料查到半夜", "label": "chat", "source": "handwritten", "note": "有「查」「资料」但是回忆"}
+{"text": "写周报这件事我一直很头疼", "label": "chat", "source": "handwritten", "note": "有「写周报」但是抱怨"}
+{"text": "脚本语言你觉得哪个好学", "label": "chat", "source": "handwritten", "note": "有「脚本」但是询问"}
+{"text": "他说安排一下就行", "label": "chat", "source": "handwritten", "note": "转述别人的话"}
+{"text": "报告写得挺好，就是太长了", "label": "chat", "source": "handwritten", "note": "在评价已有报告"}
+{"text": "文件我放桌面上啦", "label": "chat", "source": "handwritten", "note": "告知，不是要求"}
+{"text": "校验这个功能是谁做的", "label": "chat", "source": "handwritten", "note": "询问责任人"}
+{"text": "翻译软件现在挺准的", "label": "chat", "source": "handwritten", "note": "评论工具"}
+{"text": "研究报告我看完了", "label": "chat", "source": "handwritten", "note": "告知进度"}
+{"text": "表格样式我更喜欢简洁的", "label": "chat", "source": "handwritten", "note": "表达偏好"}
+{"text": "工具链老是出问题", "label": "chat", "source": "handwritten", "note": "抱怨"}
+{"text": "统计口径咱们之前定过吗", "label": "chat", "source": "handwritten", "note": "询问历史决定"}
+{"text": "分类这事不用太细", "label": "chat", "source": "handwritten", "note": "给出意见而非派活"}
+{"text": "能不能帮我生成一个校验报告？", "label": "delegate", "source": "handwritten", "target": "file", "note": "问句形态"}
+{"text": "你能整理下这个吗", "label": "delegate", "source": "handwritten", "target": "writing", "note": "问句形态"}
+{"text": "可以帮我把这些文件合并吗", "label": "delegate", "source": "handwritten", "target": "file", "note": "问句形态"}
+{"text": "能不能查一下这个库的版本", "label": "delegate", "source": "handwritten", "target": "research", "note": "问句形态"}
+{"text": "你可以写个脚本试试吗", "label": "delegate", "source": "handwritten", "target": "code", "note": "问句形态"}
+{"text": "方便帮我安排个打样吗", "label": "delegate", "source": "handwritten", "target": "sandbox", "note": "问句形态"}
+{"text": "能帮我起草一下吗", "label": "delegate", "source": "handwritten", "target": "writing", "note": "问句形态"}
+{"text": "可不可以帮我统计一下用量", "label": "delegate", "source": "handwritten", "target": "file", "note": "问句形态"}
+{"text": "你能研究下哪个方案更好吗", "label": "delegate", "source": "handwritten", "target": "research", "note": "问句形态"}
+{"text": "麻烦你跑一遍测试好吗", "label": "delegate", "source": "handwritten", "target": "code", "note": "问句形态"}
+{"text": "帮我 check 一下这个 PR", "label": "delegate", "source": "handwritten", "target": "code", "note": "英文混入"}
+{"text": "写个 dockerfile", "label": "delegate", "source": "handwritten", "target": "code", "note": "英文混入"}
+{"text": "帮我查 API 文档", "label": "delegate", "source": "handwritten", "target": "research", "note": "英文混入"}
+{"text": "算了，不用了", "label": "chat", "source": "handwritten", "note": "撤回请求"}
+{"text": "不是，我是说帮我整理下笔记", "label": "delegate", "source": "handwritten", "target": "writing", "note": "口头修正后是派活"}
+{"text": "等下，那个先别做", "label": "chat", "source": "handwritten", "note": "叫停"}
+{"text": "嗯……还是算了吧", "label": "chat", "source": "handwritten", "note": "犹豫后放弃"}
+{"text": "这个……你看着办", "label": "chat", "source": "handwritten", "note": "模糊，不构成派活"}
+{"text": "就那个", "label": "chat", "source": "handwritten", "note": "指代不明"}
+{"text": "帮我", "label": "chat", "source": "handwritten", "note": "半句话，缺宾语"}
+{"text": "那单进度怎么样了", "label": "progress", "source": "handwritten"}
+{"text": "做完了吗", "label": "progress", "source": "handwritten"}
+{"text": "还在跑吗", "label": "progress", "source": "handwritten"}
+{"text": "什么时候能好", "label": "progress", "source": "handwritten"}
+{"text": "有结论了吗", "label": "progress", "source": "handwritten"}
+{"text": "交差了没", "label": "progress", "source": "handwritten"}
+{"text": "刚才那个弄到哪一步了", "label": "progress", "source": "handwritten"}
+{"text": "好了吗", "label": "progress", "source": "handwritten"}
+{"text": "还在做吗", "label": "progress", "source": "handwritten"}
+{"text": "那件事有进展吗", "label": "progress", "source": "handwritten"}
+{"text": "收工", "label": "accept", "source": "handwritten"}
+{"text": "可以了", "label": "accept", "source": "handwritten"}
+{"text": "就这样吧", "label": "accept", "source": "handwritten"}
+{"text": "没问题，收下", "label": "accept", "source": "handwritten"}
+{"text": "这单结了", "label": "accept", "source": "handwritten"}
+{"text": "不错，归档吧", "label": "accept", "source": "handwritten"}
+{"text": "通过了", "label": "accept", "source": "handwritten"}
+{"text": "挺好，留下吧", "label": "accept", "source": "handwritten"}
+{"text": "行吧，成交", "label": "accept", "source": "handwritten"}
+{"text": "存档吧", "label": "accept", "source": "handwritten"}
+{"text": "不行，重做", "label": "reject", "source": "handwritten"}
+{"text": "这个不对，再改一下", "label": "reject", "source": "handwritten"}
+{"text": "打回", "label": "reject", "source": "handwritten"}
+{"text": "顶栏那个按钮收回去", "label": "reject", "source": "handwritten"}
+{"text": "漏了几条，补上", "label": "reject", "source": "handwritten"}
+{"text": "重来一遍", "label": "reject", "source": "handwritten"}
+{"text": "不满意，换个思路", "label": "reject", "source": "handwritten"}
+{"text": "退回去改", "label": "reject", "source": "handwritten"}
+{"text": "少了日期列", "label": "reject", "source": "handwritten"}
+{"text": "不是这样，我指的是另一份", "label": "reject", "source": "handwritten"}
+{"text": "早上好呀小溪", "label": "chat", "source": "handwritten", "note": "dogfood 真实转录"}
+{"text": "你还记得我的猫叫什么名字吗？", "label": "chat", "source": "handwritten", "note": "记忆查询，非派活"}
+{"text": "今天有点累", "label": "chat", "source": "handwritten"}
+{"text": "陪我聊会儿天吧", "label": "chat", "source": "handwritten"}
+{"text": "晚上吃什么好呢", "label": "chat", "source": "handwritten"}
+{"text": "我今天遇到一件特别有意思的事", "label": "chat", "source": "handwritten"}
+{"text": "外面下雨了", "label": "chat", "source": "handwritten"}
+{"text": "我们刚才都聊了些什么？", "label": "chat", "source": "handwritten", "note": "dogfood 真实转录"}
+{"text": "谢谢你啊", "label": "chat", "source": "handwritten"}
+{"text": "我有点睡不着", "label": "chat", "source": "handwritten"}
+{"text": "你最近在忙什么", "label": "chat", "source": "handwritten"}
+{"text": "明天要早起", "label": "chat", "source": "handwritten"}
+{"text": "这首歌叫什么名字", "label": "chat", "source": "handwritten"}
+{"text": "我买了新键盘", "label": "chat", "source": "handwritten"}
+{"text": "周末想去爬山", "label": "chat", "source": "handwritten"}
+{"text": "工作压力有点大", "label": "chat", "source": "handwritten"}
+{"text": "你看过那部电影吗", "label": "chat", "source": "handwritten"}
+{"text": "我养的多肉开花了", "label": "chat", "source": "handwritten"}
+{"text": "好久没这么放松过了", "label": "chat", "source": "handwritten"}
+{"text": "你会累吗", "label": "chat", "source": "handwritten", "note": "问她感受，非派活"}
+{"text": "你猜我刚才看到什么了", "label": "chat", "source": "handwritten"}
+{"text": "这台电脑用了三年了", "label": "chat", "source": "handwritten"}
+{"text": "我觉得最近记性变差了", "label": "chat", "source": "handwritten"}
+{"text": "你平时都做什么呀", "label": "chat", "source": "handwritten"}
+{"text": "我朋友推荐我看一本书", "label": "chat", "source": "handwritten"}
+{"text": "今天地铁特别挤", "label": "chat", "source": "handwritten"}
+{"text": "我想学点新东西但没想好学什么", "label": "chat", "source": "handwritten"}
+{"text": "你说话声音挺好听的", "label": "chat", "source": "handwritten"}
+{"text": "刚才那段音乐是什么", "label": "chat", "source": "handwritten"}
+{"text": "我最近老做梦", "label": "chat", "source": "handwritten"}
+{"text": "你说人为什么会拖延", "label": "chat", "source": "handwritten", "note": "哲学提问"}
+{"text": "这个房间采光不错", "label": "chat", "source": "handwritten"}
+{"text": "我妈让我多穿点", "label": "chat", "source": "handwritten"}
+{"text": "下雨天最适合睡觉了", "label": "chat", "source": "handwritten"}
+{"text": "我刚泡了杯茶", "label": "chat", "source": "handwritten"}
+{"text": "其实我不太喜欢热闹", "label": "chat", "source": "handwritten"}
+{"text": "你会不会觉得无聊", "label": "chat", "source": "handwritten"}
+{"text": "今天效率特别低", "label": "chat", "source": "handwritten"}
+{"text": "我决定少刷手机了", "label": "chat", "source": "handwritten"}
+{"text": "帮我记一下，我明天要买牛奶", "label": "chat", "source": "handwritten", "note": "记一下=提醒，归提醒路径而非委托派活"}
+{"text": "提醒我半小时后休息", "label": "chat", "source": "handwritten", "note": "提醒类，走 reminder 而非委托"}
+{"text": "晚点提醒我回消息", "label": "chat", "source": "handwritten", "note": "提醒类"}
+{"text": "你还记得我们上次聊到哪了吗", "label": "chat", "source": "handwritten", "note": "记忆查询"}
+{"text": "我昨天是不是说过要早睡", "label": "chat", "source": "handwritten", "note": "记忆查询"}
+{"text": "我最近总想吃辣的", "label": "chat", "source": "handwritten"}
+{"text": "这个周末没安排", "label": "chat", "source": "handwritten", "note": "有「安排」但是自述"}
+{"text": "他答应帮我修的，结果忘了", "label": "chat", "source": "handwritten", "note": "转述，非本次派活"}
+{"text": "你说我该不该换个工作", "label": "chat", "source": "handwritten", "note": "征求意见"}
+{"text": "帮我个忙，别告诉别人", "label": "chat", "source": "handwritten", "note": "有「帮我」但是请求保密，无操作对象"}
+{"text": "我需要有人听我说说", "label": "chat", "source": "handwritten"}
+{"text": "今天开会开了三个小时", "label": "chat", "source": "handwritten"}
+{"text": "有点饿了", "label": "chat", "source": "handwritten"}
+{"text": "你能理解那种感受吗", "label": "chat", "source": "handwritten"}
+{"text": "我把钥匙放哪了来着", "label": "chat", "source": "handwritten", "note": "自问，非要求检索文件"}
+{"text": "这本小说的结局我不喜欢", "label": "chat", "source": "handwritten"}
+{"text": "明天天气怎么样", "label": "chat", "source": "handwritten", "note": "天气查询，非派活"}
+{"text": "你帮我看看我是不是胖了", "label": "chat", "source": "handwritten", "note": "玩笑式，无实际操作"}
+{"text": "我刚才那句话是不是说重了", "label": "chat", "source": "handwritten"}
+{"text": "感觉时间过得好快", "label": "chat", "source": "handwritten"}
+{"text": "我先去洗漱了", "label": "chat", "source": "handwritten", "note": "告知离开"}
+{"text": "等我一下", "label": "chat", "source": "handwritten"}
+{"text": "上次那个报告我还没看完", "label": "chat", "source": "handwritten", "note": "有「报告」但是自述"}
+{"text": "写东西的时候我喜欢听白噪音", "label": "chat", "source": "handwritten", "note": "有「写」但是习惯描述"}
+{"text": "整理房间对我来说很解压", "label": "chat", "source": "handwritten", "note": "有「整理」但是感受"}
+{"text": "这个脚本写得真漂亮", "label": "chat", "source": "handwritten", "note": "评价已有代码"}
+{"text": "统计数据的人辛苦了", "label": "chat", "source": "handwritten", "note": "感慨"}
+{"text": "归档的时候记得分类", "label": "chat", "source": "handwritten", "note": "泛泛建议，不是要求她做"}
+{"text": "生成图片的模型更新了", "label": "chat", "source": "handwritten", "note": "资讯"}
+{"text": "校验码是多少来着", "label": "chat", "source": "handwritten", "note": "询问信息"}
+{"text": "翻译腔太重了", "label": "chat", "source": "handwritten", "note": "评价"}
+{"text": "文件格式我改成 PDF 了", "label": "chat", "source": "handwritten", "note": "告知已完成"}
+{"text": "麻烦你帮我整理一下周报", "label": "delegate", "source": "derived", "target": "writing", "note": "程序派生变体"}
+{"text": "帮我整理一下周报吧", "label": "delegate", "source": "derived", "target": "writing", "note": "程序派生变体"}
+{"text": "帮我麻烦你写一份会议纪要", "label": "delegate", "source": "derived", "target": "writing", "note": "程序派生变体"}
+{"text": "麻烦你写一份会议纪要吧", "label": "delegate", "source": "derived", "target": "writing", "note": "程序派生变体"}
+{"text": "帮我麻烦你写一份会议纪要呀", "label": "delegate", "source": "derived", "target": "writing", "note": "程序派生变体"}
+{"text": "麻烦你帮我生成一个校验报告", "label": "delegate", "source": "derived", "target": "file", "note": "程序派生变体"}
+{"text": "帮我生成一个校验报告吧", "label": "delegate", "source": "derived", "target": "file", "note": "程序派生变体"}
+{"text": "麻烦你帮我安排一个沙盒打样", "label": "delegate", "source": "derived", "target": "sandbox", "note": "程序派生变体"}
+{"text": "帮我安排一个沙盒打样吧", "label": "delegate", "source": "derived", "target": "sandbox", "note": "程序派生变体"}
+{"text": "帮我请把上周的讨论整理成要点", "label": "delegate", "source": "derived", "target": "writing", "note": "程序派生变体"}
+{"text": "麻烦你请把上周的讨论整理成要点", "label": "delegate", "source": "derived", "target": "writing", "note": "程序派生变体"}
+{"text": "请把上周的讨论整理成要点吧", "label": "delegate", "source": "derived", "target": "writing", "note": "程序派生变体"}
+{"text": "帮我请把上周的讨论整理成要点呀", "label": "delegate", "source": "derived", "target": "writing", "note": "程序派生变体"}
+{"text": "麻烦你帮我写个脚本把这批文件重命名", "label": "delegate", "source": "derived", "target": "code", "note": "程序派生变体"}
+{"text": "帮我写个脚本把这批文件重命名吧", "label": "delegate", "source": "derived", "target": "code", "note": "程序派生变体"}
+{"text": "帮我麻烦查一下这个库的文档", "label": "delegate", "source": "derived", "target": "research", "note": "程序派生变体"}
+{"text": "麻烦你麻烦查一下这个库的文档", "label": "delegate", "source": "derived", "target": "research", "note": "程序派生变体"}
+{"text": "麻烦查一下这个库的文档吧", "label": "delegate", "source": "derived", "target": "research", "note": "程序派生变体"}
+{"text": "帮我麻烦查一下这个库的文档呀", "label": "delegate", "source": "derived", "target": "research", "note": "程序派生变体"}
+{"text": "麻烦你帮我做个表格统计每天的用量", "label": "delegate", "source": "derived", "target": "file", "note": "程序派生变体"}
+{"text": "帮我做个表格统计每天的用量吧", "label": "delegate", "source": "derived", "target": "file", "note": "程序派生变体"}
+{"text": "帮我请起草一封回复邮件", "label": "delegate", "source": "derived", "target": "writing", "note": "程序派生变体"}
+{"text": "麻烦你请起草一封回复邮件", "label": "delegate", "source": "derived", "target": "writing", "note": "程序派生变体"}
+{"text": "请起草一封回复邮件吧", "label": "delegate", "source": "derived", "target": "writing", "note": "程序派生变体"}
+{"text": "帮我请起草一封回复邮件呀", "label": "delegate", "source": "derived", "target": "writing", "note": "程序派生变体"}
+{"text": "麻烦你帮我研究一下这几个方案哪个更稳", "label": "delegate", "source": "derived", "target": "research", "note": "程序派生变体"}
+{"text": "帮我研究一下这几个方案哪个更稳吧", "label": "delegate", "source": "derived", "target": "research", "note": "程序派生变体"}
+{"text": "麻烦你帮我跑一下测试看看有没有挂", "label": "delegate", "source": "derived", "target": "code", "note": "程序派生变体"}
+{"text": "帮我跑一下测试看看有没有挂吧", "label": "delegate", "source": "derived", "target": "code", "note": "程序派生变体"}
+{"text": "帮我麻烦整理一下下载文件夹", "label": "delegate", "source": "derived", "target": "file", "note": "程序派生变体"}
+{"text": "麻烦你麻烦整理一下下载文件夹", "label": "delegate", "source": "derived", "target": "file", "note": "程序派生变体"}
+{"text": "麻烦整理一下下载文件夹吧", "label": "delegate", "source": "derived", "target": "file", "note": "程序派生变体"}
+{"text": "帮我麻烦整理一下下载文件夹呀", "label": "delegate", "source": "derived", "target": "file", "note": "程序派生变体"}
+{"text": "麻烦你帮我把这段话翻译成英文", "label": "delegate", "source": "derived", "target": "writing", "note": "程序派生变体"}
+{"text": "帮我把这段话翻译成英文吧", "label": "delegate", "source": "derived", "target": "writing", "note": "程序派生变体"}
+{"text": "麻烦你帮我看看这个报错是怎么来的", "label": "delegate", "source": "derived", "target": "code", "note": "程序派生变体"}
+{"text": "帮我看看这个报错是怎么来的吧", "label": "delegate", "source": "derived", "target": "code", "note": "程序派生变体"}
+{"text": "麻烦你帮我搜一下最近的会议记录", "label": "delegate", "source": "derived", "target": "research", "note": "程序派生变体"}
+{"text": "帮我搜一下最近的会议记录吧", "label": "delegate", "source": "derived", "target": "research", "note": "程序派生变体"}
+{"text": "帮我请帮我把这单标记为完成", "label": "delegate", "source": "derived", "target": "file", "note": "程序派生变体"}
+{"text": "麻烦你请帮我把这单标记为完成", "label": "delegate", "source": "derived", "target": "file", "note": "程序派生变体"}
+{"text": "请帮我把这单标记为完成吧", "label": "delegate", "source": "derived", "target": "file", "note": "程序派生变体"}
+{"text": "帮我请帮我把这单标记为完成呀", "label": "delegate", "source": "derived", "target": "file", "note": "程序派生变体"}
+{"text": "麻烦你帮我生成一份月度总结", "label": "delegate", "source": "derived", "target": "writing", "note": "程序派生变体"}
+{"text": "帮我生成一份月度总结吧", "label": "delegate", "source": "derived", "target": "writing", "note": "程序派生变体"}
+{"text": "帮我麻烦把这几个文件按日期分类", "label": "delegate", "source": "derived", "target": "file", "note": "程序派生变体"}
+{"text": "麻烦你麻烦把这几个文件按日期分类", "label": "delegate", "source": "derived", "target": "file", "note": "程序派生变体"}
+{"text": "麻烦把这几个文件按日期分类吧", "label": "delegate", "source": "derived", "target": "file", "note": "程序派生变体"}
+{"text": "帮我麻烦把这几个文件按日期分类呀", "label": "delegate", "source": "derived", "target": "file", "note": "程序派生变体"}
+{"text": "麻烦你帮我写一个小工具做格式转换", "label": "delegate", "source": "derived", "target": "code", "note": "程序派生变体"}
+{"text": "帮我写一个小工具做格式转换吧", "label": "delegate", "source": "derived", "target": "code", "note": "程序派生变体"}
+{"text": "麻烦你帮我查查这个接口的参数含义", "label": "delegate", "source": "derived", "target": "research", "note": "程序派生变体"}
+{"text": "帮我查查这个接口的参数含义吧", "label": "delegate", "source": "derived", "target": "research", "note": "程序派生变体"}
+{"text": "麻烦你整理一下周报", "label": "delegate", "source": "derived", "target": "writing", "note": "掉「帮我」"}
+{"text": "整理一下周报吧", "label": "delegate", "source": "derived", "target": "writing", "note": "掉「帮我」"}
+{"text": "帮我整理一下周报呀", "label": "delegate", "source": "derived", "target": "writing", "note": "掉「帮我」"}
+{"text": "帮我写一份会议纪要", "label": "delegate", "source": "derived", "target": "writing", "note": "掉「麻烦你」"}
+{"text": "写一份会议纪要吧", "label": "delegate", "source": "derived", "target": "writing", "note": "掉「麻烦你」"}
+{"text": "帮我写一份会议纪要呀", "label": "delegate", "source": "derived", "target": "writing", "note": "掉「麻烦你」"}
+{"text": "麻烦你生成一个校验报告", "label": "delegate", "source": "derived", "target": "file", "note": "掉「帮我」"}
+{"text": "生成一个校验报告吧", "label": "delegate", "source": "derived", "target": "file", "note": "掉「帮我」"}
+{"text": "帮我生成一个校验报告呀", "label": "delegate", "source": "derived", "target": "file", "note": "掉「帮我」"}
+{"text": "帮我安排一个沙盒打样，生成并校验一个小文件吧", "label": "delegate", "source": "derived", "target": "sandbox", "note": "dogfood 实测原句：#40 的触发样本"}
+{"text": "麻烦你安排一个沙盒打样，生成并校验一个小文件吧", "label": "delegate", "source": "derived", "target": "sandbox", "note": "dogfood 实测原句：#40 的触发样本"}
+{"text": "安排一个沙盒打样，生成并校验一个小文件吧吧", "label": "delegate", "source": "derived", "target": "sandbox", "note": "dogfood 实测原句：#40 的触发样本"}
+{"text": "帮我安排一个沙盒打样，生成并校验一个小文件吧呀", "label": "delegate", "source": "derived", "target": "sandbox", "note": "dogfood 实测原句：#40 的触发样本"}
+{"text": "帮我把上周的讨论整理成要点", "label": "delegate", "source": "derived", "target": "writing", "note": "程序派生变体"}
+{"text": "麻烦你把上周的讨论整理成要点", "label": "delegate", "source": "derived", "target": "writing", "note": "程序派生变体"}
+{"text": "把上周的讨论整理成要点吧", "label": "delegate", "source": "derived", "target": "writing", "note": "程序派生变体"}
+{"text": "帮我把上周的讨论整理成要点呀", "label": "delegate", "source": "derived", "target": "writing", "note": "程序派生变体"}
+{"text": "麻烦你写个脚本把这批文件重命名", "label": "delegate", "source": "derived", "target": "code", "note": "程序派生变体"}
+{"text": "写个脚本把这批文件重命名吧", "label": "delegate", "source": "derived", "target": "code", "note": "程序派生变体"}
+{"text": "帮我写个脚本把这批文件重命名呀", "label": "delegate", "source": "derived", "target": "code", "note": "程序派生变体"}
+{"text": "帮我查一下这个库的文档", "label": "delegate", "source": "derived", "target": "research", "note": "程序派生变体"}
+{"text": "麻烦你查一下这个库的文档", "label": "delegate", "source": "derived", "target": "research", "note": "程序派生变体"}
+{"text": "查一下这个库的文档吧", "label": "delegate", "source": "derived", "target": "research", "note": "程序派生变体"}
+{"text": "帮我查一下这个库的文档呀", "label": "delegate", "source": "derived", "target": "research", "note": "程序派生变体"}

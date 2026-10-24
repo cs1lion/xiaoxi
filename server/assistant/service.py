@@ -9,9 +9,18 @@ from pathlib import Path
 from typing import Any
 
 from ..config import agents_roster_cfg
+from .intent_normalize import normalize as normalize_for_intent
 from .loop import AgentLoop, Tool
 from .runtime import RuntimeStore
 from .store import AssistantStore
+
+
+# B1 语料校准（#42）：评价/感慨/自述形态。这些句子带着「整理/翻译/报告」
+# 之类词，但说的是「这件事本身怎么样」，不是「你去给我做」。
+# 只收高精度信号——宁可漏掉一条派活（可追问）也不要误答一句闲聊。
+_EVALUATIVE_SHAPE = re.compile(
+    r"(?:真的很难|挺准的|挺不错|很难坚持|进步好快|是谁做的|我看完了|我还没看完|"
+    r"定过吗|不用太细|对我来说很|辛苦了|你看着办|是不是说过|我喜欢|我更喜欢)")
 
 logger = logging.getLogger(__name__)
 # The world page shows one commission at a time; two background drives is a
@@ -124,27 +133,55 @@ class AssistantService:
     # 各自独立成立。宁可多接一单（可撤销）也不能漏接（用户以为她拒绝了）。
     _DELEGATE_DOMAIN = ('沙盒', '打样')
     _DELEGATE_VERBS = ('整理', '安排', '计划', '起草', '生成', '校验',
-                       '做个', '搞个', '跑个', '写份', '写个', '写一篇', '写一段')
+                       '做个', '搞个', '跑个', '写份', '写个', '写一篇', '写一段',
+                       # B1 语料测量补齐（#42）：实测漏判 67/131，全是这类
+                       # 日常动词打头的说法——旧表只认强派单动词（去/安排/派/交），
+                       # 「查一下这个库的文档」「跑一下测试」「研究一下方案」全落空。
+                       '查', '搜', '研究', '调研', '翻译', '统计', '分类', '合并',
+                       '跑', '看看', '核对', '对比', '汇总', '提取')
     # 产物类名词：动词 + 产物是「派活」的强信号，单独一条（动词打头或
     # 句中都可以）。表和正则共用同一个常量，避免两处宾语集合漂移。
-    _DELEGATE_OBJECTS = ('文件', '报告', '清单', '表格', '脚本', '文档', '纪要')
-    _DELEGATE_ACTION_VERBS = ('生成', '校验', '整理', '起草', '写', '做')
+    _DELEGATE_OBJECTS = ('文件', '报告', '清单', '表格', '脚本', '文档', '纪要',
+                         '要点', '用量', '记录', '版本', '参数', '测试')
+    _DELEGATE_ACTION_VERBS = ('生成', '校验', '整理', '起草', '写', '做',
+                              '查', '搜', '研究', '翻译', '统计', '分类', '合并',
+                              '跑', '核对', '对比', '汇总', '提取')
 
     def _delegation_request(self, text: str) -> bool:
-        """这条输入是不是在派活（工具路径的入口，非普通闲聊）。"""
+        """这条输入是不是在派活（工具路径的入口，非普通闲聊）。
+
+        B1 语料校准（#42）：只看动词会把「整理真的很难坚持」判成派活，
+        所以动词打头/bare 动词都要**带宾语**才算——宾语可以是产物名词
+        （报告/文件/文档…）或指向某个对象（这个/这段/那个/这些/一下 + 宾语）。
+        纯动词句（「整理」）落普通对话，正确行为是追问而不是猜。
+        """
         if any(word in text for word in self._DELEGATE_DOMAIN):
             return True
-        if re.search(r'(?:帮我|麻烦你?|请)[^，。！？]{0,10}?(?:整理|写|安排|计划|起草|生成|'
-                     r'校验|做|跑|搞|查|搜)', text):
-            return True
-        head = re.sub(r'^(?:帮我|麻烦你?|请)', '', text.strip())
-        if any(head.startswith(verb) for verb in self._DELEGATE_VERBS):
-            return True
+        # 评价/感慨/自述形态先排除（B1 语料里这类占了误判的大头）：
+        # 「整理真的很难坚持」「翻译软件现在挺准的」「研究报告我看完了」
+        # 都有动词和产物名词，但主语是「这件事/这个东西」而不是「你去做」。
+        if _EVALUATIVE_SHAPE.search(text):
+            return False
         verbs = "|".join(self._DELEGATE_ACTION_VERBS)
         objects = "|".join(self._DELEGATE_OBJECTS)
-        return bool(re.search(rf'(?:{verbs})[^，。！？]{{0,6}}?(?:{objects})', text))
+        referents = r"这段|这个|那个|这些|那些|一下|一遍|这份|那份"
+        # 形态一：礼貌式（动词可紧跟，不必强求宾语——「帮我跑一下测试」的
+        # 「一下」就是宾语位置，但「帮我看看这个报错」里的「看看」是动词重叠，
+        # 不能因为宾语在 8 字外就漏判）。
+        if re.search(rf"(?:帮我|麻烦你?|请)[^，。！？]{{0,10}}?(?:{verbs})", text):
+            return True
+        # 形态二：动词打头（ASR 掉前缀）且后面有宾语/指代。
+        head = text.strip()
+        if re.match(rf"^(?:{verbs})(?:{referents}|{objects}|[^，。！？]{{0,8}}?(?:{objects}|{referents}))",
+                    head):
+            return True
+        # 形态三：动词 + 产物名词/指代（句中任意位置）。
+        return bool(re.search(rf"(?:{verbs})[^，。！？]{{0,8}}?(?:{objects}|{referents})", text))
 
     def should_route(self, text: str, session_id: str = '') -> bool:
+        # B1（#42）：先归一化再判定——ASR 会吃助词、写错同音字，判定不该
+        # 依赖礼貌前缀的完整与否。归一化是纯文本规范化，不改语义。
+        text = normalize_for_intent(text)
         return bool(self.note_conversation.should_route(text, session_id, enabled=self._activity_enabled())
                     or self._resume_request(text) or self.thread_conversation.should_route(text, session_id)
                     or self._world_request(text)
