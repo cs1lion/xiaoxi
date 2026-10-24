@@ -5,7 +5,7 @@
 .writing-header button{white-space:nowrap;min-height:44px}
 body.is-writing .side{display:block!important;position:fixed;inset:76px 0 0;width:auto;padding:20px 24px;background:var(--bg);border:0;box-shadow:none;overflow:visible;z-index:6}
 body.is-writing .side>*:not(.shared-workspace){display:none!important}
-body.is-writing .shared-workspace{width:min(1100px,100%);height:auto;margin:0 auto;display:flex;flex-direction:column;min-height:0;padding:16px 20px;background:var(--panel);box-shadow:0 8px 34px #060a1426}
+body.is-writing .shared-workspace{width:min(1100px,100%);height:auto;margin:0 auto;display:flex;flex-direction:column;min-height:0;padding:16px 20px;background:var(--panel);box-shadow:0 8px 34px rgba(33,28,22,.26)}
 body.is-writing .shared-workspace>[role=tablist],body.is-writing #work-feedback,body.is-writing #work-note-draft{display:none!important}
 body.is-writing #work-notes{flex:1;min-height:0}
 body.is-writing .shared-workspace iframe{height:auto;min-height:560px;border-radius:0}

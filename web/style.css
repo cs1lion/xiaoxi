@@ -89,7 +89,11 @@ details[open] > summary { margin-bottom:18px; }
 .room-label { display:flex; align-items:center; gap:12px; padding:22px 42px 0; font-size:10px; color:var(--muted); letter-spacing:.12em; }
 .room-line { width:23px; height:1px; background:#a5b495; }
 .room-label > span:last-child { margin-left:auto; font-size:20px; }
-.chat { flex:1; min-height:0; overflow-y:auto; display:flex; flex-direction:column; gap:18px; padding:28px 300px 28px 42px; scrollbar-width:thin; scroll-behavior:smooth; }
+.chat { position:relative; flex:1; min-height:0; overflow-y:auto; display:flex; flex-direction:column; gap:18px; padding:28px 300px 28px 42px; scrollbar-width:thin; scroll-behavior:smooth; }
+/* 对话=星座：连线画布铺在对话流下方（JS 在 app.js drawConstellation，绝对定位于
+   .chat 原点；消息叠在 z-index:1 之上）。定位骨架原随 2026-10-16 未落地的
+   暗色主题一起留在本地 stash，P3b 吸收时只取布局、不带色值（#38）。 */
+.chat-constellation { position:absolute; left:0; top:0; pointer-events:none; overflow:visible; z-index:0; }
 .welcome { margin:auto 0; padding:20px 0 28px; animation:arrive .6s var(--ease) both; }
 .welcome h2 { font-family:"Songti SC","Noto Serif CJK SC","SimSun",serif; font-size:clamp(30px,3.3vw,51px); line-height:1.45; letter-spacing:.03em; font-weight:400; margin:22px 0 19px; }
 .heading-dot { color:#799368; }
@@ -108,7 +112,7 @@ details[open] > summary { margin-bottom:18px; }
 .avatar-stage::before { content:""; position:absolute; bottom:8px; width:70%; height:24px; background:radial-gradient(ellipse,#4f5f3d38,transparent 68%); filter:blur(2px); z-index:-1; }
 .avatar-stage svg,.avatar-stage .avatar-svg { display:block; height:100%; width:auto; max-width:100%; }
 .avatar-stage.hidden { display:none; }
-.msg { max-width:92%; padding:13px 17px; border-radius:16px; white-space:pre-wrap; overflow-wrap:anywhere; animation:arrive .22s var(--ease) both; }
+.msg { position:relative; z-index:1; max-width:92%; padding:13px 17px; border-radius:16px; white-space:pre-wrap; overflow-wrap:anywhere; animation:arrive .22s var(--ease) both; }
 .msg.user { align-self:flex-end; background:#e1e9d7; border-bottom-right-radius:5px; }
 .msg.bot { align-self:flex-start; background:var(--panel); border:1px solid #e1e3d9; border-bottom-left-radius:5px; }
 .msg.bot.thinking { color:var(--muted); }
