@@ -877,9 +877,14 @@ class Orchestrator:
                     finish_pending()
             except asyncio.CancelledError:
                 raise
-            except Exception as exc:  # pragma: no cover - network
+            except Exception:  # pragma: no cover - network
                 holder['generation_failed'] = True
-                events.put_nowait({"type": "error", "recoverable": True, "message": "生成中断，已保留收到的部分文本。"})
+                # S3 演练②（坏 Key 401）：一个字都没收到时说"已保留收到的部分
+                # 文本"是谎话。pending 里是已流到但还没成句的尾巴，也算"保住了"。
+                kept_any = bool(holder["text"] or pending)
+                events.put_nowait({"type": "error", "recoverable": True,
+                    "message": "生成中断，已保留收到的部分文本。" if kept_any
+                    else "这轮生成失败了，一个字都没收到；请稍后重试或检查服务配置。"})
                 if not stopped:
                     finish_pending()
             finally:

@@ -861,6 +861,18 @@ async def _run_turn(conn: Connection, text: str, mode: str, turn: VoiceTurn | No
         await conn.finish(turn, {"type": "error", "message": str(exc), "terminal": True})
 
 
+def _transcribe_error_message(exc: Exception) -> str:
+    """ASR 失败给用户看的文案（S3 演练②）。stepaudio 的 RuntimeError 带着
+    供应商原始响应体（可能回显请求细节与错误 JSON），整段进字幕既不可读
+    也不该外泄；保留状态码、丢掉正文。其余异常保持原样（本地 whisper 的
+    错误本身可读，且是排障线索）。"""
+    text = str(exc)
+    if text.startswith("asr ") and ":" in text:
+        code = text[4:text.index(":", 4)]
+        return f"语音识别服务报错（{code}），这轮没听清；请检查 ASR 配置或稍后再试。"
+    return text
+
+
 async def _transcribe_turn(conn: Connection, turn: VoiceTurn, data: bytes) -> None:
     try:
         if not conn.current(turn):
@@ -889,7 +901,7 @@ async def _transcribe_turn(conn: Connection, turn: VoiceTurn, data: bytes) -> No
         await conn.finish(turn, {"type": "interrupted"})
         raise
     except Exception as exc:
-        await conn.finish(turn, {"type": "error", "message": str(exc), "terminal": True})
+        await conn.finish(turn, {"type": "error", "message": _transcribe_error_message(exc), "terminal": True})
 
 
 async def _send_proactive_blocks(conn: Connection, turn: VoiceTurn, source: str,

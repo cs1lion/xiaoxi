@@ -130,6 +130,33 @@ class StreamDeliveryTests(unittest.IsolatedAsyncioTestCase):
         self.assertLessEqual(count, 25)
         self.assertTrue(closed.is_set())
 
+    async def test_generation_failure_with_zero_text_is_honest(self):
+        """S3 演练②（坏 Key 401）：一个字都没收到时，recoverable 文案不能
+        谎称"已保留收到的部分文本"。"""
+        async def broken(*args, **kwargs):
+            raise RuntimeError("HTTP 401")
+            yield ""  # pragma: no cover - 仅为构成 async generator
+
+        events = await self.collect([], source=broken)
+        errors = [e for e in events if e["type"] == "error"]
+        self.assertTrue(errors)
+        self.assertTrue(all(e.get("recoverable") for e in errors))
+        self.assertIn("一个字都没收到", errors[-1]["message"])
+        self.assertNotIn("已保留", errors[-1]["message"])
+        self.assertEqual(events[-1]["delivery"]["text_status"], "partial")
+
+    async def test_generation_failure_after_partial_text_keeps_old_message(self):
+        """真保住了半句时，旧文案仍然正确——失败发生在句间。"""
+        async def half(*args, **kwargs):
+            yield "说了一半的话。"
+            raise RuntimeError("HTTP 401")
+
+        events = await self.collect([], source=half)
+        errors = [e for e in events if e["type"] == "error"]
+        self.assertTrue(errors)
+        self.assertIn("已保留收到的部分文本", errors[-1]["message"])
+        self.assertEqual(events[-1]["text"], "说了一半的话。")
+
     async def test_detailed_uses_hard_limit(self):
         self.policy = "detailed"
         events = await self.collect(["[认真]" + "这是具体解释。" * 40])

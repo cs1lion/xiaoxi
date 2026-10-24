@@ -190,7 +190,13 @@ class LLM:
                 async with client.stream(
                     "POST", f"{self.base_url}/chat/completions", json=payload
                 ) as resp:
-                    resp.raise_for_status()
+                    if resp.status_code >= 400:
+                        if resp.status_code < 500:
+                            # 与 complete_raw 同语义：4xx 重试不会自愈（S3 演练②实测
+                            # 坏 Key 401 重试三次把失败拖到 ~4s），直接失败；错误体
+                            # 可能回显凭据，信息里只留状态码。
+                            raise LLMError(f"HTTP {resp.status_code}")
+                        resp.raise_for_status()  # 5xx -> HTTPStatusError -> 下方退避重试
                     async for line in resp.aiter_lines():
                         if not line.startswith("data:"):
                             continue

@@ -35,11 +35,25 @@ import { createAqiFlow, aqiPendingMessage } from "./aqi-flow.js";
 import { normalizeUiNav, drawerViewFor, shouldCloseDrawer, shouldOpenSidePanel,
   shouldOpenStarmap, gazeAfter } from "./ui_nav.js";
 import { v2Hub } from "./events-v2.js";
+import { createReconnectScheduler } from "./reconnect.js";
 bootAssistant().catch(error => console.warn('助手面板启动失败', error));
 bootCompanion().catch(error => console.warn('共同事项启动失败', error));
 
 const TARGET_RATE = 16000;
-const ws = new WebSocket(`${location.protocol === "https:" ? "wss" : "ws"}://${location.host}/ws`);
+/* 断线重连（S3 演练①③）：连接死了不是页面的死局。connectWs() 建新 socket 并
+ * 绑四个 handler（onWsOpen/Message/Close/Error 在文件后段声明，函数声明有提升）；
+ * onclose 里按指数退避调度下一次尝试。所有发送路径都先查 ws.readyState，
+ * `let` 重绑后闭包自动看到新实例。 */
+let ws = null;
+const reconnect = createReconnectScheduler();
+function connectWs() {
+  ws = new WebSocket(`${location.protocol === "https:" ? "wss" : "ws"}://${location.host}/ws`);
+  ws.onopen = onWsOpen;
+  ws.onmessage = onWsMessage;
+  ws.onclose = onWsClose;
+  ws.onerror = onWsError;
+}
+connectWs();
 
 /* 协议 §25.3：五个前端命令从 ops 视图经这条连接发出（request_id 幂等键在
  * web/events-v2.js 的 buildCommand 里生成）。发送失败返回 false，UI 留待重发。 */
@@ -1130,13 +1144,19 @@ function proactiveHeartbeatTick() {
     send({ type: "proactive_check" });
   }
 }
-ws.onopen = () => {
+function onWsOpen() {
+  // 重连成功即状态复位：disposed 是 cleanupVoice 的一次性闩锁，不放开的话
+  // 断过一次线后语音链路永久失效；seq 是连接级单调（§25.1 取舍 1），
+  // 新连接必须重算起点，id 去重跨连接保留（补齐重放的旧帧靠它挡）。
+  disposed = false;
+  reconnect.reset();
   setStatus("在线", "on");
+  v2Hub.resetConnection();
   ws.send(JSON.stringify({ type: "config", proactivity: el("proactiveToggle").checked, memory: el("memoryToggle").checked }));
   if (!proactiveHeartbeat) proactiveHeartbeat = setInterval(proactiveHeartbeatTick, PROACTIVE_HEARTBEAT_MS);
-};
+}
 
-ws.onmessage = async (event) => {
+async function onWsMessage(event) {
   let msg;
   try {
     msg = JSON.parse(event.data);
@@ -1317,6 +1337,12 @@ ws.onmessage = async (event) => {
       }
       if (!VOICE_FIRST && currentBubble) appendContextUsage(currentBubble, msg.context_usage);
       contextBudget?.note(msg.context_usage);
+      // 演练②（坏 Key）：done 标 text_status='partial' 却一个字都没收到时，
+      // "只保留了部分回答"是谎话；VOICE_FIRST 下气泡注释不跑，字幕是唯一出口。
+      if (msg.delivery && msg.delivery.text_status === 'partial'
+          && !((msg.text || '').trim() || (pendingText || '').trim())) {
+        subtitle.textContent = '这轮没有收到回复内容，可能服务出错了；可以再发一次。';
+      }
       microFlow = false; narrationActive = false; proactiveActive = false; mumbleActive = false; syncModeStrip();
       turns.done = true;
       finishTurn();
@@ -1368,16 +1394,18 @@ ws.onmessage = async (event) => {
       // 否则形象层会漏掉这一类事件——scripts/check_protocol.py 会查出来。
       break;
   }
-};
+}
 
-ws.onclose = () => {
+function onWsClose() {
   experienceUI.onDisconnect();
   if (proactiveHeartbeat) { clearInterval(proactiveHeartbeat); proactiveHeartbeat = null; }
   cleanupVoice();
   setStatus("断开", "");
-  subtitle.textContent = "连接已断开，麦克风已释放。请刷新后重试。";
-};
-ws.onerror = () => { subtitle.textContent = "连接出现错误，请检查网络。"; };
+  subtitle.textContent = "连接已断开，麦克风已释放；正在自动重连……";
+  // 服务可能只是重启：指数退避探活（1s 起、15s 封顶），连上后 onWsOpen 复位。
+  setTimeout(connectWs, reconnect.next());
+}
+function onWsError() { subtitle.textContent = "连接出现错误，请检查网络。"; }
 document.addEventListener("visibilitychange", () => {
   if (document.hidden) {
     manualHeld = false; alwaysListen = false; cancelRecording(); cancelTurn(); teardownMic();
