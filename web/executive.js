@@ -8,6 +8,7 @@
  */
 
 import { createFlowGuard, pendingMessage, shouldHighlight } from "./executive-state.js";
+import { v2Hub } from "./events-v2.js";
 
 const el = (id) => document.getElementById(id);
 
@@ -20,6 +21,24 @@ const STATUS_LABELS = {
   ready_to_report: "等你验收",
   done: "已归档",
 };
+
+/* ---------- 协议 §25：慢环事件 v2 的展示词表（值域与 server/task/states.py 对齐） ---------- */
+const V2_TASK_LABELS = {
+  CLARIFYING: "追问中", PROPOSED: "契约待批", SPEC_LOCKED: "规格已锁",
+  DISPATCHED: "已派单", EXECUTING: "执行中", VERIFYING: "验收中", BLOCKED: "卡住了",
+  ACCEPTED: "已验收", DELIVERING: "交付中", DELIVERED: "已送达", CANCELLED: "已取消",
+  FAILED: "失败", TIMEOUT: "超时",
+};
+const V2_STEP_LABELS = {
+  CREATED: "已创建", READY: "就绪", DISPATCHED: "已派出", RUNNING: "干活中",
+  OBSERVED: "待核验", VERIFIED: "已核过", REJECTED: "被打回", FAILED: "失败",
+  UNKNOWN: "下落不明", SKIPPED: "跳过", CANCELLED: "已取消",
+};
+const V2_PRESENCE_LABELS = { idle: "空闲", listening: "在听", thinking: "在想", speaking: "在说" };
+const V2_RISK_LABELS = { low: "低风险", medium: "中风险", high: "高风险" };
+/* 终态取值不另造词表，直接对齐 states.py 的 TASK_TERMINAL / 副作用三值。 */
+const V2_TASK_TERMINAL = new Set(["DELIVERED", "CANCELLED", "FAILED", "TIMEOUT"]);
+const V2_EFFECT_FINAL = new Set(["done", "failed", "replayed"]);
 const POLL_MS = 4000;
 const MAX_CARDS = 20;
 
@@ -84,6 +103,7 @@ export function mountExecutive() {
   const authBox = el("opsAuthorizations");
   const telemetryBox = el("opsTelemetry");
   const rubricBox = el("opsRubrics");
+  const v2Box = el("opsEvents");
   if (!root || !list || !telemetryBox || !rubricBox) return null;
 
   const state = { seen: new Set(), lastKeyAt: 0, timer: null, active: false, revision: 0, highlight: "" };
@@ -502,6 +522,264 @@ export function mountExecutive() {
     }
   }
 
+  /* ---------- 协议 §25：九类事件的实时渲染 + 五命令的 UI 动作 ----------
+   *
+   * 数据从 web/events-v2.js 的 hub 来（id 去重、seq 保序、迟到帧不回退画面
+   * 都在那层做完），这里只做展示与「按钮 -> 命令」的接线。发过的命令按
+   * 键记进 sentCommands 保持按钮禁用，防手抖双发；request_id 幂等键在
+   * buildCommand 里生成，重发场景由调用方复用同一 command。 */
+  const sentCommands = new Set();
+
+  function sendV2Command(type, fields, key) {
+    if (key && sentCommands.has(key)) return;
+    const result = v2Hub.sendCommand(type, fields);
+    if (!result.ok || !key) return;
+    sentCommands.add(key);
+    renderV2(v2Hub.snapshot());
+  }
+
+  function v2Text(value, fallback) {
+    if (value === null || value === undefined || value === "") return fallback;
+    if (typeof value === "object") return JSON.stringify(value);
+    return String(value);
+  }
+
+  function v2ContractCard(contract) {
+    const card = node("article", "ops-card");
+    card.dataset.v2 = "contract";
+    const head = node("div", "ops-card-head");
+    head.append(node("h5", "ops-card-title",
+      `契约提案 · v${v2Text(contract.version, "?")} · ${contract.taskId || "未署名单"}`));
+    head.append(node("span", "ops-pill",
+      V2_RISK_LABELS[contract.risk] || v2Text(contract.risk, "风险未标")));
+    card.append(head);
+    card.append(line("目标", v2Text(contract.goal, "（没写目标）")));
+    card.append(line("成果", v2Text(contract.artifact, "（未注明成果）")));
+    if (contract.inputsKind.length) {
+      card.append(line("输入", contract.inputsKind.join("、")));
+    }
+    if (contract.criteria.length) {
+      card.append(line("验收标准", `${contract.criteria.length} 条`));
+    }
+    card.append(line("预算", v2Text(contract.budget, "（未谈预算）")));
+    if (contract.highlightedSlots.length) {
+      card.append(line("要你确认的槽位", contract.highlightedSlots.join("、")));
+    }
+    const actions = node("div", "ops-actions");
+    const confirmKey = `CONFIRM_CONTRACT:${contract.contractId}:${contract.version}`;
+    const confirmed = sentCommands.has(confirmKey);
+    const confirm = node("button", "primary", confirmed ? "已确认" : "确认契约");
+    confirm.type = "button";
+    confirm.disabled = confirmed;
+    /* medium/high 风险时 confirmed_slots ⊇ highlighted_slots 才放行（T5 守卫），
+     * 这里直接把高亮槽位全量带上，不替老板做「部分确认」。 */
+    confirm.addEventListener("click", () => sendV2Command("CONFIRM_CONTRACT", {
+      task_id: contract.taskId,
+      contract_id: contract.contractId,
+      version: contract.version,
+      confirmed_slots: contract.highlightedSlots,
+    }, confirmKey));
+    const cancelKey = `CANCEL_TASK:${contract.taskId || ""}:proposal`;
+    const cancelled = sentCommands.has(cancelKey);
+    const reject = node("button", "ghost", cancelled ? "已拒" : "不接这单");
+    reject.type = "button";
+    reject.disabled = cancelled;
+    reject.addEventListener("click", () => sendV2Command("CANCEL_TASK", {
+      task_id: contract.taskId,
+      reason: "wrong_task",
+    }, cancelKey));
+    actions.append(confirm, reject);
+    card.append(actions);
+    return card;
+  }
+
+  function v2AskCard(ask) {
+    const card = node("article", "ops-card");
+    card.dataset.v2 = "ask";
+    card.dataset.answered = String(ask.answered);
+    const head = node("div", "ops-card-head");
+    head.append(node("h5", "ops-card-title", ask.answered ? "提问（已回答）" : "她在请示"));
+    head.append(node("span", "ops-pill", ask.taskId ? `单 ${ask.taskId}` : "未署名单"));
+    card.append(head);
+    card.append(node("p", "ops-ask-text", ask.question || "（问题没写）"));
+    if (ask.missing.length) card.append(node("p", "ops-meta", `缺的槽位：${ask.missing.join("、")}`));
+    if (ask.answered) return card;
+    const actions = node("div", "ops-actions");
+    ask.options.forEach((option, index) => {
+      const pill = node("button", "ghost", typeof option === "string" ? option : JSON.stringify(option));
+      pill.type = "button";
+      pill.addEventListener("click", () => v2Hub.sendCommand("ANSWER", {
+        task_id: ask.taskId,
+        answer: typeof option === "string" ? option : JSON.stringify(option),
+        option_index: index,
+      }));
+      actions.append(pill);
+    });
+    const field = node("input", "ops-ask-input");
+    field.type = "text";
+    field.placeholder = ask.options.length ? "或自己写一句回答" : "不回就按琐事代答处理";
+    field.setAttribute("aria-label", "回答小溪的请示");
+    const send = node("button", "ghost", "回答");
+    send.type = "button";
+    const submit = () => {
+      const text = field.value.trim();
+      if (!text) return;
+      send.disabled = true;
+      v2Hub.sendCommand("ANSWER", { task_id: ask.taskId, answer: text });
+    };
+    send.addEventListener("click", submit);
+    field.addEventListener("keydown", (event) => {
+      if (event.key === "Enter") submit();
+    });
+    actions.append(field, send);
+    card.append(actions);
+    return card;
+  }
+
+  function v2TaskCard(task, snap) {
+    const card = node("article", "ops-card");
+    card.dataset.v2 = "task";
+    card.dataset.taskId = task.id;
+    card.dataset.status = task.status;
+    const head = node("div", "ops-card-head");
+    head.append(node("h5", "ops-card-title", task.id ? `任务 ${task.id}` : "未署名任务"));
+    head.append(node("span", "ops-pill",
+      V2_TASK_LABELS[task.status] || (task.status ? task.status : "已接单")));
+    card.append(head);
+    const metaBits = [];
+    if (task.risk) metaBits.push(V2_RISK_LABELS[task.risk] || task.risk);
+    if (Number.isFinite(task.attempt)) metaBits.push(`第 ${task.attempt + 1} 轮`);
+    if (task.reason) metaBits.push(task.reason);
+    if (task.resumeTo) metaBits.push(`恢复到 ${task.resumeTo}`);
+    if (metaBits.length) card.append(node("p", "ops-meta", metaBits.join(" · ")));
+
+    if (task.steps.length) {
+      const steps = node("ul", "ops-v2-steps");
+      for (const step of task.steps) {
+        const row = node("li");
+        const who = [step.agent || "未选将", step.station].filter(Boolean).join(" @ ");
+        row.append(node("span", null, `${who} · ${V2_STEP_LABELS[step.status] || step.status || "…"}`));
+        if (step.status === "FAILED") {
+          const retryKey = `RETRY_STEP:${task.id}:${step.id}`;
+          const retried = sentCommands.has(retryKey);
+          const retry = node("button", retried ? "primary" : "ghost", retried ? "已重试" : "重试这步");
+          retry.type = "button";
+          retry.disabled = retried;
+          retry.addEventListener("click", () => sendV2Command("RETRY_STEP", {
+            task_id: task.id,
+            step_id: step.id,
+          }, retryKey));
+          row.append(retry);
+        }
+        steps.append(row);
+      }
+      card.append(steps);
+    }
+
+    const tools = snap.tools.find((entry) => entry.taskId === task.id);
+    if (tools && tools.rows.length) {
+      const box = node("ul", "ops-v2-tools");
+      for (const row of tools.rows.slice(-4)) {
+        const progress = Number.isFinite(row.stepsDone) && Number.isFinite(row.stepsTotal)
+          ? ` · ${row.stepsDone}/${row.stepsTotal} 步` : "";
+        box.append(node("li", null,
+          `${row.tool || "工具"} · ${row.status || "…"}${progress}${row.detail ? ` · ${row.detail}` : ""}`));
+      }
+      card.append(box);
+    }
+
+    const report = snap.verifications.find((entry) => entry.taskId === task.id);
+    if (report) {
+      const box = node("div", "ops-review-pane");
+      box.append(node("p", "ops-review-head",
+        `验收报告：${report.passed ? "绿章通过" : "红灯未过"} · ${report.criteria.length} 条标准`));
+      for (const criterion of report.criteria.slice(0, 8)) {
+        box.append(node("li", "ops-review-item",
+          `${criterion && criterion.id ? criterion.id : "?"} · ${criterion && criterion.kind ? criterion.kind : "?"} · ${criterion && criterion.passed === true ? "过" : "未过"}`));
+      }
+      for (const finding of report.findings.slice(0, 6)) {
+        box.append(node("li", "ops-finding", typeof finding === "string" ? finding : JSON.stringify(finding)));
+      }
+      card.append(box);
+    }
+
+    const effects = snap.effects.find((entry) => entry.taskId === task.id);
+    if (effects && effects.rows.length) {
+      const box = node("ul", "ops-v2-tools");
+      for (const effect of effects.rows) {
+        const row = node("li");
+        row.append(node("span", null,
+          `${effect.type || "副作用"} -> ${effect.targetClass || "?"} · ${effect.status || "…"}`));
+        /* 效果未落定（done/failed/replayed 之外，含待放行态）都保留放行按钮；
+         * 值域未在 §25 钉死，未知状态宁可多给老板一次「放行」，不给静默卡死。 */
+        if (!V2_EFFECT_FINAL.has(effect.status)) {
+          const approveKey = `APPROVE_SIDE_EFFECT:${task.id}:${effect.effectId}`;
+          const approved = sentCommands.has(approveKey);
+          const allow = node("button", approved ? "primary" : "ghost", approved ? "已放行" : "放行");
+          allow.type = "button";
+          allow.disabled = approved;
+          allow.addEventListener("click", () => sendV2Command("APPROVE_SIDE_EFFECT", {
+            task_id: task.id,
+            effect_id: effect.effectId,
+          }, approveKey));
+          row.append(allow);
+        }
+        box.append(row);
+      }
+      card.append(box);
+    }
+
+    if (task.status && !V2_TASK_TERMINAL.has(task.status)) {
+      const actions = node("div", "ops-actions");
+      const cancelKey = `CANCEL_TASK:${task.id}`;
+      const cancelled = sentCommands.has(cancelKey);
+      const cancel = node("button", cancelled ? "primary" : "ghost", cancelled ? "已叫停" : "取消任务");
+      cancel.type = "button";
+      cancel.disabled = cancelled;
+      cancel.addEventListener("click", () => sendV2Command("CANCEL_TASK", {
+        task_id: task.id,
+        reason: "user_abort",
+      }, cancelKey));
+      actions.append(cancel);
+      card.append(actions);
+    }
+    return card;
+  }
+
+  function renderV2(snap) {
+    if (!v2Box) return;
+    v2Box.replaceChildren();
+    const hasAny = snap.presence || snap.tasks.length || snap.contracts.length
+      || snap.asks.length || snap.memory.length;
+    v2Box.hidden = !hasAny;
+    if (!hasAny) return;
+    if (snap.presence) {
+      const row = node("p", "ops-v2-presence");
+      row.append(node("span", "ops-pill",
+        `她在${V2_PRESENCE_LABELS[snap.presence.state] || snap.presence.state}`));
+      v2Box.append(row);
+    }
+    for (const contract of snap.contracts.slice(-4)) v2Box.append(v2ContractCard(contract));
+    for (const ask of snap.asks.slice(-4)) v2Box.append(v2AskCard(ask));
+    for (const task of snap.tasks.slice(-6)) v2Box.append(v2TaskCard(task, snap));
+    if (snap.memory.length) {
+      const box = node("div", "ops-v2-memory-box");
+      box.append(node("h6", "ops-delivery-title", "档案室动静"));
+      const rows = node("ul", "ops-v2-memory");
+      for (const item of snap.memory.slice(-8).reverse()) {
+        const confidence = Number.isFinite(item.confidence) ? ` · 置信 ${item.confidence}` : "";
+        rows.append(node("li", null,
+          `${item.action || "更新"} · ${item.memoryRef || "?"} · 来自 ${item.source || "?"}${confidence}`));
+      }
+      box.append(rows);
+      v2Box.append(box);
+    }
+  }
+
+  v2Hub.subscribe(() => {
+    if (state.active) renderV2(v2Hub.snapshot());
+  });
+
   const emptyItems = () => ({ items: [] });
 
   async function refresh() {
@@ -554,6 +832,7 @@ export function mountExecutive() {
     state.active = event.detail === "ops";
     if (state.active) {
       refresh();
+      renderV2(v2Hub.snapshot());
       start();
     } else {
       stop();
@@ -616,6 +895,7 @@ export function mountExecutive() {
     // 列表若是旧的，refresh() 重渲染后再回放一次领航，保证定位落到真实数据。
     refresh().then(() => { if (lastNav === nav) applyNav(nav); });
   });
+  renderV2(v2Hub.snapshot());
   refresh();
   return { refresh, get active() { return state.active; } };
 }

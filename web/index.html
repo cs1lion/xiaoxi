@@ -251,6 +251,8 @@
       <p>小溪替你派出去的单，和它们烧掉的 Token。主舞台不添按钮，都收在这儿。</p>
       <!-- 协议 §23：layout=drawer_ops 的积木渲染在这里（自动拉开抽屉时可见）。 -->
       <div id="opsAqiBlocks" class="ops-aqi-blocks" aria-label="小溪递来的战况卡片"></div>
+      <!-- 协议 §25：慢环事件 v2（九类事件 + 五命令）的实时消费，归约在 web/events-v2.js。 -->
+      <div id="opsEvents" class="ops-v2" aria-label="慢环实时事件" hidden></div>
       <div id="opsPending" class="ops-pending" hidden></div>
       <!-- C4：派单确认、工具放行、模型验收建议都收在这里；没有就整块隐藏。 -->
       <section id="opsAuthorizations" class="ops-auth" aria-label="等老板拍板" hidden></section>

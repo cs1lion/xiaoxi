@@ -33,11 +33,20 @@ import { createHoloDeck, parseCmd, summarizeAqiBlocks } from "./blocks.js";
 import { createAqiFlow, aqiPendingMessage } from "./aqi-flow.js";
 import { normalizeUiNav, drawerViewFor, shouldCloseDrawer, shouldOpenSidePanel,
   shouldOpenStarmap, gazeAfter } from "./ui_nav.js";
+import { v2Hub } from "./events-v2.js";
 bootAssistant().catch(error => console.warn('助手面板启动失败', error));
 bootCompanion().catch(error => console.warn('共同事项启动失败', error));
 
 const TARGET_RATE = 16000;
 const ws = new WebSocket(`${location.protocol === "https:" ? "wss" : "ws"}://${location.host}/ws`);
+
+/* 协议 §25.3：五个前端命令从 ops 视图经这条连接发出（request_id 幂等键在
+ * web/events-v2.js 的 buildCommand 里生成）。发送失败返回 false，UI 留待重发。 */
+v2Hub.attachSender((payload) => {
+  if (ws.readyState !== WebSocket.OPEN) return false;
+  ws.send(JSON.stringify(payload));
+  return true;
+});
 
 const el = (id) => document.getElementById(id);
 const chat = el("chat");
@@ -1134,6 +1143,10 @@ ws.onmessage = async (event) => {
     return;                       // 后端发了非 JSON，不该让整个前端挂掉
   }
   if (!msg || typeof msg !== "object" || typeof msg.type !== "string") return;
+  /* 协议 §25.1：v2 信封与 v1 并存。v2 帧整条归 web/events-v2.js 消费
+   * （id 去重、seq 保序、九类事件归约），不进 TurnGate / 形象层——
+   * 那两层的词汇表是 v1 的，混进去只会被当杂音丢掉。 */
+  if (msg.v === 2) { v2Hub.handleFrame(msg); return; }
   if (editorInsightVoice?.blocksServer(msg)) return;
   starmap?.onMessage?.(msg);
   /* 连接级提示先于 TurnGate 消费：speech_plan / self_evolution 不带 turn_id，

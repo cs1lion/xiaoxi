@@ -245,6 +245,13 @@ button.mode-chip:hover { background:#e6ebdd; color:var(--text); }
 .ops-review-head { margin:0 0 6px; font-size:11.5px; font-weight:600; }
 .ops-review-item { margin:0 0 3px; list-style:none; font-size:11px; color:var(--muted); overflow-wrap:anywhere; }
 .ops-review .ops-finding { list-style:none; margin:0 0 4px; font-size:11px; color:var(--danger); }
+/* ---------- 协议 §25 慢环实时事件（web/events-v2.js 归约后渲染）---------- */
+.ops-v2 { display:grid; gap:10px; margin:0 0 14px; }
+.ops-v2-presence { margin:0; }
+.ops-v2-steps { margin:8px 0 0; padding-left:16px; display:grid; gap:4px; font-size:11px; color:var(--muted); list-style:none; }
+.ops-v2-steps button { font-size:11px; min-height:30px; padding:2px 9px; margin-left:6px; }
+.ops-v2-tools { margin:8px 0 0; padding-left:16px; display:grid; gap:4px; font-size:11px; color:var(--muted); list-style:none; overflow-wrap:anywhere; }
+.ops-v2-memory { margin:6px 0 0; padding-left:16px; display:grid; gap:3px; font-size:11px; color:var(--muted); overflow-wrap:anywhere; }
 .composer-foot { display:flex; align-items:center; justify-content:space-between; padding:2px 8px 0; gap:15px; }
 .composer-foot .hint { font-size:10px; }.composer-signature { font-size:10px; color:var(--muted); white-space:nowrap; }
 .assistant-panel input:not([type=checkbox]) { width:100%; margin:5px 0; font-size:12px; }
