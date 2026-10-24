@@ -21,7 +21,7 @@ try{
   if(req.postData())data.body=req.postDataJSON();
   const value=call(data);await route.fulfill({status:value.status,json:value.body});
  });
- await page.goto('http://127.0.0.1:8000/static/card_preview.html');
+ await page.goto('http://127.0.0.1:8000/static/archive/card_preview.html');
  await page.evaluate(async()=>{
   document.body.replaceChildren();
   const {renderTaskCard}=await import('/static/task-card.js');

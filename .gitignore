@@ -75,3 +75,9 @@ scripts/.intent-live-report.txt
 
 # mattpocock/skills 的 vendored 副本（skills-lock 安装产物，与产品链路零耦合）
 agent/
+
+# 语音前端探索区：目录本身入库（见 AGENTS.md「待办」第 1 条的教训：整目录忽略会让修正在重装/换机时消失），
+# 只排掉凭据、虚拟环境与跑测原始输出。隔离靠「零 import + 不进门禁 + 分支合入是刻意动作」，不靠忽略。
+voice-lab/.env
+voice-lab/.venv/
+voice-lab/outputs/
