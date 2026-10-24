@@ -31,7 +31,7 @@ const ROOT = resolve(import.meta.dirname, '../..');
 const PIXEL = join(ROOT, 'pixel-world');
 const PY = join(ROOT, '.venv', 'Scripts', 'python.exe');
 const API = 'http://127.0.0.1:8001';
-const PAGE_URL = 'http://127.0.0.1:5189/?ledger=on';
+const PAGE_URL = 'http://127.0.0.1:5189/?ledger=on&debug=1';
 const KEEP = process.argv.includes('--keep');
 const EVIDENCE_PATH = process.env.E2E_EVIDENCE
   ?? join(tmpdir(), 'aqi-e2e-real-frame-evidence.json');

@@ -32,7 +32,7 @@
 
 const URL_BASE = 'http://127.0.0.1:5188/';
 /** 实际打开的页面地址（沙盒模式固定 ?ledger=off）；reload 等价做法是重新 goto 同一地址。 */
-const PAGE_URL = `${URL_BASE}?ledger=off`;
+const PAGE_URL = `${URL_BASE}?ledger=off&debug=1`;
 /** CDP 清存储要用的 origin（不带路径与查询串）。 */
 const ORIGIN = 'http://127.0.0.1:5188';
 /** 截图必须用绝对路径（ego 拒绝相对路径）；落在 pixel-world/eval/screens/。 */

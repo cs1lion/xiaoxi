@@ -12,6 +12,8 @@ import {
 } from './world/setup.ts';
 import { SandboxScene } from './scenes/SandboxScene.ts';
 import { bindOraclePanel, type OracleApi } from './ui/oracle-panel.ts';
+import { bindHud } from './ui/hud.ts';
+import { bindShell } from './ui/shell.ts';
 import { bindDebugPanel, type SaveStatusView } from './ui/debug-panel.ts';
 import { SaveStore, exportFileName, IMPORT_MAX_BYTES } from './ui/save-store.ts';
 import type { AgentToWorld } from './world/bridge.ts';
@@ -67,6 +69,8 @@ game.scene.add('SandboxScene', SandboxScene, true, {
 
 // 按钮等场景 create() 挂上 window.Oracle；期间点击直接忽略。
 bindOraclePanel(() => (window as unknown as { Oracle?: OracleApi }).Oracle);
+bindHud(() => (window as unknown as { Oracle?: OracleApi }).Oracle);
+bindShell();
 
 // 上帝调试面板：只读浮层，数据来自 Oracle 只读接口（不改变仿真）。
 interface DebugOracle {

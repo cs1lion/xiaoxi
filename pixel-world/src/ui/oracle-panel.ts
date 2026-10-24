@@ -6,9 +6,11 @@
 
 import { TASK_PROFILES } from '../world/tasks.ts';
 import { WILD_PREFAB_OF } from '../world/world-state.ts';
-import type { TaskKind } from '../world/types.ts';
+import type { TaskKind, WorldSnapshot } from '../world/types.ts';
 
 export interface OracleApi {
+  /** 世界快照只读视图。HUD 与浏览器回归都从这里读，不另开接口。 */
+  readonly view: () => WorldSnapshot;
   /** 只表示这句话认没认出。世界是否照办在下一个逻辑拍结算，结果走 onResult。 */
   readonly say: (text: string) => { readonly ok: boolean; readonly message: string };
   readonly dispatch: (kind: 'code' | 'research' | 'writing' | 'quick', summary: string) => void;
@@ -252,7 +254,8 @@ export function bindOraclePanel(getApi: () => OracleApi | undefined): void {
     if (submit(input.value)) input.value = '';
   });
 
-  for (const button of form.querySelectorAll<HTMLButtonElement>('button[data-kind]')) {
+  // 维护条的按钮不在 <form> 里（产品页默认不渲染它），按文档查，搬位置不用改绑定。
+  for (const button of document.querySelectorAll<HTMLButtonElement>('button[data-kind]')) {
     button.addEventListener('click', () => {
       const kind = button.dataset.kind;
       const text = kind === undefined ? undefined : BUTTON_TEXT[kind];
@@ -284,7 +287,7 @@ export function bindOraclePanel(getApi: () => OracleApi | undefined): void {
   rain?.addEventListener('click', () => submit('下雨了'));
   clear?.addEventListener('click', () => submit('放晴吧'));
 
-  for (const button of form.querySelectorAll<HTMLButtonElement>('button[data-create]')) {
+  for (const button of document.querySelectorAll<HTMLButtonElement>('button[data-create]')) {
     button.addEventListener('click', () => {
       const api = getApi();
       const prefabId = button.dataset.create;
@@ -303,7 +306,7 @@ export function bindOraclePanel(getApi: () => OracleApi | undefined): void {
     show(true, '时辰跟着真实时间走了。');
   });
 
-  for (const button of form.querySelectorAll<HTMLButtonElement>('button[data-miracle]')) {
+  for (const button of document.querySelectorAll<HTMLButtonElement>('button[data-miracle]')) {
     button.addEventListener('click', () => {
       const api = getApi();
       const kind = button.dataset.miracle;
@@ -312,7 +315,7 @@ export function bindOraclePanel(getApi: () => OracleApi | undefined): void {
     });
   }
 
-  for (const button of form.querySelectorAll<HTMLButtonElement>('button[data-build]')) {
+  for (const button of document.querySelectorAll<HTMLButtonElement>('button[data-build]')) {
     button.addEventListener('click', () => {
       const api = getApi();
       const prefabId = button.dataset.build;

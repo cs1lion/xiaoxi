@@ -14,7 +14,7 @@ from typing import Any
 import numpy as np
 from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
 from fastapi.responses import FileResponse, JSONResponse
-from .static import AppStaticFiles, mount_pixel_world
+from .static import AppStaticFiles, mount_pixel_world, world_entry_response
 
 from .config import ROOT, avatar_cfg, ensure_dirs, pacing_cfg, persona_cfg, settings
 # 协议 §17 的原子热重载。只在 startup/shutdown 两个生命周期钩子里调它，
@@ -1495,6 +1495,12 @@ async def proactive_socket(ws: WebSocket) -> None:
 
 @app.get("/")
 async def index() -> Any:
+    """主界面是像素世界。旧聊天页在 /chat，/world 仍是世界的静态挂载点。"""
+    return world_entry_response(ROOT)
+
+
+@app.get("/chat")
+async def chat() -> Any:
     return FileResponse(ROOT / "web" / "index.html", headers={"Cache-Control": "no-store"})
 
 

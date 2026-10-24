@@ -33,7 +33,7 @@ import { createHash } from 'node:crypto';
 import process from 'node:process';
 
 const CDP_URL = process.env.CDP_URL ?? 'http://127.0.0.1:9333';
-const PAGE_URL = process.env.PIXEL_WORLD_URL ?? 'http://127.0.0.1:5188/?ledger=off';
+const PAGE_URL = process.env.PIXEL_WORLD_URL ?? 'http://127.0.0.1:5188/?ledger=off&debug=1';
 
 /**
  * 固定时相后再截图，否则结果跟着本地钟点漂移、无法复现。

@@ -19,7 +19,7 @@ import { dirname, join } from 'node:path';
 const HERE = dirname(fileURLToPath(import.meta.url));
 const OUT = process.env.S5_EVIDENCE_DIR || join(HERE, '..', 'eval', 'screens');
 mkdirSync(OUT, { recursive: true });
-const URL = (process.env.S5_WORLD_URL || 'http://127.0.0.1:5189') + '/?ledger=on';
+const URL = (process.env.S5_WORLD_URL || 'http://127.0.0.1:5189') + '/?ledger=on&debug=1';
 const pause = (ms) => new Promise((r) => setTimeout(r, ms));
 
 const RAF_PATCH = `(() => {

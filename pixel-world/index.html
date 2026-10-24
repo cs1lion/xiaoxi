@@ -31,16 +31,85 @@
         display: flex;
         flex-direction: column;
         align-items: center;
-        gap: 14px;
-        padding: 28px 16px 40px;
+        gap: 12px;
+        padding: 0 16px 32px;
         background: var(--base);
         color: var(--ink);
         font: 13px/1.6 ui-monospace, "Cascadia Mono", "Noto Sans Mono CJK SC", monospace;
+      }
+      /* 顶栏：产品页常驻，不随内容滚动。用普通流而不是 fixed——固定层会压到
+         canvas 上，而调色板截图要求画布包围盒是整数像素且没有 DOM 叠着。 */
+      #topbar {
+        width: 100%;
+        max-width: 960px;
+        display: flex;
+        align-items: baseline;
+        gap: 14px;
+        padding: 12px 2px 10px;
+        border-bottom: 1px solid var(--line);
+      }
+      #topbar .brand {
+        font-family: var(--font-pixel);
+        font-size: 13px;
+        letter-spacing: 0.2em;
+        white-space: nowrap;
+      }
+      #hud-load { color: var(--dim); font-size: 12px; flex: 1 1 auto; }
+      #hud-net {
+        font-family: var(--font-pixel);
+        font-size: 11px;
+        padding: 1px 6px;
+        border: 1px solid var(--line);
+        color: var(--dim);
+        white-space: nowrap;
+      }
+      #hud-net.bad { color: var(--warn); border-color: var(--warn); }
+      #topbar .hintkey {
+        color: var(--dim);
+        font-size: 11px;
+        white-space: nowrap;
+      }
+      #topbar .hintkey kbd {
+        font: inherit;
+        padding: 1px 5px;
+        border: 1px solid var(--line);
+        color: var(--ink);
       }
       header { text-align: center; }
       h1 { margin: 0; font-size: 24px; line-height: 1.2; font-weight: 400; letter-spacing: 0.16em; }
       header p { margin: 4px 0 0; color: var(--dim); font-size: 12px; }
       #stage { position: relative; line-height: 0; width: fit-content; }
+      /* 队列表：一行一句话。空的时候整块收起，不占位置。 */
+      #queue {
+        width: 100%;
+        max-width: 960px;
+        display: flex;
+        gap: 8px;
+        align-items: baseline;
+        padding: 8px 10px;
+        background: var(--panel);
+        border: 1px solid var(--line);
+        font-size: 12px;
+        line-height: 1.5;
+      }
+      #queue[hidden] { display: none; }
+      #queue .label {
+        font-family: var(--font-pixel);
+        color: var(--amber);
+        white-space: nowrap;
+      }
+      #queue-list {
+        margin: 0;
+        padding: 0;
+        list-style: none;
+        display: flex;
+        flex-wrap: wrap;
+        gap: 4px 14px;
+        color: var(--dim);
+      }
+      /* 维护条：造物、神迹、存档、时辰。只有 ?debug=1 才出现。 */
+      #maintenance { width: 720px; max-width: 100%; display: grid; gap: 8px; }
+      #maintenance[hidden] { display: none; }
       #app {
         position: relative;
         line-height: 0;
@@ -137,12 +206,14 @@
         border-right: 2px solid transparent;
         border-top: 3px solid var(--ink);
       }
+      /* 神谕栏：产品页的主输入。默认只有一条输入框，其余派活按钮收进
+         ?debug=1 那一层——产品界面上不该有一排写死的派活类型。 */
       .oracle {
         width: 720px;
         max-width: 100%;
         display: grid;
         gap: 8px;
-        padding: 12px;
+        padding: 10px 12px;
         background: var(--panel);
         border: 1px solid var(--line);
       }
@@ -177,6 +248,17 @@
         color: var(--ink);
         font-size: 12px;
       }
+      /* 键盘用户：跳转链接，平时不可见。 */
+      .skip-link {
+        position: absolute;
+        left: -9999px;
+        top: 0;
+        padding: 6px 10px;
+        background: var(--panel);
+        border: 1px solid var(--amber);
+        color: var(--ink);
+      }
+      .skip-link:focus { left: 8px; top: 8px; z-index: 100; }
       #reply {
         min-height: 1.6em;
         color: var(--dim);
@@ -360,19 +442,30 @@
       .dbg-inject button { display: block; margin-top: 4px; font-size: 11px; }
       /* 像素字只用于标题、短标签与交互控件；新闻纸正文仍用可读宋体。 */
       h1, header p, .overlay-name, .overlay-bubble, input, button,
-      #status, #reply, #save-io-reply, #paper .masthead .name, footer {
+      #status, #reply, #save-io-reply, #paper .masthead .name, footer,
+      #topbar .brand, #hud-net, #queue .label {
         font-family: var(--font-pixel);
         -webkit-font-smoothing: none;
         font-smooth: never;
         text-rendering: geometricPrecision;
       }
+      /* 窄屏：顶栏折行，不让 Cmd+K 提示挤掉负载信息。 */
+      @media (max-width: 720px) {
+        #topbar { flex-wrap: wrap; gap: 6px 12px; }
+        #topbar .hintkey { flex: 1 0 100%; }
+        #queue { flex-direction: column; gap: 4px; }
+      }
     </style>
   </head>
   <body>
-    <header>
-      <h1>莞尔的世界</h1>
-      <p>她不知道屏幕的存在，只知道神谕从祭坛落下来。</p>
-    </header>
+    <a class="skip-link" href="#utterance">跳到神谕输入</a>
+
+    <div id="topbar">
+      <span class="brand">莞尔的世界</span>
+      <span id="hud-load" aria-live="polite">世界正在醒来…</span>
+      <span id="hud-net" title="督办台账的连接状态">连接中</span>
+      <span class="hintkey"><kbd>Ctrl</kbd>+<kbd>K</kbd> 降下神谕</span>
+    </div>
 
     <div id="stage">
       <div id="app"></div>
@@ -380,34 +473,30 @@
       <div id="minimap" role="group" aria-label="世界小地图"></div>
     </div>
 
-    <div id="status" role="status">世界正在醒来…</div>
+    <div id="queue" hidden aria-label="手头的活">
+      <span class="label">在手</span>
+      <ul id="queue-list"></ul>
+    </div>
 
-    <button type="button" id="debug-toggle" title="调试面板（快捷键 D）" aria-expanded="false" aria-controls="debug-panel">⚙ 调试</button>
-    <aside id="debug-panel" hidden aria-label="上帝调试面板">
-      <div class="dbg-head">
-        <strong>上帝调试面板</strong>
-        <label><input type="checkbox" id="debug-pause" /> 暂停</label>
-        <select id="debug-tone" aria-label="事件过滤">
-          <option value="all">事件：全部</option>
-          <option value="oracle">oracle</option>
-          <option value="work">work</option>
-          <option value="done">done</option>
-          <option value="info">info</option>
-          <option value="warn">warn</option>
-        </select>
-        <button type="button" id="debug-close">关闭</button>
-      </div>
-      <div id="debug-stats"></div>
-      <div id="debug-content"></div>
-      <div id="debug-inject-slot"></div>
-    </aside>
+    <div id="status" role="status">世界正在醒来…</div>
 
     <form class="oracle" id="oracle">
       <div class="row">
         <input id="utterance" autocomplete="off" placeholder="对世界说一句话：帮我写个爬虫 / 查一下资料 / 交付" />
         <button class="primary" type="submit">降下神谕</button>
       </div>
-      <div class="row">
+      <div id="reply" role="status" aria-live="polite"></div>
+    </form>
+
+    <!-- 维护条：造物、神迹、存档、时辰，以及写死的派活按钮。产品界面上不出现，
+         只有 ?debug=1 才展开。世界自己的浏览器回归脚本靠它们驱动，所以删不得。 -->
+    <div id="maintenance" hidden>
+      <header>
+        <h1>莞尔的世界</h1>
+        <p>她不知道屏幕的存在，只知道神谕从祭坛落下来。</p>
+      </header>
+
+      <div class="row" id="build-row">
         <button type="button" data-kind="code">派活：写代码</button>
         <button type="button" data-kind="research">派活：查资料</button>
         <button type="button" data-kind="writing">派活：整理便笺</button>
@@ -415,7 +504,7 @@
         <button type="button" id="finish">现实完成：交付</button>
       </div>
       <div class="world-state" id="world-state" aria-live="polite">世界正在醒来…</div>
-      <div class="row" id="build-row">
+      <div class="row">
         <button type="button" data-build="workshop_plot">世界法则：扩建一栋工坊</button>
         <button type="button" data-create="workshop_plot">造物模式：选位置扩建</button>
         <button type="button" id="rain">世界法则：下雨</button>
@@ -436,17 +525,27 @@
         <input type="file" id="save-import-file" accept="application/json,.json" hidden />
       </div>
       <div id="save-io-reply" role="status" aria-live="polite"></div>
-      <div id="reply" role="status" aria-live="polite"></div>
-    </form>
+      <button type="button" id="debug-toggle" title="调试面板（快捷键 D）" aria-expanded="false" aria-controls="debug-panel">⚙ 调试</button>
+    </div>
 
-    <section id="paper" aria-live="polite">
-      <div class="masthead">
-        <span class="name">神谕日报</span>
-        <span class="date" id="paper-date"></span>
+    <aside id="debug-panel" hidden aria-label="上帝调试面板">
+      <div class="dbg-head">
+        <strong>上帝调试面板</strong>
+        <label><input type="checkbox" id="debug-pause" /> 暂停</label>
+        <select id="debug-tone" aria-label="事件过滤">
+          <option value="all">事件：全部</option>
+          <option value="oracle">oracle</option>
+          <option value="work">work</option>
+          <option value="done">done</option>
+          <option value="info">info</option>
+          <option value="warn">warn</option>
+        </select>
+        <button type="button" id="debug-close">关闭</button>
       </div>
-      <h2 id="paper-headline">世界刚醒来</h2>
-      <ul id="paper-lines"></ul>
-    </section>
+      <div id="debug-stats"></div>
+      <div id="debug-content"></div>
+      <div id="debug-inject-slot"></div>
+    </aside>
 
     <section id="decree" aria-live="polite" hidden>
       <div class="masthead">
@@ -456,6 +555,16 @@
       <p class="decree-note">这一单在等你答复。世界不会替你做决定。</p>
       <blockquote id="decree-question"></blockquote>
       <p class="decree-hint">在主产品的督办界面答复这一单；答复后台账会把状态改回去，急件自动收回。</p>
+    </section>
+
+    <!-- 报纸与石板：世界的编年史。压到最下面，不跟主舞台抢注意力。 -->
+    <section id="paper" aria-live="polite">
+      <div class="masthead">
+        <span class="name">神谕日报</span>
+        <span class="date" id="paper-date"></span>
+      </div>
+      <h2 id="paper-headline">世界刚醒来</h2>
+      <ul id="paper-lines"></ul>
     </section>
 
     <section id="slab" aria-live="polite">

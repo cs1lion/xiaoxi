@@ -827,7 +827,9 @@ async function runSandboxSuite() {
 try {
   await mkdir(OUT, { recursive: true });
   await page.goto(
-    LEDGER ? `${URL_BASE}?ledger=on` : `${URL_BASE}?ledger=off`,
+    // ?debug=1：维护条（派活按钮、造物、神迹、存档、调试面板）只在调试层出现，
+    // 产品页默认没有它们。回归脚本要驱动它们，就必须显式打开这一层。
+    LEDGER ? `${URL_BASE}?ledger=on&debug=1` : `${URL_BASE}?ledger=off&debug=1`,
     { waitUntil: 'load' },
   );
   await page.waitForFunction(() => window.Oracle !== undefined, null, { timeout: 15000 });

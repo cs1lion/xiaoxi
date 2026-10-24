@@ -44,8 +44,8 @@ const KEEP = process.argv.includes('--keep');
 // --serve：跑完不杀隔离实例与临时 Vite，留给 QA 独立观察（会打印副本路径/端口/PID）。
 const SERVE = process.argv.includes('--serve');
 const API = 'http://127.0.0.1:8001';
-const LIVE_PAGE = 'http://127.0.0.1:5189/?ledger=on';
-const MOCK_PAGE = process.env.DEMO_DEV_URL ?? 'http://127.0.0.1:5188/?ledger=off';
+const LIVE_PAGE = 'http://127.0.0.1:5189/?ledger=on&debug=1';
+const MOCK_PAGE = process.env.DEMO_DEV_URL ?? 'http://127.0.0.1:5188/?ledger=off&debug=1';
 const LOG_PATH = join(OUT, `demo-run-${MODE}.jsonl`);
 const T0 = Date.now();
 // live 模式在页面打开前先落一单，seg1 用它取真实帧证据。

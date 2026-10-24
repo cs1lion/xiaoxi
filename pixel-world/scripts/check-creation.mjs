@@ -29,7 +29,7 @@ const errors = [];
 page.on('pageerror', (error) => errors.push(error.message));
 
 await page.addInitScript(() => localStorage.clear());
-await page.goto(`${BASE}?ledger=off&time=noon`, { waitUntil: 'load' });
+await page.goto(`${BASE}?ledger=off&time=noon&debug=1`, { waitUntil: 'load' });
 await page.waitForFunction(() => window.Oracle !== undefined, null, { timeout: 20000 });
 await page.waitForTimeout(600);
 

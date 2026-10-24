@@ -51,7 +51,7 @@ for (const phase of PHASES) {
   const page = await context.newPage();
   page.on('pageerror', (error) => pageErrors.push(`${phase}: ${error.message}`));
   await page.addInitScript(() => localStorage.clear());
-  await page.goto(`${BASE}?ledger=off&time=${phase}`, { waitUntil: 'load' });
+  await page.goto(`${BASE}?ledger=off&time=${phase}&debug=1`, { waitUntil: 'load' });
   await page.waitForFunction(() => window.Oracle !== undefined, null, { timeout: 20000 });
   // 渐变 FADE_MS = 900，等两倍确保拍到终态。
   await page.waitForTimeout(2200);
@@ -150,7 +150,7 @@ const nightRain = await (async () => {
   const page = await context.newPage();
   page.on('pageerror', (error) => pageErrors.push(`night+rain: ${error.message}`));
   await page.addInitScript(() => localStorage.clear());
-  await page.goto(`${BASE}?ledger=off&time=night`, { waitUntil: 'load' });
+  await page.goto(`${BASE}?ledger=off&time=night&debug=1`, { waitUntil: 'load' });
   await page.waitForFunction(() => window.Oracle !== undefined, null, { timeout: 20000 });
   await page.waitForTimeout(400);
 
