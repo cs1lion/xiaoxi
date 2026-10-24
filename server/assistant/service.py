@@ -116,11 +116,36 @@ class AssistantService:
         # Projection is idempotent; it never re-runs a tool.
         self._flush_outbox()
 
+    # 委托判定的动词与宾语表（dogfood #40）：ASR 常吃掉开头的「帮我」——
+    # 实测「帮我安排一个沙盒打样，生成并校验一个小文件吧」被识别成
+    # 「安排一个沙盒打样，…」，旧正则 `帮我(整理|写|安排|计划)` 整句落空，
+    # 委托进普通对话，模型还会自由发挥成「我没有工具权限」。
+    # 所以委托判定不能挂在礼貌前缀上：领域名词、动词打头、动词+产物三条路
+    # 各自独立成立。宁可多接一单（可撤销）也不能漏接（用户以为她拒绝了）。
+    _DELEGATE_DOMAIN = ('沙盒', '打样')
+    _DELEGATE_VERBS = ('整理', '安排', '计划', '起草', '生成', '校验',
+                       '做个', '搞个', '跑个', '写份', '写个', '写一篇', '写一段')
+    _DELEGATE_OBJECTS = ('文件', '报告', '清单', '表格', '脚本', '文档', '纪要')
+
+    def _delegation_request(self, text: str) -> bool:
+        """这条输入是不是在派活（工具路径的入口，非普通闲聊）。"""
+        if any(word in text for word in self._DELEGATE_DOMAIN):
+            return True
+        if re.search(r'(?:帮我|麻烦你?|请)[^，。！？]{0,10}?(?:整理|写|安排|计划|起草|生成|'
+                     r'校验|做|跑|搞|查|搜)', text):
+            return True
+        head = re.sub(r'^(?:帮我|麻烦你?|请)', '', text.strip())
+        if any(head.startswith(verb) for verb in self._DELEGATE_VERBS):
+            return True
+        return bool(re.search(r'(?:生成|校验|整理|起草)[^，。！？]{0,6}?'
+                              r'(?:文件|报告|清单|表格|脚本|文档)', text))
+
     def should_route(self, text: str, session_id: str = '') -> bool:
         return bool(self.note_conversation.should_route(text, session_id, enabled=self._activity_enabled())
                     or self._resume_request(text) or self.thread_conversation.should_route(text, session_id)
                     or self._world_request(text)
-                    or re.search(r'提醒|待办|任务|帮我(?:整理|写|安排|计划)|取消.*提醒|延后|(?:搜索|查找|读取)(?:已保存的)?(?:笔记|便笺)', text))
+                    or self._delegation_request(text)
+                    or re.search(r'提醒|待办|任务|取消.*提醒|延后|(?:搜索|查找|读取)(?:已保存的)?(?:笔记|便笺)', text))
 
     @staticmethod
     def _world_request(text: str) -> bool:

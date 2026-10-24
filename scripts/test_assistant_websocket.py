@@ -288,6 +288,34 @@ class WebSocketTests(unittest.IsolatedAsyncioTestCase):
         await self.ws.wait('done', 'valid')
         self.assertEqual(self.service.store.list_tasks(), [])
 
+    async def test_delegation_routing_survives_asr_dropping_the_polite_prefix(self):
+        """dogfood #40：ASR 吃掉「帮我」不能让委托整句落空。
+
+        实测原句「帮我安排一个沙盒打样，生成并校验一个小文件吧」被识别成
+        「安排一个沙盒打样，生成并校验一个小文件吧」——旧正则挂在「帮我」
+        前缀上，整句进普通对话，模型自由发挥成「我没有工具权限」。
+        """
+        for text in (
+            '帮我安排一个沙盒打样，生成并校验一个小文件吧。',
+            '安排一个沙盒打样，生成并校验一个小文件吧。',
+            '帮我整理一下周报',
+            '整理一下周报',
+            '生成一个校验报告',
+            '麻烦你写一份会议纪要',
+            '跑个脚本校验一下',
+        ):
+            self.assertTrue(self.service.should_route(text, self.session_id), text)
+
+    async def test_ordinary_chat_does_not_route_as_delegation(self):
+        """放宽路由的代价要守住：普通闲聊不能被误路由进工具路径。"""
+        for text in (
+            '早上好呀小溪',
+            '你还记得我的猫叫什么名字吗？',
+            '今天有点累',
+            '你觉得写代码累吗',
+        ):
+            self.assertFalse(self.service.should_route(text, self.session_id), text)
+
 
 if __name__ == '__main__':
     unittest.main(verbosity=2)

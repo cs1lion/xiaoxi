@@ -63,6 +63,35 @@ async def noop(*args, **kwargs):
     pass
 
 
+async def _noop_reply(code, message):   # 隔离环境里的 v2 命令错误回执（不发帧）
+    return None
+
+
+_BROADCAST = None
+
+
+def _broadcast():
+    """§25 广播层的轻量替身。
+
+    本测试用 AST 隔离装载 app.py（不 import server 包，靠 FakeSocket 直驱
+    websocket_endpoint），所以这里不能真 import server.broadcast。替身只满足
+    websocket_endpoint 用到的两个成员：attach 返回 detach（什么也不做）、
+    publish 不发帧。语音路径的既有断言与广播层无关。
+    """
+    global _BROADCAST
+    if _BROADCAST is None:
+        class _Hub:
+            def attach(self, key, sink):
+                return lambda: None
+
+            def publish(self, *args, **kwargs):
+                return None
+
+        _BROADCAST = SimpleNamespace(v2_hub=_Hub(), v2_bridge=SimpleNamespace(
+            on_commission=lambda *args, **kwargs: None))
+    return _BROADCAST
+
+
 def load_ws():
     path = Path(__file__).resolve().parents[1] / "server" / "app.py"
     tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
@@ -77,11 +106,14 @@ def load_ws():
     # _send_proactive_blocks 是协议 §23.6 主动轮随路积木，被 _proactive_check 调用。
     # 不编译进来时该调用点在隔离环境里 NameError，被 _proactive_check 的 except 吞掉，
     # turn_started 永不到达——proactive 两条测试表现为超时而不是失败原因。
-    names = {"VoiceTurn", "Connection", "_present_reply", "_confirm_action", "_run_turn", "_transcribe_turn", "_proactive_check", "websocket_endpoint", "proactive_socket", "_maybe_diary", "_maybe_self_evolution", "_narrate_turn", "_node_snippet", "_aqi_action", "_executive_delegate", "_executive_finish", "_touch_reply", "_send_proactive_blocks"}
+    names = {"VoiceTurn", "Connection", "_present_reply", "_confirm_action", "_run_turn", "_transcribe_turn", "_proactive_check", "websocket_endpoint", "proactive_socket", "_maybe_diary", "_maybe_self_evolution", "_narrate_turn", "_node_snippet", "_aqi_action", "_executive_delegate", "_executive_finish", "_touch_reply", "_send_proactive_blocks", "_transcribe_error_message"}
     nodes = []
     for node in tree.body:
-        if isinstance(node, (ast.ClassDef, ast.AsyncFunctionDef)) and node.name in names:
-            if isinstance(node, ast.AsyncFunctionDef):
+        # 同步 def 也要收：_transcribe_error_message 是普通函数（S3 加的 ASR
+        # 文案清洗），被 _transcribe_turn 的异常分支调用；漏编译会让 ASR
+        # 失败路径在隔离环境 NameError，被上层 except 吞成静默超时。
+        if isinstance(node, (ast.ClassDef, ast.AsyncFunctionDef, ast.FunctionDef)) and node.name in names:
+            if isinstance(node, (ast.AsyncFunctionDef, ast.FunctionDef)):
                 node.decorator_list = []
             nodes.append(node)
         elif isinstance(node, ast.Assign) and any(isinstance(t, ast.Name) and t.id == "MAX_AUDIO_SECONDS" for t in node.targets):
@@ -120,6 +152,18 @@ def load_ws():
                note_snippet=blocks_module.note_snippet,
                compose_spinning_card=blocks_module.compose_spinning_card,
                compose_delivery_card=blocks_module.compose_delivery_card,
+               # W1（#25）§25 广播层：websocket_endpoint 用 v2_hub.attach 挂连接、
+               # 用 V2_COMMAND_TYPES 分发命令、用 v2_command_actions 执行动作。
+               # AST 隔离装载不执行模块级赋值，这里装真实单例（sink 由测试自己
+               # 控制，不会真发帧）与空动作表，保持既有语音路径逐字节不变。
+               v2_hub=_broadcast().v2_hub,
+               v2_bridge=_broadcast().v2_bridge,
+               V2_COMMAND_TYPES=frozenset(),
+               v2_command_actions=None,
+               _make_v2_sink=lambda conn, loop: (lambda envelope: True),
+               _v2_presence=lambda *args, **kwargs: None,
+               _v2_reply=lambda conn: _noop_reply,
+               _maybe_v2_refresh=lambda *args, **kwargs: None,
                to_wav_bytes=lambda audio, rate: audio.tobytes())
     exec(compile(ast.Module(body=nodes, type_ignores=[]), str(path), "exec"), env)
     return env
