@@ -22,7 +22,7 @@ npm run dev        # http://127.0.0.1:5188
 
 ```bash
 cd pixel-world
-npm test           # 纯逻辑，221 项，不需要浏览器
+npm test           # 纯逻辑，不需要浏览器；项数以运行输出为准
 npm run check      # 类型检查
 npm run build      # tsc + vite build
 ```
@@ -110,7 +110,7 @@ src/render/         只读 WorldSnapshot，画地形、建筑、小人、烟、�
 src/scenes/         唯一的 Phaser 场景：驱动 tick、转输入、转快照
 src/ui/             DOM 神谕面板与报纸。中文永远归 DOM，不画进 canvas
 src/audio/          哇啦哇啦拟音，Web Audio 现场合成，无素材、无 TTS
-test/               349 项纯逻辑用例
+test/               纯逻辑用例，项数以 npm test 运行输出为准
 scripts/smoke.mjs   浏览器闭环回归
 ```
 
@@ -136,9 +136,11 @@ scripts/smoke.mjs   浏览器闭环回归
 
 ## 世界预算（写成常量，不许破）
 
-- **80×60 格，16px/格**（1280×960 像素）。画布只显示 30×20 的一小块，靠相机移动看其余部分。
-  旧规格 30×20 保留为测试夹具（`SMALL_WORLD_SPEC`），20 处既有单测依赖它。
-- 13 个分区，**6 栋常驻铺子**（镇内三 + 郊野三）+ 1 种扩建样板，2 个角色，4 类活
+- 规格以 `LARGE_WORLD_SPEC`（`src/world/setup.ts`）为准，图块固定 16px/格。画布只显示
+  世界的一小块，靠相机移动看其余部分。旧规格 30×20 保留为测试夹具（`SMALL_WORLD_SPEC`），
+  20 处既有单测依赖它。
+- 分区、常驻铺子、民居的数量以 `prefabs.json` 与 `buildLargeWorld` 的实际落位为准；
+  铺子预算由 `validateCoverage` 与 `assertWorldInvariants` 在开局校验。2 个角色，4 类活
 - 同时只能接一单；短活不占铺子；铺子四态（静息 / 运转 / 故障 / 冷却）
 - 调色板来自 `src/world/palette-data.ts`（24 色，2026-10-21 ADR）与蓝图，不允许渲染层随手取色
 

@@ -186,6 +186,46 @@ test('神谕里出现答复也只当普通文本，不触发任何回答', () =>
   assert.equal(parseOracle('回答：选 A').kind, 'unknown');
 });
 
+test('句中顺带提到天气：提问不改世界，查数据照旧派研究活', () => {
+  assert.equal(parseOracle('明天下雨吗').kind, 'unknown');
+  assert.equal(parseOracle('昨天放晴了吗').kind, 'unknown');
+  const lookup = parseOracle('查一下下雨的历史数据');
+  assert.equal(lookup.kind, 'dispatch');
+  assert.equal(lookup.kind === 'dispatch' && lookup.taskKind, 'research');
+});
+
+test('句中顺带提到完成不收单，写报告照旧派写活', () => {
+  assert.equal(parseOracle('把任务标记为完成').kind, 'unknown');
+  const report = parseOracle('帮我写一份完成报告');
+  assert.equal(report.kind, 'dispatch');
+  assert.equal(report.kind === 'dispatch' && report.taskKind, 'writing');
+  assert.equal(parseOracle('完成').kind, 'complete');
+  assert.equal(parseOracle('交付').kind, 'complete');
+});
+
+test('短活必须打头：句中顺带提到「简单」抢不走长活', () => {
+  const mid = parseOracle('查资料这事很简单');
+  assert.equal(mid.kind, 'dispatch');
+  assert.equal(mid.kind === 'dispatch' && mid.taskKind, 'research');
+  const quick = parseOracle('顺手查一下今天几号');
+  assert.equal(quick.kind === 'dispatch' && quick.taskKind, 'quick');
+});
+
+test('句中顺带提到撤销不动队列，动词打头才收', () => {
+  assert.equal(parseOracle('取消排队').kind, 'cancelPending');
+  assert.equal(parseOracle('先别取消排队').kind, 'unknown');
+  assert.equal(parseOracle('撤销刚才那条').kind, 'cancelPending');
+});
+
+test('英文命中词同样只认打头，问句落 unknown', () => {
+  assert.deepEqual(parseOracle('rain'), { kind: 'weather', weather: 'rain' });
+  assert.equal(parseOracle('will it rain tomorrow').kind, 'unknown');
+  assert.equal(parseOracle('DONE').kind, 'complete');
+  const search = parseOracle('帮我 search 一下');
+  assert.equal(search.kind, 'dispatch');
+  assert.equal(search.kind === 'dispatch' && search.taskKind, 'research');
+});
+
 // ------------------------------------------------------------------- everyday
 
 test('没人管的时候她也过日子：离开祭坛再回来', () => {

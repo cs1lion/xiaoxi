@@ -30,7 +30,7 @@ const RAIN_WORDS = ['下雨', '降雨', '落雨', 'rain'];
 const CLEAR_WORDS = ['放晴', '雨停', '天晴', '出太阳', 'clear'];
 /** 撤销排队中的神谕；只撤等待队列，不动正在干的活。 */
 const CANCEL_WORDS = ['撤销', '取消', 'cancel', 'undo'];
-/** 短活：句首就是「顺手 / 随便」这类，整句都在说"小事一桩"。 */
+/** 短活必须「顺手」打头：句中顺带提到「简单」不算短活，也抢不走长活的词。 */
 const QUICK_PREFIXES = ['顺手', '随便', '简单', '小事'];
 
 /** 句首的祈使动词。只有出现在**开头**才算命令。 */
@@ -56,22 +56,29 @@ export function parseOracle(raw: string): OracleAction {
   if (text.length === 0) return { kind: 'unknown', raw };
   const lower = text.toLowerCase();
 
-  // 世界法则与「交付 / 撤销」是固定短语，不受祈使判定影响：
-  // 说「撤销」就是在撤销，说「交付」就是在交付。
-  if (COMPLETE_WORDS.some((word) => lower === word || lower.includes(word))) {
-    // 但叙述性的「已经完成了」不该触发。
-    if (!hasNarrativeMarker(lower)) return { kind: 'complete' };
-  }
-  // 世界法则与撤销是**固定短语**，不套祈使判定：说「下雨吧」就是在改天气，
-  // 它没有「写 / 查」那样的动词，硬套祈使规则会把合法输入也挡掉。
-  // 只排除叙述性的用法（「外面在下雨吗」是提问，不该改天）。
-  if (CLEAR_WORDS.some((word) => lower.includes(word)) && !isQuestion(lower)) {
+  // 世界法则与「交付 / 撤销」是固定短语。**命中词必须打头。**
+  //
+  // 为什么不能只靠「排除问句」：`isQuestion` 只认句尾问号与疑问词打头，
+  // 挡不住「命令里顺带提到」——实测这四句都被误判过：
+  //   「查一下下雨的历史数据」→ 判成 weather（用户其实在派查资料的活）
+  //   「帮我写一份完成报告」  → 判成 complete（收了一张根本没在手上的单）
+  //   「先别取消排队」        → 判成 cancelPending（否定句被当成命令执行）
+  //   「will it rain tomorrow」→ 判成 weather
+  // 这类误判改的是世界本身（改天气、收单），比漏判危险得多。
+  //
+  // 打头判定是**主防线**；问句与叙述排除留着做第二道——有些合法的打头句仍
+  // 不是命令（「下雨了吗」以「下雨」打头但是提问），两道一起才够。
+  const leads = (words: readonly string[]): boolean =>
+    words.some((word) => lower.startsWith(word));
+
+  if (leads(COMPLETE_WORDS) && !hasNarrativeMarker(lower)) return { kind: 'complete' };
+  if (leads(CLEAR_WORDS) && !isQuestion(lower)) {
     return { kind: 'weather', weather: 'clear' };
   }
-  if (RAIN_WORDS.some((word) => lower.includes(word)) && !isQuestion(lower)) {
+  if (leads(RAIN_WORDS) && !isQuestion(lower)) {
     return { kind: 'weather', weather: 'rain' };
   }
-  if (CANCEL_WORDS.some((word) => lower.includes(word)) && !isQuestion(lower)) {
+  if (leads(CANCEL_WORDS) && !isQuestion(lower)) {
     return { kind: 'cancelPending' };
   }
 
