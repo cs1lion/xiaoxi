@@ -4,7 +4,7 @@
  */
 
 import {
-  assertSaveV1,
+  assertSave,
   CURRENT_SCHEMA_VERSION,
   migrateSave,
   SAVE_STORAGE_KEY,
@@ -12,7 +12,7 @@ import {
   SETTLED_WARN_THRESHOLD,
   saveFingerprint,
   type RawSave,
-  type WorldSaveV1,
+  type WorldSave,
 } from '../world/save.ts';
 
 export interface StorageLike {
@@ -24,7 +24,7 @@ export interface StorageLike {
 }
 
 export type SaveReadResult =
-  | { readonly ok: true; readonly save: WorldSaveV1 }
+  | { readonly ok: true; readonly save: WorldSave }
   | {
       readonly ok: false;
       readonly reason: 'empty' | 'corrupt' | 'version' | 'storage';
@@ -63,7 +63,7 @@ export interface SaveImportResult {
 const pad2 = (value: number): string => String(value).padStart(2, '0');
 
 export type SaveParseResult =
-  | { readonly ok: true; readonly save: WorldSaveV1 }
+  | { readonly ok: true; readonly save: WorldSave }
   | {
       readonly ok: false;
       readonly reason: 'empty' | 'corrupt' | 'version';
@@ -74,7 +74,7 @@ export type SaveParseResult =
     };
 
 /**
- * 唯一的存档校验链（P3）：空白 → JSON/形状 → 高版本只读 → 迁移 → assertSaveV1（含路径集合校验）。
+ * 唯一的存档校验链（P3）：空白 → JSON/形状 → 高版本只读 → 迁移 → assertSave（含路径集合校验）。
  * `read()` 与 `importText()` 都走这里，避免两条平行实现慢慢漂移。
  * 纯函数：不碰存储、不备份、不改 autoSave——这些由调用方按各自语义处理。
  */
@@ -95,7 +95,7 @@ export function parseSaveText(text: string): SaveParseResult {
   if (version > CURRENT_SCHEMA_VERSION) return { ok: false, reason: 'version', version };
   try {
     const migrated = migrateSave(raw);
-    assertSaveV1(migrated);
+    assertSave(migrated);
     return { ok: true, save: migrated };
   } catch {
     return { ok: false, reason: 'corrupt' };
@@ -185,7 +185,7 @@ export class SaveStore {
   }
 
   /** 写主存档；配额/安全异常 → 关自动存档、提示一次、不抛。 */
-  write(save: WorldSaveV1): SaveWriteResult {
+  write(save: WorldSave): SaveWriteResult {
     if (!this.autoSave) {
       return { ok: false, paused: true, message: '自动存档已暂停。' };
     }

@@ -11,9 +11,11 @@
 
 import Phaser from 'phaser';
 import type { WorldGrid } from '../world/grid.ts';
-import type { TerrainId } from '../world/types.ts';
+import type { GridPoint, TerrainId } from '../world/types.ts';
 import { TILE_PX } from '../world/setup.ts';
 import { TERRAIN_COLORS, WORLD } from '../world/palette-data.ts';
+import { biomeAt } from '../world/biomes.ts';
+import { DRESSING } from '../world/dressing.ts';
 import { drawTileEdge, type EdgeNeighbors } from './terrain-edges.ts';
 
 type Terrain = keyof typeof TERRAIN_COLORS;
@@ -23,8 +25,12 @@ export function drawTerrain(
   grid: WorldGrid,
   originX: number,
   originY: number,
+  target?: Phaser.GameObjects.Graphics,
+  altar?: GridPoint,
 ): void {
-  const g = scene.add.graphics();
+  // 给了 target 就画进它：烘焙到纹理时用同一个 Graphics，
+  // 否则每次子绘制都会多创建一个对象。
+  const g = target ?? scene.add.graphics();
 
   // pass 1：底色。先全部铺满，后面的纹理才不会被邻格底色覆盖。
   for (let y = 0; y < grid.height; y += 1) {
@@ -60,9 +66,9 @@ export function drawTerrain(
     }
   }
 
-  drawPlantingBeds(scene, grid, originX, originY);
-  drawFarmFence(scene, grid, originX, originY);
-  drawDressing(scene, grid, originX, originY);
+  drawPlantingBeds(scene, grid, originX, originY, g);
+  drawFarmFence(scene, grid, originX, originY, g);
+  drawDressing(scene, grid, originX, originY, g, altar);
 
   // 网格线只是排查落位用的辅助层，默认不画：铺满全屏的细线会把地形纹理与轮廓压成
   // “表格纸”，也会让建筑/道路的边线失去对比。需要时用 ?debug-grid=1 打开。
@@ -343,8 +349,9 @@ function drawPlantingBeds(
   grid: WorldGrid,
   originX: number,
   originY: number,
+  target?: Phaser.GameObjects.Graphics,
 ): void {
-  const g = scene.add.graphics();
+  const g = target ?? scene.add.graphics();
   const streetX = Math.floor(grid.width / 2) - 2;
   const streetW = 4;
   let plazaTop = grid.height;
@@ -422,8 +429,9 @@ function drawFarmFence(
   grid: WorldGrid,
   originX: number,
   originY: number,
+  target?: Phaser.GameObjects.Graphics,
 ): void {
-  const g = scene.add.graphics();
+  const g = target ?? scene.add.graphics();
   for (let y = 0; y < grid.height; y += 1) {
     for (let x = 0; x < grid.width; x += 1) {
       if (grid.at({ x, y })?.terrain !== 'farm') continue;
@@ -459,13 +467,16 @@ function drawFarmFence(
   }
 }
 
-/** 草地/农田的贴边草与少量石子。纯装饰，不参与碰撞。 */
-function drawDressing(  scene: Phaser.Scene,
+/** 草地/农田的贴边草与地表细节。纯装饰，不参与碰撞。 */
+function drawDressing(
+  scene: Phaser.Scene,
   grid: WorldGrid,
   originX: number,
   originY: number,
+  target?: Phaser.GameObjects.Graphics,
+  altar?: GridPoint,
 ): void {
-  const g = scene.add.graphics();
+  const g = target ?? scene.add.graphics();
   for (let y = 0; y < grid.height; y += 1) {
     for (let x = 0; x < grid.width; x += 1) {
       const cell = grid.at({ x, y });
@@ -473,9 +484,14 @@ function drawDressing(  scene: Phaser.Scene,
       const px = originX + x * TILE_PX;
       const py = originY + y * TILE_PX;
       const h = hash2(x, y);
+      // 没有祭坛坐标就退回工坊环的配方：调用方漏传时行为最接近旧版，
+      // 而不是让整张图突然变成郊野。
+      const recipe = altar === undefined
+        ? DRESSING.craftRing
+        : DRESSING[biomeAt({ x, y }, altar)];
 
       const edge = nearestNonGrassSide(grid, x, y);
-      if (edge !== null && h % 7 < 3) {
+      if (edge !== null && h % recipe.edge < 3) {
         const inset = 1 + (h % 2);
         let jx = px + 4 + (h % 7);
         let jy = py + 6 + ((h >>> 3) % 5);
@@ -489,16 +505,57 @@ function drawDressing(  scene: Phaser.Scene,
         continue;
       }
 
-      // 草地内部：只偶尔留一颗石子或一丛灌木/岩石，给大片草地一点地标。
-      if (h % 53 === 0) {
+      // 四类细节互斥，按固定顺序判定：一格只加一样东西，
+      // 否则镇内会出现「岩石上开着花」这种拼贴感。
+      if (h % recipe.rock === 0) {
         drawRock(g, px, py);
-      } else if (h % 71 === 0) {
+      } else if (h % recipe.bush === 0) {
         drawBush(g, px, py);
-      } else if (h % 37 === 0) {
+      } else if (recipe.flower !== 0 && h % recipe.flower === 0) {
+        drawWildflower(g, px, py, h);
+      } else if (recipe.slab !== 0 && h % recipe.slab === 0) {
         g.fillStyle(WORLD.plaza, 0.8);
         g.fillRect(px + 4 + (h % 8), py + 5 + ((h >>> 8) % 6), 2, 1);
       }
     }
+  }
+}
+
+/**
+ * 野花：一小丛，三朵高低错开。
+ *
+ * 第一版只有 1px 花头 + 1px 茎，3x 缩放下看起来像两个孤零零的亮点，
+ * 读不出「一丛花」。改成每个花头 2×2（带 1px 花心）、三朵错开高度，
+ * 才在像素密度上立得住。
+ *
+ * 镇内的花在窗台花箱里（`drawFacade`），地表不长花——人踩的地方草都长不齐。
+ * 郊野才有一片一片的野花，那也是「没人来过」的证据。
+ */
+function drawWildflower(
+  g: Phaser.GameObjects.Graphics,
+  px: number,
+  py: number,
+  h: number,
+): void {
+  const ox = 2 + (h % 9);
+  const oy = 5 + ((h >>> 7) % 7);
+  // 茎：三根，高度错开。
+  g.fillStyle(WORLD.soil, 1);
+  g.fillRect(px + ox, py + oy - 2, 1, 3);
+  g.fillRect(px + ox + 3, py + oy - 3, 1, 4);
+  g.fillRect(px + ox + 6, py + oy - 1, 1, 2);
+  // 花冠：2×2 的 trim 加一格暖高光，读成花心。
+  g.fillStyle(WORLD.trim, 1);
+  g.fillRect(px + ox - 1, py + oy - 4, 2, 2);
+  g.fillRect(px + ox + 2, py + oy - 5, 2, 2);
+  g.fillRect(px + ox + 5, py + oy - 3, 2, 2);
+  g.fillStyle(WORLD.warmLight, 1);
+  g.fillRect(px + ox + 2, py + oy - 5, 1, 1);
+  // 叶：只在部分丛出现，避免每丛都一样。
+  if (h % 3 === 0) {
+    g.fillStyle(WORLD.moss, 1);
+    g.fillRect(px + ox + 1, py + oy, 2, 1);
+    g.fillRect(px + ox + 5, py + oy + 1, 2, 1);
   }
 }
 

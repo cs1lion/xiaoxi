@@ -35,12 +35,21 @@ import process from 'node:process';
 const CDP_URL = process.env.CDP_URL ?? 'http://127.0.0.1:9333';
 const PAGE_URL = process.env.PIXEL_WORLD_URL ?? 'http://127.0.0.1:5188/?ledger=off';
 
-/** 夜景走产品渲染态（?night=1），不再用 brightness 滤镜冒充。 */
-function withNight(url, night) {
-  if (!night) return url;
+/**
+ * 固定时相后再截图，否则结果跟着本地钟点漂移、无法复现。
+ *
+ * `?night=1` 是旧入口，现在等价于 `?time=night`；新脚本一律用 `?time=`。
+ * 白天两档必须也显式指定，不能留空——留空就是「此刻真实时间」。
+ */
+function withPhase(url, phase) {
+  if (phase === null) return url;
   const next = new URL(url);
-  next.searchParams.set('night', '1');
+  next.searchParams.set('time', phase);
   return next.toString();
+}
+
+function withNight(url, night) {
+  return withPhase(url, night ? 'night' : null);
 }
 const OUT = 'eval/screens';
 const SEED = Number(process.env.PALETTE_SEED ?? 20261019);
@@ -121,7 +130,7 @@ async function shoot(context, name, { rain = false, night = false }) {
     rainAt: RAIN_CLICK_AT,
     rain,
   });
-  await page.goto(withNight(PAGE_URL, night), { waitUntil: 'load' });
+  await page.goto(withPhase(PAGE_URL, night ? 'night' : 'noon'), { waitUntil: 'load' });
   await page.waitForFunction(() => window.__CAPTURE_STATE__ !== undefined, null, { timeout: TIMEOUT });
   await page.waitForFunction((stop) => window.__CAPTURE_STATE__.frame >= stop, STOP_AT, { timeout: TIMEOUT });
   await page.waitForTimeout(300);
@@ -404,7 +413,7 @@ async function openSliceWorld(context, { rain = false, night = false } = {}) {
   const pendingClicks = [{ selector: '[data-build="workshop_plot"]', atNow: SLICE.buildAt }];
   if (rain) pendingClicks.push({ selector: '#rain', atNow: SLICE.rainAt });
   await page.addInitScript(animInitScript, { seed: SEED, pendingClicks });
-  await page.goto(withNight(PAGE_URL, night), { waitUntil: 'load' });
+  await page.goto(withPhase(PAGE_URL, night ? 'night' : 'noon'), { waitUntil: 'load' });
   await page.waitForFunction(() => window.Oracle !== undefined, null, { timeout: TIMEOUT });
   return page;
 }

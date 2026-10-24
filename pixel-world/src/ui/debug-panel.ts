@@ -5,6 +5,7 @@
  */
 
 import type { WorldEvent, WorldSnapshot } from '../world/types.ts';
+import { summarizeWorld } from '../world/world-state.ts';
 
 export const DEBUG_EVENT_LIMIT = 50;
 /** 面板刷新节流 4Hz；10Hz 的逻辑步长不受影响（纯 DOM，不参与仿真）。 */
@@ -318,6 +319,34 @@ export function bindDebugPanel(sources: DebugPanelSources): DebugPanelHandle {
       );
     }
     content.append(buildings);
+
+    // 世界状态：归纳结果，不是原始数据。造物主做选择时读的就是这份。
+    const state = summarizeWorld(snapshot);
+    const summary = section('世界状态', state.buildings.total);
+    summary.append(
+      row('镇内 / 郊野', `${state.buildings.town} / ${state.buildings.wild}`, 'state'),
+    );
+    for (const entry of state.taskKinds) {
+      summary.append(
+        row(
+          `活：${entry.kind}`,
+          `镇内 ${entry.town} · 郊野 ${entry.wild}`,
+          'state',
+        ),
+      );
+    }
+    summary.append(
+      row('郊野空地', `约 ${state.space.wildFree} 栋`, 'state'),
+    );
+    summary.append(
+      row('角色', `忙 ${state.activity.busy} · 闲 ${state.activity.idle}`, 'state'),
+    );
+    if (state.gaps.missingWild.length > 0) {
+      summary.append(
+        row('缺口', `缺郊野铺子：${state.gaps.missingWild.join('、')}`, 'state'),
+      );
+    }
+    content.append(summary);
 
     const tasks = section('任务', model.tasks.length);
     for (const task of model.tasks) {

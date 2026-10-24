@@ -12,7 +12,10 @@
     "check": "tsc --noEmit",
     "test": "node --test test/*.test.ts",
     "test:inprocess": "node --test --experimental-test-isolation=none test/*.test.ts",
-    "test:browser": "node scripts/smoke.mjs"
+    "test:browser": "node scripts/smoke.mjs",
+    "test:phases": "node scripts/check-phases.mjs",
+    "test:persistence": "node scripts/check-persistence.mjs",
+    "test:render-budget": "node scripts/check-render-budget.mjs"
   },
   "dependencies": {
     "phaser": "3.90.0"

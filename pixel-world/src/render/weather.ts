@@ -7,11 +7,9 @@
  */
 
 import Phaser from 'phaser';
-import { GRID_HEIGHT, GRID_WIDTH, TILE_PX } from '../world/setup.ts';
 import { WORLD } from '../world/palette-data.ts';
+import { TILE_PX } from '../world/setup.ts';
 
-const WIDTH = GRID_WIDTH * TILE_PX;
-const HEIGHT = GRID_HEIGHT * TILE_PX;
 const DROPS = 150;
 
 /** 截图/回归用的确定性雨滴种子。默认 null = 线上行为不变（Math.random）。 */
@@ -55,7 +53,17 @@ export interface WeatherView {
   readonly update: (intensity: number, delta: number) => void;
 }
 
-export function createWeatherView(scene: Phaser.Scene): WeatherView {
+/**
+ * 雨与雾覆盖**整个世界**，不是画布：大世界里雨要下在整片地图上，
+ * 镜头移动时不能出现"只有视野在下雨"的边界。
+ */
+export function createWeatherView(
+  scene: Phaser.Scene,
+  worldWidth: number,
+  worldHeight: number,
+): WeatherView {
+  const WIDTH = worldWidth;
+  const HEIGHT = worldHeight;
   // 截图脚本在加载前写 window.__RAIN_SEED__；页面自身不设，只读。
   const injected = (globalThis as { __RAIN_SEED__?: unknown }).__RAIN_SEED__;
   if (typeof injected === 'number' && Number.isFinite(injected)) setRainSeed(injected);

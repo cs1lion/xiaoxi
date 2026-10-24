@@ -78,7 +78,9 @@ export type VillagerMode =
   | 'working'
   | 'delivering'
   | 'toAltar'
-  | 'sheltering';
+  | 'sheltering'
+  /** 举着急件跑去祭坛：台账有单在等人答复。 */
+  | 'bearingDecree';
 
 export type TaskStatus = 'assigned' | 'in_progress' | 'done' | 'failed';
 
@@ -161,6 +163,14 @@ export interface PlacedBuilding {
   readonly silhouette: Silhouette;
   readonly boundTask: WorkshopTask | null;
   readonly palette: PrefabBlueprint['palette'];
+  /**
+   * 这栋楼是谁建的、为什么建。开局常驻的楼没有来源，记 null。
+   *
+   * 与摆件同一个理由：没有来源，过两天就没人知道它为什么在那儿。
+   * 老档迁移来的楼也没有来源，读作"世界自带的"。
+   */
+  readonly sourceTaskId?: string | null;
+  readonly sourceSummary?: string | null;
 }
 
 export type WorkstationActivity =
@@ -218,6 +228,12 @@ export interface VillagerDeliveries {
   readonly mock: number;
 }
 
+/**
+ * 从郊野带回来的东西。按活类型分：查资料带卷轴、写代码带石料、
+ * 整理文稿带纸。
+ */
+export type CarryKind = 'scroll' | 'stone' | 'paper';
+
 /** 累积式改变：交付多了，世界多一件东西。不可花掉、不贬值。 */
 export type PropKind = 'lamp' | 'tree' | 'banner';
 
@@ -226,6 +242,21 @@ export interface WorldProp {
   readonly kind: PropKind;
   readonly at: GridPoint;
   readonly label: string;
+  /**
+   * 这个摆件从哪种活换来的。v1 存档迁移过来的老摆件没有来源，记 null；
+   * 绘制层据此换外观，纸面据此写「这盏灯是哪一单换来的」。
+   */
+  readonly sourceTaskKind: TaskKind | null;
+  /** 换来摆件的那条活的 id，没有来源时记 null。 */
+  readonly sourceTaskId: string | null;
+  /**
+   * 换来摆件的那条活的摘要。
+   *
+   * 为什么抄一份：任务结算后会被 `removeTask` 删掉，`settled` 只留 id。
+   * 只存 id 的话，纸面永远只能显示一个编号，说不出「那单爬虫」。
+   * 老摆件没有来源，记 null。
+   */
+  readonly sourceSummary: string | null;
 }
 
 export interface VillagerSnapshot {
@@ -242,7 +273,40 @@ export interface VillagerSnapshot {
   readonly routine: string | null;
   /** 下雨时渲染层给她打把伞；世界不判断"她淋不淋湿"。 */
   readonly umbrella: boolean;
+  /**
+   * 手上带着的东西。从郊野干完活回来时不为 null。
+   * 纯视觉：它不影响任务结算，只是"跑了一趟，带了东西回来"的读感。
+   */
+  readonly carrying: CarryKind | null;
 }
+
+/**
+ * 只做氛围的环境实体，不参与任务、不改交付统计。
+ * 猫是第一个：它会自己走开，不永久占位。
+ */
+export interface Critter {
+  readonly id: string;
+  readonly kind: 'cat';
+  readonly at: Vec2;
+  /** 离开世界的逻辑时刻。到点自己走，不需要调用方清理。 */
+  readonly leavesAt: number;
+}
+
+/**
+ * 神谕石板上的一条：只记真正改变了世界的那句话，外加世界当时的回执。
+ * 认不出的输入不进石板（那是回问，不是世界事件）。封顶见 ORACLE_SLAB_LIMIT。
+ */
+export interface OracleRecord {
+  /** 玩家原话。 */
+  readonly raw: string;
+  /** 世界执行后的回执原文。 */
+  readonly receipt: string;
+  /** 逻辑时刻（sim.now），不是墙钟：石板要能确定性回放。 */
+  readonly at: number;
+}
+
+/** 石板最多留多少条。超出丢最旧：再多就没人读了。 */
+export const ORACLE_SLAB_LIMIT = 20;
 
 export interface WorldSnapshot {
   readonly now: number;
@@ -257,7 +321,21 @@ export interface WorldSnapshot {
   /** 排队等待派发的神谕（FIFO）。只展示/可撤销，不影响台账完成权。 */
   readonly pending: readonly PendingDispatch[];
   readonly props: readonly WorldProp[];
+  /** 神谕石板：最近 N 条改变了世界的神谕，旧在前。 */
+  readonly oracle: readonly OracleRecord[];
+  /** 氛围实体（猫等）。不参与任何世界结算。 */
+  readonly critters: readonly Critter[];
+  /**
+   * 迷雾：世界还没长出来的部分。
+   * **不影响通行**，只压暗画面并拦住新建造——否则读档时迷雾里的建筑会变孤岛。
+   */
+  readonly fog: { readonly center: GridPoint; readonly revealedRadius: number };
   readonly roads: readonly GridPoint[];
+  /**
+   * 走出来的痕迹：人反复走过的地方。强度 2 起才出现在这里。
+   * **不落档**——能从走动重新累积，存起来只会让存档无限膨胀。
+   */
+  readonly trails: readonly { readonly at: GridPoint; readonly strength: number }[];
   readonly altar: GridPoint;
   readonly events: readonly WorldEvent[];
   readonly weather: Weather;

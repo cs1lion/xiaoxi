@@ -1,0 +1,360 @@
+{
+  "schemaVersion": 2,
+  "world": {
+    "now": 123456,
+    "villagers": [
+      {
+        "id": "v0",
+        "name": "莞尔",
+        "mode": "idle",
+        "pos": {
+          "x": 15,
+          "y": 9
+        },
+        "facing": "down",
+        "visible": true,
+        "path": [],
+        "taskId": null,
+        "bubble": null,
+        "bubbleUntil": 0,
+        "saluteUntil": 0,
+        "deliverUntil": 0,
+        "nextRoutineAt": 1200,
+        "routineIndex": 0,
+        "routineLabel": null,
+        "inPlaceUntil": 0,
+        "pendingRoute": [],
+        "pendingBuildingId": null
+      },
+      {
+        "id": "v1",
+        "name": "阿雾",
+        "mode": "working",
+        "pos": {
+          "x": 5,
+          "y": 3
+        },
+        "facing": "right",
+        "visible": false,
+        "path": [],
+        "taskId": "t1",
+        "bubble": null,
+        "bubbleUntil": 0,
+        "saluteUntil": 0,
+        "deliverUntil": 0,
+        "nextRoutineAt": 4200,
+        "routineIndex": 2,
+        "routineLabel": null,
+        "inPlaceUntil": 0,
+        "pendingRoute": [],
+        "pendingBuildingId": "code_forge#1"
+      }
+    ],
+    "buildings": [
+      {
+        "instanceId": "code_forge#1",
+        "prefabId": "code_forge",
+        "displayName": "炼码工坊",
+        "zone": "industry",
+        "origin": {
+          "x": 2,
+          "y": 2
+        },
+        "footprint": {
+          "w": 5,
+          "h": 4
+        },
+        "door": {
+          "x": 4,
+          "y": 6
+        },
+        "workSpot": {
+          "x": 4,
+          "y": 4
+        },
+        "chimney": {
+          "x": 5.6,
+          "y": 2.4
+        },
+        "accent": "smoke",
+        "silhouette": "gable",
+        "boundTask": "code",
+        "palette": {
+          "body": 9067076,
+          "roof": 4147786,
+          "trim": 13208383,
+          "window": 15777904
+        },
+        "sourceTaskId": null,
+        "sourceSummary": null
+      },
+      {
+        "instanceId": "star_archive#1",
+        "prefabId": "star_archive",
+        "displayName": "星图书阁",
+        "zone": "scholarly",
+        "origin": {
+          "x": 18,
+          "y": 2
+        },
+        "footprint": {
+          "w": 4,
+          "h": 4
+        },
+        "door": {
+          "x": 19,
+          "y": 6
+        },
+        "workSpot": {
+          "x": 19,
+          "y": 4
+        },
+        "chimney": {
+          "x": 21.2,
+          "y": 2.5
+        },
+        "accent": "pages",
+        "silhouette": "tower",
+        "boundTask": "research",
+        "palette": {
+          "body": 7043690,
+          "roof": 3095347,
+          "trim": 9412746,
+          "window": 15918000
+        },
+        "sourceTaskId": null,
+        "sourceSummary": null
+      },
+      {
+        "instanceId": "ink_house#1",
+        "prefabId": "ink_house",
+        "displayName": "抄书斋",
+        "zone": "agriculture",
+        "origin": {
+          "x": 18,
+          "y": 14
+        },
+        "footprint": {
+          "w": 4,
+          "h": 3
+        },
+        "door": {
+          "x": 19,
+          "y": 17
+        },
+        "workSpot": {
+          "x": 19,
+          "y": 15
+        },
+        "chimney": {
+          "x": 21.2,
+          "y": 14.4
+        },
+        "accent": "ink",
+        "silhouette": "flat",
+        "boundTask": "writing",
+        "palette": {
+          "body": 8020562,
+          "roof": 4865849,
+          "trim": 13082730,
+          "window": 16177568
+        },
+        "sourceTaskId": null,
+        "sourceSummary": null
+      },
+      {
+        "instanceId": "workshop_plot#1",
+        "prefabId": "workshop_plot",
+        "displayName": "新工坊",
+        "zone": "industry",
+        "origin": {
+          "x": 8,
+          "y": 4
+        },
+        "footprint": {
+          "w": 4,
+          "h": 3
+        },
+        "door": {
+          "x": 9,
+          "y": 7
+        },
+        "workSpot": {
+          "x": 9,
+          "y": 5
+        },
+        "chimney": {
+          "x": 11.2,
+          "y": 4.4
+        },
+        "accent": "smoke",
+        "silhouette": "gable",
+        "boundTask": null,
+        "palette": {
+          "body": 7035951,
+          "roof": 4525891,
+          "trim": 12624582,
+          "window": 15777904
+        },
+        "sourceTaskId": "t_42",
+        "sourceSummary": "开一间新工坊"
+      }
+    ],
+    "roads": [
+      {
+        "x": 14,
+        "y": 9
+      },
+      {
+        "x": 13,
+        "y": 9
+      }
+    ],
+    "props": [
+      {
+        "id": "prop-0",
+        "kind": "lamp",
+        "at": {
+          "x": 13,
+          "y": 9
+        },
+        "label": "一盏路灯",
+        "sourceTaskKind": "code",
+        "sourceTaskId": "t0",
+        "sourceSummary": "写一个爬虫"
+      }
+    ],
+    "oracle": [
+      {
+        "raw": "帮我写个爬虫",
+        "receipt": "这单办了（阿雾，离线 Mock，不计入台账）。",
+        "at": 1200
+      },
+      {
+        "raw": "下雨吧",
+        "receipt": "天要下雨了。",
+        "at": 2400
+      }
+    ],
+    "critters": [
+      {
+        "id": "miracle-1",
+        "kind": "cat",
+        "at": {
+          "x": 17.5,
+          "y": 11.5
+        },
+        "leavesAt": 45000
+      }
+    ],
+    "tasks": [
+      {
+        "id": "t1",
+        "kind": "code",
+        "summary": "写一个爬虫",
+        "buildingId": "code_forge#1",
+        "source": "sandbox",
+        "status": "in_progress",
+        "createdAt": 1000,
+        "completedAt": null,
+        "blockedQuestion": null,
+        "workerId": "v1"
+      },
+      {
+        "id": "c_demo000001",
+        "kind": "research",
+        "summary": "查一下资料",
+        "buildingId": null,
+        "source": "ledger",
+        "status": "assigned",
+        "createdAt": 2000,
+        "completedAt": null,
+        "blockedQuestion": "选哪个数据源？",
+        "workerId": null
+      }
+    ],
+    "pending": [
+      {
+        "id": "p1",
+        "kind": "writing",
+        "summary": "整理便笺",
+        "requestedAt": 3000,
+        "source": "oracle",
+        "villagerId": "v0"
+      }
+    ],
+    "activities": [
+      {
+        "buildingId": "code_forge#1",
+        "activity": {
+          "kind": "operating",
+          "taskId": "t1",
+          "startedAt": 1000,
+          "estimateMs": 6000,
+          "determinate": true
+        }
+      },
+      {
+        "buildingId": "star_archive#1",
+        "activity": {
+          "kind": "idle"
+        }
+      },
+      {
+        "buildingId": "ink_house#1",
+        "activity": {
+          "kind": "cooling",
+          "taskId": "t0",
+          "until": 5000
+        }
+      },
+      {
+        "buildingId": "workshop_plot#1",
+        "activity": {
+          "kind": "overheating",
+          "taskId": "t0",
+          "since": 4000
+        }
+      }
+    ],
+    "constructions": [
+      {
+        "buildingId": "workshop_plot#1",
+        "remainingMs": 1600,
+        "totalMs": 3200
+      }
+    ],
+    "weather": {
+      "kind": "rain",
+      "intensity": 0.5,
+      "remainingMs": 20000
+    },
+    "faith": {
+      "points": 1,
+      "milestones": 0
+    },
+    "settled": [
+      {
+        "id": "c_000000000001",
+        "source": "ledger",
+        "workerId": "v0",
+        "completedAt": 1700000000000,
+        "completedAtClock": "ledger"
+      },
+      {
+        "id": "t0",
+        "source": "mock",
+        "workerId": "v1",
+        "completedAt": 1234567890123,
+        "completedAtClock": "local"
+      }
+    ],
+    "nextTaskNumber": 3,
+    "nextPendingNumber": 2
+  },
+  "meta": {
+    "savedAtWallClock": 1792500000000,
+    "savedReconciled": true,
+    "schemaFingerprint": "72c4a6c0f1f444f7"
+  }
+}

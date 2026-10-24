@@ -3,7 +3,13 @@
 import Phaser from 'phaser';
 import prefabs from './world/prefabs.json';
 import { parseBlueprintTable } from './world/blueprints.ts';
-import { buildWorld, buildWorldFromSave, GRID_WIDTH, GRID_HEIGHT, TILE_PX } from './world/setup.ts';
+import {
+  buildLargeWorld,
+  buildWorldFromSave,
+  LARGE_ALTAR,
+  LARGE_WORLD_SPEC,
+  TILE_PX,
+} from './world/setup.ts';
 import { SandboxScene } from './scenes/SandboxScene.ts';
 import { bindOraclePanel, type OracleApi } from './ui/oracle-panel.ts';
 import { bindDebugPanel, type SaveStatusView } from './ui/debug-panel.ts';
@@ -17,18 +23,25 @@ const blueprints = parseBlueprintTable(prefabs);
 const saveNotices: string[] = [];
 const saveStore = new SaveStore({ onWarning: (message) => saveNotices.push(message) });
 const loadedSave = saveStore.read();
+/**
+ * 生产用大世界：80×60 格。旧规格 30×20 保留给测试夹具，生产入口不再用它。
+ *
+ * 读档时按大世界规格重建网格：存档里没有网格数据，只有建筑坐标；
+ * 旧档的建筑坐标在新图里仍然合法（新图包含原来的镇中心）。
+ */
 const world = loadedSave.ok
-  ? buildWorldFromSave(loadedSave.save.world.buildings, blueprints)
-  : buildWorld(blueprints);
+  ? buildWorldFromSave(loadedSave.save.world.buildings, blueprints, LARGE_WORLD_SPEC, LARGE_ALTAR)
+  : buildLargeWorld(blueprints);
 
-const WIDTH = GRID_WIDTH * TILE_PX;
-const HEIGHT = GRID_HEIGHT * TILE_PX;
+/** 画布尺寸：只显示世界的一小块，靠相机移动看其余部分。 */
+const VIEW_WIDTH = 30 * TILE_PX;
+const VIEW_HEIGHT = 20 * TILE_PX;
 
 const game = new Phaser.Game({
   type: Phaser.AUTO,
   parent: 'app',
-  width: WIDTH,
-  height: HEIGHT,
+  width: VIEW_WIDTH,
+  height: VIEW_HEIGHT,
   backgroundColor: WORLD.ink,
   pixelArt: true,
   roundPixels: true,

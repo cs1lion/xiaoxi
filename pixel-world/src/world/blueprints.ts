@@ -99,8 +99,12 @@ export function validateCoverage(
   const workshops = [...table.values()].filter((bp) => bp.boundTask !== null);
   for (const task of TASKS) {
     const matches = workshops.filter((bp) => bp.boundTask === task);
-    if (matches.length !== 1) {
-      problems.push(`任务 ${task} 绑定了 ${matches.length} 栋铺子，必须恰好 1 栋`);
+    // 每种活允许 1–2 栋：镇内一栋（本地确定性工作）+ 郊野一栋（探索性工作）。
+    // 0 栋等于这类活无处可去；超过 2 栋则是蓝图表失控，没有对应的调度规则。
+    if (matches.length < 1 || matches.length > 2) {
+      problems.push(
+        `任务 ${task} 绑定了 ${matches.length} 栋铺子，必须是 1 或 2 栋（镇内 + 郊野）`,
+      );
     }
   }
   for (const bp of table.values()) {

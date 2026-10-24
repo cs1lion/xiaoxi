@@ -1,0 +1,207 @@
+<!doctype html>
+<!-- 一次性原型：四刻光配方能不能只用现有 24 色 + 压暗 + 叠加光区分开。
+     不是产品代码，不进构建，不进测试。证据见 docs/ADR_WORLD_ALIVE.md 附录 A。 -->
+<html lang="zh">
+<head>
+<meta charset="utf-8">
+<title>四刻光配方原型 G：拉开夜与昏</title>
+<style>
+  body { background: #0c0f0d; color: #e8e2d2; font: 12px/1.6 monospace; margin: 16px; }
+  .row { display: flex; align-items: flex-start; gap: 16px; margin-bottom: 20px; }
+  .label { width: 230px; }
+  .label b { color: #e3a13c; font-size: 14px; }
+  canvas { image-rendering: pixelated; display: block; }
+</style>
+</head>
+<body>
+<div id="out"></div>
+<script>
+const W = 480, H = 320;
+
+const C = {
+  ink: 0x14110d, soil: 0x1b211c, grass: 0x2d3b2e, grassLit: 0x334234,
+  stone: 0x3e433f, plaza: 0x4a4f42, farm: 0x3b3423,
+  timber: 0x8a5a44, timberDark: 0x4a3f39, trim: 0xc9a86a, amber: 0xe3a13c,
+  skin: 0xe0b48c, cloak: 0x30506b, cloakDark: 0x223a4d, ember: 0xc06a3e,
+  pale: 0xd8dad3, plaster: 0xc2b39a, terracotta: 0x9c4f3c, copper: 0x5f8a74,
+  water: 0x3d6b7a, moss: 0x4e6241, deepShade: 0x18242b, warmLight: 0xf2c879,
+  charcoal: 0x5a463e,
+};
+
+const hex = (n) => '#' + n.toString(16).padStart(6, '0');
+const rgba = (n, a) => `rgba(${(n >> 16) & 255},${(n >> 8) & 255},${n & 255},${a})`;
+
+/** 四刻配方：只改三件事，压暗浓度、亮窗数量、光晕强度。色表固定 24 色。 */
+const PHASES = [
+  { id: 'dawn',  dim: 0.16, tint: C.cloakDark, mist: 0.38, band: 58, glow: 0.25, windows: 0, ridge: 0, fireflies: false },
+  { id: 'noon',  dim: 0.00, tint: C.deepShade, mist: 0.00, band: 0,  glow: 0.00, windows: 0, ridge: 0, fireflies: false },
+  { id: 'dusk',  dim: 0.08, tint: C.ink,       mist: 0.00, band: 0,  glow: 1.20, windows: 2, ridge: 0.55, fireflies: false },
+  { id: 'night', dim: 0.46, tint: C.deepShade, mist: 0.00, band: 0,  glow: 1.00, windows: 2, ridge: 0, fireflies: true },
+];
+
+const hash = (x, y) => {
+  let h = Math.imul(x, 374761393) ^ Math.imul(y, 668265263);
+  h = Math.imul(h ^ (h >>> 13), 1274126177);
+  return (h ^ (h >>> 16)) >>> 0;
+};
+
+const BUILDING = { x: 64, y: 88, w: 104, h: 88 };
+const LAMP = { x: 296, y: 232 };
+const TREE = { x: 392, y: 148 };
+const WINDOWS = [
+  { x: BUILDING.x + 16, y: BUILDING.y + 44, w: 14, h: 11 },
+  { x: BUILDING.x + 66, y: BUILDING.y + 44, w: 14, h: 11 },
+];
+
+function fill(g, color, x, y, w, h) {
+  g.fillStyle = hex(color);
+  g.fillRect(x, y, w, h);
+}
+
+function pb(g, color, alpha, x, y, w, h) {
+  g.fillStyle = rgba(color, alpha);
+  g.fillRect(x, y, w, h);
+}
+
+/** 晴天全彩场景。时相层只往上叠，不改这里的颜色。 */
+function paintScene(g) {
+  fill(g, C.grass, 0, 0, W, H);
+
+  for (let y = 0; y < H; y += 2) {
+    for (let x = 0; x < W; x += 2) {
+      const h = hash(x >> 1, y >> 1) % 100;
+      if (h < 26) fill(g, C.soil, x, y, 1, 1);
+      else if (h < 34) fill(g, C.grassLit, x + 1, y, 1, 1);
+    }
+  }
+
+  fill(g, C.plaza, 0, 200, W, 34);
+  fill(g, C.stone, 0, 199, W, 1);
+  fill(g, C.stone, 0, 234, W, 1);
+  for (let x = 0; x < W; x += 22) fill(g, C.stone, x, 200, 2, 34);
+  for (let x = 6; x < W; x += 37) fill(g, C.moss, x, 203, 3, 1);
+
+  fill(g, C.timber, BUILDING.x, BUILDING.y + 26, BUILDING.w, BUILDING.h - 26);
+  for (let x = BUILDING.x; x < BUILDING.x + BUILDING.w; x += 13) {
+    fill(g, C.timberDark, x, BUILDING.y + 26, 1, BUILDING.h - 26);
+  }
+  fill(g, C.terracotta, BUILDING.x - 6, BUILDING.y + 14, BUILDING.w + 12, 14);
+  fill(g, C.charcoal, BUILDING.x - 6, BUILDING.y + 25, BUILDING.w + 12, 3);
+  for (let x = BUILDING.x - 4; x < BUILDING.x + BUILDING.w + 4; x += 9) {
+    fill(g, C.terracotta, x, BUILDING.y + 16, 5, 8);
+  }
+  fill(g, C.plaster, BUILDING.x + 42, BUILDING.y + 74, 18, 40);
+  fill(g, C.charcoal, BUILDING.x + 42, BUILDING.y + 74, 18, 2);
+
+  for (const w of WINDOWS) {
+    fill(g, C.deepShade, w.x, w.y, w.w, w.h);
+    fill(g, C.trim, w.x - 1, w.y - 1, w.w + 2, 1);
+    fill(g, C.trim, w.x - 1, w.y + w.h, w.w + 2, 1);
+    fill(g, C.trim, w.x + Math.floor(w.w / 2), w.y, 1, w.h);
+  }
+
+  pb(g, C.deepShade, 0.28, LAMP.x - 4, LAMP.y - 1, 9, 2);
+  fill(g, C.ink, LAMP.x - 1, LAMP.y - 16, 2, 16);
+  fill(g, C.ink, LAMP.x - 4, LAMP.y - 24, 9, 8);
+  fill(g, C.amber, LAMP.x - 3, LAMP.y - 23, 7, 6);
+
+  fill(g, C.timberDark, TREE.x - 2, TREE.y - 12, 5, 14);
+  fill(g, C.soil, TREE.x - 13, TREE.y - 30, 27, 22);
+  fill(g, C.grassLit, TREE.x - 10, TREE.y - 28, 20, 15);
+  fill(g, C.moss, TREE.x - 7, TREE.y - 25, 12, 9);
+
+  for (const [px, body] of [[196, C.cloak], [228, C.terracotta]]) {
+    const py = 244;
+    pb(g, C.deepShade, 0.35, px - 1, py + 9, 8, 2);
+    fill(g, C.skin, px + 1, py, 5, 4);
+    fill(g, C.timberDark, px + 1, py - 1, 5, 1);
+    fill(g, body, px, py + 4, 7, 5);
+    fill(g, C.ember, px, py + 4, 7, 1);
+    fill(g, C.ink, px + 1, py + 9, 2, 1);
+    fill(g, C.ink, px + 4, py + 9, 2, 1);
+  }
+}
+
+/** 时相层：压暗、亮窗、光晕、萤火。只用 24 色里的颜色。 */
+function paintPhase(g, phase) {
+  if (phase.dim > 0) pb(g, phase.tint, phase.dim, 0, 0, W, H);
+  if (phase.mist > 0) {
+    // 晨雾只做贴地一条带（band 像素高），不做全屏渐变，否则草地会被洗成灰。
+    const top = H - phase.band;
+    for (let y = top; y < H; y += 1) {
+      const t = 1 - (y - top) / phase.band;
+      pb(g, C.pale, phase.mist * t, 0, y, W, 1);
+    }
+    pb(g, C.water, phase.mist * 0.6, 0, top - 2, W, 3);
+  }
+
+  for (const w of WINDOWS.slice(0, phase.windows)) {
+    fill(g, C.amber, w.x, w.y, w.w, w.h);
+    fill(g, C.warmLight, w.x + 1, w.y + 1, Math.floor(w.w / 2) - 1, Math.max(1, w.h - 2));
+  }
+
+  if (phase.glow > 0) {
+    g.globalCompositeOperation = 'lighter';
+    const glow = (cx, cy, w, h, a) => {
+      pb(g, C.amber, a * phase.glow, Math.round(cx - w / 2), Math.round(cy - h / 2), w, h);
+      pb(g, C.warmLight, a * 0.6 * phase.glow,
+        Math.round(cx - w / 4), Math.round(cy - h / 4),
+        Math.max(1, Math.round(w / 2)), Math.max(1, Math.round(h / 2)));
+    };
+    for (const w of WINDOWS) glow(w.x + w.w / 2, w.y + w.h / 2, 26, 18, 0.12);
+    glow(LAMP.x + 0.5, LAMP.y - 20, 22, 16, 0.16);
+    g.globalCompositeOperation = 'source-over';
+  }
+
+  if (phase.ridge) {
+    // 黄昏屋脊受光：warmLight 落在屋脊顶面与檐口，这是 24 色里唯一够亮的暖色。
+    g.globalCompositeOperation = 'lighter';
+    pb(g, C.warmLight, phase.ridge, BUILDING.x - 6, BUILDING.y + 14, BUILDING.w + 12, 2);
+    pb(g, C.amber, phase.ridge * 0.6, BUILDING.x - 4, BUILDING.y + 16, BUILDING.w + 8, 7);
+    pb(g, C.warmLight, phase.ridge, TREE.x - 12, TREE.y - 30, 25, 2);
+    pb(g, C.warmLight, phase.ridge * 0.8, 0, 199, W, 1);
+    g.globalCompositeOperation = 'source-over';
+  }
+
+  if (phase.fireflies) {
+    pb(g, C.warmLight, 0.7, 96, 262, 1, 1);
+    pb(g, C.warmLight, 0.7, 154, 290, 1, 1);
+    pb(g, C.warmLight, 0.7, 356, 268, 1, 1);
+    pb(g, C.warmLight, 0.7, 430, 214, 1, 1);
+    pb(g, C.warmLight, 0.7, 266, 176, 1, 1);
+  }
+}
+
+function render(phase) {
+  const canvas = document.createElement('canvas');
+  canvas.width = W;
+  canvas.height = H;
+  const g = canvas.getContext('2d');
+  paintScene(g);
+  paintPhase(g, phase);
+  return canvas;
+}
+
+const out = document.getElementById('out');
+const names = { dawn: '晨雾', noon: '正午', dusk: '黄昏', night: '夜' };
+for (const phase of PHASES) {
+  const row = document.createElement('div');
+  row.className = 'row';
+  const label = document.createElement('div');
+  label.className = 'label';
+  label.innerHTML = `<b>${names[phase.id]}</b><br>dim ${phase.dim.toFixed(2)} · glow ${phase.glow.toFixed(2)}<br>雾带 ${phase.band}px · 亮窗 ${phase.windows} · 萤火 ${phase.fireflies ? 'on' : 'off'}`;
+  const wrap = document.createElement('div');
+  wrap.appendChild(render(phase));
+  row.appendChild(label);
+  row.appendChild(wrap);
+  out.appendChild(row);
+}
+
+for (const c of document.querySelectorAll('canvas')) {
+  c.style.width = `${W * 2}px`;
+  c.style.height = `${H * 2}px`;
+}
+document.documentElement.dataset.ready = '1';
+</script>
+</body>
+</html>

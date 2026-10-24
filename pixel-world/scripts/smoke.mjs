@@ -253,8 +253,10 @@ async function runSandboxSuite() {
     const villager = snapshot.villagers[0];
     const nameEl = names[0];
     const scale = canvasRect.width / 480;
-    const expectedX = (villager.pos.x + 0.5) * 16 * scale;
-    const expectedY = ((villager.pos.y + 1) * 16 - 30) * scale;
+    // 大世界里画布只是世界的一小块：必须减掉相机偏移，否则期望值会差一整个屏幕。
+    const cam = window.Oracle.camera();
+    const expectedX = ((villager.pos.x + 0.5) * 16 - cam.scrollX) * scale;
+    const expectedY = ((villager.pos.y + 1) * 16 - 30 - cam.scrollY) * scale;
     const actualX = Number.parseFloat(nameEl?.style.left ?? 'NaN');
     const actualY = Number.parseFloat(nameEl?.style.top ?? 'NaN');
     return {
@@ -287,9 +289,20 @@ async function runSandboxSuite() {
 
 
   // 认不出的句子不让世界动。
-  const unknown = await page.evaluate(() => window.Oracle.say('今天天气不错'));
-  check(unknown.ok === false, '认不出的输入被拒');
-  check((await state()).villager.mode !== 'saluting', '认不出的输入没有触发神谕');
+  // `say()` 现在只表示"已投递"：解析在下一拍结算，所以这里等一拍再校验结果。
+  const beforeUnknown = await state();
+  await page.evaluate(() => window.Oracle.say('今天天气不错'));
+  await page.waitForTimeout(600);
+  const afterUnknown = await state();
+  check(
+    afterUnknown.tasks.length === beforeUnknown.tasks.length &&
+      afterUnknown.villager.mode === beforeUnknown.villager.mode,
+    '认不出的输入没有改变世界',
+  );
+  check(
+    afterUnknown.oracle.length === beforeUnknown.oracle.length,
+    '认不出的输入没有刻上石板',
+  );
 
   // 一句代码活：行礼 → 赶路 → 开工。派活只叫一个人。
   await page.fill('#utterance', '帮我写个爬虫脚本');
@@ -730,9 +743,19 @@ async function runSandboxSuite() {
   const savedRaw = await page.evaluate(() =>
     localStorage.getItem('xiaoxi.pixel-world.save.v1'),
   );
+  const savedParsed = typeof savedRaw === 'string' ? JSON.parse(savedRaw) : null;
   check(
-    typeof savedRaw === 'string' && savedRaw.includes('"schemaVersion":1'),
-    '单槽里是 v1 JSON',
+    savedParsed !== null && savedParsed.schemaVersion === 2,
+    '单槽里是 v2 JSON',
+  );
+  // 石板与摆件来源是 v2 新增字段，写档必须带上；缺了就是字段漂移。
+  check(
+    savedParsed !== null &&
+      Array.isArray(savedParsed.world?.oracle) &&
+      savedParsed.world.props.every(
+        (prop) => 'sourceTaskKind' in prop && 'sourceTaskId' in prop,
+      ),
+    'v2 存档带石板与摆件来源',
   );
 
   await page.reload({ waitUntil: 'load' });
@@ -765,12 +788,14 @@ async function runSandboxSuite() {
   await page.waitForFunction(() => window.Oracle !== undefined, null, { timeout: 15000 });
   const freshWorld = await state();
   check(
-    freshWorld.buildings.length === 3 && freshWorld.faith.milestones === 0,
+    freshWorld.buildings.length >= 3 && freshWorld.faith.milestones === 0,
     '清档后从新世界开始',
   );
 
-  // 夜景是纯渲染态：开关可切换、状态保持，且不写世界/台账。
+  // 时相是纯渲染态：可切到夜、状态保持，且不写世界/台账。
+  // 页面按真实时间开局，所以先显式落到昼，再切夜，断言才与时刻无关。
   const nightWorldBefore = await state();
+  await page.evaluate(() => window.Oracle.setPhase('noon'));
   const nightOn = await page.evaluate(() => window.Oracle.toggleNight());
   check(nightOn === true, '夜景可以打开');
   await page.waitForTimeout(800);
@@ -785,8 +810,18 @@ async function runSandboxSuite() {
       JSON.stringify(nightWorldAfter.faith) === JSON.stringify(nightWorldBefore.faith),
     '夜景不写世界/台账',
   );
-  const nightOff = await page.evaluate(() => window.Oracle.toggleNight());
-  check(nightOff === false, '夜景可以关闭');
+  // 关闭 = 交还给真实时间。真实时间此刻可能就是夜，所以不能断言「不再是夜」；
+  // 断言的是「回到自动推进」，这才是这条开关的契约。
+  await page.evaluate(() => window.Oracle.toggleNight());
+  const afterOff = await page.evaluate(() => ({
+    phase: window.Oracle.currentPhase(),
+    auto: window.Oracle.isAutoPhase(),
+  }));
+  check(afterOff.auto === true, '关闭夜景后交还给真实时间');
+  check(
+    afterOff.phase === (await page.evaluate(() => window.Oracle.realPhase())),
+    '关闭后停在真实时间对应的刻',
+  );
 }
 
 try {
@@ -799,7 +834,25 @@ try {
   check(errors.length === 0, '页面加载无 JS 报错');
 
   const opening = await state();
-  check(opening.buildings.length === 3, '世界里摆了三栋铺子');
+  // 大世界开局：镇内三铺 + 郊野三铺 + 五间民居。小世界只剩镇内三铺。
+  //
+  // 原来这条断言写成「建筑总数 == 接活的铺子数」，它默认世界里没有不接活的
+  // 建筑。民居进来之后这个前提就不成立了——那不是数字过期，是断言的前提被
+  // 推翻。所以拆成两条：铺子数与建筑总数各自校验，谁也不依赖谁。
+  const counts = await page.evaluate(() => {
+    const buildings = window.Oracle.view().buildings;
+    return {
+      total: buildings.length,
+      workshops: buildings.filter((b) => b.boundTask !== null).length,
+      homes: buildings.filter((b) => b.zone === 'living').length,
+    };
+  });
+  check(counts.workshops >= 3, `世界里摆好了铺子（${counts.workshops} 栋接活）`);
+  check(
+    counts.total === counts.workshops + counts.homes,
+    `建筑总数对得上（${counts.total} = ${counts.workshops} 铺 + ${counts.homes} 屋）`,
+  );
+  check(opening.buildings.length === counts.total, '快照与统计同源');
   check(opening.villager.mode === 'idle', '开局她在闲逛');
 
   if (LEDGER) {
