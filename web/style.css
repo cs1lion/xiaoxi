@@ -60,6 +60,7 @@ button.danger { color:var(--danger); }
 .mem .val { display:block; width:100%; text-align:left; white-space:pre-wrap; overflow-wrap:anywhere; padding:4px; border-radius:4px; cursor:pointer; }
 .mem .val:hover { background:#e4eadc; }
 .mem .meta { display:flex; gap:5px; align-items:center; flex-wrap:wrap; margin-top:5px; font-size:10px; color:var(--muted); }
+.mem.is-disabled .val { color:var(--muted); } /* 软停用：仍在库、可恢复，只是检索不再使用 */
 .mem details { margin-top:6px; }
 .mem summary { cursor:pointer; color:var(--muted); }
 .mem blockquote { margin:6px 0; padding-left:9px; border-left:2px solid var(--line); white-space:pre-wrap; }

@@ -134,6 +134,11 @@ class MemoryRetriever:
         for memory in candidates:
             if memory.status not in (("active", "done") if include_done else ("active",)):
                 continue
+            # User-disabled rows are soft-muted for every confidence tier at
+            # this single gate: stated, inferred and uncertain all pass here.
+            # The row itself stays in the store (hard delete is 忘掉 only).
+            if memory.disabled:
+                continue
             if kinds and memory.kind not in kinds:
                 continue
             if subject and memory.subject != subject:

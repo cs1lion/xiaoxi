@@ -190,7 +190,23 @@ async def memories_context(query: str, subject: str | None = None, limit: int = 
 
 @app.patch("/api/memories/{memory_id}")
 async def correct_memory(memory_id: int, payload: dict[str, Any]) -> Any:
+    """One PATCH, one concern: correct the value, or flip the soft-disable bit.
+
+    `disabled` is a reversible retrieval mute (issue #28); it never deletes and
+    never rewrites the evidence chain. Value corrections supersede into a new
+    row, so the two operations are mutually exclusive by design.
+    """
     value = (payload.get("value") or "").strip()
+    disabled = payload.get("disabled")
+    if disabled is not None and not isinstance(disabled, bool):
+        raise HTTPException(status_code=400, detail="disabled must be a boolean")
+    if value and disabled is not None:
+        raise HTTPException(status_code=400, detail="value and disabled are exclusive")
+    if disabled is not None:
+        memory = manager.set_disabled(memory_id, disabled)
+        if memory is None:
+            raise HTTPException(status_code=404, detail="memory not found")
+        return memory.to_dict()
     if not value:
         raise HTTPException(status_code=400, detail="value required")
     memory = manager.correct(memory_id, value)

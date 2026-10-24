@@ -60,7 +60,11 @@ CREATE TABLE IF NOT EXISTS memories (
     -- lucky/unlucky turn can never dominate relevance.
     utility REAL NOT NULL DEFAULT 0.5,
     utility_n INTEGER NOT NULL DEFAULT 0,
-    last_reward_at REAL
+    last_reward_at REAL,
+    -- Soft mute for retrieval assembly (user-managed, reversible). Not a
+    -- lifecycle status, never a delete: the physical hard-delete path stays
+    -- the explicit 忘掉 action only.
+    disabled INTEGER NOT NULL DEFAULT 0
 );
 CREATE INDEX IF NOT EXISTS idx_mem_status ON memories(status);
 CREATE INDEX IF NOT EXISTS idx_mem_kind ON memories(kind);
@@ -314,6 +318,11 @@ class Memory:
     utility: float = 0.5
     utility_n: int = 0
     last_reward_at: float | None = None
+    disabled: bool = False
+
+    def __post_init__(self) -> None:
+        # SQLite hands back 0/1 for the flag; the exported shape stays a bool.
+        self.disabled = bool(self.disabled)
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
@@ -391,6 +400,7 @@ class MemoryStore:
                 "utility": "REAL NOT NULL DEFAULT 0.5",
                 "utility_n": "INTEGER NOT NULL DEFAULT 0",
                 "last_reward_at": "REAL",
+                "disabled": "INTEGER NOT NULL DEFAULT 0",
             }
             for name, definition in additions.items():
                 if name not in columns:
@@ -1005,6 +1015,20 @@ class MemoryStore:
         if status not in STATUSES:
             raise ValueError(f"bad status: {status}")
         self._write("UPDATE memories SET status = ?, updated_at = ? WHERE id = ?", (status, time.time(), memory_id))
+
+    def set_disabled(self, memory_id: int, disabled: bool) -> bool:
+        """Soft mute for retrieval assembly. Reversible, never a delete.
+
+        ``updated_at`` is deliberately untouched: it marks the content
+        lifecycle and feeds recency decay, and a retrieval switch is neither.
+        Toggling it must not make an old memory look fresh again.
+        """
+        if not isinstance(disabled, bool):
+            raise ValueError("disabled must be a boolean")
+        with self._transaction(track_write=True) as db:
+            cursor = db.execute("UPDATE memories SET disabled = ? WHERE id = ?",
+                                (1 if disabled else 0, int(memory_id)))
+        return cursor.rowcount > 0
 
     def link_supersedes(self, new_id: int, old_id: int) -> None:
         """New value wins, old row stays queryable via history_for_key()."""

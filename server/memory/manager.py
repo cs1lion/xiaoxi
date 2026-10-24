@@ -290,6 +290,18 @@ class MemoryManager:
     def forget_key(self, key: str) -> int:
         return self.store.delete_key(key)
 
+    def set_disabled(self, memory_id: int, disabled: bool) -> Memory | None:
+        """Soft-mute one memory out of retrieval assembly; reversible.
+
+        This is not a delete and not a status change: the row keeps its
+        evidence chain, its slot in the store and its hard-delete semantics.
+        """
+        if type(memory_id) is not int or not isinstance(disabled, bool):
+            return None
+        if not self.store.set_disabled(memory_id, disabled):
+            return None
+        return self.store.get(memory_id)
+
     def context_for(self, query: str, *, subject: str | None = None) -> str:
         if not self.enabled:
             return ""

@@ -23,6 +23,7 @@ import { bootCompanion } from './companion.js';
 import { mountStarmap } from './starmap/index.js';
 import { mountExperience } from './experience.js';
 import { appendContextUsage } from './context-usage.js';
+import { memoryDisabledTag, memoryUpdatedNote, memoryEvidenceNote, memoryDisableControl } from './memory-panel.js';
 import { mountModeStrip } from './mode-strip.js';
 import { mountWorkDrawer } from './drawer.js';
 import { mountExternalModel } from './external-model.js';
@@ -1423,6 +1424,7 @@ async function loadMemories() {
   data.items.forEach((m) => {
     const div = document.createElement("div");
     div.className = seenMemoryIds.has(String(m.id)) ? "mem" : "mem mem-new";
+    if (memoryDisabledTag(m)) div.classList.add("is-disabled");
     seenMemoryIds.add(String(m.id));
     div.dataset.memoryId = String(m.id);
     const val = document.createElement("button");
@@ -1446,6 +1448,8 @@ async function loadMemories() {
     // key 与 value 相同（手动记忆）时不再重复渲染同一句话
     const metaItems = [[KIND_LABEL[m.kind] || m.kind, "tag"], [memorySourceLabel(m), "tag"],
       [STATUS_LABEL[m.status] || "当前", "tag"]];
+    const disabledTag = memoryDisabledTag(m);
+    if (disabledTag) metaItems.push([disabledTag, "tag"]);
     if (m.key && m.key !== m.value) metaItems.push([m.key, ""]);
     for (const [text, className] of metaItems) {
       const label = document.createElement("span");
@@ -1460,6 +1464,12 @@ async function loadMemories() {
         when.textContent = `记于 ${created.toISOString().slice(0, 10)}（UTC）`;
         meta.append(when);
       }
+    }
+    const updatedNote = memoryUpdatedNote(m);
+    if (updatedNote) {
+      const edited = document.createElement("span");
+      edited.textContent = updatedNote;
+      meta.append(edited);
     }
     if (Number.isFinite(m.use_count)) {
       const used = document.createElement("span");
@@ -1495,6 +1505,21 @@ async function loadMemories() {
         meta.append(caution);
       }
     }
+    const disableControl = memoryDisableControl(m);
+    if (disableControl) {
+      const toggle = document.createElement("button");
+      toggle.className = "ghost";
+      toggle.textContent = disableControl.label;
+      toggle.setAttribute("aria-label", `${disableControl.label}记忆：${m.value}`);
+      toggle.onclick = async () => {
+        await mutateMemory(toggle, `/api/memories/${m.id}`, {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(disableControl.body),
+        }, disableControl.done);
+      };
+      meta.appendChild(toggle);
+    }
     const del = document.createElement("button");
     del.className = "ghost danger";
     del.textContent = "忘掉";
@@ -1510,6 +1535,12 @@ async function loadMemories() {
       const quote = document.createElement("blockquote");
       quote.textContent = m.evidence_quote;
       evidence.append(summary, quote);
+      const evidenceNote = memoryEvidenceNote(m);
+      if (evidenceNote) {
+        const origin = document.createElement("p");
+        origin.textContent = evidenceNote;
+        evidence.append(origin);
+      }
       div.append(evidence);
     }
     list.appendChild(div);
