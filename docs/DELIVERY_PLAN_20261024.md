@@ -42,10 +42,12 @@
 
 ## Phase 2 — 日常真用稳定性
 
-- [ ] 2.1 延迟与卡顿实测：基准脚本量首字延迟、打断响应、记忆检索耗时。不追求 500ms 红线保留，目标只有「不卡不炸」。
-- [ ] 2.2 记忆管理 UI：「何时说过 / 停用」能力（日常真用高频痛点；PARKED_TASKS §A Memory 项）。事实有效期全量、逐条引用链按需再排。
-- [ ] 2.3 容错演练：断网、Key 失效、WS 断连重连的真实场景过一遍（Mock 模式掩盖的路径），error 态文案补全。
-- [ ] 2.4 每阶段出口跑 run_gates 全绿并记录（带 HEAD 锚）。
+- [x] 2.1 延迟与卡顿实测（issue #27）：`scripts/bench_voice_loop.py` + `docs/LATENCY_BASELINE.md`（Mock 口径：首字 p50≈95ms，六成为 Mock 桩节奏；打断亚毫秒；检索毫秒级）。实测挖出 #30 检索假命中（幻觉风险）与 #31 快环内索引重建线性涨，另案跟踪。
+- [x] 2.2 记忆管理 UI（issue #28）：「何时说过」（证据链引用与时间）+ 软停用（`disabled` 列，retriever 单点出三档装配，不碰 updated_at 与硬删）。遗留 #32：冷启动破冰绕过停用门（归 Role 2 域）。
+- [x] 2.3 容错演练（issue #29）：`docs/DRIFT_DRILLS.md` 三场景——断线自动重连（指数退避封顶 15s + v2 seq 重算/id 去重保留）、坏 Key 4xx 快败与文案止损（不回显供应商响应体）、WS 重连后任务视图与台账一致。三份演练脚本双模式（observe 记录/回归断言）入册门禁。立案 #33（clarify 分支无意图门槛）、#34（重连不续 session_id，需 Role 0 决策）。
+- [x] 2.4 出口门禁：run_gates 全绿留档（带 HEAD 锚，见 Phase 2 收口提交）；新套件入册——memory_manage、三个 drill 门禁、npm 链补 memory-panel 与 reconnect。
+
+**Phase 2 收口记录**：S1/S2 后端由 agent 完成、S3 由两任 agent 暂存+集成 session 复验收口；五张立案票（#30-#34）待排期，见交付汇报。
 
 ## Phase 3 — 界面分级瘦身
 

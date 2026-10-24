@@ -356,6 +356,26 @@ GATES: dict[str, dict[str, object]] = {
         "cmd": ["node", "scripts/test-step8-e2e-browser.mjs"],
         "skip_regex": r"^\s*SKIP",
     },
+    "memory_manage": {
+        # S2（#28）：记忆软停用/证据链时间（python 侧）。
+        "cmd": [str(PY), "scripts/test_memory_manage.py"],
+        "skip_regex": r"^\s*SKIP",
+    },
+    "drill_network": {
+        # S3（#29）场景①：断网自动重连回归（自起 8033）。
+        "cmd": ["node", "scripts/drill-s1-network.mjs"],
+        "skip_regex": r"^\s*SKIP",
+    },
+    "drill_badkey": {
+        # S3（#29）场景②：坏 Key 快败与文案回归（自起 8034 + 401 桩）。
+        "cmd": ["node", "scripts/drill-s2-badkey.mjs"],
+        "skip_regex": r"^\s*SKIP",
+    },
+    "drill_ws_reconnect": {
+        # S3（#29）场景③：WS 断连重连与 v2 语义回归（自起 8035）。
+        "cmd": ["node", "scripts/drill-s3-ws-reconnect.mjs"],
+        "skip_regex": r"^\s*SKIP",
+    },
 }
 
 # 这些门禁的本体是纯逻辑单测，不需要本地服务，永远必须真跑。

@@ -57,31 +57,41 @@ const stamp = Date.now().toString(36);
 const DB = path.join(root, 'tmp', `drill-s2-${stamp}`, 'memory.db');
 
 /* 台账隔离：executive_route 的每个分支都要真实台账状态才命中（intent 单独
- * 不路由）。不搬开 data/ 的话，前一场演练留下的待验收单会把"还记得…"
- * 截走走台账直出——LLM 根本不被调用，坏 Key 路径就测不到了（实测踩过）。
- * 搬开-恢复只动本 worktree 的演练产物；tmp/ 已在 .gitignore。 */
+ * 不路由）。带着既有待验收单跑"还记得…"会被 clarify 分支截走台账直出——
+ * LLM 根本不被调用，坏 Key 路径就测不到了（实测踩过）。
+ *
+ * 只挪 data/commissions.db 一个文件（服务自建空账），不搬整个 data/：
+ * 整目录改名在主仓会被日志/索引句柄挡住（EPERM），而且把用户的真实
+ * memory.db 等库一起搬家风险不成比例。单文件也被占用时（多半是用户
+ * 的常驻服务实例在跑），按门禁惯例打 SKIP 退出，不硬抢。 */
 function isolateDataDir() {
-  const data = path.join(root, 'data');
-  if (!fs.existsSync(data)) return null;
-  const backup = path.join(root, 'tmp', `drill-data-backup-${stamp}`);
+  const ledger = path.join(root, 'data', 'commissions.db');
+  if (!fs.existsSync(ledger)) return null;
+  const backup = path.join(root, 'tmp', `drill-ledger-backup-${stamp}.db`);
   fs.mkdirSync(path.dirname(backup), { recursive: true });
-  fs.renameSync(data, backup);
+  try {
+    fs.renameSync(ledger, backup);
+  } catch (error) {
+    console.log(`SKIP data/commissions.db 被占用（${error.code || error.message}，` +
+      `疑有常驻服务实例在跑），场景②坏 Key 演练让路`);
+    process.exit(0);
+  }
   return backup;
 }
 function restoreDataDir(backup) {
   if (!backup) return;
-  const data = path.join(root, 'data');
+  const ledger = path.join(root, 'data', 'commissions.db');
   // Windows 上进程退出后文件锁释放有延迟：rm/rename 带重试；彻底失败时
   // 保留备份并大喊，绝不静默吞掉别人的数据。
   for (let i = 0; i < 10; i += 1) {
     try {
-      if (fs.existsSync(data)) fs.rmSync(data, { recursive: true, force: true });
-      fs.renameSync(backup, data);
+      if (fs.existsSync(ledger)) fs.rmSync(ledger, { force: true });
+      fs.renameSync(backup, ledger);
       return;
     } catch (error) {
       if (i === 9) {
-        console.error(`还原 data/ 失败（${error.code || error.message}）；` +
-          `演练数据留在 ${backup}，请手动把备份改名回 data/。`);
+        console.error(`还原 data/commissions.db 失败（${error.code || error.message}）；` +
+          `台账备份留在 ${backup}，请手动改名回去。`);
         return;
       }
       Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 1000);
