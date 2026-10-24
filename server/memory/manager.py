@@ -34,9 +34,24 @@ def _score(value: Any) -> float | None:
 class MemoryManager:
     def __init__(self, store: MemoryStore | None = None, retriever: MemoryRetriever | None = None) -> None:
         self.store = store or default_store
-        self.cfg = memory_cfg()
+        # 记忆配置按使用点读，不在构造时冻结（协议 §17）。测试仍可整体替换 self.cfg。
+        self._cfg_override: dict[str, Any] | None = None
         self.retriever = retriever or MemoryRetriever(self.store)
         self._enabled = True
+
+    @property
+    def cfg(self) -> dict[str, Any]:
+        """记忆配置。默认每次读 `memory_cfg()`。
+
+        `config_hot` 换上快照后，下一次写入就看到新值，不需要重启进程。
+        """
+        if self._cfg_override is not None:
+            return self._cfg_override
+        return memory_cfg()
+
+    @cfg.setter
+    def cfg(self, value: dict[str, Any]) -> None:
+        self._cfg_override = value
 
     @property
     def enabled(self) -> bool:

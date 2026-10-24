@@ -4,6 +4,7 @@ import json
 import math
 import threading
 import time
+from typing import Any
 
 from ..assistant.context import _text as sanitize_context_text
 
@@ -24,12 +25,29 @@ class MemoryRetriever:
 
     def __init__(self, store: MemoryStore | None = None) -> None:
         self.store = store or default_store
-        self.cfg = memory_cfg()["retrieval"]
+        # 检索配置按使用点读，不在构造时冻结：协议 §17 要求 `memory_cfg()` 的底层
+        # 「可换快照」，在 __init__ 里取一次等于把 `config/memory.local.yaml` 的
+        # retrieval.* 关在进程外。测试仍可整体替换 self.cfg 做隔离。
+        self._cfg_override: dict[str, Any] | None = None
         self._index_content: tuple[tuple[int, str, str], ...] | None = None
         self._index_lock = threading.RLock()
         self._ids: list[int] = []
         self._matrix = None
         self._vectorizer: TfidfVectorizer | None = None
+
+    @property
+    def cfg(self) -> dict[str, Any]:
+        """检索配置。默认每次读 `memory_cfg()["retrieval"]`。
+
+        `config_hot` 换上快照后，下一次检索就看到新值，不需要重启进程。
+        """
+        if self._cfg_override is not None:
+            return self._cfg_override
+        return memory_cfg()["retrieval"]
+
+    @cfg.setter
+    def cfg(self, value: dict[str, Any]) -> None:
+        self._cfg_override = value
 
     def _ensure_index(self, rows: list[Memory]) -> None:
         # Only searchable text changes invalidate TF-IDF. Message logging,

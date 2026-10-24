@@ -152,6 +152,13 @@ GATES: dict[str, dict[str, object]] = {
         "cmd": [str(PY), "scripts/test_config_hot.py"],
         "skip_regex": r"^\s*SKIP",
     },
+    # §17 的第二层：覆盖必须到达读取方，且 startup/shutdown 真的装上 watcher。
+    # 上面那条只测 config_hot 模块本身；2026-10-22 抓到的事故（机制写得完整、
+    # 那条测试全绿、而生产代码零处调用 start_watcher）正在它视线外。
+    "config_hot_consumers": {
+        "cmd": [str(PY), "scripts/test_config_hot_consumers.py"],
+        "skip_regex": r"^\s*SKIP",
+    },
     # 慢环执行内核：适配器契约、进程监督、以及 agent-runtime 自己的接管测试。
     # 此前这三条只写在 docs/TESTING.md 里，没有进 run_gates——本轮改 durable
     # 时发现"文档说跑过、报告里根本没有这一行"。缺 node 时 supervisor 会打
@@ -320,6 +327,10 @@ GATES: dict[str, dict[str, object]] = {
         "cmd": ["node", "scripts/test-companion-browser.mjs"],
         "skip_regex": r"^\s*SKIP",
     },
+    "experience_entry_browser": {
+        "cmd": ["node", "scripts/test-experience-entry-browser.mjs"],
+        "skip_regex": r"^\s*SKIP",
+    },
     "voice_browser": {
         "cmd": ["node", "scripts/test-voice-browser.mjs"],
         "skip_regex": r"^\s*SKIP",
@@ -330,7 +341,8 @@ GATES: dict[str, dict[str, object]] = {
 ALWAYS_REQUIRED = ("protocol", "core", "scheduler_health", "budget_scope", "backup_restore", "operation_outbox", "outbox_crash", "mood_writer", "evals", "npm", "executive_v3", "adapter_ext",
                    "codex_shim", "claude_shim", "gateway", "task_planning", "cross_day",
                    "thread_conversation", "self_evolution", "agent_loop", "llm_client",
-                   "self_evolution_send", "config_hot", "evolution_quality_report",
+                   "self_evolution_send", "config_hot", "config_hot_consumers",
+                   "evolution_quality_report",
                    "durable_adapter", "durable_supervisor", "durable_takeover",
                    "durable_recovery", "durable_revive", "durable_app_wiring",
                    "durable_reconcile", "durable_soak", "durable_storage", "durable_compaction",

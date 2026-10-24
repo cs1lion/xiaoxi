@@ -17,6 +17,10 @@ from fastapi.responses import FileResponse, JSONResponse
 from .static import AppStaticFiles, mount_pixel_world
 
 from .config import ROOT, avatar_cfg, ensure_dirs, pacing_cfg, persona_cfg, settings
+# 协议 §17 的原子热重载。只在 startup/shutdown 两个生命周期钩子里调它，
+# 不在 import 期调：测试进程 import server.app 时不该起后台线程、也不该把
+# 真实 config/ 的快照装进去（那会让测试看到开发者本机的 .local.yaml）。
+from . import config_hot
 from .dialogue.aqi_blocks import (aqi_blocks_message, compose_delivery_card,
                                   compose_spinning_card, note_snippet)
 from .dialogue.orchestrator import (EMOTIONS, commission_accept_line, detect_emotion,
@@ -1513,6 +1517,11 @@ async def _start_durable_if_enabled() -> None:
 async def startup() -> None:
     global _scheduler_task, _loop, _commission_unsubscribe
     _loop = asyncio.get_running_loop()
+    # 协议 §17：本地覆盖与原子热重载。不装快照的话 `config_hot.snapshot()` 恒为
+    # None，`config._live()` 永远回落启动加载的基础配置——`config/*.local.yaml`
+    # 于是从头到尾没生效过，且没有任何日志。必须先于下面所有读配置的初始化：
+    # 覆盖要在第一轮对话之前就位，不能等运维改完文件再补一次。
+    config_hot.start_watcher()
     # 督办状态变化是旁路推送：台账写成功后通知所有在线连接（协议 §19）。
     _commission_unsubscribe = executive.ledger.subscribe(_commission_changed)
     orchestrator.set_proactivity(False)
@@ -1538,6 +1547,9 @@ async def shutdown() -> None:
         _commission_unsubscribe = None
     _loop = None
     editor_insights.close()
+    # 与 startup 的 start_watcher 配对。停掉轮询线程，否则测试进程里会残留
+    # 一个每 2 秒醒一次的 daemon 线程，且它持有的 CONFIG_DIR 已被 tearDown 换掉。
+    config_hot.stop_watcher()
     if _reconcile_task is not None:
         _reconcile_task.cancel()
         try:

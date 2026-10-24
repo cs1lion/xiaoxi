@@ -198,8 +198,6 @@ from .aqi_blocks import (AQI_BLOCK_INSTRUCTION, AqiBlockFilter, alert_card,
                          compose_choice, compose_memory_card, compose_metric_flame,
                          compose_progress_strip, note_snippet, strip_aqi_blocks)
 
-REFUSE_KEYWORDS = pacing_cfg()["cooldown"]["on_refuse_keywords"]
-
 _MD = re.compile(r"[*_`#>]|^\s*[-+]\s", re.M)
 _EMOJI = re.compile(
     "[\U0001F300-\U0001FAFF\U00002600-\U000027BF\U0001F1E6-\U0001F1FF]"
@@ -337,7 +335,10 @@ def _default_state() -> dict[str, Any]:
 
 class Orchestrator:
     def __init__(self) -> None:
-        self.pacing = pacing_cfg()
+        # 节奏配置按使用点读，不在构造时冻结：协议 §17 要求 `pacing_cfg()` 的底层
+        # 「可换快照」，在这里取一次等于把 `config/pacing.local.yaml` 关在进程外。
+        # 测试仍可整体替换 self.pacing 做隔离。
+        self._pacing_override: dict[str, Any] | None = None
         from .composer import ResponseComposer
         self.composer = ResponseComposer()
         from ..interaction.broker import ContextBroker
@@ -358,6 +359,20 @@ class Orchestrator:
             "day_stamp": time.strftime("%Y-%m-%d"),
             "recent_reopens": 0,
         }
+
+    @property
+    def pacing(self) -> dict[str, Any]:
+        """节奏配置。默认每次读 `pacing_cfg()`。
+
+        `config_hot` 换上快照后，下一轮对话就看到新值，不需要重启进程。
+        """
+        if self._pacing_override is not None:
+            return self._pacing_override
+        return pacing_cfg()
+
+    @pacing.setter
+    def pacing(self, value: dict[str, Any]) -> None:
+        self._pacing_override = value
 
     def session_state(self, session_id: str) -> dict[str, Any]:
         return self._sessions.setdefault(session_id, _default_state())
@@ -620,7 +635,7 @@ class Orchestrator:
             return
         session = self.session_state(session_id)
 
-        for keyword in REFUSE_KEYWORDS:
+        for keyword in self.pacing["cooldown"]["on_refuse_keywords"]:
             if keyword in user_text:
                 self.state["proactive_suppressed_until"] = time.time() + float(
                     self.pacing["cooldown"]["suppress_proactivity_seconds"]
@@ -1039,7 +1054,7 @@ class Orchestrator:
             return TurnResult(text="", latency_ms=0)
         session = self.session_state(session_id)
 
-        for keyword in REFUSE_KEYWORDS:
+        for keyword in self.pacing["cooldown"]["on_refuse_keywords"]:
             if keyword in user_text:
                 self.state["proactive_suppressed_until"] = time.time() + float(
                     self.pacing["cooldown"]["suppress_proactivity_seconds"]
