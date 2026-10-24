@@ -167,7 +167,7 @@ async def _drive_world_commission(self, commission_id):
 | 路径 | 同义句（如「帮我把便笺整理成三版标题」）的命运 | 证据 |
 |---|---|---|
 | **live 路**（`?ledger=on`，世界吃 server 台账） | server `_DELEGATION` 不命中 → 不建单、世界无输入——"同义改写静默不建单"**只在这条路成立** | 上引 A6 三重断言（不命中 `_DELEGATION` + `should_route` 不命中 + 无世界短语）；`orchestrator.py:60-65`、`app.py:697-739` |
-| **Mock 路**（`?ledger=off`，世界自己的关键词路由器） | 被 `parseOracle` 接走 → **建成 Mock 单并按沙盒计时器交付**——静默不建单在这条路**不成立** | `pixel-world/src/world/oracle.ts:23-27`（writing 规则含「便笺」「整理」）、`:33-54`（`parseOracle`）；用户实测建成并交付（Chief 转报，未附单号）；parseOracle 路由决策本轮已跑 **9/9 PASS**：6 条静默组全接走为 `dispatch/writing`、3 条对照日常句落 `unknown`（scratch `tmp/verify_mock_oracle.ts`，未入库；"建成并交付"为 simulation 行为，用户实测覆盖） |
+| **Mock 路**（`?ledger=off`，世界自己的关键词路由器） | 被 `parseOracle` 接走 → **建成 Mock 单并按沙盒计时器交付**——静默不建单在这条路**不成立** | `pixel-world/src/world/oracle.ts:23-27`（writing 规则含「便笺」「整理」）、`parseOracle`；用户实测建成并交付（Chief 转报，未附单号）；parseOracle 路由决策本轮已跑 **9/9 PASS**：6 条静默组全接走为 `dispatch/writing`、3 条对照日常句落 `unknown`（scratch `tmp/verify_mock_oracle.ts`，未入库；"建成并交付"为 simulation 行为，用户实测覆盖） |
 
 **因此：本已知限制的验收必须指定路径，否则 Mock 路的成功交付会被误读为限制不存在。** 落地要求：① 语料表每条标 `live`/`mock` 预期（本版 A6 属 live 断言；Mock 断言见上表右列）；② §4.7 方案 C 的"已知限制"表述只覆盖 live 路——Mock 路同义句照样建成 Mock 单，演示话术必须单独说明，避免"世界很灵"（Mock）与"live 路静默"两种观感对不上；③ Mock 路断言的永久归宿应是像素世界自己的测试套件（`pixel-world/test/`，现由 scratch 临时承担；纳入属于 World Builder 范围，S5 前不动 `pixel-world/**`）。
 
@@ -205,7 +205,7 @@ async def _drive_world_commission(self, commission_id):
 | 方案 | 改动面（文件:行） | 回归风险 | 验收方式 | 需用户批准 |
 |---|---|---|---|---|
 | **A 快环侧提示**：`executive_route` 返回 None 但命中"弱委派特征"时回一句明示（"这句像派单，但没派下去；要我派就说『去把…』"） | `server/dialogue/orchestrator.py`（弱委派识别 + 新 route kind，如 `delegation_hint`）+ `server/app.py:727-732`（kind 分支：只发文本、不 spawn delegate；复用 `_present_reply` 既有路径，**无新协议事件**）；**或 hint 逻辑下移 service 层**（+1 文件 `server/assistant/service.py`：在 `should_route`（`app.py:740`）之后、`assistant.start` 之前才看得见便笺/事项路由状态） | **高**：① **干净让位做不到（除非下移 service 层）**——便笺/事项路由发生在 `assistant.start` 内部（`service.py:383,391` 的 note/thread conversation 判定），orchestrator 拿不到该状态；插在快环的 hint 会劫走「帮我把便笺改一下」这类本应进便笺会话的句子；② 与 12 个既有工具的交互——提示轮次不得触发工具；③ 需独立正反语料 + 差分 | 每条弱委派句→出提示且不建单；既有 73 条语料 + 历史样本路由输出逐条不变；演示脚本可演 | **是**（`server/**`，主产品语音路径行为变更） |
-| **B 像素世界侧提示**：调试面板/状态行显示"派单未建单" | **不可行（如所述）**：世界只能收 `commission_update` 帧与 REST 快照（`ledger.ts`），"没建单"是**非事件**，任何通道都不会通知世界；`?ledger=off` 时更无从得知。server-free 唯一变体是在世界侧复制派单正则（`oracle.ts:31-51` 有自建关键词路由先例）——意图判定双真相源，违反协议单一事实来源纪律，且神谕面板输入是界内操作、覆盖不了麦克风原话 | 变体=高（双真相源漂移） | n/a（不采纳） | 世界内不需要；若要世界可知，必须服务端广播新事件 → 回到 A 的改动面 + 协议评审 |
+| **B 像素世界侧提示**：调试面板/状态行显示"派单未建单" | **不可行（如所述）**：世界只能收 `commission_update` 帧与 REST 快照（`ledger.ts`），"没建单"是**非事件**，任何通道都不会通知世界；`?ledger=off` 时更无从得知。server-free 唯一变体是在世界侧复制派单正则（`oracle.ts` 的 `parseOracle` 有自建关键词路由先例）——意图判定双真相源，违反协议单一事实来源纪律，且神谕面板输入是界内操作、覆盖不了麦克风原话 | 变体=高（双真相源漂移） | n/a（不采纳） | 世界内不需要；若要世界可知，必须服务端广播新事件 → 回到 A 的改动面 + 协议评审 |
 | **C 不加提示 + 文档声明 + server-free 静态声明（现状 + 新变体，已并入 C）** | `docs/`（演示脚本/FAQ；Role 0/Chief 领地）+ **世界页状态行固定一行**「这里只显示已建单；刚派的单没出现，请回主界面确认」：`pixel-world/index.html:213`（`#status` 静态落点）/ `pixel-world/src/scenes/SandboxScene.ts:497 statusLine()` 固定补充行——零检测、零 server、零回归，使"只改 `pixel-world/**`"的选项有可核清单 | 零 | QA 复核：文档声明与实测一致（静默组→普通对话、无帧、无提示）；静态行在 `?ledger=on/off` 两模式均在且不随状态变化 | 否（`pixel-world/**` 内 + docs） |
 
 **推荐：C（1.0/S5 最小闭环，含静态声明变体）**。理由：零回归、零协议变更，且 G2 范围预批准只覆盖 5 处世界桥接编辑、**不含** orchestrator/service 语音路径的行为变更——推 A 等于推荐一个未获批准的主产品改动；§4.4.1 差分要求（"不建单 + 有可见反馈"**或**记录为已知限制）以"已知限制 + 静态声明"形式闭合。

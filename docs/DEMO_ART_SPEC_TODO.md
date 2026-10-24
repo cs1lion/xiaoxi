@@ -149,7 +149,7 @@
 - **验收方式**：断网/关停 8000 跑一遍完整剧本，页面无 JS 报错、世界闭环正常、状态行可读。
 
 #### A5 失败演示
-- **现状证据**：真实工具失败不存在——`tasks.ts:27-30` 的 `shouldOverheat()` 恒为 `false`，`overheating` 态永远进不去；README 也承认“没有真实工具时伪造失败就是假动作”（`pixel-world/README.md:104-105`）。现成的失败/拒绝路径有 4 条：认不出的句子（`oracle.ts:50`）、手上有活时再派单（`simulation.ts:415-419`）、重复扩建（`simulation.ts:519-521`）、分区无空地（`simulation.ts:523-525`）。
+- **现状证据**：真实工具失败不存在——`tasks.ts:27-30` 的 `shouldOverheat()` 恒为 `false`，`overheating` 态永远进不去；README 也承认“没有真实工具时伪造失败就是假动作”（`pixel-world/README.md:104-105`）。现成的失败/拒绝路径有 4 条：认不出的句子（`oracle.ts` 的 unknown 回落）、手上有活时再派单（`simulation.ts:415-419`）、重复扩建（`simulation.ts:519-521`）、分区无空地（`simulation.ts:523-525`）。
 - **建议补法**：剧本明确“失败演示 = 拒单 + 世界不动 + 理由回到界面”，并给一张 `#reply.bad` 的截图证据；不要演“工坊黑烟故障”。若用户坚持要故障演示，另立任务给 World Builder 做可注入失败，且必须标注“演示用注入，不是真实工具失败”。
 - **由谁补**：Chief 选定失败剧本；QA 拍拒单证据；World Builder 仅在批准后加注入。
 - **验收方式**：失败后 `window.Oracle.view().tasks` 不增加、状态行不变、`#reply` 出现红字理由。

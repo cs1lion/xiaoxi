@@ -98,7 +98,7 @@
 | 7 | 状态机消费台账：替换式 sync、完成权归台账、撤单停手 | `simulation.ts:266-326`（sync 主体）、`:284-305`（收工/消失）、`:366-382`（撤单）、`:729-752`（交付） |
 | 8 | 不编进度：台账活 `determinate:false` | `simulation.ts:684-691`；渲染侧 progress=null（`simulation.ts:190-198`） |
 | 9 | 命令队列唯一入口 + 固定步长（100ms，可确定性回放） | `simulation.ts:163-165`（enqueue）、`:168-183`（每拍开头统一结算）、`SandboxScene.ts:31-32`（LOGIC_STEP_MS/MAX_STEPS_PER_FRAME）、`:165-179`（累加器驱动）；sim 内无 `Date.now/Math.random`（全文件 grep 为空） |
-| 10 | 神谕关键词路由（世界自己的意图路由器，非 LLM） | `oracle.ts:31-51`；面板/按钮/终端都收敛到 `say()`（`oracle-panel.ts`、`SandboxScene.ts:184-198`） |
+| 10 | 神谕关键词路由（世界自己的意图路由器，非 LLM） | `oracle.ts` 的 `parseOracle`；面板/按钮/终端都收敛到 `say()`（`oracle-panel.ts`、`SandboxScene.ts:184-198`） |
 | 11 | 任务档位表：短活原地、长活进城 | `tasks.ts:9-25`；`simulation.ts:421-464` |
 | 12 | bridge 消息形状 + 纯转换函数（单向可用） | `bridge.ts:13-33`（形状）、`:62-74`（转换）；单测 `test/surface.test.ts:116-135` |
 | 13 | 协议契约本身（同形、旁路、不补发） | `docs/PROTOCOL.md:348-354`；写路由同源校验 `executive_api.py:17-29` |

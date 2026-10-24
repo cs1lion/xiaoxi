@@ -84,7 +84,7 @@ $ git status --porcelain | Select-String '^\?\?'
 | A-09 | 状态/事件用集中 `GameState` + Phaser 事件机制 | `PROJECT_BRIEF.md:14` | 实际 `Simulation` 类 + 自定义 listener Set（`SandboxScene.ts:59-61,240-248`）；grep `GameState` / `EventEmitter` 无命中 | 偏离 |
 | A-10 | Agent 通信异步 WS/消息队列，支持重连、心跳、错误处理 | `PROJECT_BRIEF.md:14`；`README_CHIEF_START.md:82` | `ledger.ts:54-62,106-135` 有 REST+WS+轮询；**无心跳、无超时**；`bridge.ts:1-10` 明确“运输层在别处”（未实现） | 部分 |
 | A-11 | 首期伪光照（全局调色 + 发光贴图 + 混合模式） | `PROJECT_BRIEF.md:15`；`source/01:107` | 只有雨幕压暗矩形（`render/weather.ts:42`）与灯的光圈（`render/decor.ts:80-83`）；无全局调色/混合模式 | 部分 |
-| A-12 | LLM 只出语义/结构化提案，Schema + 确定性校验，失败降级 | `PROJECT_BRIEF.md:16`；`source/01:277-285,339` | 世界侧无任何 LLM 调用；意图=关键词规则（`oracle.ts:15-51`）；气泡是写死文案（`simulation.ts:475,746`） | 未接入（离线路径成立） |
+| A-12 | LLM 只出语义/结构化提案，Schema + 确定性校验，失败降级 | `PROJECT_BRIEF.md:16`；`source/01:277-285,339` | 世界侧无任何 LLM 调用；意图=关键词规则（`oracle.ts` 的 `parseOracle`）；气泡是写死文案（`simulation.ts:475,746`） | 未接入（离线路径成立） |
 | A-13 | 不做键鼠玩法，输入=文本神谕 | `PROJECT_BRIEF.md:17`；`source/01:46` | `index.html:130-148` 表单/预设按钮；`ui/oracle-panel.ts:98-136` | 一致 |
 | A-14 | 无语音陪伴/TTS；语音只作为用户输入方式 | `PROJECT_BRIEF.md:18`；`README_CHIEF_START.md:84` | 无 TTS；`audio/animalese.ts:37-85` 为 Web Audio 拟音（世界音效，非语音播报） | 一致 |
 | A-15 | Mock-first，真实 Agent 后置 | `PROJECT_BRIEF.md:50`；`source/01:643` | 先沙盒（`ROUND1`）后接台账只读（`ROUND3`）；`ledger.ts` 全文件只有 GET（:77-80） | 一致 |
@@ -146,7 +146,7 @@ $ git status --porcelain | Select-String '^\?\?'
 | 一张固定预制地图（:24） | DONE | `setup.ts:18-31` 写死分区；`world.test.ts:104-109` |
 | 2–3 个小人（:25） | **MISSING**（只有 1 个） | `simulation.ts:108` 单 `villager`；`README.md:107`“多角色…只有一个她” |
 | coding/research/生活 三工坊，各 Idle/Operating（:26） | PARTIAL：三栋接活铺子存在（code/research/writing），但“生活”靠 `writing` 映射、`living` 分区空置；状态从 2 种扩到 4 种，其中 `overheating` 不可达 | `prefabs.json:2-43`（`code_forge/star_archive/ink_house`）；`setup.ts:28` 有 `living` 分区但无蓝图使用；`types.ts:123-142` 四态；`tasks.ts:27-30` `shouldOverheat()` 无调用者（grep） |
-| 高质量 Mock 神谕路由；LLM 可选；核心可离线降级（:27） | PARTIAL：只有关键词规则路由，无 LLM 路径/降级开关；离线=唯一模式 | `oracle.ts:1-5`（自述“这是世界自己的意图路由器，不是 LLM”）、`oracle.ts:15-51`；grep 无 LLM/fetch 调用（`ledger.ts` 仅台账 GET） |
+| 高质量 Mock 神谕路由；LLM 可选；核心可离线降级（:27） | PARTIAL：只有关键词规则路由，无 LLM 路径/降级开关；离线=唯一模式 | `oracle.ts:1-5`（自述“这是世界自己的意图路由器，不是 LLM”）、`oracle.ts` 的 `parseOracle`；grep 无 LLM/fetch 调用（`ledger.ts` 仅台账 GET） |
 | 晴/雨 + 躲雨（:28） | DONE | `weather.ts:30-46`；`simulation.ts:384-412`；`routines.ts:47-61`；`smoke.mjs:200-209`（已知实测 49/49） |
 | 模板式 DOM 日报（:29） | DONE | `report.ts:17-58`；`oracle-panel.ts:61-72`；`index.html:150-157` |
 | JSON 存档，单存档槽（:30） | **MISSING** | 全 `src/` grep `存档|save|load|serialize|localStorage` 无实现；`README.md:101-108`“这一版没有做的”也未提存档 |
@@ -180,7 +180,7 @@ $ git status --porcelain | Select-String '^\?\?'
 | 集中 `GameState` + Phaser 事件（`PROJECT_BRIEF.md:14`） | 单例状态 + EventEmitter | `Simulation` 类 + listener Set | 偏离 |
 | WS 通信支持重连/心跳/错误处理（`PROJECT_BRIEF.md:14`） | 心跳 + 超时 | `ledger.ts` 有重连（:123-131）与轮询兜底（:58-62），**无心跳、fetch 无超时**；`app.py` 无 ping/pong（grep） | 部分 |
 | 伪光照三层（`PROJECT_BRIEF.md:15`；`source/01:107`） | 全局调色 + 发光贴图 + 混合 | 仅雨幕压暗（`render/weather.ts:42`）+ 灯光圈（`decor.ts:80-83`） | 部分 |
-| `OracleIntent` 结构化协议（`source/01:313-321`，含 channel/task_type/target_role/urgency/display_summary） | 结构化 JSON + 降级 | `types.ts:206-210` 只有 `dispatch/complete/unknown` 三态，天气单独一支（`oracle.ts:27-29`）；无 channel/urgency/display_summary | 简化偏离 |
+| `OracleIntent` 结构化协议（`source/01:313-321`，含 channel/task_type/target_role/urgency/display_summary） | 结构化 JSON + 降级 | `types.ts:206-210` 只有 `dispatch/complete/unknown` 三态，天气单独一支（`oracle.ts` 的天气分支）；无 channel/urgency/display_summary | 简化偏离 |
 | Aseprite 帧标签动画（`source/01:100,218`） | spritesheet 动画 | 全 `Graphics` 色块手绘 + 2px 抖动（`render/villager.ts:68-79`） | 未实现（原型可接受） |
 
 ### B4. “世界规格/预算”数字冲突
@@ -246,7 +246,7 @@ $ git status --porcelain | Select-String '^\?\?'
 - 建议：由 `ledger.ts` 发布 `active`（或排序后的 tasks），`simulation` 只按序取；补一条“运行路径”测试。
 
 ### C4. 人工交付绕过台账完成权（P0）
-- 证据链：`index.html:140` 按钮 → `oracle-panel.ts:122` → `parseOracle` complete（`oracle.ts:35`）→ `simulation.ts:500-513` 无 source 检查 → `finishActiveTask`（:729-752）写 done + 信仰。
+- 证据链：`index.html:140` 按钮 → `oracle-panel.ts:122` → `parseOracle` complete（`oracle.ts` 的 `leads(lower, COMPLETE_WORDS)` 分支）→ `simulation.ts:500-513` 无 source 检查 → `finishActiveTask`（:729-752）写 done + 信仰。
 - 与 `README.md:85`、`ROUND3:54` 冲突；无测试覆盖（B7）。
 - 后果：演示中按一下“交付”即可让台账单在世界里“完成”，而台账仍在跑；之后 WS 再报 running 时，`sync` 因 `tasks.some(id)` 为真而不会纠正（`simulation.ts:308-309`），世界会长期与真相不一致。
 - 建议：`completeManually` 仅对 `source === 'sandbox'` 生效；对台账单返回“完成权在台账”并保持 working。
