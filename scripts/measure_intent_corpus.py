@@ -21,6 +21,9 @@ os.environ.setdefault("LLM_PROVIDER", "mock")
 os.environ.setdefault("LLM_API_KEY", "")
 
 CORPUS = ROOT / "evals" / "intent_corpus.jsonl"
+# 用户真实语料：判据调整的**真实基准**。自造语料容易过拟合（实测同一判定器
+# 在自造 90.3%、真实 80.8%），所以两份都要量、都要报。
+CORPUS_USER = ROOT / "evals" / "intent_corpus_user.jsonl"
 
 # 判定器把一句话分到哪个「通道」。这里只对照语料的 label 与判定器的落点，
 # 不评价每种通道内部实现。
@@ -33,9 +36,9 @@ CHANNEL_NAMES = {
 }
 
 
-def load_corpus() -> list[dict]:
+def load_corpus(path: Path = CORPUS) -> list[dict]:
     rows = []
-    for line in CORPUS.read_text(encoding="utf-8").splitlines():
+    for line in path.read_text(encoding="utf-8").splitlines():
         if line.strip():
             rows.append(json.loads(line))
     return rows
@@ -83,8 +86,33 @@ def main() -> int:
 
     service = AssistantService(Path(tempfile.mkdtemp(prefix="intent-measure-")), None, None)
     orchestrator = Orchestrator()
-    rows = load_corpus()
 
+    results = {}
+    for label, path in (("自造语料", CORPUS), ("真实语料", CORPUS_USER)):
+        if not path.exists():
+            continue
+        rows = load_corpus(path)
+        results[label] = measure(rows, service, orchestrator, verbose=args.verbose)
+        print()
+
+    if "真实语料" in results and "自造语料" in results:
+        fake = results["自造语料"]["accuracy"]
+        real = results["真实语料"]["accuracy"]
+        gap = fake - real
+        print(f"两份语料差 {gap:.1%}（自造 {fake:.1%} / 真实 {real:.1%}）"
+              + ("——差距 >5pt 说明判据正在拟合自造语料，以真实语料为准"
+                 if gap > 0.05 else "——差距在可接受范围"))
+
+    report = ROOT / "eval" / "intent" / "corpus_baseline.json"
+    report.parent.mkdir(parents=True, exist_ok=True)
+    report.write_text(json.dumps(results, ensure_ascii=False, indent=1), encoding="utf-8")
+    print(f"\n基线写入 {report}")
+    service.close()
+    return 0
+
+
+def measure(rows: list[dict], service, orchestrator, *, verbose: bool) -> dict:
+    """在一份语料上跑混淆矩阵，打印并返回结果。"""
     labels = ["delegate", "progress", "accept", "reject", "chat"]
     matrix = {expected: {got: 0 for got in labels} for expected in labels}
     errors: list[tuple[str, str, str, str]] = []
@@ -112,22 +140,17 @@ def main() -> int:
         by_pair.setdefault((item[1], item[2]), []).append(item)
     for (expected, got), items in sorted(by_pair.items(), key=lambda kv: -len(kv[1])):
         print(f"  {CHANNEL_NAMES[expected]} → {CHANNEL_NAMES[got]}：{len(items)} 条")
-        show = items if args.verbose else items[:5]
+        show = items if verbose else items[:5]
         for text, _e, _g, note in show:
             print(f"    · {text}" + (f"   （{note}）" if note else ""))
-        if not args.verbose and len(items) > 5:
+        if not verbose and len(items) > 5:
             print(f"    … 另 {len(items) - 5} 条（--verbose 全列）")
 
-    report = ROOT / "eval" / "intent" / "corpus_baseline.json"
-    report.parent.mkdir(parents=True, exist_ok=True)
-    report.write_text(json.dumps({
+    return {
         "total": total, "correct": correct, "accuracy": round(correct / total, 4),
         "matrix": matrix,
         "errors": [{"text": t, "expected": e, "got": g, "note": n} for t, e, g, n in errors],
-    }, ensure_ascii=False, indent=1), encoding="utf-8")
-    print(f"\n基线写入 {report}")
-    service.close()
-    return 0
+    }
 
 
 if __name__ == "__main__":
