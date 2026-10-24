@@ -1441,6 +1441,15 @@ class MemoryStore:
             (time.time(), summary, session_id),
         )
 
+    def has_session(self, session_id: str) -> bool:
+        """断线重连续接（#34）的前置检查：这个会话 id 是否真实存在过。"""
+        return bool(self._query("SELECT id FROM sessions WHERE id = ?", (session_id,)))
+
+    def resume_session(self, session_id: str) -> None:
+        """续接已结束的会话（#34）：只清 ended 标记，不动 started_at 与 summary——
+        会话的开始时间与首段小结属于它的历史，重连不是重启。"""
+        self._write("UPDATE sessions SET ended_at = NULL WHERE id = ?", (session_id,))
+
     def add_message(self, session_id: str, role: str, text: str, mode: str = "text") -> int:
         cursor = self._write(
             "INSERT INTO messages (session_id, role, text, mode, created_at) VALUES (?, ?, ?, ?, ?)",

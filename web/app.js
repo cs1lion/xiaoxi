@@ -45,6 +45,9 @@ const TARGET_RATE = 16000;
  * onclose 里按指数退避调度下一次尝试。所有发送路径都先查 ws.readyState，
  * `let` 重绑后闭包自动看到新实例。 */
 let ws = null;
+/* #34 断线重连续接：记住最近一次 ready 帧的 session_id，重连后第一帧发
+ * resume 续接会话（协议 §六）；服务端校验不过则静默开新会话。 */
+let lastSessionId = "";
 const reconnect = createReconnectScheduler();
 function connectWs() {
   ws = new WebSocket(`${location.protocol === "https:" ? "wss" : "ws"}://${location.host}/ws`);
@@ -1152,6 +1155,7 @@ function onWsOpen() {
   reconnect.reset();
   setStatus("在线", "on");
   v2Hub.resetConnection();
+  if (lastSessionId) ws.send(JSON.stringify({ type: "resume", session_id: lastSessionId }));
   ws.send(JSON.stringify({ type: "config", proactivity: el("proactiveToggle").checked, memory: el("memoryToggle").checked }));
   if (!proactiveHeartbeat) proactiveHeartbeat = setInterval(proactiveHeartbeatTick, PROACTIVE_HEARTBEAT_MS);
 }
@@ -1262,6 +1266,7 @@ async function onWsMessage(event) {
       break;
     }
     case "ready":
+      if (msg.session_id) lastSessionId = msg.session_id;
       setStatus("在线", "on");
       subtitle.textContent = "按住左下角说话，或者打字。";
       break;

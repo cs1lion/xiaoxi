@@ -1231,6 +1231,26 @@ async def websocket_endpoint(ws: WebSocket) -> None:
                 _v2_presence(conn, "thinking")
                 await conn.send_turn(turn, {"type": "asr", "text": text, "duration_ms": 0})
                 conn.spawn(_run_turn(conn, text, "text", turn))
+            elif kind == "resume":
+                # #34 断线重连续接：客户端重连后第一帧带上次 ready 的 session_id。
+                # 校验（形状/存在过/未被占用）不过就静默维持本连接的新会话，
+                # 不回错误帧——重连路径上的失败不该再打断一次。续接后重发
+                # ready（原 id），客户端据此对齐本地记录；v2 广播名单换绑。
+                candidate = event.get("session_id")
+                if (isinstance(candidate, str) and 8 <= len(candidate) <= 32
+                        and all(ch in "0123456789abcdef" for ch in candidate)
+                        and store.has_session(candidate)
+                        and not any(c.session_id == candidate and c is not conn
+                                    for c in _connections)):
+                    store.end_session(conn.session_id)
+                    conn.session_id = candidate
+                    store.resume_session(candidate)
+                    detach_v2()
+                    detach_v2 = v2_hub.attach(candidate,
+                                              _make_v2_sink(conn, asyncio.get_running_loop()))
+                    await conn.send({"type": "ready", "session_id": candidate,
+                                     "persona": persona_cfg()["name"],
+                                     "sample_rate": settings.audio_sample_rate})
             elif kind == "barge_in":
                 if conn.matches(event) or (conn.turn is None and event.get("turn_id") is None):
                     await conn.cancel(playback=True)

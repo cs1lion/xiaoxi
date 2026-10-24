@@ -97,6 +97,7 @@ uv run python scripts/check_protocol.py
 ## 六、连续对话轮次协议
 
 - 客户端 `start` / `text` 携带唯一字符串 `turn_id`；服务端兼容旧客户端无ID时生成 `server-*`。新 `start` 在录音开始时立即取消旧ASR/生成，不等待 `audio_end`。
+- **断线重连续接（2026-10-24 Role 0 批准，issue #34）**：客户端重连成功后应**最先**发 `{"type":"resume","session_id":"<上次 ready 帧携带的 session_id>"}`（先于 `config`）。服务端校验 id 形状（8–32 位十六进制）、会话存在、且未被其它在线连接占用；通过即续接该会话——转录与快慢环上下文延续——并重发 `ready`（携带**原** session_id）。任一校验不过则静默维持本连接的新会话，**不回错误帧**：重连路径上的失败不应再打断一次。续接只影响会话记账；v2 事件语义不变（seq 连接级重新起算、id 去重跨连接保留，见 §25.1）。
 - `audio_end` / `barge_in` 携带所作用的ID；旧ID不能取消新录音。二进制帧属于当前录音，WS保持顺序，重复 `audio_end` 不重复识别。
 - `recording/asr/thinking/emotion/text_delta/audio/done/error/interrupted/playback_stopped/assistant_result/memory_notice` 均以捕获的轮次标记发送。前端在调用形象层之前过滤过期ID。`ready/config_ack` 为连接级事件。
 - 主动检查仅在服务端空闲启动，先发 `turn_started`（服务端ID、`source: proactive`）；客户端仅本地也空闲时接受。

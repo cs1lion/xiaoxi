@@ -26,6 +26,39 @@ const pass = (name) => { checks.push(name); console.log('ok -', name); };
 const fail = (name, detail = '') => { failed += 1; console.log('FAIL -', name, detail ? `｜${detail}` : ''); };
 const ok = (cond, name, detail = '') => (cond ? pass(name) : fail(name, detail));
 
+/* 台账隔离（与 drill-s2/s3 同款）：本 e2e 建的 A/B/C 单不能写进真实台账
+ * （此前每次跑都在主库攒残留）。被常驻实例占用时按门禁惯例 SKIP。 */
+import fs from 'node:fs';
+const stamp = Date.now().toString(36);
+function isolateLedger() {
+  const ledger = path.join(root, 'data', 'commissions.db');
+  if (!fs.existsSync(ledger)) return null;
+  const backup = path.join(root, 'tmp', `e2e-ledger-${stamp}.db`);
+  fs.mkdirSync(path.dirname(backup), { recursive: true });
+  try {
+    fs.renameSync(ledger, backup);
+  } catch (error) {
+    console.log(`SKIP data/commissions.db 被占用（${error.code || error.message}，` +
+      `疑有常驻服务实例在跑），step8 e2e 让路`);
+    process.exit(0);
+  }
+  return backup;
+}
+function restoreLedger(backup) {
+  if (!backup) return;
+  const ledger = path.join(root, 'data', 'commissions.db');
+  for (let i = 0; i < 10; i += 1) {
+    try {
+      if (fs.existsSync(ledger)) fs.rmSync(ledger, { force: true });
+      fs.renameSync(backup, ledger);
+      return;
+    } catch { /* Windows 句柄释放延迟，重试 */ }
+    Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 1000);
+  }
+  console.error(`还原 data/commissions.db 失败；台账备份留在 ${backup}，请手动改名回去。`);
+}
+const ledgerBackup = isolateLedger();
+
 const server = spawn(PY, ['-m', 'uvicorn', 'server.app:app',
   '--host', '127.0.0.1', '--port', String(PORT), '--log-level', 'warning'],
   { cwd: root, stdio: ['ignore', 'pipe', 'pipe'] });
@@ -197,6 +230,7 @@ try {
 } finally {
   if (browser) await browser.close().catch(() => {});
   spawn('taskkill', ['/PID', String(server.pid), '/T', '/F'], { stdio: 'ignore' });
+  restoreLedger(ledgerBackup);
 }
 
 console.log(`\n${checks.length} passed, ${failed} failed`);

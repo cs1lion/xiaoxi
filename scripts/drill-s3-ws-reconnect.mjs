@@ -28,6 +28,45 @@ const log = (...a) => console.log(...a);
 const stamp = Date.now().toString(36);
 const DB = path.join(root, 'tmp', `drill-s3-${stamp}`, 'memory.db');
 
+/* 台账隔离（与 drill-s2 同款）：只挪 data/commissions.db 让服务自建空账——
+ * 本演练的 D1 断言要的就是「A/B 落库且跨重启持久」，隔离出的空账同样满足，
+ * 还不会把演练单写进真实台账（此前每次跑都在主库攒残留）。被占用（常驻
+ * 实例在跑）则按门禁惯例 SKIP。 */
+import fs from 'node:fs';
+function isolateLedger() {
+  const ledger = path.join(root, 'data', 'commissions.db');
+  if (!fs.existsSync(ledger)) return null;
+  const backup = path.join(root, 'tmp', `drill-s3-ledger-${stamp}.db`);
+  fs.mkdirSync(path.dirname(backup), { recursive: true });
+  try {
+    fs.renameSync(ledger, backup);
+  } catch (error) {
+    console.log(`SKIP data/commissions.db 被占用（${error.code || error.message}，` +
+      `疑有常驻服务实例在跑），演练③让路`);
+    process.exit(0);
+  }
+  return backup;
+}
+function restoreLedger(backup) {
+  if (!backup) return;
+  const ledger = path.join(root, 'data', 'commissions.db');
+  for (let i = 0; i < 10; i += 1) {
+    try {
+      if (fs.existsSync(ledger)) fs.rmSync(ledger, { force: true });
+      fs.renameSync(backup, ledger);
+      return;
+    } catch (error) {
+      if (i === 9) {
+        console.error(`还原 data/commissions.db 失败（${error.code || error.message}）；` +
+          `台账备份留在 ${backup}，请手动改名回去。`);
+        return;
+      }
+      Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 1000);
+    }
+  }
+}
+const ledgerBackup = isolateLedger();
+
 function startServer() {
   const server = spawn(PY, ['-m', 'uvicorn', 'server.app:app',
     '--host', '127.0.0.1', '--port', String(PORT), '--log-level', 'warning'],
@@ -80,10 +119,18 @@ const openCommission = async (title, brief = '') => {
 const ledger = async () => (await (await fetch(`${BASE}/api/executive/commissions?limit=50`)).json()).items;
 
 let failed = 0;
-const ok = (cond, name, detail = '') => {
-  if (cond) log('ok -', name);
+const ok = (cond, name, detail = '') => {  if (cond) log('ok -', name);
   else { failed += 1; log(OBSERVE ? 'observe FAIL -' : 'FAIL -', name, detail ? `｜${detail}` : ''); }
 };
+
+async function waitFor(predicate, timeoutMs = 15000, stepMs = 500) {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    if (await predicate()) return true;
+    await new Promise((resolve) => setTimeout(resolve, stepMs));
+  }
+  return false;
+}
 
 let server = startServer();
 let browser;
@@ -99,6 +146,17 @@ try {
   page.setDefaultTimeout(20000);
   const pageErrors = [];
   page.on('pageerror', (error) => pageErrors.push(error.message));
+  /* #34 会话续接断言：捕获每条 ready 帧的 session_id（首连一个、重连后再两个：
+   * 服务端新 id + 续接后的原 id）。 */
+  const readyIds = [];
+  page.on('websocket', (socket) => {
+    socket.on('framereceived', (frame) => {
+      try {
+        const data = JSON.parse(frame.payload);
+        if (data.type === 'ready' && data.session_id) readyIds.push(data.session_id);
+      } catch { /* 非 JSON 帧忽略 */ }
+    });
+  });
 
   await page.goto(`${BASE}/`, { waitUntil: 'domcontentloaded' });
   await page.waitForFunction(() => (document.getElementById('status')?.textContent || '') === '在线');
@@ -113,6 +171,17 @@ try {
   const cardA = page.locator('#opsEvents .ops-card').filter({ hasText: a.id });
   await cardA.waitFor({ state: 'visible' });
   log('ok - 建单 A 经 v2 TASK_STATE_CHANGE 渲染任务卡');
+
+  // ---- A2. 断连前：一句话入会话（session_id 记账的证据） ----
+  await page.fill('#textInput', '重启前的这句话要留在会话里');
+  await page.press('#textInput', 'Enter');
+  const sidBefore = readyIds[0];
+  const preLanded = await waitFor(async () => {
+    const items = await fetch(`${BASE}/api/session/${sidBefore}/transcript`)
+      .then((response) => response.json()).then((body) => body.items || []);
+    return items.some((item) => item.text === '重启前的这句话要留在会话里');
+  });
+  ok(Boolean(sidBefore && preLanded), 'S1 断连前文本按 session_id 入账');
 
   // ---- B. 断连 → 重启 → 自动恢复 ----
   await killTree(server);
@@ -143,6 +212,20 @@ try {
     ok(bRendered, 'C1 重连后新单的 v2 事件照常渲染（seq 重新起算被正确处理）');
   }
 
+  // ---- C2. #34 会话续接：resume 生效则最后一帧 ready 回原 id，前后两句话同账 ----
+  const sidAfter = readyIds[readyIds.length - 1];
+  ok(sidAfter === sidBefore, 'S2 重连续接同一会话（ready 回原 session_id）',
+    `before=${sidBefore} after=${sidAfter} all=[${readyIds.join(',')}]`);
+  await page.fill('#textInput', '重连后的这句话要在同一会话里');
+  await page.press('#textInput', 'Enter');
+  const bothSame = await waitFor(async () => {
+    const items = await fetch(`${BASE}/api/session/${sidBefore}/transcript`)
+      .then((response) => response.json()).then((body) => body.items || []);
+    return items.some((item) => item.text === '重启前的这句话要留在会话里')
+      && items.some((item) => item.text === '重连后的这句话要在同一会话里');
+  }, 20000);
+  ok(bothSame, 'S3 断连前后两句话都在同一 session 名下（对话线接上了）');
+
   // ---- D. 页面任务视图与台账 REST 一致 ----
   const rows = await ledger();
   const rowA = rows.find((row) => row.id === a.id);
@@ -165,6 +248,7 @@ try {
 } finally {
   if (browser) await browser.close().catch(() => {});
   if (server.exitCode === null) spawn('taskkill', ['/PID', String(server.pid), '/T', '/F'], { stdio: 'ignore' });
+  restoreLedger(ledgerBackup);
 }
 
 log(`\n${OBSERVE ? 'observe mode' : 'assert mode'}: ${failed} failed`);
