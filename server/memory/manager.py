@@ -6,7 +6,7 @@ import re
 from typing import Any
 
 from ..config import memory_cfg
-from ..contract.broadcast import publish_memory_update
+from ..broadcast import publish_memory_update
 from .extractor import MAX_EVIDENCE_QUOTE_CHARS, MAX_KEY_CHARS, extract_memories, is_direct_user_evidence
 from .retriever import MemoryRetriever
 from .preference import normalize_preference, PreferenceValidationError

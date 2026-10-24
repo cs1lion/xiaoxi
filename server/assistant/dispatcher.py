@@ -19,7 +19,7 @@ import time
 from dataclasses import dataclass, field
 from typing import Any, Callable
 
-from ..contract.broadcast import publish_tool_execution
+from ..broadcast import publish_tool_execution
 from ..memory.commission_context import gather as gather_memory
 from ..memory.commission_context import memory_refs, render_memory_block
 from .adapters import (UnknownAdapterError, adapter_types, create_adapter_for,

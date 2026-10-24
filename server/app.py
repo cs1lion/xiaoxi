@@ -70,7 +70,7 @@ orchestrator.executive = executive
 durable_state = DurableState(executive.ledger)
 # §25 事件协议 v2：发射层（emitter）之上的线上广播。hub 是连接级 seq 的持有者，
 # /ws 端点 attach sink；五命令的动作路由在这里组（动作本体接 executive 门面）。
-from .contract.broadcast import (V2CommandActions, publish_presence, v2_bridge,
+from .broadcast import (V2CommandActions, publish_presence, v2_bridge,
                                  v2_hub)
 from .contract.events_v2 import COMMAND_TYPES as V2_COMMAND_TYPES
 v2_command_actions = V2CommandActions(executive)
