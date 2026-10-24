@@ -22,7 +22,7 @@ from server.assistant.evaluator import load_roster  # noqa: E402
 from server.assistant.executive import ExecutiveService  # noqa: E402
 from server.assistant.dispatcher import roster_agents  # noqa: E402
 from server.contract import events_v2 as v2  # noqa: E402
-from server.contract.broadcast import (CommissionEventBridge, RequestLedger,  # noqa: E402
+from server.broadcast import (CommissionEventBridge, RequestLedger,  # noqa: E402
                                        V2BroadcastHub, V2CommandActions,
                                        validate_command)
 

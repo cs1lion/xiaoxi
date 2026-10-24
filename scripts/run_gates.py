@@ -124,6 +124,21 @@ GATES: dict[str, dict[str, object]] = {
         "cmd": [str(PY), "scripts/test_task_planning.py"],
         "skip_regex": r"^\s*SKIP",
     },
+    "task_fsm": {
+        # T4（#22）：契约 v2 §4 状态机全套（合法迁移 + 非法组合锁）。
+        "cmd": [str(PY), "scripts/test_task_fsm.py"],
+        "skip_regex": r"^\s*SKIP",
+    },
+    "contract_v2": {
+        # T4（#22）：契约层 lint/gate/risk（含 3b 权限-风险跨字段）。
+        "cmd": [str(PY), "scripts/test_contract.py"],
+        "skip_regex": r"^\s*SKIP",
+    },
+    "v2_broadcast": {
+        # W1（#25）：§25 事件协议 v2 线上广播层（信封/台账桥/五命令）。
+        "cmd": [str(PY), "scripts/test_v2_broadcast.py"],
+        "skip_regex": r"^\s*SKIP",
+    },
     "cross_day": {
         "cmd": [str(PY), "scripts/test_cross_day_companion.py"],
         "skip_regex": r"^\s*SKIP",

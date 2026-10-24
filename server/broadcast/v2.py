@@ -34,8 +34,8 @@ import threading
 from collections import deque
 from typing import Any, Awaitable, Callable
 
-from . import events_v2 as v2
-from .emitter import emit
+from ..contract import events_v2 as v2
+from ..contract.emitter import emit
 
 # 广播 sink 的签名与 emitter.Broadcast 一致：收信封 dict，回 True 表示受理。
 Sink = Callable[[dict[str, Any]], bool]

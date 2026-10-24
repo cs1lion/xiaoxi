@@ -32,12 +32,13 @@
 
 ## Phase 1 — 慢环垂直切片（真 Worker 打样）
 
-- [ ] 1.1 step8 前端消费：9 类事件 + 5 个前端命令接入 app.js 与抽屉 ops 视图（落地顺序第 4 步，协议已确认无需再请求）。
-- [ ] 1.2 打样 Worker 全链路：优先 CLI worker（先合并 fix/s5-d-worker-routing），跑通「语音委托 → 契约 → dispatcher → cli_subproc → 遥测 → verify → 台账 → step8 事件 → 前端可见 → commission_update → /world 投影」。
-- [ ] 1.3 契约 v2 §4 状态机收口（server/task/ 进行中），连带消化 3b 权限-风险跨字段缺口单。
-- [ ] 1.4 端到端回归入册 + 涉及 Prompt/装配改动时跑一次 live 评测。
+- [x] 1.1 step8 前端消费：9 类事件 + 5 个前端命令接入 app.js 与抽屉 ops 视图（issue #20，`web/events-v2.js` + ops 视图事件区；单测 28/28 入 npm test 链）。
+- [x] 1.2 打样 Worker 全链：roster 增 `sandbox` CLI 工（issue #21），调度核心与适配器零改动；W1（issue #25）补齐了此前缺位的发送点接线（v2 信封广播进 /ws、五命令接收端）——0437303 只建了 emitter 发射层，真实发送点从未接进 app.py，这是拆票时才发现的事实缺口。
+- [x] 1.3 契约 v2 §4 状态机收口（issue #22）：迁移表与规范逐边零差集，收口落在非法组合拒绝，顺手修了 resume_to 非法目标与 BLOCKED 丢 reason 两个真缺陷；3b 权限-风险跨字段校验落地（L5/L6 → 至少 high）。
+- [x] 1.4 浏览器 e2e 单缝 tracer（issue #23）：真服务（独立端口）+ 真页面 + 真子进程，13/13 绿，变异自证「断链即红」，入 run_gates 为 `step8_e2e_browser` 门禁。
+- [x] T5 收口（issue #24）：发送点↔事件对账入票、四个新套件全部入册（task_fsm / contract_v2 / v2_broadcast 进 run_gates，events-v2 进 npm test 链）、run_gates 全绿留档。live 评测判定：本切片零 Prompt/装配改动，按规矩不触发。
 
-**Blocking edges：** 1.1 → 1.2 → 1.4；1.3 与 1.1 并行（server/task/ 与 web/ 无文件交集）。
+**Blocking edges：** 实际执行顺序 1.1（#20）∥ 1.3（#22）∥ 打样后端（#21）→ W1 接线（#25）→ 1.4（#23）→ T5（#24）；与计划的差异仅在于拆出了 W1（发送点接线是拆票后暴露的缺口）。执行方式：T1/T2/T4 由后台 agent 完成初版、集成 session 复核集成；W1 与 T3 因模型并发上限三次中断后由集成 session 亲手收口。
 
 ## Phase 2 — 日常真用稳定性
 
