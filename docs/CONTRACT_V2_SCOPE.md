@@ -136,6 +136,24 @@
 **改法不写**：要动 `compute_risk` 的既有签名或调用点，属契约层主代码，
 按项目红线需先问用户。缺口三要素——现象（`L6 + risk=low` 能进契约）、
 规范依据（§6.2 那条跨字段硬断言，搜「本身就是 `risk` 的下界」）、缺口位置（`compute_risk` 签名只读 `side_effects`）。
+
+> **3b 已完成（2026-10-24，issue #22 / T4，用户经票拍板）**：
+> `compute_risk` 增加 keyword-only 可选参数 `permissions_required`，L5/L6 出现即把
+> 等级抬到 `high` 下界（只兜不降，L0–L4 规范未给映射、不擅自发明；等级名合法性仍归 G6）；
+> `gate.py` 的 `freeze` 与 `model.py` 的 `parse_contract` 两个调用点都已接线。
+> 测试锁在 `scripts/test_contract.py` 的 `[C]`/`[J]` 节：`L6 + low` 在两条冻结路径
+> 都被重算为 `high`。原「需先问用户」的红线由本票的派单与认领满足。
+>
+> **连带后果（规范内冲突，按 §6.2 收口）**：§3.6 示例的权限表含 L5（发消息按
+> §6.2 就是 L5 能力），其 `risk` 从示例原文的 `medium` 变为 `high`。§6.2 自我声明
+> 为硬断言（「风险规则算漏了，权限表兜住」）且写于 §3.6 之后，以 §6.2 为准；
+> `test_contract.py` `[H]` 节断言已按 `high` 更新并注明缘由（含确认策略从
+> `explicit_confirm` 升为 `explicit_confirm_with_slot_ack`）。
+>
+> 原「当前不可实现」裁定给的判据（防线成立需「消费者存在」且「输入已落地」）
+> 如今两条都成立：输入（L0–L6 等级表）由 3a 落地；消费者是 risk 下游的
+> 确认/开工/交付策略（`effective_start_policy` 与 §4.4 T6/T19 的守卫），抬到
+> `high` 会真实改变倒计时与交付前确认行为，不再是「守护空气」。
 - IntentGate 接进 `_run_turn`（替换 `server/app.py:736` 的正则路由）→ Role 0 批准
 
 在最后这条批准之前，运行时行为不变：本包只判断「契约能不能成立」，不决定「契约怎么被执行」。
