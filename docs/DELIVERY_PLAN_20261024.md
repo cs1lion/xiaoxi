@@ -59,10 +59,12 @@
 
 ## Phase 4 — 交付验收与打标
 
-- [ ] 4.1 全量黄金命令 + run_gates 全绿，结果带 HEAD 与日期锚记录。
-- [ ] 4.2 连续一天真实使用 dogfood，修复清单快速消化。
-- [ ] 4.3 roadmap 落档：pixel-world 世界生成器愿景（见「已拍板」第 3 条）写入 PARKED_TASKS 或独立 ADR。
-- [ ] 4.4 打 tag（建议 v1.0-daily）并附交付说明：怎么开机、怎么用、已知边界。
+- [x] 4.1 全量黄金命令 + run_gates 全绿，结果带 HEAD 与日期锚记录。
+- [x] 4.2 dogfood：**以合成语音自动化替代人工**（用户 2026-10-24 授权）。SAPI Huihui 合成一天语段 → Playwright 假麦克风 → 常驻真实服务，产出 `docs/DOGFOOD_REPORT_20261024.md`。真机验证：真实 ASR、负向约束不脑补、记忆写入并被引用、断线重连 resume 回原会话、打断正常。发现并立案 #40（委托路由对 ASR 词形脆弱 + 落空文案误导 + 语音确认口径待拍板）。
+- [x] 4.3 roadmap 落档：`docs/ROADMAP.md`（pixel-world 世界生成器愿景、IntentGate 已否、#31 择机、voice-lab 停泊）。
+- [x] 4.4 交付说明：`docs/USAGE.md`（开机、日常操作、已知边界、出错时看哪里）。**打 tag 待用户确认名称**（建议 `v1.0-daily`）。
+
+**Phase 4 附注**：dogfood 前按项目红线征得用户同意重启了 8000 到当前 master（原进程为 2026-10-21 启动，已漂移出 `/api/memories` 500 的不可服务状态，重启后 200）。
 
 ## 多 session 分工
 
