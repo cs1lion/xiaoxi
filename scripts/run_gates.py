@@ -422,7 +422,7 @@ def run_gate(name: str, spec: dict) -> dict:
         # self_evolution、config_hot、config_hot_consumers、world_bridge、
         # evolution_quality_report、memory_manage）——它们确用模块级单例或真实
         # 库，但改造它们不属本轮。让门禁默认红违反「全绿才算完成」，
-        # 所以做成显式的隔离审计开关；审计结论与待修清单记在 #39。
+        # 所以做成显式的隔离审计开关；审计结论与待修清单记在 #41（#39 是哨兵本身的立项票，已关闭）。
         env = {**os.environ}
         if os.environ.get("GATE_SENTINEL", "off") == "on":
             env["TEST_SENTINEL"] = "1"
