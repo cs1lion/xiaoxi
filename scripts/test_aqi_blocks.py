@@ -321,11 +321,18 @@ class OrchestratorRouteBlockTests(unittest.TestCase):
 
     def test_clarify_carries_choice_pills(self):
         self._pending = [{"id": "c1", "title": "《甲》"}, {"id": "c2", "title": "《乙》"}]
-        route = self._route("好了吗")
+        # #33 收口后，多单待验收的澄清句只在验收/打回相关输入命中时触发
+        # （acceptance_intent 非 None），普通输入必须落回闲聊。
+        route = self._route("收工")
         self.assertEqual(route["kind"], "clarify")
         blocks = route["aqi_blocks"]
         self.assertEqual([b["kind"] for b in blocks], ["choice_pills"])
         self.assertEqual(len(blocks[0]["options"]), 2)
+
+    def test_multi_pending_non_acceptance_falls_back_to_chat(self):
+        self._pending = [{"id": "c1", "title": "《甲》"}, {"id": "c2", "title": "《乙》"}]
+        self.assertIsNone(self._route("好了吗"))
+        self.assertIsNone(self._route("今天有点累"))
 
     def test_accept_carries_spotlight_card(self):
         self._pending = [{"id": "c1", "title": "《整理标题》", "agent_id": "scribe",
