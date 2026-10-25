@@ -288,6 +288,41 @@ def _mood_row(row: sqlite3.Row) -> dict[str, Any]:
 
 
 @dataclass(slots=True)
+class RankingRow:
+    """Ranking-time projection of a memory: only what a score reads.
+
+    Deliberately NOT a `Memory` with holes. Retrieval ranks thousands of rows
+    per turn and keeps ~6; building the full record (30 fields, `**kwargs`
+    unpack) for every one of them was 88 of the 166 ms a 10k-row warm turn cost
+    (2026-10-25). This carries the ranking inputs and nothing else, so there is
+    no "half-populated Memory" that a caller could mistake for a real record.
+    """
+
+    id: int
+    key: str
+    value: str
+    kind: str
+    subject: str
+    source: str
+    status: str
+    importance: float
+    confidence: float
+    updated_at: float
+    utility: float
+    utility_n: int
+    disabled: bool
+
+    def __post_init__(self) -> None:
+        # SQLite hands back 0/1; the ranking gate wants a real bool.
+        self.disabled = bool(self.disabled)
+
+
+# Column order must match RankingRow's field order (positional construction).
+RANKING_COLUMNS = ("id, key, value, kind, subject, source, status, importance, "
+                   "confidence, updated_at, utility, utility_n, disabled")
+
+
+@dataclass(slots=True)
 class Memory:
     id: int
     kind: str
@@ -724,6 +759,40 @@ class MemoryStore:
             f"SELECT * FROM memories WHERE status IN ({placeholders}) "
             "ORDER BY updated_at DESC, id DESC", statuses)
         return [Memory(**dict(row)) for row in rows]
+
+    def retrieval_ranking_rows(self, *, include_done: bool = False) -> list[RankingRow]:
+        """The same candidate set, in the cheap shape ranking actually needs.
+
+        Retrieval used to start from `retrieval_candidates()`, which builds one
+        `Memory` per row -- 30 fields, each arriving as a `**kwargs` unpack --
+        for the whole table, every turn, and then throws all but `top_k` of them
+        away. Measured at 10k rows (2026-10-25): 51 ms to read + **88 ms** to
+        marshal = 139 of the 166 ms a warm turn cost, while the vector math it
+        was assumed to be dominated by (`matrix @ qv`) took 1.2 ms.
+
+        This returns only the columns the score actually reads (plus `key` /
+        `value` for the TF-IDF index). Callers rank on these, then fetch full
+        records for the handful that survive -- see `memories_by_ids`.
+
+        The ORDER BY is not needed for the final ordering (callers sort by
+        score) but it keeps iteration order identical to the previous
+        implementation, so stable sorting breaks ties the same way.
+        """
+        statuses = ("active", "done") if include_done else ("active",)
+        placeholders = ",".join("?" for _ in statuses)
+        rows = self._query(
+            f"SELECT {RANKING_COLUMNS} FROM memories WHERE status IN ({placeholders}) "
+            "ORDER BY updated_at DESC, id DESC", statuses)
+        return [RankingRow(*row) for row in rows]
+
+    def memories_by_ids(self, ids: Iterable[int]) -> dict[int, Memory]:
+        """Full records for a deliberately small, caller-chosen id set."""
+        wanted = [int(i) for i in ids]
+        if not wanted:
+            return {}
+        marks = ",".join("?" for _ in wanted)
+        rows = self._query(f"SELECT * FROM memories WHERE id IN ({marks})", wanted)
+        return {row["id"]: Memory(**dict(row)) for row in rows}
 
     def delete(self, memory_id: int) -> bool:
         """Hard delete: the row itself, plus the uniqueness slot it occupied."""

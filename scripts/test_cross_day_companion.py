@@ -357,8 +357,11 @@ class CrossDayCompanionTests(unittest.IsolatedAsyncioTestCase):
         # do the same, or the spy sees a broker with no selected matter.
         original_context = O.orchestrator._turn_context
 
-        def spy_context(user_text, session_id, recent):
-            data = original_context(user_text, session_id, recent)
+        # 透传而不是重抄签名：spy 的职责是旁听，不是重新实现被包裹函数的参数表。
+        # 硬写三个参数时，`_turn_context` 一加关键字参数（#31 的 memory_block）
+        # 就会 TypeError——而那不是行为变化，只是 spy 写死了。
+        def spy_context(*args, **kwargs):
+            data = original_context(*args, **kwargs)
             captured['data'] = data
             return data
 

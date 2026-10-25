@@ -4,7 +4,7 @@ import json
 import math
 import threading
 import time
-from typing import Any
+from typing import Any, Sequence
 
 from ..assistant.context import _text as sanitize_context_text
 
@@ -12,7 +12,7 @@ from sklearn.feature_extraction.text import TfidfVectorizer
 
 from ..config import memory_cfg
 from .presentation import present_memory
-from .store import Memory, MemoryStore, store as default_store
+from .store import Memory, MemoryStore, RankingRow, store as default_store
 
 
 class MemoryRetriever:
@@ -49,7 +49,7 @@ class MemoryRetriever:
     def cfg(self, value: dict[str, Any]) -> None:
         self._cfg_override = value
 
-    def _ensure_index(self, rows: list[Memory]) -> None:
+    def _ensure_index(self, rows: Sequence[Memory | RankingRow]) -> None:
         # Only searchable text changes invalidate TF-IDF. Message logging,
         # usage counts and ranking metadata do not, and another connection's
         # edit/delete is detected without relying on this store's local version.
@@ -79,7 +79,7 @@ class MemoryRetriever:
         self._vectorizer = vec
         self._index_content = content
 
-    def _similarity(self, query: str, rows: list[Memory]) -> dict[int, float]:
+    def _similarity(self, query: str, rows: Sequence[Memory | RankingRow]) -> dict[int, float]:
         with self._index_lock:
             self._ensure_index(rows)
             if self._matrix is None or not self._ids:
@@ -88,13 +88,13 @@ class MemoryRetriever:
             sims = (self._matrix @ qv.T).toarray().ravel()
             return {mid: float(score) for mid, score in zip(self._ids, sims)}
 
-    def _recency(self, memory: Memory, now: float) -> float:
+    def _recency(self, updated_at: float, now: float) -> float:
         half_life_days = float(self.cfg.get("recency_half_life_days", 14))
         half_life = max(half_life_days, 0.5) * 86400
-        age = max(0.0, now - memory.updated_at)
+        age = max(0.0, now - updated_at)
         return math.pow(0.5, age / half_life)
 
-    def _utility_factor(self, memory: Memory) -> float:
+    def _utility_factor(self, memory: Memory | RankingRow) -> float:
         """Bounded multiplier from learned usefulness, neutral at n=0.
 
         MemRL's two-phase retrieval normalises a Q score and mixes it with
@@ -128,7 +128,11 @@ class MemoryRetriever:
         top_k = int(cfg.get("top_k", 6)) if top_k is None else max(0, int(top_k))
         query = (query or "").strip()
         now = time.time()
-        candidates = self.store.retrieval_candidates(include_done=include_done)
+        # Rank on the cheap projection, then materialise records only for the
+        # survivors. This is an equivalence transform, not an approximation:
+        # every gate below reads only RankingRow fields, so the surviving set
+        # and their scores are identical to ranking full Memory objects.
+        candidates = self.store.retrieval_ranking_rows(include_done=include_done)
         sims = self._similarity(query, candidates)
         min_similarity = float(cfg.get("min_similarity", 0.08))
         w_imp = float(cfg.get("importance_weight", 0.35))
@@ -137,7 +141,7 @@ class MemoryRetriever:
         min_score = float(cfg.get("min_score", 0.0))
         infer_decay_hours = float(memory_cfg()["write"].get("infer_decay_hours", 72))
 
-        out: list[tuple[Memory, float]] = []
+        ranked: list[tuple[int, float]] = []
         for memory in candidates:
             if memory.status not in (("active", "done") if include_done else ("active",)):
                 continue
@@ -159,17 +163,25 @@ class MemoryRetriever:
                 age_h = (now - memory.updated_at) / 3600
                 if age_h > infer_decay_hours or age_h < 0:
                     continue
-            score = w_sim * sim + w_imp * memory.importance + w_rec * self._recency(memory, now)
+            score = w_sim * sim + w_imp * memory.importance + w_rec * self._recency(
+                memory.updated_at, now)
             score *= 0.5 + 0.5 * memory.confidence
             if score < min_score:
                 continue
             # Phase B (MemRL): re-rank only candidates that already passed the
             # relevance gate. Utility is bounded and cannot create relevance.
             score *= self._utility_factor(memory)
-            out.append((memory, score))
+            ranked.append((memory.id, score))
 
-        out.sort(key=lambda pair: pair[1], reverse=True)
-        return out[:top_k]
+        # Sorting by score alone is not stable w.r.t. the SQL order that used to
+        # break ties, so ties are resolved by ascending iteration position --
+        # which preserves "the row earlier in ORDER BY updated_at DESC wins".
+        ranked.sort(key=lambda pair: pair[1], reverse=True)
+        chosen = ranked[:top_k]
+        if not chosen:
+            return []
+        records = self.store.memories_by_ids(mid for mid, _score in chosen)
+        return [(records[mid], score) for mid, score in chosen if mid in records]
 
     def build_context(
         self, query: str, *, subject: str | None = None, mark_used: bool = True

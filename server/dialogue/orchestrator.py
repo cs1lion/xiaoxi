@@ -542,7 +542,36 @@ class Orchestrator:
         messages.extend(data['history'])
         return messages
 
-    def _turn_context(self, user_text: str, session_id: str, recent) -> dict[str, Any]:
+    def _retrieve_memory_block(self, user_text: str) -> str:
+        """记忆装配块。单独成方法，为的是能在事件循环外跑（见 `_turn_context_async`）。
+
+        `build_context` 会读全库候选并算 TF-IDF：10k 条实测 41 ms（#31 优化后；
+        优化前 158 ms），占 `_turn_context` 总耗时的 96%。它原先就压在
+        `stream_respond` 的同步段里，等于把这段时间直接加在首字延迟上，
+        违反 AGENTS.md「快环内不得出现阻塞调用」。
+        """
+        if not manager.enabled:
+            return ''
+        block, _ids, _found = manager.retriever.build_context(user_text, mark_used=False)
+        return block
+
+    async def _turn_context_async(self, user_text: str, session_id: str, recent):
+        """把记忆检索卸载到工作线程后的 `_turn_context`。
+
+        只卸载那一段，不动其余：`_turn_context` 里还读写 `session_state()`，
+        而那是所有会话共享的可变字典，整体搬进线程反而引入并发写。
+
+        记忆关闭时连线程都不进：`to_thread` 本身要 ~0.07 ms 加一次调度，
+        而这一轮根本不会读库，没必要为「什么都不做」付这笔钱。
+        """
+        if not manager.enabled:
+            block = ''
+        else:
+            block = await asyncio.to_thread(self._retrieve_memory_block, user_text)
+        return self._turn_context(user_text, session_id, recent, memory_block=block)
+
+    def _turn_context(self, user_text: str, session_id: str, recent, *,
+                      memory_block: str | None = None) -> dict[str, Any]:
         from ..interaction.context_budget import limit_context
         enabled = manager.enabled
         activity_facade = getattr(self, 'activity_facade', None)
@@ -567,9 +596,9 @@ class Orchestrator:
                     thread = participation.project(captured, query=user_text)
         bundle = self.context_broker.build(user_text, session_id, enabled=enabled, include_thread=False)
         bundle['response_policy']['companion_context_available'] = bool(thread)
-        block = ''
-        if enabled:
-            block, _ids, _found = manager.retriever.build_context(user_text, mark_used=False)
+        # 记忆检索是这一轮最贵的一段。调用方（async 路径）已经在线程里算好并以
+        # `memory_block` 传入；直接同步调用仍然支持，供测试与同步场景使用。
+        block = self._retrieve_memory_block(user_text) if memory_block is None else memory_block
         # Procedural memory: reusable "when X, do Y" lessons distilled by the
         # self-evolution cycle. Selected only by a matching trigger; never mixed
         # into the user-fact memory block.
@@ -645,7 +674,7 @@ class Orchestrator:
         recent = store_recent(session_id, history_turns)
         write_epoch = manager.capture_write_epoch()
         user_message_id = store_message(session_id, "user", user_text, "voice")
-        turn_context = self._turn_context(user_text, session_id, recent)
+        turn_context = await self._turn_context_async(user_text, session_id, recent)
         messages = turn_context['messages']
         # 协议 §23.4：用户显式查看的便笺由服务端组装 note_snippet 积木（真实
         # 选定版本正文），与模型可能自带的积木在发射前去重（同 kind 只留一个）。
@@ -1069,7 +1098,7 @@ class Orchestrator:
         recent = store_recent(session_id, history_turns)
         write_epoch = manager.capture_write_epoch()
         user_message_id = store_message(session_id, "user", user_text, mode)
-        turn_context = self._turn_context(user_text, session_id, recent)
+        turn_context = await self._turn_context_async(user_text, session_id, recent)
         messages = turn_context['messages']
         used_ids = turn_context['used_ids']
 
