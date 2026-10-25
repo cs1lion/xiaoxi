@@ -361,6 +361,17 @@ GATES: dict[str, dict[str, object]] = {
         "cmd": [str(PY), "scripts/test_memory_manage.py"],
         "skip_regex": r"^\s*SKIP",
     },
+    "memory_ranking": {
+        # #31：两阶段检索必须与「全表建对象再排序」逐条等价。
+        # 用改动前的实现当对照器；投影漏一列、打平次序变化都会红。
+        "cmd": [str(PY), "scripts/test_memory_ranking_equivalence.py"],
+        "skip_regex": r"^\s*SKIP",
+    },
+    "memory_fastloop": {
+        # #31：记忆检索不得阻塞事件循环（量的是行为，不是有没有 to_thread）。
+        "cmd": [str(PY), "scripts/test_memory_fastloop.py"],
+        "skip_regex": r"^\s*SKIP",
+    },
     "drill_network": {
         # S3（#29）场景①：断网自动重连回归（自起 8033）。
         "cmd": ["node", "scripts/drill-s1-network.mjs"],
