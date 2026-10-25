@@ -832,6 +832,8 @@ def test_orchestrator_route_needs_real_state() -> None:
     check("委托路由附挂 ui_nav", delegated is not None and delegated["kind"] == "delegation"
           and delegated.get("ui_nav", {}).get("target_view") == "ops"
           and delegated.get("ui_nav", {}).get("sub_action") == "focus_latest")
+    check("派单台词明示卡片确认（dogfood D2）", delegated is not None
+          and "点一下才开工" in (delegated.get("text") or ""))
     service.close()
 
 

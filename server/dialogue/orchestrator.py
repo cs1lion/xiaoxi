@@ -1088,8 +1088,11 @@ class Orchestrator:
         # 最后的空回复兜底。截断救援（_retry_shorter）本身也可能被推理占满，
         # 那时 body 仍是空字符串；如果原样返回，用户听到的是静音。
         # 只补一句中性的在场提示，不替模型编内容，也不改情绪判定。
+        # 2026-10-25：补上 [base] 前缀。项目不变量是「每轮回复以合法 [情绪] 开头」，
+        # 无标签的兜底句自己就违反它——emotion-tag-retention-live 会挂，且
+        # parse_emotion 对它只能启发式推断。base 是中性的，符合"中性在场提示"原意。
         if not text.strip():
-            text = '嗯，我在呢。'
+            text = '[base]嗯，我在呢。'
         self._last_meta = {
             "finish_reason": raw["finish_reason"],
             "usage": raw.get("usage", {}),
@@ -1558,7 +1561,11 @@ class Orchestrator:
                         "text": "这单我没派出去——接单台词库是空的，先别等我。",
                         "ui_nav": self._ui_nav("clarify", {})}
             strip = compose_progress_strip(running)
-            route = {"kind": "delegation", "text": line, "brief": text,
+            # D2（dogfood 2026-10-24）：委托确认走卡片显式点击（协议 §118），
+            # 语音说「确认」不会建单。派单台词必须把这条路说明白，否则用户
+            # 以为她不理确认，而真相是没路由到确认通道。
+            reply = f"{line}确认按钮在战况抽屉的卡片上，点一下才开工。"
+            route = {"kind": "delegation", "text": reply, "brief": text,
                      # 协议 §23：派单成功自动滑出战况抽屉，老板直接看见新单落位。
                      "nav": "ops",
                      "aqi_blocks": [strip] if strip else []}
