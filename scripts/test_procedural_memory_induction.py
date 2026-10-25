@@ -25,10 +25,26 @@ def candidate(ids):
 
 
 def setUpModule():
-    """评测夹具是本地撰写的语料（随 /eval 清理被删、从未入 git）；缺失时整组跳过而非报红。"""
+    """共享域夹具缺失时整组跳过。
+
+    2026-10-25 更正：这个跳过**不是**纯遗留。PipelineTests.asyncSetUp 经
+    target.load_sources()（scripts/eval_procedural_memory_induction.py:50-57）
+    读 eval/research/procedural_memory_eval_cases.json；test_plan_* 与
+    test_real_frozen_prepare_* 也各自间接依赖它。该文件随 /eval 清理被删、
+    从未入 git，还被 procedural_memory_eval_snapshot.py 的 SOURCE_FILES
+    收进冻结白名单（:35）。
+
+    曾据「测试文件里没有 read_text」误判它自包含而删掉跳过，结果 5 条立刻红——
+    夹具依赖在被测模块里，grep 测试文件看不见。要做真修复得重建共享夹具
+    （3 个 source_bundle、各 2 条 recipe、id 互异，另需 eval_procedural_memory.py
+    用的 oracles 文件），并让 domain.prepare() 能对其真实执行；那是独立一张票，
+    补齐之前，跳过是诚实的，假绿不是。
+    """
     fixture = Path(__file__).resolve().parents[1] / "eval/research/procedural_memory_eval_cases.json"
     if not fixture.exists():
-        raise unittest.SkipTest("缺少本地评测夹具 procedural_memory_eval_cases.json（曾随 /eval 清理被删，未入 git）；补齐该文件后自动恢复")
+        raise unittest.SkipTest(
+            "缺少共享域夹具 procedural_memory_eval_cases.json（随 /eval 清理被删、从未入 git）；"
+            "PipelineTests 经 target.load_sources() 真实依赖它，补夹具前整组跳过")
 
 
 class FormatTests(unittest.TestCase):

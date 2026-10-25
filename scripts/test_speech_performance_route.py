@@ -23,6 +23,11 @@ class Socket:
         self.events.append(json.loads(text))
 
 
+async def _reject_call(*_args, **_kwargs):
+    """运输层测试不该触发真实模型调用；真被调用说明隔离破了，立刻炸开。"""
+    raise AssertionError("test_speech_performance_route 不得触发真实模型调用")
+
+
 def load_transport():
     path = Path(__file__).resolve().parents[1] / "server" / "app.py"
     tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
@@ -34,7 +39,14 @@ def load_transport():
                EMOTIONS=("base", "认真"),
                assistant=SimpleNamespace(should_route=lambda _, session_id='': False,
                                          waiting_input=lambda _: False),
-              executive=None, manager=SimpleNamespace(enabled=False))
+              executive=None, manager=SimpleNamespace(enabled=False),
+               # server/app.py:724 的 _run_turn 读全局 llm；不喂它，运输层一跑就
+               # NameError（2026-10-25 实测本文件整组红）。offline=True 让意图预判
+               # 不建任务，complete_raw 兜底防离线层退化出真实调用。
+               llm=SimpleNamespace(offline=True, complete_raw=_reject_call),
+               # _v2_presence(app.py:889) 在真机发广播，env 里不钉 no-op 就是
+               # NameError；与 evals/checks.py 的 barge_in_timeline 同款处理。
+               _v2_presence=lambda _conn, _state: None)
     exec(compile(ast.Module(body=nodes, type_ignores=[]), str(path), "exec"), env)
     return env
 

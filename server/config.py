@@ -170,6 +170,14 @@ DEFAULTS: dict[str, Any] = {
     # 慢一点的反而更准；抽取在后台跑，慢一点不影响体验。
     "llm_extract_model": os.getenv("LLM_EXTRACT_MODEL", ""),
     "llm_extract_effort": os.getenv("LLM_EXTRACT_EFFORT", "low"),
+    # 评测裁判（evals 的 judge 型 check）单独一个模型槽位。必须与被测模型不同
+    # 厂商：同源自评有自我偏好偏差，让模型判"我没编造"最容易偏袒自家措辞。
+    # 空 api_key / model = 不启用，judge check 一律记 review 而不是 fail——
+    # 不把"没配裁判"假装成"判过"。judge 永不进 CI：CI 没有 Key。
+    "llm_judge_provider": os.getenv("LLM_JUDGE_PROVIDER", ""),
+    "llm_judge_base_url": os.getenv("LLM_JUDGE_BASE_URL", ""),
+    "llm_judge_api_key": os.getenv("LLM_JUDGE_API_KEY", ""),
+    "llm_judge_model": os.getenv("LLM_JUDGE_MODEL", ""),
     "asr_engine": os.getenv("ASR_ENGINE", "whisper"),
     "asr_model": os.getenv("ASR_MODEL", "small"),
     "asr_model_id": os.getenv("ASR_MODEL_ID", "stepaudio-2.5-asr"),

@@ -4,7 +4,8 @@
     .\\.venv\\Scripts\\python.exe scripts\\run_evals.py --live    # 离线 + live 层（需 LLM_API_KEY）
 
 分层语义：
-- offline：无网络、无 Key、确定性。记忆库强制 :memory:，失败即非零退出码。
+- offline：无网络、无 Key、确定性。记忆库强制 :memory:，失败即非零退出码；
+  用例缺 `origin`（来源实验 / 事故 / commit）同样非零退出，见 main_async 起手处。
 - live：真实模型。无 Key 或 Mock 模式时整层跳过并明示，不算失败；原始回复与
   判定落盘 evals/results/（gitignore，仅存回复与判定，不存 prompt 与凭据）。
 
@@ -86,14 +87,30 @@ def build_offline_prompt(case: dict) -> tuple[str, str]:
     return "\n".join(m["content"] for m in messages), block
 
 
-async def run_check(check: dict, state: dict) -> tuple[bool, str]:
-    kind = check["type"]
-    if kind == "custom":
+async def run_check(check: dict, state: dict) -> tuple[bool, str, str]:
+    """返回 (ok, detail, verdict)；verdict ∈ pass / fail / review。
+
+    review 是第三态：判定器说不清（judge 没配、调用失败、与正则不一致）时用，
+    既不算通过也不算失败，交人工复核。只有 fail 计入退出码。
+    既有 check 仍返回两元组，在这里归一化成 pass / fail，行为逐位不变。
+    """
+    if check["type"] == "custom":
         import inspect
         outcome = load_custom(check["value"])(state.get("case"), state)
         if inspect.isawaitable(outcome):
             outcome = await outcome
-        return outcome
+        if isinstance(outcome, tuple) and len(outcome) == 3:
+            ok, detail, verdict = outcome
+            return bool(ok), str(detail), str(verdict or "fail")
+        ok, detail = outcome
+        return bool(ok), str(detail), "pass" if ok else "fail"
+    ok, detail = await _run_builtin_check(check, state)
+    return bool(ok), str(detail), "pass" if ok else "fail"
+
+
+async def _run_builtin_check(check: dict, state: dict) -> tuple[bool, str]:
+    """内置 check 类型：contains / not_contains / not_regex / regex_any。"""
+    kind = check["type"]
     target_text = {
         "prompt": state.get("prompt", ""),
         "reply": "\n".join(state.get("replies", [])),  # 多轮时每条回复都必须通过
@@ -122,6 +139,12 @@ async def run_live_turns(case: dict, llm) -> tuple[list[str], list[dict]]:
 
     截断时按生产路径同款救援再要一次短回复；救援是否成功记在 rescued 里，
     仍然为空就如实判失败，不靠重试把失败掩盖掉。
+
+    与生产的差异是**故意的**：生产在 server/dialogue/orchestrator.py:1091 还有
+    一层无条件空正文兜底（`if not text.strip(): text = '嗯，我在呢。'`），那是 UX
+    保证——用户不能听到静音。评测层刻意**不**复刻那层：这里测的是「模型能不能
+    稳定产出合规回复」，兜掉就等于掩盖退化；且兜底文案本身不带 [情绪] 标签，
+    复刻它反而会制造新的标签失败。要改先想清楚你在测哪个问题。
     """
     from server.dialogue.orchestrator import EMOTION_INSTRUCTION, parse_emotion
 
@@ -188,16 +211,22 @@ async def run_case(case: dict, *, live: bool, llm) -> dict:
         check_results = []
         for check in case.get("checks") or []:
             try:
-                ok, detail = await run_check(check, state)
+                ok, detail, verdict = await run_check(check, state)
             except Exception as exc:  # check 自身炸了算失败，不静默
-                ok, detail = False, f"check 抛异常 {type(exc).__name__}: {exc}"
+                ok, detail, verdict = False, f"check 抛异常 {type(exc).__name__}: {exc}", "fail"
             check_results.append({
                 "type": check["type"], "target": check.get("target", "reply"),
-                "value": check.get("value", ""), "pass": bool(ok), "detail": detail,
+                "value": check.get("value", ""), "pass": bool(ok),
+                "verdict": verdict, "detail": detail,
             })
+        # 一轮的结论：全部 pass 才算通过；有 fail 算失败；只剩 review 算"说不清"
+        # （不计入通过也不计入失败，退出码只看 fail）。
+        verdicts = [c["verdict"] for c in check_results]
         run_records.append({
             "run": run_idx + 1,
-            "passed": all(c["pass"] for c in check_results),
+            "verdict": ("pass" if all(v == "pass" for v in verdicts)
+                        else "fail" if any(v == "fail" for v in verdicts) else "review"),
+            "passed": all(v == "pass" for v in verdicts),
             # live 落盘只存回复与判定；prompt 与凭据不落盘。
             "turns": [{"user": u, "reply": r} for u, r in
                       zip(case.get("turns") or [], replies)] if is_live else [],
@@ -215,13 +244,63 @@ async def run_case(case: dict, *, live: bool, llm) -> dict:
             "xfail": case.get("status") == "xfail",
             "xfail_reason": case.get("reason", ""),
             "runs": run_records, "passed_runs": passed_runs,
-            "total_runs": runs_n, "passed": case_passed}
+            "total_runs": runs_n, "passed": case_passed,
+            # 三态计数：退出码只看 failed_runs，review 既不红也不绿（方案 §四）。
+            "failed_runs": sum(1 for r in run_records if r.get("verdict") == "fail"),
+            "reviewed_runs": sum(1 for r in run_records if r.get("verdict") == "review")}
+
+
+def classify_results(results: list[dict]) -> dict:
+    """按三态给用例定 mark 并分桶。退出码只由 fail 轮次决定。
+
+    设计（docs/EVAL_MECHANISM_PLAN.md §四）：review 是"判定器说不清"，
+    既不算通过也不算失败，交人工复核；只有 fail 计入退出码。
+
+    曾按 `passed=False` 把 review 扫进 failures：judge 一没配或一调用失败，
+    整条 live 门禁就退出码 1——红的不是被测系统，是评测配置，而这种红在
+    paid live run 里最难分辨。回归测试见 scripts/test_judge_three_state.py
+    的 RunEvalsClassificationTests。
+    """
+    marks: list[str] = []
+    failures: list[str] = []
+    xfails: list[str] = []
+    reviewed: list[str] = []
+    for r in results:
+        failed_runs = int(r.get("failed_runs") or 0)
+        reviewed_runs = int(r.get("reviewed_runs") or 0)
+        if r.get("xfail") and not r.get("passed"):
+            mark = "XFAIL"
+            xfails.append(r["id"])
+        elif failed_runs:
+            mark = "FAIL"
+            failures.append(r["id"])
+        elif reviewed_runs:
+            mark = "REVIEW"
+            reviewed.append(r["id"])
+        elif r.get("passed"):
+            mark = "PASS"
+        else:
+            # 不是通过、又没有 fail/review 轮次（含缺 verdict 的旧形状）：
+            # 未知状态按失败算，别让漏判静默变成放行。
+            mark = "FAIL"
+            failures.append(r["id"])
+        marks.append(mark)
+    return {"marks": marks, "failures": failures, "xfails": xfails, "reviewed": reviewed}
 
 
 async def main_async(args) -> int:
     cases = load_cases(args.case)
     if not cases:
         print("evals/cases/ 下没有匹配的用例")
+        return 1
+
+    # origin 必填（docs/TESTING.md:59）：缺失或空串都算没溯源，直接失败。
+    # 只校验过滤后的用例：--case 指定单条时不为无关坏档陪失败；不带 --case 的
+    # 整跑（CI / run_gates 的 evals 门禁）仍覆盖 evals/cases/ 下全部 yaml。
+    missing_origin = [c for c in cases if not str(c.get("origin") or "").strip()]
+    if missing_origin:
+        print("以下用例缺少 origin（必填，来源实验 / 事故 / commit）："
+              + "、".join(f"{c['_path']}（id: {c.get('id', '?')}）" for c in missing_origin))
         return 1
 
     offline_cases = [c for c in cases if c.get("layer") != "live"]
@@ -261,14 +340,13 @@ async def main_async(args) -> int:
         encoding="utf-8")
 
     print("\n=== 通过率表 ===")
-    failures = []
-    xfails = []
-    for r in results:
-        mark = "PASS" if r["passed"] else ("XFAIL" if r["xfail"] else "FAIL")
+    buckets = classify_results(results)
+    failures = buckets["failures"]
+    xfails = buckets["xfails"]
+    reviewed = buckets["reviewed"]
+    for r, mark in zip(results, buckets["marks"]):
         print(f"  {mark:5} {r['id']:38} {r['passed_runs']}/{r['total_runs']} 轮通过"
               + (f"  (xfail: {r['xfail_reason']})" if r["xfail"] and not r["passed"] else ""))
-        if not r["passed"]:
-            (xfails if r["xfail"] else failures).append(r["id"])
         for run in r["runs"]:
             for c in run["checks"]:
                 if not c["pass"]:
@@ -277,8 +355,12 @@ async def main_async(args) -> int:
         print("（live 层本次跳过，未计入上表）")
     if xfails:
         print(f"xfail 用例（已知失败，不计入）：{', '.join(xfails)}")
-    print(f"=== {len(results) - len(failures) - len(xfails)} passed, "
-          f"{len(failures)} failed, {len(xfails)} xfail ===")
+    if reviewed:
+        print("review 用例（判定器说不清，未计入通过也未计入失败，需人工复核）："
+              + "、".join(reviewed))
+    passed_count = len(results) - len(failures) - len(xfails) - len(reviewed)
+    print(f"=== {passed_count} passed, {len(failures)} failed, "
+          f"{len(xfails)} xfail, {len(reviewed)} review ===")
     return 1 if failures else 0
 
 
