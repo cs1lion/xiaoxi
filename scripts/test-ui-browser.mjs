@@ -17,7 +17,8 @@ try {
  await page.routeWebSocket('**/ws', socket=>{
    socket.onMessage(message=>{if(typeof message==='string') { const value=JSON.parse(message); sent.push(value); if(value.type==='text') { socket.send(JSON.stringify({type:'asr',turn_id:value.turn_id,text:value.text})); socket.send(JSON.stringify({type:'thinking',turn_id:value.turn_id})); socket.send(JSON.stringify({type:'text_delta',turn_id:value.turn_id,delta:'那种心里终于轻了一点的感觉，真好。想聊聊是什么事吗？'})); socket.send(JSON.stringify({type:'done',turn_id:value.turn_id})); } }});
  });
- await page.goto(process.env.BASE_URL || 'http://127.0.0.1:8000/');
+ // 聊天页在 /chat：`/` 从 2026-10-24 起是像素世界（world_entry_response）。
+ await page.goto(process.env.BASE_URL || 'http://127.0.0.1:8000/chat');
  // The workspace deliberately hides the task tab at boot; attachment proves
  // bootstrap, while later task checks explicitly open its tab.
  await page.locator('.assistant-panel:not([data-interaction-preferences])').waitFor({state:'attached'});

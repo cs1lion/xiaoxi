@@ -32,7 +32,11 @@ def check(name: str, condition: bool, detail: str = "") -> None:
 
 
 def run(env_extra: dict[str, str], code: str) -> subprocess.CompletedProcess:
-    env = {**os.environ, **env_extra}
+    # 子进程必须显式 UTF-8：Windows 下 stdout/stderr 是管道时默认走 locale（GBK），
+    # 而哨兵的报错文案是中文——子进程按 GBK 写出、父进程按 utf-8 解码，中文全变成
+    # `�`，断言「"真实数据目录" in stderr」就永远不成立，于是**一个坏掉的检查器
+    # 报出的红看起来像被测行为坏了**（实测踩过）。父进程那侧的 encoding 只解决解码。
+    env = {**os.environ, "PYTHONIOENCODING": "utf-8", **env_extra}
     return subprocess.run([PY, "-c", code], cwd=str(ROOT), env=env,
                           capture_output=True, text=True, encoding="utf-8", errors="replace")
 
@@ -50,6 +54,14 @@ LEDGER_OPEN = (
 
 
 def main() -> int:
+    # 本套件的输出里有中文，断言失败时还会把子进程的中文 stderr 原样打出来。
+    # Windows 控制台默认 GBK，遇到 `�`（父进程解码替换符）就 UnicodeEncodeError
+    # 整只脚本崩掉——报出来的是编码错误，不是哨兵的结论。先把自己钉成 UTF-8。
+    for stream in (sys.stdout, sys.stderr):
+        try:
+            stream.reconfigure(encoding="utf-8", errors="replace")
+        except (AttributeError, OSError):
+            pass  # 老解释器或被重定向到不支持 reconfigure 的对象
     print("[生产库哨兵]")
 
     prod = run({"TEST_SENTINEL": ""}, MEMORY_OPEN.format(path=str(ROOT / "data" / "memory.db")))

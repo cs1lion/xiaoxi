@@ -18,6 +18,9 @@ import path from 'node:path';
 const root = path.resolve(import.meta.dirname, '..');
 const PORT = Number(process.env.E2E_PORT || 8021);
 const BASE = `http://127.0.0.1:${PORT}`;
+/* 工作台抽屉在聊天页上；`/` 从 2026-10-24 起是像素世界。
+ * 世界那一段仍走 /world（静态挂载点没变）。 */
+const CHAT = `${BASE}/chat`;
 const PY = path.join(root, '.venv', 'Scripts', 'python.exe');
 
 const checks = [];
@@ -26,42 +29,25 @@ const pass = (name) => { checks.push(name); console.log('ok -', name); };
 const fail = (name, detail = '') => { failed += 1; console.log('FAIL -', name, detail ? `｜${detail}` : ''); };
 const ok = (cond, name, detail = '') => (cond ? pass(name) : fail(name, detail));
 
-/* 台账隔离（与 drill-s2/s3 同款）：本 e2e 建的 A/B/C 单不能写进真实台账
- * （此前每次跑都在主库攒残留）。被常驻实例占用时按门禁惯例 SKIP。 */
-import fs from 'node:fs';
+/* 台账隔离由 TEST_SENTINEL=1 + DB_PATH 完成（见下方 spawn 的 env）：
+ * 本 e2e 建的 A/B/C 单与它们的运行目录全落在 tmp/ 下自建，真实 data/ 不碰。
+ *
+ * 原先这里会「把 data/commissions.db 改名到 tmp/，跑完再改回来」——动的是
+ * 用户正在用的文件：常驻服务占着就只能 SKIP，中途崩溃则台账留在 tmp/。 */
 const stamp = Date.now().toString(36);
-function isolateLedger() {
-  const ledger = path.join(root, 'data', 'commissions.db');
-  if (!fs.existsSync(ledger)) return null;
-  const backup = path.join(root, 'tmp', `e2e-ledger-${stamp}.db`);
-  fs.mkdirSync(path.dirname(backup), { recursive: true });
-  try {
-    fs.renameSync(ledger, backup);
-  } catch (error) {
-    console.log(`SKIP data/commissions.db 被占用（${error.code || error.message}，` +
-      `疑有常驻服务实例在跑），step8 e2e 让路`);
-    process.exit(0);
-  }
-  return backup;
-}
-function restoreLedger(backup) {
-  if (!backup) return;
-  const ledger = path.join(root, 'data', 'commissions.db');
-  for (let i = 0; i < 10; i += 1) {
-    try {
-      if (fs.existsSync(ledger)) fs.rmSync(ledger, { force: true });
-      fs.renameSync(backup, ledger);
-      return;
-    } catch { /* Windows 句柄释放延迟，重试 */ }
-    Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 1000);
-  }
-  console.error(`还原 data/commissions.db 失败；台账备份留在 ${backup}，请手动改名回去。`);
-}
-const ledgerBackup = isolateLedger();
 
 const server = spawn(PY, ['-m', 'uvicorn', 'server.app:app',
   '--host', '127.0.0.1', '--port', String(PORT), '--log-level', 'warning'],
-  { cwd: root, stdio: ['ignore', 'pipe', 'pipe'] });
+  { cwd: root, env: {
+    ...process.env,
+    /* 本 e2e 要真建单、真跑子进程，A/B/C 三单和它们的运行目录都写进慢环各库。
+     * DB_PATH 把记忆库钉到临时根，TEST_SENTINEL=1 让 server/app.py 的
+     * _service_data_dir() 跟随它——台账/线程/偏好全落在 tmp/ 里自建，于是
+     * **不用去改名用户的 data/commissions.db**（此前没给 env，服务直接开
+     * 仓库 data/，只能靠 rename 真实台账隔离；用户常驻服务占着时就只能 SKIP）。 */
+    DB_PATH: path.join(root, 'tmp', `step8-e2e-${stamp}`, 'memory.db'),
+    TEST_SENTINEL: '1',
+  }, stdio: ['ignore', 'pipe', 'pipe'] });
 let serverErr = '';
 server.stderr.on('data', (chunk) => { serverErr += String(chunk); });
 
@@ -133,7 +119,7 @@ try {
   const pageErrors = [];
   page.on('pageerror', (error) => pageErrors.push(error.message));
 
-  await page.goto(`${BASE}/`, { waitUntil: 'domcontentloaded' });
+  await page.goto(CHAT, { waitUntil: 'domcontentloaded' });
   await page.click('#drawerToggle');
   await page.waitForSelector('#drawerOps', { state: 'visible' });
   await page.click('#drawerOps');
@@ -230,7 +216,6 @@ try {
 } finally {
   if (browser) await browser.close().catch(() => {});
   spawn('taskkill', ['/PID', String(server.pid), '/T', '/F'], { stdio: 'ignore' });
-  restoreLedger(ledgerBackup);
 }
 
 console.log(`\n${checks.length} passed, ${failed} failed`);
