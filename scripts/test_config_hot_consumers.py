@@ -22,6 +22,10 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
+# 生产库哨兵（#39/#41）：`server.memory.store` 在模块底部建了 `store = MemoryStore()`
+# 单例，import 即开库。必须写在下面任何 `from server...` 之前。
+os.environ.setdefault('DB_PATH', ':memory:')
+
 from server import config as C  # noqa: E402
 from server import config_hot as H  # noqa: E402
 

@@ -423,16 +423,20 @@ def run_gate(name: str, spec: dict) -> dict:
     started = time.time()
     try:
         cwd = ROOT / str(spec["cwd"]) if spec.get("cwd") else ROOT
-        # 生产库哨兵（#39）**默认关**，按需开启：GATE_SENTINEL=on 时所有门禁
-        # 子进程带 TEST_SENTINEL=1，打开仓库 data/ 下的库即报错。
+        # 生产库哨兵（#39）**默认打开**：所有门禁子进程带 TEST_SENTINEL=1，
+        # 打开仓库 data/ 下的库即报错。
         #
-        # 为什么不默认开：开启后有 8 个历史套件立刻变红（mood_writer、cross_day、
+        # 曾经默认关着，因为开启后有 8 个历史套件立刻变红（mood_writer、cross_day、
         # self_evolution、config_hot、config_hot_consumers、world_bridge、
-        # evolution_quality_report、memory_manage）——它们确用模块级单例或真实
-        # 库，但改造它们不属本轮。让门禁默认红违反「全绿才算完成」，
-        # 所以做成显式的隔离审计开关；审计结论与待修清单记在 #41（#39 是哨兵本身的立项票，已关闭）。
+        # evolution_quality_report、memory_manage）——它们用模块级单例或真实库。
+        # #41 已把八个全部钉到临时根，且 `_service_data_dir` 的参照点从会被 patch
+        # 的 `config.ROOT` 换成了 `__file__` 锚。**关着的门卫等于没有门卫**：
+        # #39 的 379 条正是从这条通道攒进真实台账的，而一个「开了就 8 红」的
+        # 开关没人会一直开着。
+        #
+        # 需要临时关掉（例如调试一个尚未隔离的新套件）：GATE_SENTINEL=off。
         env = {**os.environ}
-        if os.environ.get("GATE_SENTINEL", "off") == "on":
+        if os.environ.get("GATE_SENTINEL", "on") == "on":
             env["TEST_SENTINEL"] = "1"
         proc = subprocess.run(spec["cmd"], cwd=str(cwd), capture_output=True, text=True,
                               encoding="utf-8", errors="replace", timeout=900, env=env)
@@ -448,6 +452,17 @@ def run_gate(name: str, spec: dict) -> dict:
 
 
 def main() -> int:
+    # 输出一律 UTF-8，不管是被管道还是被重定向接走。Windows 下 stdout 不是
+    # 控制台时默认走 locale（GBK），而门禁脚本自己吐中文——子进程按 UTF-8 写
+    # （下面 subprocess.run 显式 encoding="utf-8"）、父进程按 GBK 编码出去，
+    # 于是 `run_gates.py | tail` 出来的报告全是 `�����`。而「失败时贴输出」
+    # 正是为了让人读得懂失败原因，贴一坨乱码等于没贴（2026-10-25 实测）。
+    for stream in (sys.stdout, sys.stderr):
+        try:
+            stream.reconfigure(encoding="utf-8", errors="replace")
+        except (AttributeError, OSError):
+            pass
+
     parser = argparse.ArgumentParser(description="黄金门禁报告")
     parser.add_argument("--allow-skip", action="store_true",
                         help="跳过的门禁只告警，不算失败（兼容旧口径）")
@@ -472,6 +487,14 @@ def main() -> int:
         rows.append(row)
         print(f"[{verdict:4}] {name:20} exit={row['exit']:<4} {row['seconds']:>6}s"
               + ("  ← 这轮没有真的断言" if verdict == "SKIP" else ""), flush=True)
+        # 失败时把子进程输出贴出来。不贴的话，唯一可得的证据就是一个 exit code
+        # ——而失败往往正是「脚本自己没跑起来」，光看退出码无从判断（实测：
+        # drill_network 间歇失败，报告里只有 exit=1，得手动重跑五次才抓得到）。
+        if verdict == "FAIL":
+            tail = (row.get("output_tail") or "").strip()
+            if tail:
+                for line in tail.splitlines()[-25:]:
+                    print(f"       | {line}", flush=True)
 
     failed = [r for r in rows if r["verdict"] == "FAIL"]
     skipped = [r for r in rows if r["verdict"] == "SKIP"]

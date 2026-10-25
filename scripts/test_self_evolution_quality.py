@@ -23,6 +23,11 @@ import unittest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
+# 生产库哨兵（#39/#41）：`server.memory.store` 在模块底部建了 `store = MemoryStore()`
+# 单例，import 即开库。必须写在下面任何 `from server...` 之前。
+import os  # noqa: E402
+os.environ.setdefault('DB_PATH', ':memory:')
+
 from server.assistant.loop import SelfEvolutionCycle, validate_reflection_payload
 from server.memory import seeds as seed_mod
 from server.memory.seeds import question_novelty, similarity

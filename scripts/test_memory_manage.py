@@ -280,5 +280,105 @@ class MemoryManageAPITests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(corrected["decision"], "update")
 
 
+class ServiceDataDirTests(unittest.TestCase):
+    """`server.app._service_data_dir` 的隔离判据（#41）。
+
+    这段代码没有任何测试覆盖，于是坏掉的时候没人发现：它原先拿模块级 `ROOT`
+    当「仓库根」参照，而那是 `from .config import ROOT` 的绑定——测试「先 patch
+    `config.ROOT`、后 import server.app」时这行会重新执行，`app.ROOT` 跟着变成
+    临时目录，于是「DATA_DIR 是否仍指向仓库 data/」两边一起漂、恒判为真，判据
+    失效，数据根掉进 `app-test-data-*` 这个谁都不知道的目录（实测见 #41）。
+
+    这里钉住的是**判据本身**：不管 patch 怎么组合，落点只有三种合法归属。
+    """
+
+    def _resolve(self, *, patch_root: bool, patch_data: bool, app_data_dir: str | None = None):
+        """按给定组合隔离配置并 import server.app，返回 (落点, 允许的根集合)。"""
+        import os as _os
+        import tempfile
+        from unittest.mock import patch
+
+        tmp = Path(tempfile.mkdtemp(prefix="svc-dir-")).resolve()
+        data = tmp / "data"
+        data.mkdir()
+        (tmp / "web").mkdir()
+        (tmp / "web" / "index.html").write_text("x", encoding="utf-8")
+        self.addCleanup(lambda: __import__("shutil").rmtree(tmp, ignore_errors=True))
+
+        saved = {k: _os.environ.get(k) for k in ("TEST_SENTINEL", "APP_DATA_DIR")}
+        self.addCleanup(lambda: [(_os.environ.pop(k, None) if v is None
+                                  else _os.environ.__setitem__(k, v)) for k, v in saved.items()])
+        _os.environ["TEST_SENTINEL"] = "1"
+        if app_data_dir is None:
+            _os.environ.pop("APP_DATA_DIR", None)
+        else:
+            _os.environ["APP_DATA_DIR"] = app_data_dir
+
+        # server.* 的模块缓存会跨用例复用，逐次清掉才能重演不同的 import 顺序。
+        saved_modules = {m: sys.modules.pop(m) for m in list(sys.modules)
+                         if m == "server" or m.startswith("server.")}
+        self.addCleanup(lambda: sys.modules.update(saved_modules))
+
+        for patcher in (patch("dotenv.load_dotenv", return_value=False),):
+            patcher.start()
+            self.addCleanup(patcher.stop)
+        config = importlib.import_module("server.config")
+        if patch_data:
+            p = patch.object(config, "DATA_DIR", data); p.start(); self.addCleanup(p.stop)
+        if patch_root:
+            p = patch.object(config, "ROOT", tmp); p.start(); self.addCleanup(p.stop)
+        p = patch.object(config.settings, "db_path", ":memory:"); p.start(); self.addCleanup(p.stop)
+
+        app = importlib.import_module("server.app")
+        resolved = Path(app._service_data_dir()).resolve()
+        return resolved, {tmp.resolve(), data.resolve()}
+
+    def test_patching_data_dir_alone_lands_in_the_patched_root(self):
+        got, allowed = self._resolve(patch_root=False, patch_data=True)
+        self.assertIn(got, allowed, f"数据根应留在隔离根内，实际 {got}")
+
+    def test_patching_root_and_data_together_still_lands_in_the_patched_root(self):
+        """这正是 #41 的回归点：两者一起 patch 时，旧判据会漂到 app-test-data-*。"""
+        got, allowed = self._resolve(patch_root=True, patch_data=True)
+        self.assertIn(
+            got, allowed,
+            f"同时 patch ROOT 与 DATA_DIR 时数据根漂到了隔离根之外：{got}。"
+            "判据不能拿会被 patch 的模块属性当参照（见 #41）。")
+
+    def test_app_data_dir_wins_when_data_dir_was_not_moved(self):
+        import tempfile
+        explicit = Path(tempfile.mkdtemp(prefix="svc-explicit-")).resolve()
+        self.addCleanup(lambda: __import__("shutil").rmtree(explicit, ignore_errors=True))
+        got, _ = self._resolve(patch_root=False, patch_data=False, app_data_dir=str(explicit))
+        self.assertEqual(got, explicit)
+
+    def test_repository_root_does_not_follow_config_patch(self):
+        """`_repository_root()` 的存在理由：它必须是 patch 碰不到的锚。
+
+        不 import 整个 app（patch 过的 ROOT 会让 `app.mount('/static')` 找不到
+        目录），只把那段函数体按源码取出来单独执行——这正好也是这条契约的
+        全部内容。
+        """
+        import ast
+        import types
+        from unittest.mock import patch
+
+        source = (Path(__file__).resolve().parents[1] / "server" / "app.py").read_text(
+            encoding="utf-8")
+        tree = ast.parse(source)
+        func = next(n for n in tree.body
+                    if isinstance(n, ast.FunctionDef) and n.name == "_repository_root")
+        module = ast.Module(body=[func], type_ignores=[])
+        env: dict = {"Path": Path, "__file__": str(Path(__file__).resolve().parents[1]
+                                                  / "server" / "app.py")}
+        exec(compile(module, "app.py", "exec"), env)
+
+        real = env["_repository_root"]()
+        config = importlib.import_module("server.config")
+        with patch.object(config, "ROOT", Path("C:/somewhere/else")):
+            self.assertEqual(env["_repository_root"](), real,
+                             "仓库根参照不能跟着 config.ROOT 的 patch 漂移")
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)
