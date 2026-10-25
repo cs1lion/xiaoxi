@@ -10,6 +10,12 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 
+# 生产库哨兵（#39/#41）：`server.memory.store` 在模块底部建了 `store = MemoryStore()`
+# 单例，import 即开库。不先把库钉到内存，测试还没跑就撞在哨兵上。
+# 必须写在下面任何 `from server...` 之前——import 顺序就是隔离顺序。
+import os  # noqa: E402
+os.environ.setdefault('DB_PATH', ':memory:')
+
 from server.assistant.loop import SelfEvolutionCycle  # noqa: E402
 from server.memory import seeds as seed_mod  # noqa: E402
 from server.memory.diary import mood_overlap  # noqa: E402

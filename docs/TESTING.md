@@ -17,7 +17,7 @@
 ### 门禁报告（一条命令确认"每道门都真的跑过"）
 
 ```bash
-.\.venv\Scripts\python.exe scripts\run_gates.py                 # 60 道门全跑，跳过即失败
+.\.venv\Scripts\python.exe scripts\run_gates.py                 # 全跑，跳过即失败（道数以输出为准）
 .\.venv\Scripts\python.exe scripts\run_gates.py --allow-skip    # 跳过只告警（兼容旧口径）
 .\.venv\Scripts\python.exe scripts\run_gates.py --only protocol,core,evals
 ```
@@ -33,6 +33,32 @@
 
 改动 `web/` 前端文件后必须杀掉旧服务进程再重启，否则 `StaticFiles` 缓存的目录
 列表会让新增前端文件持续 404，浏览器回归会假失败。
+
+### 生产库哨兵（默认已开，2026-10-25 起）
+
+`run_gates.py` 给每条门禁子进程注入 `TEST_SENTINEL=1`。测试态的进程一旦打开
+仓库 `data/` 下的 SQLite 就**就地报错**，拦在打开点（`MemoryStore.__init__` /
+`CommissionStore.__init__`），因为 import 期抛会误伤只读配置的静态检查器。
+
+它曾经默认关着：#39 把隔离做成机械保证后，一开就有 8 个历史套件立刻变红
+（`mood_writer`、`cross_day`、`self_evolution`、`config_hot`、
+`config_hot_consumers`、`world_bridge`、`evolution_quality_report`、
+`memory_manage`）。#41 已把这八个全部钉到临时根，于是它现在**默认打开**。
+
+- **关着的门卫等于没有门卫**：#39 那 379 条测试数据正是从这条通道攒进真实台账的，
+  而一个「开了就 8 红」的开关没人会一直开着。
+- 调试一个尚未隔离的新套件时可以临时关：`GATE_SENTINEL=off python scripts/run_gates.py`。
+  但**合入前必须让它在开着的状态下全绿**——一个新套件如果只有关掉哨兵才能过，
+  它就是在往真实库写。
+- 隔离手法见 `test_core.py` 与 `test_memory_manage.py`：前者在任何 `from server...`
+  之前 `os.environ['DB_PATH'] = ':memory:'`，后者除了 patch 配置根，还加了
+  `guarded_connect` 当第二道锁。
+
+> 顺带一条经验：`server/app.py` 的 `_service_data_dir` 曾经拿模块级 `ROOT` 当
+> 「仓库根」参照，而那是 `from .config import ROOT` 的绑定——测试「先 patch
+> `config.ROOT`、后 import」时它会跟着漂，判据失效，数据根掉进
+> `app-test-data-*`。现在用 `Path(__file__)` 算，那是唯一 patch 碰不到的锚。
+> 回归见 `test_memory_manage.py` 的 `ServiceDataDirTests`。
 
 ## 回归评测（evals/）
 

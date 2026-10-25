@@ -141,8 +141,18 @@ try {
   } else {
     ok(backOnline, 'C1 服务回来后页面自动重连（status 回"在线"）');
     if (backOnline) {
-      ok(/按住左下角|打字/.test(afterBack.subtitle),
-        'C2 subtitle 被服务端 ready 帧复位为初始引导', afterBack.subtitle);
+      /* C1 与 C2 的复位时刻不一样，中间有个几毫秒的缝：
+       *   status  → onWsOpen（socket open 事件）立刻置「在线」；
+       *   subtitle → 要等服务端随后发来的 `ready` 帧才复位成初始引导。
+       * 原本这里直接读一次 pageState 就断言，正好落在缝里时读到的是断线
+       * 文案「连接已断开……」，于是间歇性 C2 失败（实测 12 轮全量里挂 2 轮；
+       * 单独跑 5/5、分组跑 3/3 都过——典型的时序竞态，不是产品缺陷）。
+       * 等它复位再判：等到就是通过，等不到仍然失败，断言语义不变。 */
+      const subtitleBack = await page.waitForFunction(
+        () => /按住左下角|打字/.test(document.getElementById('subtitle')?.textContent || ''),
+        null, { timeout: 5000 }).then(() => true).catch(() => false);
+      ok(subtitleBack, 'C2 subtitle 被服务端 ready 帧复位为初始引导',
+        (await pageState(page)).subtitle);
     }
   }
 

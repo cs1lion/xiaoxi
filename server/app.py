@@ -57,6 +57,20 @@ from .assistant.service import AssistantService
 from .assistant.api import create_router, scheduler, scheduler_snapshot
 
 
+def _repository_root() -> Path:
+    """本文件所在的仓库根。**不随 `config.ROOT` 的 patch 漂移。**
+
+    `_service_data_dir` 原先拿模块级的 `ROOT` 当「仓库根」参照，但那是
+    `from .config import ROOT` 拿到的绑定——测试若「先 patch `config.ROOT`、
+    后 import server.app」，这行会重新执行，`app.ROOT` 跟着变成临时目录，
+    于是「DATA_DIR 是否仍指向仓库 data/」两边一起漂、恒判为真，判据失效，
+    数据根掉进一个谁也不知道的 `app-test-data-*` 临时目录（#41 实测）。
+
+    `__file__` 不受任何 patch 影响，是这里唯一稳的锚。
+    """
+    return Path(__file__).resolve().parents[1]
+
+
 def _service_data_dir() -> Path:
     """慢环各库（context/threads/preferences/commissions）的根目录。
 
@@ -71,11 +85,11 @@ def _service_data_dir() -> Path:
         return ROOT / "data"
     # 测试进程：跟随 config.DATA_DIR（测试普遍 patch 它来做隔离根），
     # 再退到显式 APP_DATA_DIR / DB_PATH 同根 / 进程临时目录。
-    # 判据是「DATA_DIR 是否仍指向**仓库** data/」——本模块的 ROOT 常量不受
-    # patch 影响，正好是仓库根的稳定参照；测试会同时 patch config.ROOT 与
-    # config.DATA_DIR，两者相等并不说明没换地方。
+    # 判据是「DATA_DIR 是否仍指向**仓库** data/」。仓库根必须用 `__file__` 算，
+    # 不能用模块级的 `ROOT`——那个是 `config.ROOT` 的绑定，会被测试的 patch
+    # 带着一起漂，于是两边相等、判据失效（#41）。
     from . import config as _config
-    if Path(_config.DATA_DIR).resolve() != (ROOT / "data").resolve():
+    if Path(_config.DATA_DIR).resolve() != (_repository_root() / "data").resolve():
         return Path(_config.DATA_DIR)
     explicit = os.environ.get("APP_DATA_DIR")
     if explicit:

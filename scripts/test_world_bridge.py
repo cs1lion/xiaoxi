@@ -17,6 +17,11 @@ from types import SimpleNamespace
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 
+# 生产库哨兵（#39/#41）：`server.memory.store` 在模块底部建了 `store = MemoryStore()`
+# 单例，import 即开库。必须写在下面任何 `from server...` 之前。
+import os  # noqa: E402
+os.environ.setdefault('DB_PATH', ':memory:')
+
 from server.assistant.executive import (  # noqa: E402
     NO_WORKER_QUESTION, ExecutiveService,
 )
