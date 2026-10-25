@@ -73,7 +73,7 @@
 
 > 四项强制修正已并入：① 全链路首字提速（speech/self_evolution 默认 true + 首句激进切分 + 思考期预演 + deliver_reply 微句化）；② 默认开启灵动感知（搭话心跳 + 视线跟随默认开 + 区域化点击互动）；③ 默认推荐 seed-daily-hair 造型 + 舞台打光；④ 界面极简（禁平铺新按钮 + 胶囊输入框 + 低频控件入设置面板 + 副玩法统一内嵌）。
 >
-> **2026-10-24 口径说明**：抬头宣称四项修正已并入，但下方 A-1~A-5、U-1~U-6 复选框未随之回填——多项实际已由后续提交落地（首句切分、微句化、胶囊输入框等）。不追溯补勾；逐项对账并入交付计划 Phase 3（UI 分级清单轮）一并做，见 `docs/DELIVERY_PLAN_20261024.md`。
+> **2026-10-24 口径说明**：抬头宣称四项修正已并入，但下方 A-1~A-5、U-1~U-6 复选框未随之回填，多项实际已由后续提交落地（首句切分、微句化、胶囊输入框等）。不追溯补勾；逐项对账见本节末「2026-10-25 对账」（2026-10-25 只读 review 发现原承诺的「并入交付计划 Phase 3」在该计划中无对应项，故对账落在本文）。
 
 ## Role 0（基线清零与主舞台整合）
 
@@ -85,7 +85,7 @@
 
 ## Role 2 / Avatar 专项（微句首包提速 + 呼吸落地 + 叠加防抽搐 + 触控热区 + VRM 美化）
 
-- [ ] A-1 首句激进切分（6~12 字遇标点即切）+ 后续恢复 12-35 字；段间停顿由 playback 消费（pause_after_ms 定停顿、停顿期口型放松、breath 点轻眨眼）
+- [ ] A-1 首句激进切分（任务书原写 6~12 字；实现已演进为 V2 口径，首句不满 8 字不提前切，见 `config/pacing.yaml:77`）+ 后续恢复 12-35 字；段间停顿由 playback 消费（pause_after_ms 定停顿、停顿期口型放松、breath 点轻眨眼）
 - [ ] A-1b deliver_reply 微句化：narrate/self_topic/助手结果同样获得 chunk 字段与呼吸停顿
 - [ ] A-2 思考期预演：thinking→首包音频间播放思考微表情（轻眨眼+视线微移+轻微歪头）
 - [ ] A-3 idle 层多驱动叠加软限幅（sway/Motion Magic/beat/dialogueExpression），消除过冲抽搐；before/after 截图
@@ -100,6 +100,12 @@
 - [ ] U-4 practice 入口从 details 深处提为一级控件
 - [ ] U-5 模式状态可视化：状态栏展示当前生效模式（体验/练习/连续对话/微句流/自进化/星图）
 - [ ] U-6 移动端（≤760px / 390px）验证：胶囊栏不溢出、抽屉可开合、无横向滚动
+
+### 2026-10-25 对账（只读 review 结论，逐项带证据；复选框维持原样，不做无验收证据的补勾）
+
+- A-1/A-1b/A-2/A-3/A-4/A-5、U-1/U-2/U-3/U-4/U-5：代码已落地（证据见 review 记录：`server/dialogue/orchestrator.py:671-682` 首包切分、`config/pacing.yaml:67-78`、`web/avatar/index.js:346`、`:506`、`:561`、`:692`、`web/avatar/params.js:68-84`、`web/app.js:161`、`:174-191`、`web/index.html:65-116`、`:169-187`）。
+- U-6：静态证据表明 390px 可容纳（`web/almanac.css:551` 起 760px 断点下 `.side` 改 fixed 浮层、`.capsule` 各子件有 min-width、输入区 `flex:1;min-width:0` 可收缩），但无模拟视口验证、无测试断言，记为未验证，不计完成。
+- A-1 口径：任务书 6 字与实现 8 字的差异已在条目内注明；差异原因只写在 `config/pacing.yaml:77` 注释里，未补决策记录。
 
 ## V3 内阁总管（Executive Secretary / Agent 指挥官 / 可观测 Eval）
 
@@ -146,7 +152,8 @@
 - [x] `docs/TESTING.md` 补 V3 黄金命令；本看板建档
 - [ ] **Worker 执行体尚未接真**：三个内置 Agent 仍是 `adapter: manual`，只组密件不执行。
       花名册里已留 `cli_subproc` / `http_api` 接线示例，改成真命令即可跑，无需改 Python。
-- [ ] `POST /commissions/{id}/run` 目前只被进程内链路与测试使用；前台语音路径只接单、不驱动执行。
+      （2026-10-25 核：3 个 manual 不变，但 Phase 1.2 打样后花名册已增 sandbox 等 5 个 `cli_subproc` 真执行体，「执行体尚未接真」的边界已部分打破；本条的准确范围是「三个内置编制仍未接真」。）
+- [x] `POST /commissions/{id}/run` 已被前台语音路径驱动（2026-10-25 核）：委托命中后 `server/app.py:856` spawn 后台任务，经 `server/assistant/executive.py` 的 `delegate()` → `drive()` → `run_commission()` 把单驱动到终态。原「只接单、不驱动执行」的记录过期。
 - [ ] 语音路径上"收工/打回"仍只认唯一一单；多单时必须先回答澄清选择题。
 
 ### 打磨轮：主动开口疏通 + 陪伴心流三态胶囊（2026-10-16）

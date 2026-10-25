@@ -34,7 +34,7 @@
 3. 命中的 playbook 与 principle 叶子文件，按路径直读（它们不在 skill 目录里列名）
 
 **路径必须是绝对路径 `D:\project\neurosama\.agents\...`。** `.agents/` 在
-`.gitignore:55`，不会进 worktree；在 `tmp/wt-*` 里用相对路径会指向不存在的目录。
+`.gitignore:57`，不会进 worktree；在 `tmp/wt-*` 里用相对路径会指向不存在的目录。
 worktree 里的 `AGENTS.md` 也可能落后（取决于它检出的提交），规矩以仓库根这份为准。
 
 **自主性档位：A（全开）**。原文「Just do it」「Never Block on the Human」生效：
@@ -48,7 +48,7 @@ worktree 里的 `AGENTS.md` 也可能落后（取决于它检出的提交），�
 改别人的文件不需要先问，只要改错了能撤回。
 
 **`.agents/` 算「能撤回」是因为改动本身可恢复，不是因为它不重要**（Memory 2026-10-21 纠正）。
-它的**存在性**另有问题（`.gitignore:55` 让这些修正在重装 pstack 时消失，见「待办」第 1 条），
+它的**存在性**另有问题（`.gitignore:57` 让这些修正在重装 pstack 时消失，见「待办」第 1 条），
 但**存在性不稳 ≠ 可以草率修改** —— 那里的修正是这轮最重要的产出之一。
 两个判断要分开：**要不要问**看可撤回性；**能不能长期依赖**看存在性。
 
@@ -123,7 +123,7 @@ worktree 里的 `AGENTS.md` 也可能落后（取决于它检出的提交），�
 
 1. **`.agents/` 入库** —— 里面有本轮全部实质修正（`DSH.md` 与 `docs/harness/claude-code.md`
    两个文件的工具映射、Graphite 措辞与归属、bun 归属、计数表、死链说明等），**全部只在本机**。
-   `.gitignore:55` 忽略整目录，重装 pstack 会覆盖它们。
+   `.gitignore:57` 忽略整目录，重装 pstack 会覆盖它们。
    （不写「N 处」：一处怎么算取决于粒度，这个数没法核，也没人会去重数。）
    入库需要改 `.gitignore` 为 `.agents/*` 加白名单（negation 对整目录忽略无效），
    且要单独定 `DSH.md` 的同步策略 —— 它是本机适配层，不该和上游 bundle 同一策略。

@@ -1,5 +1,7 @@
 # 第五轮 review：durable 接管、结构化输入、形象联动与四个未决项
 
+> **⚠️ 过期快照（2026-10-25 回填标注）**：本文为 2026-10-18 的历史记录，其后进展以 `git log` 与门禁命令输出为准；现行交付状态见 `docs/DELIVERY_PLAN_20261024.md`。
+
 日期：2026-10-18（晚）
 范围：pstack-claude 移植、Claude Code 插件系统、durable 接管四场景、门禁、四个断点、
 `choice:`/`say:` 输入缺口、3D 形象 commission 联动、记忆与自进化生产效用。

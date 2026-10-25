@@ -1,6 +1,6 @@
 # 交付计划（2026-10-24 拍板版）
 
-**Status:** 用户当日拍板四项方向，本文为唯一执行依据。执行中的状态回填到本文各 Phase 的复选框。
+**Status:** 用户当日拍板四项方向。本文是 2026-10-24 的交付快照，不再是现行执行依据（2026-10-25 回填）：v1.0-daily 之后的进展不回填本文，现行状态以 `git log` 与门禁命令输出为准。
 **性质:** 记录 2026-10-24 的决策快照。带日期的数字只在当日成立；进度一律以命令输出为准。
 
 ## 已拍板的方向（用户 2026-10-24 原话口径）
@@ -22,7 +22,7 @@
 
 - [x] 0.1 主仓在飞批验证后落袋：四门禁全绿后按逻辑拆成六个提交（interpret 离线闸门 / 陪伴入口 / 上下文预算护栏 / config §17 热重载 / 状态文档 / 残件处置）。npm 红点系 node_modules 丢失 three（环境问题，`npm install` 补齐）。stash@{0} 核验为已落地内容的旧形态（pixel-world 部分被 bba023d 演进版取代），已弃。
 - [x] 0.2 推送 master 到 origin。
-- [x] 0.3 五条 ahead 分支全并入（UIUX_AUDIT 冲突取 HEAD 侧：对家是带本机绝对路径的旧版，`git cherry` 证实补丁已在 master）；合并后四门禁复跑全绿再推；已并入分支与 tmp/wt-* worktree 清理，远端同步删除；backup/* 与 stash@{1} 保留。**例外**：`.claude/worktrees/confident-roentgen-3771a9` 里有 8 个文件的真实未提交工作（另一 session 在飞），保留不动，待其认领或过期后再议。
+- [x] 0.3 五条 ahead 分支全并入（UIUX_AUDIT 冲突取 HEAD 侧：对家是带本机绝对路径的旧版，`git cherry` 证实补丁已在 master）；合并后四门禁复跑全绿再推；已并入分支与 tmp/wt-* worktree 清理，远端同步删除；backup/* 与 stash@{1} 保留。**例外**：`.claude/worktrees/confident-roentgen-3771a9` 里有 8 个文件的真实未提交工作（另一 session 在飞），保留不动，待其认领或过期后再议。（2026-10-25 复查为 15 个未提交文件，仍保留不动。）
 - [x] 0.4 文档真相对齐：三份 10-19 审计加过期横幅；TASKS.md 打磨轮加口径说明（不追溯补勾，对账归 Phase 3）；README 计数改「以运行输出为准」；DEMO_ART_SPEC_TODO 加覆盖标注。
 - [x] 0.5 残件处置：chief-bak 归档 `docs/history/`；`web/style.css.bak` 删；一次性采集点文件移 `tmp/` 停车；`agent/`（vendored skills 副本）加 gitignore；四个新测试随 0.1 入册。
 
@@ -54,7 +54,7 @@
 - [x] 3.1 出分级清单（证据：使用路径、测试覆盖、耦合度；合并后的 uiux-audit / art-audit 两分支结论作为输入）。预判供否决：核心可见＝语音对话＋舞台＋记忆侧栏＋ops 抽屉；收二级＝interpret/practice/experience/writing/companion/music；演示专用＝avatar-lab、starmap、pixel-world 入口；待删＝card_preview、notepad_preview、design-preview。
 - [x] 3.2 用户一次性否决（2026-10-24 晚：「继续吧」＝零否决项，按草案定稿）。
 - [x] 3.3a P3a 分级落地（issue #37，master `56ce458`）：盘点发现主界面本就无多余直达入口；归档三件（card_preview 全家/notepad_preview 全家/design-preview 工作区）连同测试账目；task-card 集成测试改借归档页当宿主。
-- [x] 3.3b P3b 视觉统一（进行中，本节最后一条）。
+- [~] 3.3b P3b 视觉统一（2026-10-24 晚启动；完成范围与验收证据未回填，2026-10-25 核。原记录勾选与「进行中」并存，自相矛盾，现按未完成记。）
 - 附加落地（2026-10-24 晚，排期呈报后用户「继续」）：F1 #35 检索假命中（ngram(2,3)）、F2 #36 clarify 意图门槛、F3 #32 破冰停用门、F4 #34 重连续会话（协议 §六新增 resume，Role 0 批准）全部收口；#31 索引重建择机未动。
 
 ## Phase 4 — 交付验收与打标
@@ -76,3 +76,15 @@
 ## 本计划的边界
 
 - 不含：pixel-world 生成器与新组件（roadmap）、IntentGate 接入（已否）、durable 全面接真、500ms 延迟目标、给第三方分发的安装工程。
+
+## 2026-10-25 回填（只读 review 发现；当日只改文档，未执行任何写操作）
+
+- `git rev-list --count v1.0-daily..HEAD` = 13：tag 之后的提交（世界接管入口 `05db039`、意图 B1/B2、world 批复动作 `e7ca5b5`、voice-lab 收口 `66c743f`、pixel-world 迁仓标注 `249a071`）均不在本文记录内。
+- `git status --short --branch`：master  ahead origin 5 个；未提交 17 项（5 个 M + 12 个 ??）。Phase 0 出口条件「工作区干净、origin 同步」当前不成立。
+- pixel-world 已于 2026-10-25 整体迁往独立仓 `cs1lion/pixel-world-engine`（`pixel-world/MIGRATED.md`，源提交 `05db039`）；迁仓无交接票，母票 #45 未关，#48/#51/#52 在本仓查无交付证据（关票时点晚于 HEAD）。
+- 门禁复跑（2026-10-25 两轮）：第一轮在 HEAD `249a071` 实跑，`check_protocol.py` EXIT 0、`test_core.py` 92 通过 0 失败、`run_evals.py` 离线层 7 通过 0 失败（10-24 口径为 6）；`scripts/run_gates.py` 的 GATES 实有 74 条（10-25 方案稿记 71）。第二轮在含本轮修复的工作区实跑，`npm test` EXIT 0 全链零失败。两轮都含未提交改动，不是对某个提交的干净复跑。
+- 本轮修复（2026-10-25，全部可逆）：文档漂移与矛盾按上文各条修正；`run_gates.py:433` 交叉引用 #39 改 #41；D2 派单台词追加「确认按钮在战况抽屉的卡片上，点一下才开工」（`server/dialogue/orchestrator.py` delegation 分支，`scripts/test_executive_v3.py` 绑断言；README 两处「语音确认」同步改实）；`test_aqi_blocks.py` 一例陈旧测试修正（#33 收口后 clarify 只在验收相关输入触发，原测试输入「好了吗」已不触发），并补多单待验收时非验收输入落闲聊的回归断言。
+- 分家补交付（2026-10-25）：交接票 #54 建（源提交 `05db039`/`249a071`、新仓 12 张 open issue 快照、#45 八子票逐条处置与证据）；#45 母票已关并指向 #54，#48–#53 各补一条复核评论；ROADMAP/README/USAGE/TASKS 的分家相关陈述已修。常驻 8000 仍跑 `05db039` 之前的代码（`/` 返旧聊天页、`/chat` 404），重启属项目红线，待用户批准后备份（`scripts/backup_local_databases.py`）再重启（`docs/TESTING.md:89-91`）。
+- 8000 重启（2026-10-25，用户批准）：在线备 6 库（完整性 ok，快照 `data/backups/20261025T084403442211Z`）后重启。暴露并处置两个环境事实：常驻进程原用 anaconda3 python，其 NumPy 2.5.1 与编译版 scipy 冲突，重启即 `ImportError: numpy.core.multiarray failed to import`，改用 `docs/USAGE.md` 记载的 `.venv` 解释器；`.venv` 相对 `uv.lock` 缺语音栈，已按锁补齐（faster-whisper 1.2.1 / edge-tts 7.2.8 / ctranslate2 4.5.0）。验证：`/` 返世界页「莞尔的世界 · 神谕沙盒」、`/chat` 200、`/api/memories` 200、health 200；whisper 模型缓存（small/tiny）在位。入口反转（`05db039`）至此在运行态生效。
+- open issue 9 个（`gh issue list --state open`）：#45、#41、#31、#19、#15、#14、#12、#10、#9。其中 #12/#10/#14/#19 为「已修未关」，关闭与否待 Role 0 拍板；#15 正确地开着（24 色重建后占比数据需重测）。
+- 遗留待办：#31 索引重建（快环内同步，`server/memory/retriever.py:82-89`，内容变化后首次检索触发，非每轮）；评测报告层（`scripts/evals_report.py` 与 `docs/EVAL_MECHANISM_PLAN.md`）未入 git、无 issue。
