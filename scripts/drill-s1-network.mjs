@@ -20,6 +20,9 @@ const root = path.resolve(import.meta.dirname, '..');
 const PORT = Number(process.env.DRILL_PORT || 8033);
 if (PORT === 8000 || PORT === 8010) { console.error(`端口 ${PORT} 是用户在用的，拒绝`); process.exit(2); }
 const BASE = `http://127.0.0.1:${PORT}`;
+/* 聊天页在 /chat：`/` 从 2026-10-24 起是像素世界（那是另一张页面，没有 #textInput/#sendBtn，
+ * 也没有会变成"在线"的 #status）。REST 仍走 BASE 根。 */
+const CHAT = `${BASE}/chat`;
 /* worktree 里没有 .venv：用主仓的虚拟环境解释器（只读），cwd 仍是本 worktree。 */
 const localVenv = path.join(root, '.venv', 'Scripts', 'python.exe');
 const PY = process.env.DRILL_PYTHON
@@ -103,7 +106,7 @@ try {
   const pageErrors = [];
   page.on('pageerror', (error) => pageErrors.push(error.message));
 
-  await page.goto(`${BASE}/`, { waitUntil: 'domcontentloaded' });
+  await page.goto(CHAT, { waitUntil: 'domcontentloaded' });
   await page.waitForFunction(() => (document.getElementById('status')?.textContent || '') === '在线');
   log('ok - 页面在线（status=在线）');
 

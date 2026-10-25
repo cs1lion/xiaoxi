@@ -19,7 +19,6 @@
 import { chromium } from '@playwright/test';
 import { spawn } from 'node:child_process';
 import http from 'node:http';
-import fs from 'node:fs';
 import path from 'node:path';
 
 const root = path.resolve(import.meta.dirname, '..');
@@ -27,6 +26,8 @@ const PORT = Number(process.env.DRILL_PORT || 8034);
 const STUB_PORT = Number(process.env.DRILL_STUB_PORT || 8043);
 if (PORT === 8000 || PORT === 8010) { console.error(`端口 ${PORT} 是用户在用的，拒绝`); process.exit(2); }
 const BASE = `http://127.0.0.1:${PORT}`;
+/* 聊天页在 /chat：`/` 从 2026-10-24 起是像素世界。REST 仍走 BASE 根。 */
+const CHAT = `${BASE}/chat`;
 /* worktree 里没有 .venv：用主仓的虚拟环境解释器（只读），cwd 仍是本 worktree。 */
 const localVenv = path.join(root, '.venv', 'Scripts', 'python.exe');
 const PY = process.env.DRILL_PYTHON
@@ -56,55 +57,25 @@ function sinePcm16(seconds = 1.0, freq = 440, rate = 16000) {
 const stamp = Date.now().toString(36);
 const DB = path.join(root, 'tmp', `drill-s2-${stamp}`, 'memory.db');
 
-/* 台账隔离：executive_route 的每个分支都要真实台账状态才命中（intent 单独
- * 不路由）。带着既有待验收单跑"还记得…"会被 clarify 分支截走台账直出——
- * LLM 根本不被调用，坏 Key 路径就测不到了（实测踩过）。
+/* 台账隔离由 TEST_SENTINEL=1 + DB_PATH 完成（见 startServer 的注释）：
+ * 服务进程自己的慢环各库都建在 tmp/ 下，真实 data/ 一次都不碰。
  *
- * 只挪 data/commissions.db 一个文件（服务自建空账），不搬整个 data/：
- * 整目录改名在主仓会被日志/索引句柄挡住（EPERM），而且把用户的真实
- * memory.db 等库一起搬家风险不成比例。单文件也被占用时（多半是用户
- * 的常驻服务实例在跑），按门禁惯例打 SKIP 退出，不硬抢。 */
-function isolateDataDir() {
-  const ledger = path.join(root, 'data', 'commissions.db');
-  if (!fs.existsSync(ledger)) return null;
-  const backup = path.join(root, 'tmp', `drill-ledger-backup-${stamp}.db`);
-  fs.mkdirSync(path.dirname(backup), { recursive: true });
-  try {
-    fs.renameSync(ledger, backup);
-  } catch (error) {
-    console.log(`SKIP data/commissions.db 被占用（${error.code || error.message}，` +
-      `疑有常驻服务实例在跑），场景②坏 Key 演练让路`);
-    process.exit(0);
-  }
-  return backup;
-}
-function restoreDataDir(backup) {
-  if (!backup) return;
-  const ledger = path.join(root, 'data', 'commissions.db');
-  // Windows 上进程退出后文件锁释放有延迟：rm/rename 带重试；彻底失败时
-  // 保留备份并大喊，绝不静默吞掉别人的数据。
-  for (let i = 0; i < 10; i += 1) {
-    try {
-      if (fs.existsSync(ledger)) fs.rmSync(ledger, { force: true });
-      fs.renameSync(backup, ledger);
-      return;
-    } catch (error) {
-      if (i === 9) {
-        console.error(`还原 data/commissions.db 失败（${error.code || error.message}）；` +
-          `台账备份留在 ${backup}，请手动改名回去。`);
-        return;
-      }
-      Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 1000);
-    }
-  }
-}
-
+ * 这里原先会「把 data/commissions.db 改名到 tmp/，跑完再改回来」——那是
+ * 在动用户正在用的文件：常驻服务占着时整条演练只能 SKIP，中途 Ctrl-C 或
+ * 崩溃则台账留在 tmp/ 里等人手动找回。既然 app 已经支持按 DB_PATH 整体
+ * 改根，那个 rename 就不该存在。 */
 function startServer() {
   const server = spawn(PY, ['-m', 'uvicorn', 'server.app:app',
     '--host', '127.0.0.1', '--port', String(PORT), '--log-level', 'warning'],
     { cwd: root, env: {
       ...process.env,
       DB_PATH: DB,
+      /* TEST_SENTINEL=1 让 server/app.py 的 _service_data_dir() 跟随 DB_PATH
+       * 落到临时目录（慢环各库：台账/线程/偏好全在那儿自建），于是**不需要**
+       * 去改名用户的 data/commissions.db。此前没设它，服务仍开仓库 data/，
+       * 只好靠「rename 真实台账再还原」做隔离——用户常驻服务占着文件时整条
+       * 演练只能 SKIP，而且中途崩溃会把真实台账留在 tmp/ 里。 */
+      TEST_SENTINEL: '1',
       LLM_API_KEY: 'drill-invalid-key',
       LLM_BASE_URL: `http://127.0.0.1:${STUB_PORT}/v1`,
       ASR_ENGINE: 'stepaudio',
@@ -171,7 +142,6 @@ const ok = (cond, name, detail = '') => {
 await new Promise((resolve) => stub.listen(STUB_PORT, '127.0.0.1', resolve));
 log(`observe - 401 桩就绪 127.0.0.1:${STUB_PORT}`);
 
-const dataBackup = isolateDataDir();
 const server = startServer();
 let browser;
 try {
@@ -186,7 +156,7 @@ try {
   page.setDefaultTimeout(20000);
   const pageErrors = [];
   page.on('pageerror', (error) => pageErrors.push(error.message));
-  await page.goto(`${BASE}/`, { waitUntil: 'domcontentloaded' });
+  await page.goto(CHAT, { waitUntil: 'domcontentloaded' });
   await page.waitForFunction(() => (document.getElementById('status')?.textContent || '') === '在线');
 
   // ---- A. 文本轮：LLM 401 ----
@@ -252,7 +222,6 @@ try {
     const timer = setTimeout(resolve, 5000);
     server.once('exit', () => { clearTimeout(timer); resolve(); });
   });
-  restoreDataDir(dataBackup);
 }
 
 log(`\n${OBSERVE ? 'observe mode' : 'assert mode'}: ${failed} failed`);

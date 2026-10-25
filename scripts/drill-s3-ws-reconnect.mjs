@@ -17,6 +17,9 @@ const root = path.resolve(import.meta.dirname, '..');
 const PORT = Number(process.env.DRILL_PORT || 8035);
 if (PORT === 8000 || PORT === 8010) { console.error(`端口 ${PORT} 是用户在用的，拒绝`); process.exit(2); }
 const BASE = `http://127.0.0.1:${PORT}`;
+/* 聊天页在 /chat：`/` 从 2026-10-24 起是像素世界，工作台抽屉在聊天页上。
+ * REST 对账仍走 BASE 根。 */
+const CHAT = `${BASE}/chat`;
 /* worktree 里没有 .venv：用主仓的虚拟环境解释器（只读），cwd 仍是本 worktree。 */
 const localVenv = path.join(root, '.venv', 'Scripts', 'python.exe');
 const PY = process.env.DRILL_PYTHON
@@ -28,49 +31,21 @@ const log = (...a) => console.log(...a);
 const stamp = Date.now().toString(36);
 const DB = path.join(root, 'tmp', `drill-s3-${stamp}`, 'memory.db');
 
-/* 台账隔离（与 drill-s2 同款）：只挪 data/commissions.db 让服务自建空账——
- * 本演练的 D1 断言要的就是「A/B 落库且跨重启持久」，隔离出的空账同样满足，
- * 还不会把演练单写进真实台账（此前每次跑都在主库攒残留）。被占用（常驻
- * 实例在跑）则按门禁惯例 SKIP。 */
-import fs from 'node:fs';
-function isolateLedger() {
-  const ledger = path.join(root, 'data', 'commissions.db');
-  if (!fs.existsSync(ledger)) return null;
-  const backup = path.join(root, 'tmp', `drill-s3-ledger-${stamp}.db`);
-  fs.mkdirSync(path.dirname(backup), { recursive: true });
-  try {
-    fs.renameSync(ledger, backup);
-  } catch (error) {
-    console.log(`SKIP data/commissions.db 被占用（${error.code || error.message}，` +
-      `疑有常驻服务实例在跑），演练③让路`);
-    process.exit(0);
-  }
-  return backup;
-}
-function restoreLedger(backup) {
-  if (!backup) return;
-  const ledger = path.join(root, 'data', 'commissions.db');
-  for (let i = 0; i < 10; i += 1) {
-    try {
-      if (fs.existsSync(ledger)) fs.rmSync(ledger, { force: true });
-      fs.renameSync(backup, ledger);
-      return;
-    } catch (error) {
-      if (i === 9) {
-        console.error(`还原 data/commissions.db 失败（${error.code || error.message}）；` +
-          `台账备份留在 ${backup}，请手动改名回去。`);
-        return;
-      }
-      Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 1000);
-    }
-  }
-}
-const ledgerBackup = isolateLedger();
+/* 台账隔离由 TEST_SENTINEL=1 + DB_PATH 完成（见 startServer 的注释）：
+ * 服务自己的慢环各库都建在 tmp/ 下，D1 断言要的「A/B 落库且跨重启持久」
+ * 在那儿同样成立，而真实 data/ 一次都不碰。
+ *
+ * 原先这里会「把 data/commissions.db 改名到 tmp/，跑完再改回来」——动的是
+ * 用户正在用的文件：常驻服务占着就只能 SKIP，中途崩溃则台账留在 tmp/。
+ * app 已支持按 DB_PATH 整体改根，那个 rename 不该存在。 */
 
 function startServer() {
   const server = spawn(PY, ['-m', 'uvicorn', 'server.app:app',
     '--host', '127.0.0.1', '--port', String(PORT), '--log-level', 'warning'],
-    { cwd: root, env: { ...process.env, DB_PATH: DB }, stdio: ['ignore', 'pipe', 'pipe'] });
+    { cwd: root, env: { ...process.env, DB_PATH: DB,
+      /* TEST_SENTINEL=1 → _service_data_dir() 跟随 DB_PATH 落临时目录，
+       * 台账自建在那儿，不必改名用户的 data/commissions.db（见 drill-s2 同款注释）。 */
+      TEST_SENTINEL: '1' }, stdio: ['ignore', 'pipe', 'pipe'] });
   let err = '';
   server.stderr.on('data', (chunk) => { err += String(chunk); });
   server.errText = () => err;
@@ -158,7 +133,7 @@ try {
     });
   });
 
-  await page.goto(`${BASE}/`, { waitUntil: 'domcontentloaded' });
+  await page.goto(CHAT, { waitUntil: 'domcontentloaded' });
   await page.waitForFunction(() => (document.getElementById('status')?.textContent || '') === '在线');
   await page.click('#drawerToggle');
   await page.waitForSelector('#drawerOps', { state: 'visible' });
@@ -248,7 +223,6 @@ try {
 } finally {
   if (browser) await browser.close().catch(() => {});
   if (server.exitCode === null) spawn('taskkill', ['/PID', String(server.pid), '/T', '/F'], { stdio: 'ignore' });
-  restoreLedger(ledgerBackup);
 }
 
 log(`\n${OBSERVE ? 'observe mode' : 'assert mode'}: ${failed} failed`);
