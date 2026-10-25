@@ -6,12 +6,14 @@ outputs test the evaluation plumbing; they do not measure semantic accuracy.
 from __future__ import annotations
 
 import asyncio
+import atexit
 from contextlib import redirect_stdout
 import copy
 import io
 import json
 import os
 from pathlib import Path
+import shutil
 import sys
 import tempfile
 from types import SimpleNamespace
@@ -31,11 +33,173 @@ def client_config(**changes):
     return SimpleNamespace(**fields)
 
 
+def build_cases():
+    """内联合成夹具（T3b）：12 条用例全部在此构造，替代曾随 /eval 清理删除、
+    从未入 git 的 eval/research/memory_live_cases.json。
+
+    约束与 scripts/eval_memory.py 的 load_cases 逐条对齐：
+      - provenance='authored_synthetic_evaluation'、恰好 12 条、id 互异；
+      - 每条 max_extraction_calls 为 [0,2] 的 int，且 Σ=12=MAX_CALLS；
+      - steps/queries 非空、expected 为 dict；action 只在白名单内；
+      - turn 的 user 为 1..12000 字；message 只允许 role=assistant；
+      - replay 的 ref 必须指向本 cases 内更早 turn 的 as；
+      - 每条的 max_extraction_calls 恰好等于它成功发起的抽取次数（预算不多不少）。
+    FakeProvider 只认关键词，故每条的 user 文本决定它写出哪些事实。
+    """
+    return [
+        {
+            'id': 'direct_employer_and_role',
+            'max_extraction_calls': 1,
+            'steps': [
+                {'action': 'turn', 'user': '我在星桥公司上班，做产品设计师。'},
+            ],
+            'queries': ['我在星桥公司做什么工作', '我的岗位是产品设计师对吗'],
+            'expected': {'company': '星桥公司', 'role': '产品设计师'},
+        },
+        {
+            'id': 'independent_across_turns',
+            'max_extraction_calls': 2,
+            'steps': [
+                {'action': 'turn', 'user': '我最喜欢喝绿茶。'},
+                {'action': 'turn', 'user': '我喜欢椰子味的点心。'},
+            ],
+            'queries': ['我喜欢喝什么茶', '我喜欢吃什么点心'],
+            'expected': {'facts': 2},
+        },
+        {
+            'id': 'explicit_correction',
+            'max_extraction_calls': 2,
+            'steps': [
+                {'action': 'turn', 'user': '我在北辰公司工作。'},
+                {'action': 'turn', 'user': '我换成银杉公司了。'},
+            ],
+            'queries': ['我的公司'],
+            'expected': {'final_company': '银杉公司'},
+        },
+        {
+            'id': 'ambiguous_conflict',
+            'max_extraction_calls': 2,
+            'steps': [
+                {'action': 'turn', 'user': '我最喜欢喝绿茶。'},
+                {'action': 'turn', 'user': '最近更喜欢红茶。'},
+            ],
+            'queries': ['我喜欢喝什么茶'],
+            'expected': {'conflict': True},
+        },
+        {
+            'id': 'unknown_retrieval',
+            'max_extraction_calls': 1,
+            'steps': [
+                {'action': 'turn', 'user': '今天天气真不错。'},
+            ],
+            'queries': ['我家的邮政编码是多少'],
+            'expected': {'memories': 0},
+        },
+        {
+            'id': 'third_party_quote',
+            'max_extraction_calls': 0,
+            'steps': [
+                {'action': 'turn', 'user': '我朋友说“我在星桥公司上班”。'},
+            ],
+            'queries': ['我的公司'],
+            'expected': {'memories': 0},
+        },
+        {
+            'id': 'hypothesis_and_roleplay',
+            'max_extraction_calls': 0,
+            'steps': [
+                {'action': 'turn', 'user': '假如我在星桥公司工作，我们角色扮演一下。'},
+            ],
+            'queries': ['我的公司'],
+            'expected': {'memories': 0},
+        },
+        {
+            'id': 'assistant_assertion_then_continue',
+            'max_extraction_calls': 1,
+            'steps': [
+                {'action': 'message', 'role': 'assistant', 'text': '我记得你在琥珀公司上过班。'},
+                {'action': 'turn', 'user': '嗯嗯，你继续说吧。'},
+            ],
+            'queries': ['我们刚才聊了什么'],
+            'expected': {'memories': 0},
+        },
+        {
+            'id': 'disable_enable_then_replay_old_message',
+            'max_extraction_calls': 0,
+            'steps': [
+                {'action': 'memory_toggle', 'enabled': False},
+                {'action': 'turn', 'user': '我在星桥公司上班。', 'as': 'old'},
+                {'action': 'memory_toggle', 'enabled': True},
+                {'action': 'replay', 'ref': 'old'},
+            ],
+            'queries': ['我的公司'],
+            'expected': {'memories': 0},
+        },
+        {
+            'id': 'delete_then_replay_old_message',
+            'max_extraction_calls': 1,
+            'steps': [
+                {'action': 'turn', 'user': '我最喜欢喝绿茶。', 'as': 'old'},
+                {'action': 'forget_all'},
+                {'action': 'replay', 'ref': 'old'},
+            ],
+            'queries': ['我喜欢喝什么茶'],
+            'expected': {'memories': 0},
+        },
+        {
+            'id': 'stated_preference',
+            'max_extraction_calls': 1,
+            'steps': [
+                {'action': 'turn', 'user': '我最喜欢喝绿茶。'},
+            ],
+            'queries': ['我喜欢喝什么'],
+            'expected': {'tea': '绿茶'},
+        },
+        {
+            'id': 'game_interest',
+            'max_extraction_calls': 1,
+            'steps': [
+                {'action': 'turn', 'user': '我最近在玩文明六。'},
+            ],
+            'queries': ['我玩什么游戏'],
+            'expected': {'game': '文明六'},
+        },
+    ]
+
+
+_ORIGINAL_LOAD_CASES = None
+
+
 def setUpModule():
-    """评测夹具是本地撰写的语料（随 /eval 清理被删、从未入 git）；缺失时整组跳过而非报红。"""
-    fixture = Path(__file__).resolve().parents[1] / "eval/research/memory_live_cases.json"
-    if not fixture.exists():
-        raise unittest.SkipTest("缺少本地评测夹具 memory_live_cases.json（曾随 /eval 清理被删，未入 git）；补齐该文件后自动恢复")
+    """把内联合成夹具写进临时 JSON，再用**真实** load_cases 校验并加载。
+
+    旧实现依赖 eval/research/memory_live_cases.json；该文件随 /eval 清理被删、
+    从未入 git，缺失时整组 SkipTest——退出码 0、CI 判绿，其实一条都没跑（假绿）。
+    现在夹具随测试一起分发：缺文件不再跳过，而是当场生成 12 条合成用例。
+    """
+    global _FIXTURE_PATH, _ORIGINAL_LOAD_CASES
+    directory = tempfile.mkdtemp(prefix='neurosama-memory-eval-fixture-')
+    atexit.register(shutil.rmtree, directory, ignore_errors=True)
+    _FIXTURE_PATH = Path(directory) / 'memory_live_cases.json'
+    _FIXTURE_PATH.write_text(json.dumps(
+        {'provenance': 'authored_synthetic_evaluation', 'cases': build_cases()},
+        ensure_ascii=False), encoding='utf-8')
+    _ORIGINAL_LOAD_CASES = target.load_cases
+    original = _ORIGINAL_LOAD_CASES
+
+    def load_cases(path=_FIXTURE_PATH):
+        return original(_FIXTURE_PATH)
+
+    target.load_cases = load_cases
+
+
+def tearDownModule():
+    """还原 setUpModule 打的补丁，别让内联夹具泄漏到同进程的其他测试。"""
+    global _FIXTURE_PATH, _ORIGINAL_LOAD_CASES
+    if _ORIGINAL_LOAD_CASES is not None:
+        target.load_cases = _ORIGINAL_LOAD_CASES
+        _ORIGINAL_LOAD_CASES = None
+    _FIXTURE_PATH = None
 
 
 class FakeProvider:

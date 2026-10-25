@@ -12,6 +12,10 @@ import procedural_memory_source_projection as projection
 
 
 ROOT = Path(__file__).resolve().parents[1]
+# 真实域夹具（随 /eval 清理被删、从未入 git）。只有一条用例需要它，其余 8 条用内联
+# fixture() 自建数据；所以跳过做成逐条 skipUnless，不再是整组 setUpModule 假绿。
+REAL_CASES = ROOT / 'eval/research/procedural_memory_eval_cases.json'
+REAL_CASES_AVAILABLE = REAL_CASES.is_file()
 
 
 def note(body, version=1, **extra):
@@ -47,11 +51,8 @@ def fixture():
              ]}]
 
 
-def setUpModule():
-    """评测夹具是本地撰写的语料（随 /eval 清理被删、从未入 git）；缺失时整组跳过而非报红。"""
-    fixture = Path(__file__).resolve().parents[1] / "eval/research/procedural_memory_eval_cases.json"
-    if not fixture.exists():
-        raise unittest.SkipTest("缺少本地评测夹具 procedural_memory_eval_cases.json（曾随 /eval 清理被删，未入 git）；补齐该文件后自动恢复")
+# 2026-10-25：删掉整组 SkipTest。本文件只有 test_prepared_real_domain_public_bundles_roundtrip
+# 需要真实域夹具（见该方法的 skipUnless），其余 8 条用内联 fixture() 自建数据、照常真跑。
 
 
 class SourceProjectionTests(unittest.TestCase):
@@ -178,6 +179,9 @@ class SourceProjectionTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, 'cyclic_json'):
             projection.project_public_bundle([cyclic])
 
+    @unittest.skipUnless(REAL_CASES_AVAILABLE,
+                         "真实域夹具 eval/research/procedural_memory_eval_cases.json 未提供"
+                         "（随 /eval 清理被删、从未入 git）；其余 8 条内联用例不受影响")
     def test_prepared_real_domain_public_bundles_roundtrip(self):
         import procedural_memory_eval_domain as domain
         cases = json.loads((ROOT / 'eval/research/procedural_memory_eval_cases.json').read_text(encoding='utf-8'))

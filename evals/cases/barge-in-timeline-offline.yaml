@@ -1,0 +1,19 @@
+id: barge-in-timeline-offline
+title: barge_in 打断链发出 interrupted→playback_stopped，且旧轮迟到 audio/text_delta/done 不得逃逸（事件序断言）
+layer: offline
+origin: >-
+  源自 scripts/bench_voice_loop.py 墙钟基线里已有的 barge_in→interrupted→playback_stopped
+  时序与「打断后旧轮不再逃逸」行为（对应 docs/PROTOCOL.md 打断契约与 turn_id 过滤），
+  此前只有墙钟基线、没有 offline CI 断言。本用例复用
+  scripts/test_speech_performance_route.py 的 in-process Connection+Socket AST 提取
+  harness，把它固化为纯 offline 事件序回归：零网络、零 Key、不起 uvicorn、不占 8000/8010。
+tags: [barge_in, interrupted, playback_stopped, fence, transport, offline]
+setup: {}
+turns:
+  - 打断一下，我在听
+pass_rule: all
+checks:
+  - target: prompt
+    type: custom
+    value: "evals.checks:barge_in_timeline"
+status: active

@@ -15,4 +15,11 @@ checks:
   - target: reply
     type: not_regex
     value: 我记得我们|我们之前一起|上次我们|咱们之前一起|你以前说过
+  # T5：异源裁判（llm_judge_* 槽位）。三态 pass/fail/review：与正则一致才定论，
+  # 不一致或 judge 未配置/调用失败一律 review——不算通过也不算失败，交人工。
+  # 不配 judge 时这条会整层退化成 review，不会把无 Key 的跑态假装成判过。
+  # judge 永不进 CI（CI 无 Key）；rubric 见 evals/checks.py 的 JUDGE_RUBRIC。
+  - target: reply
+    type: custom
+    value: "evals.checks:judge_hallucination"
 status: active

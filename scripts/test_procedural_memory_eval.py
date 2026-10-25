@@ -23,14 +23,17 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 import eval_procedural_memory as target
 
 
-def setUpModule():
-    """评测夹具是本地撰写的语料（随 /eval 清理被删、从未入 git）；缺失时整组跳过而非报红。"""
-    fixture = Path(__file__).resolve().parents[1] / "eval/research/procedural_memory_eval_cases.json"
-    if not fixture.exists():
-        raise unittest.SkipTest("缺少本地评测夹具 procedural_memory_eval_cases.json（曾随 /eval 清理被删，未入 git）；补齐该文件后自动恢复")
+# 2026-10-25：整组 SkipTest 改成逐条 skipUnless。本文件只有部分用例需要真实域夹具
+# （cases + oracles 两个文件，见各方法的 skipUnless），其余用内联数据自建、照常真跑
+# ——整组跳过会让它们在 CI 里假绿。
+EVAL_CASES = Path(__file__).resolve().parents[1] / 'eval/research/procedural_memory_eval_cases.json'
+EVAL_CASES_AVAILABLE = EVAL_CASES.is_file()
 
 
 class PlanTests(unittest.TestCase):
+    @unittest.skipUnless(EVAL_CASES_AVAILABLE,
+                         "真实域夹具 eval/research/procedural_memory_eval_cases.json 未提供"
+                         "（随 /eval 清理被删、从未入 git）")
     def test_default_plan_does_not_load_domain_or_credentials_or_network(self):
         with tempfile.TemporaryDirectory() as directory:
             output = Path(directory) / 'plan.json'
@@ -48,6 +51,9 @@ class PlanTests(unittest.TestCase):
             self.assertEqual(report['budget']['calls_reserved'], 0)
             self.assertNotIn('SECRET_SENTINEL', persisted)
 
+    @unittest.skipUnless(EVAL_CASES_AVAILABLE,
+                         "真实域夹具 eval/research/procedural_memory_eval_cases.json 未提供"
+                         "（随 /eval 清理被删、从未入 git）")
     def test_frozen_plan_keeps_every_condition_and_budget(self):
         cases, _ = target.load_specs()
         report = target.make_report(cases)
@@ -119,6 +125,10 @@ class PlanTests(unittest.TestCase):
                                           'completion_tokens_details': {'reasoning_tokens': 2}})
 
 
+@unittest.skipUnless(EVAL_CASES_AVAILABLE,
+                     "真实域夹具 eval/research/procedural_memory_eval_cases.json 未提供"
+                     "（随 /eval 清理被删、从未入 git；还需配套 oracles 文件）；"
+                     "PlanTests 里不读夹具的方法不受影响，照常真跑")
 class BudgetTests(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self):
         self.directory = tempfile.TemporaryDirectory()
@@ -237,6 +247,9 @@ def procedure_candidate(observation_id):
                      'evidence': [{'observation_id': observation_id}]}}
 
 
+@unittest.skipUnless(EVAL_CASES_AVAILABLE,
+                     "真实域夹具 eval/research/procedural_memory_eval_cases.json 未提供"
+                     "（随 /eval 清理被删、从未入 git；还需配套 oracles 文件）")
 class DomainTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
@@ -454,6 +467,9 @@ class FakeProvider:
                 'reasoning_content': 'HIDDEN_REASONING_SENTINEL'}
 
 
+@unittest.skipUnless(EVAL_CASES_AVAILABLE,
+                     "真实域夹具 eval/research/procedural_memory_eval_cases.json 未提供"
+                     "（随 /eval 清理被删、从未入 git；还需配套 oracles 文件）")
 class PipelineTests(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self):
         asyncio.get_running_loop().set_debug(False)

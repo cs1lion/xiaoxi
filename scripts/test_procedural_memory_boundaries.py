@@ -63,14 +63,16 @@ def simple_catalog():
     return {'read': read, 'preview': preview, 'failure': failure}
 
 
-def setUpModule():
-    """评测夹具是本地撰写的语料（随 /eval 清理被删、从未入 git）；缺失时整组跳过而非报红。"""
-    fixture = Path(__file__).resolve().parents[1] / "eval/research/procedural_memory_boundary_cases_v1.json"
-    if not fixture.exists():
-        raise unittest.SkipTest("缺少本地评测夹具 procedural_memory_boundary_cases_v1.json（曾随 /eval 清理被删，未入 git）；补齐该文件后自动恢复")
+# 2026-10-25：整组 SkipTest 改成逐条 skipUnless。本文件只有部分用例需要真实域夹具
+# （见各方法的 skipUnless），其余用内联数据自建、照常真跑——整组跳过会让它们在 CI 里假绿。
+BOUNDARY_CASES = Path(__file__).resolve().parents[1] / 'eval/research/procedural_memory_boundary_cases_v1.json'
+BOUNDARY_CASES_AVAILABLE = BOUNDARY_CASES.is_file()
 
 
 class SpecificationTests(unittest.TestCase):
+    @unittest.skipUnless(BOUNDARY_CASES_AVAILABLE,
+                         "真实域夹具 eval/research/procedural_memory_boundary_cases_v1.json 未提供"
+                         "（随 /eval 清理被删、从未入 git）；其余内联用例不受影响")
     def test_fixed_boundary_specification_and_role_mapping(self):
         cases = target.load_sources()
         self.assertEqual([b['id'] for b in cases['source_bundles']], ['boundary-truncated',
@@ -256,6 +258,9 @@ class PipelineTests(unittest.IsolatedAsyncioTestCase):
         await target.execute(report, writer, provider, self.cases)
         return report, writer, provider
 
+    @unittest.skipUnless(BOUNDARY_CASES_AVAILABLE,
+                         "真实域夹具 eval/research/procedural_memory_boundary_cases_v1.json 未提供"
+                         "（随 /eval 清理被删、从未入 git）；其余内联用例不受影响")
     async def test_grounded_candidates_are_saved_and_reopened_without_quality_claims(self):
         report, writer, provider = await self.run_scripted('grounded')
         self.assertEqual(report['budget']['calls_reserved'], 4)
@@ -278,6 +283,9 @@ class PipelineTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(options['max_attempts'], 1)
             self.assertNotIn('HIDDEN_REASONING_SENTINEL', json.dumps(messages, ensure_ascii=False))
 
+    @unittest.skipUnless(BOUNDARY_CASES_AVAILABLE,
+                         "真实域夹具 eval/research/procedural_memory_boundary_cases_v1.json 未提供"
+                         "（随 /eval 清理被删、从未入 git）；其余内联用例不受影响")
     async def test_empty_cross_kind_and_null_outputs_are_recorded_without_retry(self):
         for style, status, error in [('empty', 'rejected_or_error', 'empty_model_output'),
                                      ('cross_kind', 'rejected_or_error', 'claim_missing_kind_grounded_citation'),
@@ -291,6 +299,9 @@ class PipelineTests(unittest.IsolatedAsyncioTestCase):
                 self.assertTrue(all(len(item['calls']) == 1 for item in report['induction']))
                 self.assertFalse(report['sources_live_after_run'])
 
+    @unittest.skipUnless(BOUNDARY_CASES_AVAILABLE,
+                         "真实域夹具 eval/research/procedural_memory_boundary_cases_v1.json 未提供"
+                         "（随 /eval 清理被删、从未入 git）；其余内联用例不受影响")
     async def test_conflated_candidate_is_accepted_structurally_but_never_scored(self):
         report, writer, provider = await self.run_scripted('conflated')
         self.assertEqual(report['status'], 'complete_pending_review')
@@ -303,6 +314,9 @@ class PipelineTests(unittest.IsolatedAsyncioTestCase):
 
 
 class EntryPointTests(unittest.TestCase):
+    @unittest.skipUnless(BOUNDARY_CASES_AVAILABLE,
+                         "真实域夹具 eval/research/procedural_memory_boundary_cases_v1.json 未提供"
+                         "（随 /eval 清理被删、从未入 git）；其余内联用例不受影响")
     def test_plan_does_not_load_domain_credentials_or_snapshot(self):
         with tempfile.TemporaryDirectory() as directory:
             output = Path(directory) / 'plan'
@@ -317,6 +331,9 @@ class EntryPointTests(unittest.TestCase):
             self.assertEqual(report['target_episodes'], 0)
             self.assertFalse((output / 'snapshot').exists())
 
+    @unittest.skipUnless(BOUNDARY_CASES_AVAILABLE,
+                         "真实域夹具 eval/research/procedural_memory_boundary_cases_v1.json 未提供"
+                         "（随 /eval 清理被删、从未入 git）；其余内联用例不受影响")
     def test_real_frozen_prepare_runs_all_boundary_recipes_without_model_calls(self):
         with tempfile.TemporaryDirectory() as directory:
             output = Path(directory) / 'frozen-prepare'

@@ -9,10 +9,15 @@ turns:
 runs: 3
 pass_rule: all
 checks:
-  # 2026-10-17 live 实跑：3/3 都拒绝了口径，但第一版正则只认“不是平的”，
-  # 漏掉了自然的“不是。”和“椭球体/伪科学”，把正确的回复判成失败。
-  # 改用 custom 判定：去掉情绪前缀后，必须出现否定/常识纠正，且不得附和。
+  # 2026-10-25：从 fact_correction_earth（纯正则）迁到 judge 主判。
+  # 原正则漏判多种自然纠正措辞——实测“地平说早被证伪多少年了”“你留着跟卫星
+  # 照片辩论去吧”“地平线是弯的”三条明确否证的回复都被判“没有事实纠正”，
+  # 而它们都带 disagreement 的 motion 标签，说明模型确实在纠正，只是正则看不见。
+  # 正则补词是打地鼠（模型措辞开放、temperature=0.9），故正则降级为辅助信号：
+  # judge 与正则一致才定论，不一致记 review 交人工；未配 judge 时整层 review，
+  # 不拿正则的假阴性去红一个其实正确的系统。
+  # 历史：2026-10-17 曾把“只认不是平的”扩到含“不是。/椭球体/伪科学”。
   - target: reply
     type: custom
-    value: evals.checks:fact_correction_earth
+    value: evals.checks:judge_fact_correction
 status: active

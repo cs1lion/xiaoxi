@@ -391,6 +391,14 @@ GATES: dict[str, dict[str, object]] = {
         "cmd": [str(PY), "scripts/measure_intent_corpus.py"],
         "skip_regex": r"^\s*SKIP",
     },
+    "evals_report": {
+        # 评测报告层（docs/EVAL_MECHANISM_PLAN.md）：读 evals/results/ 快照出
+        # 通过率（平均与全过概率分列）、与上次的配对差异、token 成本。
+        # 报告内容不进门禁，收进来是为了让"报告跑得完"本身成为一条断言；
+        # 空目录 / 单快照 / 快照损坏都是 exit 0 的正常态，不许退化成 SKIP。
+        "cmd": [str(PY), "scripts/evals_report.py"],
+        "skip_regex": r"^\s*SKIP",
+    },
 }
 
 # 这些门禁的本体是纯逻辑单测，不需要本地服务，永远必须真跑。
@@ -398,7 +406,7 @@ ALWAYS_REQUIRED = ("protocol", "core", "scheduler_health", "budget_scope", "back
                    "codex_shim", "claude_shim", "gateway", "task_planning", "cross_day",
                    "thread_conversation", "self_evolution", "agent_loop", "llm_client",
                    "self_evolution_send", "config_hot", "config_hot_consumers",
-                   "evolution_quality_report",
+                   "evolution_quality_report", "evals_report",
                    "durable_adapter", "durable_supervisor", "durable_takeover",
                    "durable_recovery", "durable_revive", "durable_app_wiring",
                    "durable_reconcile", "durable_soak", "durable_storage", "durable_compaction",
