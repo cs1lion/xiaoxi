@@ -739,9 +739,15 @@ class Orchestrator:
                 )
                 session["user_state_note"] = "用户刚表示不想聊，语气要收着，不要追问"
 
-        recent = store_recent(session_id, history_turns)
+        # MEM-OPT-01 step2：历史读取与用户消息落库是同步 sqlite，且压在首个
+        # thinking 之前——库锁被慢写持有时，这一轮连「正在想」都发不出。与
+        # #31 检索卸载、executive 路径卸载（app.py）同一模式：纯 store 调用，
+        # 无共享可变状态，异常原样在 await 处重抛。
+        recent, user_message_id = await asyncio.gather(
+            asyncio.to_thread(store_recent, session_id, history_turns),
+            asyncio.to_thread(store_message, session_id, "user", user_text, "voice"),
+        )
         write_epoch = manager.capture_write_epoch()
-        user_message_id = store_message(session_id, "user", user_text, "voice")
         turn_context = await self._turn_context_async(user_text, session_id, recent)
         messages = turn_context['messages']
         # 协议 §23.4：用户显式查看的便笺由服务端组装 note_snippet 积木（真实
