@@ -60,6 +60,13 @@ GATES: dict[str, dict[str, object]] = {
         "cmd": [str(PY), "scripts/test_core.py"],
         "skip_regex": r"^\s*SKIP",
     },
+    "gate_coverage": {
+        # 棘轮：scripts/test_*.py 要么登记进 GATES，要么进 gates_unregistered.txt。
+        # CI 的 glob 比这里宽得多，差集里的脚本坏了没人知道（master 曾连续红
+        # 多次而日志只有一句 exit code 1）。这条本身也要登记 —— 不登记它就拦自己。
+        "cmd": [str(PY), "scripts/test_gate_coverage.py"],
+        "skip_regex": r"^\s*SKIP",
+    },
     "scheduler_health": {
         "cmd": [str(PY), "scripts/test_scheduler_health.py"],
         "skip_regex": r"^\s*SKIP",
