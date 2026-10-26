@@ -69,13 +69,18 @@ jobs:
 
       - name: Python 测试（逐脚本运行，跳过计通过）
         run: |
-          failed=0
+          # 失败的脚本名要出现在日志顶层。旧写法只把名字留在 ::group:: 里，
+          # 日志一长就翻不到——master 连红多次却说不清是哪个脚本红的。
+          failed=""
           for f in scripts/test_*.py; do
             echo "::group::$f"
-            if ! python "$f"; then failed=1; fi
+            if ! python "$f"; then failed="$failed $f"; fi
             echo "::endgroup::"
           done
-          exit $failed
+          if [ -n "$failed" ]; then
+            echo "::error::以下测试脚本失败：$failed"
+            exit 1
+          fi
 
       - name: Node 单测（无浏览器 / 无模型依赖）
         run: npm test
