@@ -101,8 +101,13 @@ async def main_async() -> int:
 
         # 预热：首次 to_thread 会现建线程池，首次检索会建 TF-IDF 索引。
         # 这两笔都是**一次性**成本，不该算进「每轮阻塞」。
+        # 线程池是按事件循环建的：asyncio.run 退出会 shutdown 默认执行器，
+        # 所以每个 asyncio.run 段落前都要重新预热一次，否则首次 to_thread
+        # 的建池成本（实测约 3.5ms）会落进被测间隙，负载下叠加调度抖动
+        # 就把 10ms 阈值打穿（2026-10-27 实测 11.93ms 假红）。
         manager.retriever.build_context(query, mark_used=False)
         await orchestrator._turn_context_async(query, "warm", [])
+        await asyncio.to_thread(lambda: None)
 
         print("[1] 同步调用（改动前 stream_respond 的做法）会卡住循环")
         def run_sync():

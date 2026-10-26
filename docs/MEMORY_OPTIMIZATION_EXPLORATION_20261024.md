@@ -102,7 +102,7 @@
 1. `orchestrator.py:648` 改为 `await asyncio.to_thread(self._turn_context, ...)`，保留同步版供文本通道与测试；已核对 `_turn_context` 体只涉 SQLite、context_broker、limit_context、guard_for 与 JSONL trace，不接触 loop 绑定对象，可安全跨线程。
 2. 同段 `store_recent`/`capture_write_epoch`/`store_message` 并入同一次 to_thread 批次，批次内严格保持原序：`capture_write_epoch` 先于 `store_message` 是异步抽取防硬删护栏语义，`mark_used` 必须晚于 `store_message`。
 3. 计时测试驱动 `stream_respond` 真实入口、spy `_turn_context` 断言其执行线程非事件循环线程——不得直接调 `_turn_context`，否则删掉 to_thread 包装测试照样绿；并补 `_turn_context` 抛异常仍向上传播的回归。
-4. 评估专用单线程 executor，避免与 ASR 的 `anyio.to_thread` 争抢默认线程池。
+4. 评估专用单线程 executor，避免与 ASR 争抢默认线程池（2026-10-27 核：ASR 已由 `anyio.to_thread` 改为 `asyncio.to_thread`，commit `cb5646d`；anyio 首次调用有约 29ms 循环侧设置成本，asyncio 首调约 3.5ms，争抢判断对两者都成立）。
 5. 验收用 `scripts/bench_voice_loop.py` 指标 A/B/C 出新 `LATENCY_BASELINE`（写 HEAD+日期锚），并明确 mock 口径约六成首字是桩节奏。
 6. `limit_context` 以 `_render_turn_context` 当测量回调导致的每轮重复同步读库另立单，本轮不动。
 
@@ -158,7 +158,7 @@
 - **Role 0**：MEM-OPT-04 的 `/api/memories` 响应结构未在 PROTOCOL.md 登记，加字段是否算新增对外字段需口径确认；任何外露先 `[PROTOCOL_REQUEST]`。
 - **Role 0（如坚持升版）**：MEM-OPT-04 schema v4→v5 与迁移回滚策略；仓库惯例是加列不升 SCHEMA_VERSION。
 - **MEM-OPT-01 测量缺口**：lessons_for/difflib 每轮耗时无实测；"库锁冻结全局事件循环"是推理非实测；跨线程安全只有代码走查无并发回归；验收数字必须是带 HEAD+日期锚的新基线。
-- **MEM-OPT-01 工程风险**：ASR 已占用默认线程池（`anyio.to_thread`），并发多轮装配可能排队在其后。
+- **MEM-OPT-01 工程风险**：ASR 已占用默认线程池（`asyncio.to_thread`，2026-10-27 由 anyio 切换，commit `cb5646d`），并发多轮装配可能排队在其后。
 - **MEM-OPT-03 校验器风险**：静态门必须 ast 而非正则，且须对现有 12+ 调用点实测全绿再纳入黄金命令，否则第一天假红。
 - **MEM-OPT-05 触发源与语义风险**：`_proactive_check` 由客户端事件驱动、无服务端定时器，关浏览器即无触发；aging-only 判据对长会话的误判等价性无文档。
 - **mock 口径限制**：约六成首字延迟是桩节奏，所有延迟收益声明都受此限制；live 评测需 LLM_API_KEY 用 `--live` 手动跑，本轮未跑，不得把离线重放表述为真实模型成绩。

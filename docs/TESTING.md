@@ -10,6 +10,7 @@
 
 ```bash
 .\.venv\Scripts\python.exe scripts\check_protocol.py   # 协议漂移 + REST 接缝，必须 PASS
+.\.venv\Scripts\python.exe scripts\check_memory_contract.py  # 记忆装配接缝静态契约门（ast；build_context/context_with_status 不得单目标赋值、元数不得漂移），必须 PASS
 .\.venv\Scripts\python.exe scripts\test_core.py        # 基线 40 passed / 0 failed，零回归
 .\.venv\Scripts\python.exe scripts\run_evals.py        # 回归评测离线层，失败即非零退出码
 ```
@@ -33,6 +34,35 @@
 
 改动 `web/` 前端文件后必须杀掉旧服务进程再重启，否则 `StaticFiles` 缓存的目录
 列表会让新增前端文件持续 404，浏览器回归会假失败。
+
+### 环境与机制门禁（2026-10-27 起，全部 ALWAYS_REQUIRED）
+
+2026-10-25 事故的形状是「门禁全绿但 `.venv` 缺整个语音栈」——离线门禁把
+ASR/TTS mock 掉，环境残缺它们看不见。此后新增的门禁把「解释器完整」
+「tmp 卫生」「lessons 扫描有界」变成断言，均随 `run_gates` 全跑：
+
+```bash
+.\.venv\Scripts\python.exe scripts\check_venv_lock.py      # 跑门禁的解释器与 uv.lock 一致（关键子集缺失/不符即红，全集漂移只报数）
+.\.venv\Scripts\python.exe scripts\tmp_sweep.py --dry-run --ceiling scripts\tmp_ceiling.txt  # tmp/ 只增不减棘轮（超上限即红）
+.\.venv\Scripts\python.exe scripts\test_lessons_cap.py     # #59：lessons 扫描边界来自真实行数（COUNT），超 1000 条不老不退役
+```
+
+`venv_lock` 与 `tmp_sweep` 是**本机环境门禁**：CI 用 pip + requirements-ci.txt
+（非 uv.lock）且新检出无 tmp/，所以 CI 不跑它们属合理；本地 `run_gates.py`
+全跑时二者在 ALWAYS_REQUIRED，跳过即失败。
+
+### 记忆检索等价与快环行为门禁（#31，2026-10-26 起）
+
+```bash
+.\.venv\Scripts\python.exe scripts\test_memory_ranking_equivalence.py  # 两阶段检索与「全表建对象再排序」逐条等价（ALWAYS_REQUIRED）
+.\.venv\Scripts\python.exe scripts\test_memory_fastloop.py             # 检索不阻塞事件循环（sleep(0) 心跳行为门禁）
+```
+
+`memory_ranking` 是确定性等价比对，纯逻辑、`:memory:`、无服务依赖，已入
+ALWAYS_REQUIRED。`memory_fastloop` 的判据是墙钟停顿（心跳 + 10ms 阈值），
+重载机器上有假红风险（2026-10-27 实测 11.93ms，线程池预热后稳定），因此
+随全套回归常规跑但不做「跳过即失败」的硬门；真值以 code review 与
+`docs/LATENCY_BASELINE.md` 的实测为准，不以某一刻的机器负载为准。
 
 ### 生产库哨兵（默认已开，2026-10-25 起）
 
@@ -101,11 +131,19 @@
 
 `scripts/evals_report.py` 读 `evals/results/` 的运行快照，出通过率表（**平均通过率**与**全过概率 pass^k** 分列）、与上次快照的配对差异、`completion_tokens` 成本。它属于**报告层**：只读快照、不删不轮转、不计入任何退出码；「报告跑得完」由 `run_gates` 的 `evals_report` 门禁断言。空目录 / 单快照 / 快照损坏都是 exit 0 的正常态，输出不得出现行首 `SKIP`（否则会被判为跳过）。成本口径是评测进程口径，与生产 usage 记账是两套，暂不合并。
 
+### 评测健康度层（2026-10-26）
+
+`scripts/evals_health.py` 横向扫 `evals/results/` 的**全史**快照（报告层只比对末两份），回答三个报告层不回答的问题：offline 层是否还确定（近期窗口内失效即非确定性 bug）、live 用例是一直抖还是最近退化（每条通过率 + 失效日期分布）、快照数据本身的质量（损坏 / 缺字段 / xfail 占比 / 与 `evals/cases/` 的用例差集）。近期窗口 `RECENT_WINDOW_DAYS=7`（按自然日不按份数：抗单日快照突发，并把建制日的历史欠账排除在门外，只进报告不判红）。
+
+退出码语义：**仅当近期窗口内 offline 用例失效才 exit 1**；live 抖动、历史欠账、数据质量提示、空目录、快照全损坏一律 exit 0，只在输出里标注。`xfail` 用例照常跑但不计入失败（`run_evals.py` 的口径），因此也不进通过率与门禁判定，只进占比统计。**当前状态（2026-10-27 核）**：`scripts/evals_health.py` 尚未落盘，`run_gates` 中也无 `evals_health` 门禁——本节是计划口径，落地前以 `run_gates` 的 `GATES` 名单为准；落地时脚本、门禁登记、`ALWAYS_REQUIRED` 三处必须同时进。与报告层一样只读快照、不删不轮转、输出不得出现行首 `SKIP`（否则会被判为跳过）。
+
 ## V3 内阁总管（全员适用，2026-10-15 起）
 
 ```bash
 .\.venv\Scripts\python.exe scripts\test_executive_v3.py         # 督办台账 / 观测网关 / 自进化初审 / 台前意图 + ui_nav 领航载荷
 .\.venv\Scripts\python.exe scripts\test_agent_adapter_ext.py    # Worker 适配器可插拔（Mock 适配器跑通全程）
+.\.venv\Scripts\python.exe scripts\test_verify.py               # server/verify 三种确定性 check 正反例 + acceptance 桥接三态渲染（M2）
+.\.venv\Scripts\python.exe scripts\test_stalled_running.py      # M5 缺口复现：重启收口机制通路 + 会话内僵单无人收（第二段钉现状，主体落地后照 docstring 口径翻转）
 .\.venv\Scripts\python.exe scripts\test_codex_worker_shim.py   # Codex shim 五种事件 + 真实 artifact ref（假 Codex，不联网）
 node web\executive-state.test.mjs                               # 心流防打扰纯逻辑（零 DOM）
 node web\ui_nav.test.mjs                                         # 界面自动领航（ui_nav）纯逻辑 + 心流护栏（零 DOM，无服务依赖）
@@ -228,6 +266,12 @@ node --experimental-strip-types reference/24-child-tasks.ts   # 官方示例：f
 
 ```bash
 .\.venv\Scripts\python.exe scripts\backup_local_databases.py
+```
+
+人可审计的记忆快照（只读投影，SQLite 仍是唯一真相源；`--out` 省略则打屏，`--subject user` 只导一个 subject）：
+
+```bash
+.\.venv\Scripts\python.exe scripts\export_memory_snapshot.py --out tmp\memory-snapshot.md
 ```
 
 ## Role 2（长语音 / 微句流 / 演出编排）

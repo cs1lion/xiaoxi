@@ -378,11 +378,17 @@ GATES: dict[str, dict[str, object]] = {
     "memory_ranking": {
         # #31：两阶段检索必须与「全表建对象再排序」逐条等价。
         # 用改动前的实现当对照器；投影漏一列、打平次序变化都会红。
+        # ALWAYS_REQUIRED：纯逻辑、:memory:、无服务依赖，确定性等价比对。
         "cmd": [str(PY), "scripts/test_memory_ranking_equivalence.py"],
         "skip_regex": r"^\s*SKIP",
     },
     "memory_fastloop": {
         # #31：记忆检索不得阻塞事件循环（量的是行为，不是有没有 to_thread）。
+        # 刻意不进 ALWAYS_REQUIRED：判据是墙钟停顿（sleep(0) 心跳 + 10ms
+        # 阈值），重载机器上有假红风险（2026-10-27 实测 11.93ms；线程池预热
+        # 后连跑 5 次全绿）。它随全套回归常规跑，但不做「跳过即失败」的
+        # 硬门；真值以 code review 与 LATENCY_BASELINE 的实测为准，不以
+        # 某一刻的机器负载为准。
         "cmd": [str(PY), "scripts/test_memory_fastloop.py"],
         "skip_regex": r"^\s*SKIP",
     },
@@ -455,7 +461,7 @@ ALWAYS_REQUIRED = ("protocol", "core", "scheduler_health", "budget_scope", "back
                    "thread_conversation", "self_evolution", "agent_loop", "llm_client",
                    "self_evolution_send", "config_hot", "config_hot_consumers",
                    "evolution_quality_report", "evals_report", "lessons_cap", "venv_lock",
-                   "tmp_sweep",
+                   "tmp_sweep", "memory_ranking",
                    "durable_adapter", "durable_supervisor", "durable_takeover",
                    "durable_recovery", "durable_revive", "durable_app_wiring",
                    "durable_reconcile", "durable_soak", "durable_storage", "durable_compaction",
