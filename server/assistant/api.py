@@ -316,7 +316,12 @@ async def scheduler(service, state: SchedulerState | None = None, *,
         while True:
             current.attempt()
             try:
-                service.store.scan_due()
+                # scan_due 是一个 BEGIN IMMEDIATE 写事务：同步执行它的那几毫秒
+                # 里事件循环是停的，所有连接一起冻。卸载到工作线程，与 #31 检索
+                # 卸载、executive_route 台账读卸载同一目的。worker 里抛的异常
+                # 原样在 await 处重抛，failure/backoff 语义不变；取消只断 await，
+                # 线程跑完（at-least-once，靠 scan_due 的 occurrence_key 幂等）。
+                await asyncio.to_thread(service.store.scan_due)
             except asyncio.CancelledError:
                 raise
             except Exception as exc:

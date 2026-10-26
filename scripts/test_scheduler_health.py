@@ -112,10 +112,85 @@ def snapshot_contract() -> None:
           snapshot["consecutive_failures"] == 0 and snapshot["scan_count"] == 1)
 
 
+async def scan_due_does_not_block_the_loop() -> None:
+    """调度器的 scan_due 写事务不得卡住事件循环。
+
+    判据是行为，不是「代码里有没有 to_thread」：给 scan_due 打 40ms 延迟桩，
+    模拟最坏形状的写事务（持锁加慢盘），心跳协程用 sleep(0) 打点（Windows
+    15.6ms 定时器精度会盖住被测对象），量调度期间循环还能不能跑。同步对照
+    证明这个测量器看得见阻塞。
+    """
+    import time
+
+    state = SchedulerState()
+    service = FakeService()
+    calls = {"n": 0}
+
+    def slow_scan():
+        calls["n"] += 1
+        time.sleep(0.04)
+        return []
+
+    service.store.scan_due = slow_scan
+
+    gaps: list[float] = []
+    stop = asyncio.Event()
+
+    async def heartbeat():
+        last = time.perf_counter()
+        while not stop.is_set():
+            await asyncio.sleep(0)
+            now = time.perf_counter()
+            gaps.append((now - last) * 1000)
+            last = now
+
+    beat = asyncio.create_task(heartbeat())
+    await asyncio.sleep(0)
+    task = asyncio.create_task(
+        scheduler(service, state, base_delay=0.01, max_delay=0.02))
+    try:
+        ran = await wait_for(lambda: calls["n"] >= 2, timeout=2.0)
+        check("slow scan_due 被调用过（测试不是空转）", ran, f"calls={calls['n']}")
+        check("调度器状态健康（卸载不影响存活与降级判据）",
+              state.alive and not state.snapshot()["degraded"], str(state.snapshot()))
+        worst = max(gaps) if gaps else 0.0
+        check("scan_due 不再阻塞事件循环（最长停顿 < 10 ms）", worst < 10.0,
+              f"最长停顿 {worst:.2f} ms")
+    finally:
+        stop.set()
+        await beat
+        task.cancel()
+        try:
+            await task
+        except asyncio.CancelledError:
+            pass
+
+    # 对照：同样的 40ms 同步 scan_due 直接跑在循环上，心跳必须被卡住。
+    gaps.clear()
+    stop2 = asyncio.Event()
+
+    async def heartbeat2():
+        last = time.perf_counter()
+        while not stop2.is_set():
+            await asyncio.sleep(0)
+            now = time.perf_counter()
+            gaps.append((now - last) * 1000)
+            last = now
+
+    beat2 = asyncio.create_task(heartbeat2())
+    await asyncio.sleep(0)
+    slow_scan()
+    stop2.set()
+    await beat2
+    check("对照：同步跑法确实卡住循环（证明测量器看得见）", max(gaps) > 20,
+          f"最长停顿仅 {max(gaps):.2f} ms")
+
+
 def main() -> int:
     print("scheduler health")
     asyncio.run(transient_failure_then_success())
     asyncio.run(persistent_failure_is_visible())
+    asyncio.run(scan_due_does_not_block_the_loop())
     snapshot_contract()
     print(f"\n=== {passed} passed, {len(failed)} failed ===")
     for item in failed:
