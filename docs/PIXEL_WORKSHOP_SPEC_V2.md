@@ -381,7 +381,7 @@ budget: { max_retries: 3, max_step_retries: 2, max_wall_s: 900 }
 | --- | --- | --- |
 | R1 | **已实现** | `config/contract.yaml` 的 `lint.allowed_commands` + `lint.py:_cmd_allowed`，黑名单保留作第二道（`9ffc099`） |
 | R2 | **已实现** | `SEMANTIC_ONLY_ARTIFACT_KINDS = {report_md, message, chart}`（`adae2ba`） |
-| R3 | **未实现** | 语义已由本节定死（乘 procedural 经验、不乘 stated 事实）；实现要接 §5.6 的 `MEMORY_UPDATE`，**需 `[PROTOCOL_REQUEST]`** |
+| R3 | **未实现** | 语义已由本节定死（乘 procedural 经验、不乘 stated 事实）。协议门已过，`MEMORY_UPDATE` 已入 `docs/PROTOCOL.md` §25 且有发送点，但 `promotion_weight` 字段仍无消费方 |
 
 下表是三处升级的原始理由，保留备用：
 

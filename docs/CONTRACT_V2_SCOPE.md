@@ -19,9 +19,10 @@
 >   黑名单保留作第二道。测试在 `test_contract.py` 的 `[K]` 节。
 > - **R2 纯语义任务判定**已做：`SEMANTIC_ONLY_ARTIFACT_KINDS = {report_md, message, chart}`。
 >   原先「只要有 human 标准就放行」是真漏洞——写一条 human 就能绕过 deterministic，已修。
-> - **R3 `promotion_weight` 语义**未做：它要接 §5.6 的 `MEMORY_UPDATE` 事件，而那是新增 WS 事件，
->   **必须先过 `[PROTOCOL_REQUEST]`**。语义本身由 §3.8 定死（乘 procedural 经验，不乘 stated 事实），
->   实现等协议放行。
+> - **R3 `promotion_weight` 语义**仍未做。协议门已过，`MEMORY_UPDATE` 2026-10-23 经 Role 0 批准并入
+>   `docs/PROTOCOL.md` §25 事件表，发送点在 `server/broadcast/v2.py`，唯一写入出口
+>   `server/memory/manager.py` 已接。但 `promotion_weight` 字段本身仍无消费方，该乘在哪里还没实现。
+>   语义由 §3.8 定死，乘 procedural 经验，不乘 stated 事实。动记忆晋升路径属用户红线，先报批。
 >
 > 另：契约层同日**接进派单路径**（`dispatcher.dispatch()` → `_contract_gaps()`），只读旁路、不拦派单。
 > 此前 `app.py` 对 `server/contract/` 是 0 处引用，252 条测试覆盖的是死代码。
