@@ -19,8 +19,33 @@ import unittest
 
 
 ROOT = Path(__file__).resolve().parents[1]
+
+
+def _guard_sqlite_path(path: str) -> None:
+    """桩件版的生产库哨兵（#39）。
+
+    server/memory/store.py 从 ..config 同时 import 了 settings 与
+    guard_sqlite_path；本文件把 config 整个换成桩件，所以两个都得给——
+    少给一个就是 ImportError（CI 上红过一次）。
+
+    这里比真实现**更严**：真的那个看 TEST_SENTINEL 环境变量，本文件不看，
+    仓库 data/ 下的路径一律拒绝。理由是这份测试全程只用 :memory: 与
+    tempfile，真指到 data/ 就是回归，条件放行不如直接抛。
+    """
+    if not path or path == ":memory:":
+        return
+    try:
+        target = Path(path).resolve()
+    except (OSError, ValueError):
+        return
+    if (ROOT / "data").resolve() in target.parents:
+        raise RuntimeError(
+            f"本测试的数据库路径指向真实数据目录：{target}")
+
+
 CONFIG = ModuleType("memory_store_contract.config")
 CONFIG.settings = SimpleNamespace(db_path=":memory:")
+CONFIG.guard_sqlite_path = _guard_sqlite_path
 sys.modules[CONFIG.__name__] = CONFIG
 SPEC = importlib.util.spec_from_file_location(
     "memory_store_contract.memory.store", ROOT / "server/memory/store.py")
