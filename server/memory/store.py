@@ -1081,8 +1081,17 @@ class MemoryStore:
                                 (status, stamp, int(lesson_id)))
         return cursor.rowcount > 0
 
+    def count_lessons(self, *, status: str | None = "active") -> int:
+        """COUNT ignores LIMIT, so this is the only honest bound for a scan."""
+        sql = "SELECT COUNT(*) FROM lessons"
+        params: list[Any] = []
+        if status is not None:
+            sql += " WHERE status = ?"
+            params.append(status)
+        return int(self._query(sql, params)[0][0])
+
     def count_active_lessons(self) -> int:
-        return int(self._query("SELECT COUNT(*) FROM lessons WHERE status = 'active'")[0][0])
+        return self.count_lessons(status="active")
 
     def set_status(self, memory_id: int, status: str) -> None:
         if status not in STATUSES:

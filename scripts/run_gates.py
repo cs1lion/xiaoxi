@@ -416,6 +416,12 @@ GATES: dict[str, dict[str, object]] = {
         "cmd": [str(PY), "scripts/measure_intent_corpus.py"],
         "skip_regex": r"^\s*SKIP",
     },
+    "lessons_cap": {
+        # #59：lessons 扫描边界来自真实行数（COUNT），不是写死的 1000。
+        # active 超过 1000 条时，最老那批必须仍被 prune 看见、被检索命中。
+        "cmd": [str(PY), "scripts/test_lessons_cap.py"],
+        "skip_regex": r"^\s*SKIP",
+    },
     "evals_report": {
         # 评测报告层（docs/EVAL_MECHANISM_PLAN.md）：读 evals/results/ 快照出
         # 通过率（平均与全过概率分列）、与上次的配对差异、token 成本。
@@ -431,7 +437,7 @@ ALWAYS_REQUIRED = ("protocol", "core", "scheduler_health", "budget_scope", "back
                    "codex_shim", "claude_shim", "gateway", "task_planning", "cross_day",
                    "thread_conversation", "self_evolution", "agent_loop", "llm_client",
                    "self_evolution_send", "config_hot", "config_hot_consumers",
-                   "evolution_quality_report", "evals_report",
+                   "evolution_quality_report", "evals_report", "lessons_cap",
                    "durable_adapter", "durable_supervisor", "durable_takeover",
                    "durable_recovery", "durable_revive", "durable_app_wiring",
                    "durable_reconcile", "durable_soak", "durable_storage", "durable_compaction",

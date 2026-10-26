@@ -140,11 +140,32 @@ def validate_lesson(raw: Any, *, material_refs: set[str] | None = None,
             "scope": scope, "source_refs": refs}
 
 
+def _scan_limit(store: "MemoryStore") -> int:
+    """Size an active-lessons scan from the true row count, never a magic number.
+
+    SQL LIMIT silently drops the oldest rows. Prune enforces a cap and
+    retrieval matches triggers, so both must see every active candidate; a
+    hardcoded limit lets the oldest lessons escape retirement and retrieval
+    with no error anywhere (#59). COUNT ignores LIMIT, so it is the only
+    honest bound.
+    """
+    return max(1, store.count_lessons())
+
+
 def find_duplicate(store: "MemoryStore", proposal: dict[str, Any],
                    threshold: float) -> dict[str, Any] | None:
     combined = f"{proposal['trigger']} {proposal['action']}"
     best: dict[str, Any] | None = None
     best_score = threshold
+    # Dedupe scans a deliberately bounded window over recent lessons (any
+    # status). The #59 landmine is about *active* lessons escaping prune and
+    # retrieval, fixed at the active-listing sites; a count-derived bound here
+    # would scan an ever-growing retired set on every reflection cycle.
+    # Known gap, accepted: past 1000 total rows an old active lesson can also
+    # fall out of the window, so a near-duplicate proposal creates a new row
+    # instead of merging. The consequence is bounded (prune's score tie-break
+    # retires the older row); status="active" plus a count-derived bound is
+    # the cleaner fix if this ever matters in practice.
     for lesson in store.list_lessons(status=None, limit=1000):
         score = similarity(combined, f"{lesson.get('trigger', '')} {lesson.get('action', '')}")
         if score >= best_score:
@@ -212,13 +233,13 @@ def prune(store: "MemoryStore", *, cfg: dict[str, Any] | None = None,
     stamp = time.time() if now is None else float(now)
     threshold = int(_number(cfg.get("retire_harmful"), 2, 1, 100))
     retired = 0
-    active = store.list_lessons(status="active", limit=1000)
+    active = store.list_lessons(status="active", limit=_scan_limit(store))
     for lesson in active:
         harmful, helpful = int(lesson.get("harmful") or 0), int(lesson.get("helpful") or 0)
         if harmful >= threshold and harmful > helpful:
             if store.set_lesson_status(lesson["id"], "retired", now=stamp):
                 retired += 1
-    active = store.list_lessons(status="active", limit=1000)
+    active = store.list_lessons(status="active", limit=_scan_limit(store))
     cap = int(_number(cfg.get("max_active"), 24, 1, 1000))
     if len(active) > cap:
         ordered = sorted(active, key=lambda item: (lesson_score(item),
@@ -249,7 +270,7 @@ def retrieve_lessons(store: "MemoryStore", query: str, *,
     limit = int(_number(cfg.get("max_inject"), 3, 0, 20))
     hits: list[tuple[float, dict[str, Any]]] = []
     try:
-        lessons = store.list_lessons(status="active", limit=1000)
+        lessons = store.list_lessons(status="active", limit=_scan_limit(store))
     except Exception:  # A read failure must never take down the dialogue path.
         return []
     for lesson in lessons:
