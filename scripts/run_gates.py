@@ -422,6 +422,14 @@ GATES: dict[str, dict[str, object]] = {
         "cmd": [str(PY), "scripts/test_lessons_cap.py"],
         "skip_regex": r"^\s*SKIP",
     },
+    "venv_lock": {
+        # 跑门禁的解释器与 uv.lock 一致：2026-10-25 事故的形状是「门禁全绿，
+        # 但 .venv 缺整个语音栈」——离线门禁 mock 掉 ASR/TTS，环境残缺它们
+        # 看不见。关键子集（语音栈 + == 钉死项）缺失/不符即 FAIL，全集漂移
+        # 只报数。纯离线、亚秒级、自带失败路径自检，ALWAYS_REQUIRED。
+        "cmd": [str(PY), "scripts/check_venv_lock.py"],
+        "skip_regex": r"^\s*SKIP",
+    },
     "evals_report": {
         # 评测报告层（docs/EVAL_MECHANISM_PLAN.md）：读 evals/results/ 快照出
         # 通过率（平均与全过概率分列）、与上次的配对差异、token 成本。
@@ -437,7 +445,7 @@ ALWAYS_REQUIRED = ("protocol", "core", "scheduler_health", "budget_scope", "back
                    "codex_shim", "claude_shim", "gateway", "task_planning", "cross_day",
                    "thread_conversation", "self_evolution", "agent_loop", "llm_client",
                    "self_evolution_send", "config_hot", "config_hot_consumers",
-                   "evolution_quality_report", "evals_report", "lessons_cap",
+                   "evolution_quality_report", "evals_report", "lessons_cap", "venv_lock",
                    "durable_adapter", "durable_supervisor", "durable_takeover",
                    "durable_recovery", "durable_revive", "durable_app_wiring",
                    "durable_reconcile", "durable_soak", "durable_storage", "durable_compaction",
