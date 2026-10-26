@@ -79,6 +79,7 @@ async def fastloop_nonblocking(case, state):
     """
     import asyncio
     import copy
+    import shutil
     import uuid
     from pathlib import Path
 
@@ -144,8 +145,14 @@ async def fastloop_nonblocking(case, state):
         await slow
         return result
 
-    result = await scenario()
-    service.close()
+    try:
+        result = await scenario()
+    finally:
+        service.close()
+        # 沙盘随用随清：此前每次离线评测都往 tmp/ 留一个 eval-fastloop-*
+        # 目录，只增不减（AGENTS.md 待办第 3 条）。rmtree 必须在
+        # service.close() 之后，SQLite 句柄先释放。
+        shutil.rmtree(scratch, ignore_errors=True)
 
     problems = []
     if "worker_start" not in events or "worker_done" not in events:

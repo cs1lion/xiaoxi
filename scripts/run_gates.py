@@ -430,6 +430,15 @@ GATES: dict[str, dict[str, object]] = {
         "cmd": [str(PY), "scripts/check_venv_lock.py"],
         "skip_regex": r"^\s*SKIP",
     },
+    "tmp_sweep": {
+        # tmp/ 只增不减的计数棘轮（AGENTS.md 待办第 3 条）：dry-run 跑，
+        # 条目数超 scripts/tmp_ceiling.txt 即红。只扫 tmp/（.gitignore），
+        # 删不到仓库文件也不碰 data/。源头修复在 evals/checks.py 的沙盘
+        # 随用随清；这是兜底。
+        "cmd": [str(PY), "scripts/tmp_sweep.py", "--dry-run",
+                "--ceiling", "scripts/tmp_ceiling.txt"],
+        "skip_regex": r"^\s*SKIP",
+    },
     "evals_report": {
         # 评测报告层（docs/EVAL_MECHANISM_PLAN.md）：读 evals/results/ 快照出
         # 通过率（平均与全过概率分列）、与上次的配对差异、token 成本。
@@ -446,6 +455,7 @@ ALWAYS_REQUIRED = ("protocol", "core", "scheduler_health", "budget_scope", "back
                    "thread_conversation", "self_evolution", "agent_loop", "llm_client",
                    "self_evolution_send", "config_hot", "config_hot_consumers",
                    "evolution_quality_report", "evals_report", "lessons_cap", "venv_lock",
+                   "tmp_sweep",
                    "durable_adapter", "durable_supervisor", "durable_takeover",
                    "durable_recovery", "durable_revive", "durable_app_wiring",
                    "durable_reconcile", "durable_soak", "durable_storage", "durable_compaction",
