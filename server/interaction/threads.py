@@ -820,15 +820,20 @@ class CommissionStore:
                 params).fetchall()
         return [self._project(dict(row)) for row in rows]
 
-    def open_commissions(self, agent_id=None):
+    def open_commissions(self, agent_id=None, limit=MAX_LIST):
+        """在途单（未完成）。显式上界与 list_commissions 共用 MAX_LIST：无上界的
+        ORDER BY 会随台账增长线性变慢，且 BEGIN IMMEDIATE 下这段持锁读的时间
+        同步变长。个人助理的在途单量级远小于此界。"""
+        cap = max(1, min(int(limit), self.MAX_LIST))
         with self._transaction():
             if agent_id:
                 rows = self._db.execute(
                     "SELECT * FROM commissions WHERE agent_id=? AND status NOT IN ('done')"
-                    " ORDER BY updated_at DESC", (agent_id,)).fetchall()
+                    " ORDER BY updated_at DESC LIMIT ?", (agent_id, cap)).fetchall()
             else:
                 rows = self._db.execute(
-                    "SELECT * FROM commissions WHERE status NOT IN ('done') ORDER BY updated_at DESC").fetchall()
+                    "SELECT * FROM commissions WHERE status NOT IN ('done')"
+                    " ORDER BY updated_at DESC LIMIT ?", (cap,)).fetchall()
         return [self._project(dict(row)) for row in rows]
 
     def events(self, commission_id, limit=50):

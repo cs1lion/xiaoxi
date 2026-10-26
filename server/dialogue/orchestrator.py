@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import json
 import re
+import threading
 import time
 from dataclasses import dataclass, field
 from typing import Any, AsyncIterator
@@ -16,6 +17,11 @@ _MICRO_ACTIONS = ("glance_away", "tilt_head", "stretch", "fidget", "thoughtful",
 _SAMPLE_RECENT: dict[str, list[str]] = {}
 # 旧名指向同一个字典：既有回归清理的就是它，重命名不该让老测试炸。
 _TOUCH_RECENT = _SAMPLE_RECENT
+# 台词旋转状态是进程级共享的。executive_route 整段卸载到工作线程后
+# （app.py 调用点），两个并发轮次可能同 key 交错执行下面那三步非原子
+# 操作：同一句连说两遍，或 clear() 抹掉刚 append 的条目。锁只圈住
+# 字典操作，不圈读盘（见 stage_sample_line 内的注释）。
+_SAMPLE_LOCK = threading.Lock()
 
 
 def stage_sample_line(key: str) -> str:
@@ -37,12 +43,15 @@ def stage_sample_line(key: str) -> str:
     lines = [line.strip() for line in lines if isinstance(line, str) and line.strip()]
     if not lines:
         return ""
-    recent = _SAMPLE_RECENT.setdefault(key, [])
-    fresh = [line for line in lines if line not in recent] or lines
-    pick = fresh[0]
-    recent.append(pick)
-    if len(recent) >= len(lines):
-        recent.clear()
+    # 旋转状态三步（setdefault/append/clear）必须在锁内完成：整段卸载后
+    # 并发轮次会同 key 交错，GIL 只保证单操作原子，不保证这三步的先后。
+    with _SAMPLE_LOCK:
+        recent = _SAMPLE_RECENT.setdefault(key, [])
+        fresh = [line for line in lines if line not in recent] or lines
+        pick = fresh[0]
+        recent.append(pick)
+        if len(recent) >= len(lines):
+            recent.clear()
     return pick
 
 

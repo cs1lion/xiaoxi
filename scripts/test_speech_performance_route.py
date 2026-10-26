@@ -139,6 +139,74 @@ class SpeechPerformanceRouteTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(wire["performance"], audio["performance"])
         self.assertIn("turn_id", wire)
 
+    async def test_executive_route_ledger_read_does_not_block_the_loop(self):
+        """快环幸存项：台账读不得卡住事件循环（判据是行为，不是有没有 to_thread）。
+
+        给 executive_route 桩注入 40ms 同步延迟，模拟真实台账读+锁等待的最坏
+        形状；心跳协程用 sleep(0) 打点（Windows 15.6ms 定时器精度会盖住被测
+        对象，见 scripts/test_memory_fastloop.py 的教训）。改动前这段同步读
+        直接把轮次钉在循环上，改动后它跑在工作线程，心跳最大间隔应远小于
+        注入的延迟。对照：把同一个桩同步跑一遍，心跳必须被卡住，证明这个
+        测量器看得见阻塞。
+        """
+        async def stream(**kwargs):
+            yield {"type": "done", "text": "好", "emotion": "认真"}
+        delays = {"n": 0}
+
+        def slow_route(text, executive=None, memory_enabled=False):
+            delays["n"] += 1
+            time.sleep(0.04)
+            return None
+
+        self.env["orchestrator"] = SimpleNamespace(
+            stream_respond=stream, executive_route=slow_route)
+
+        gaps: list[float] = []
+        stop = asyncio.Event()
+
+        async def heartbeat():
+            last = time.perf_counter()
+            while not stop.is_set():
+                await asyncio.sleep(0)
+                now = time.perf_counter()
+                gaps.append((now - last) * 1000)
+                last = now
+
+        beat = asyncio.create_task(heartbeat())
+        await asyncio.sleep(0)
+        turn = await self.conn.begin("ledger-read")
+        started = time.perf_counter()
+        await self.env["_run_turn"](self.conn, "那单进度怎么样了", "voice", turn)
+        elapsed = (time.perf_counter() - started) * 1000
+        stop.set()
+        await beat
+        worst = max(gaps) if gaps else 0.0
+
+        self.assertEqual(delays["n"], 1, "桩没被调用，测试是空转")
+        self.assertGreater(elapsed, 30, f"轮次只花了 {elapsed:.2f} ms，延迟没生效")
+        self.assertLess(worst, 10.0,
+                        f"循环最长停顿 {worst:.2f} ms，台账读仍在阻塞事件循环")
+
+        # 对照：同样的 40ms 同步延迟直接跑在循环上，心跳必须被卡住。
+        gaps.clear()
+        stop2 = asyncio.Event()
+
+        async def heartbeat2():
+            last = time.perf_counter()
+            while not stop2.is_set():
+                await asyncio.sleep(0)
+                now = time.perf_counter()
+                gaps.append((now - last) * 1000)
+                last = now
+
+        beat2 = asyncio.create_task(heartbeat2())
+        await asyncio.sleep(0)
+        slow_route("对照", None, False)
+        stop2.set()
+        await beat2
+        self.assertGreater(max(gaps), 20,
+                           f"对照最长停顿仅 {max(gaps):.2f} ms，测量器可能没生效")
+
 
 if __name__ == "__main__":
     unittest.main()

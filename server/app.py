@@ -823,8 +823,12 @@ async def _run_turn(conn: Connection, text: str, mode: str, turn: VoiceTurn | No
             return
         # V3 台前快环：委托接单 / 进度追问 / API 战况 / 验收反馈。
         # 全部用配置样本或真实台账数据回答，不发第二次模型请求；慢环另起后台任务。
-        route = orchestrator.executive_route(text, executive,
-                                              memory_enabled=manager.enabled)
+        # 台账读卸载到工作线程：executive_route 是自足的同步路由决策（读台账加
+        # 纯逻辑，不碰 session_state 等共享可变状态），整段 to_thread 比拆参数
+        # 简单；同步方法与全部现有调用方（含测试桩）行为不变。与 #31 检索卸载
+        # 同一目的：快环内不得有阻塞调用。
+        route = await asyncio.to_thread(orchestrator.executive_route, text, executive,
+                                        memory_enabled=manager.enabled)
         # B2（#43）：正则把这句话判成委托后，用**并行预判**做二次确认。
         # 正则 85% / LLM 预判实测 20/20，两者的错法不重叠——所以让预判能否决
         # 正则，但不让预判单独建单（预判漏判时正则仍是唯一依据）。
