@@ -214,6 +214,52 @@ async def main_async() -> int:
             orchestrator._circadian_and_mood = original_mood
             orchestrator._mark_used = original_mark
 
+        print("[6] lessons_for 也不再阻塞事件循环（#59）")
+        # #59 的病灶：lessons_for 曾留在 _turn_context 里同步全量扫 active
+        # lessons。桩打在 manager.lessons_for 上——那是 _lessons_for 与内联
+        # 路径共同的真实调用点，同步/异步两条路都拦得到。
+        #
+        # 判据是**增量**，不是绝对阈值：`_turn_context` 收尾段本身就在循环
+        # 上跑（limit_context 的测量回调反复 JSON 序列化），它的耗时随语料
+        # 与机器负载波动（并发 session 跑门禁时实测到 67ms），绝对阈值会把
+        # 这份固有成本误判成本单回归。增量判据直接隔离变量：同一异步路径
+        # 「带 40ms 延迟」与「不带」的最长停顿差——延迟落 worker 则差接近
+        # 零，落循环则差约 40ms。同步对照仍保留，证明测量器看得见阻塞。
+        lessons_calls = {"n": 0}
+        original_lessons = manager.lessons_for
+
+        def slow_lessons(text):
+            lessons_calls["n"] += 1
+            time.sleep(0.04)
+            return original_lessons(text)
+
+        manager.lessons_for = slow_lessons
+        try:
+            ctrl2_elapsed, ctrl2_worst, _ = await _measure(
+                lambda: _run_sync(orchestrator, query))
+            print(f"       对照（同步路径）：耗时 {ctrl2_elapsed:6.2f} ms，"
+                  f"循环最长停顿 {ctrl2_worst:6.2f} ms")
+            check("对照路径里 lessons 延迟生效了（对照不是空转）",
+                  lessons_calls["n"] >= 1, f"lessons={lessons_calls['n']}")
+            check("注入延迟后同步路径确实卡住（证明测量器看得见）",
+                  ctrl2_worst > 20, f"最长停顿仅 {ctrl2_worst:.2f} ms")
+
+            base_elapsed, base_worst, _ = await _measure(
+                lambda: orchestrator._turn_context_async(query, "base", []))
+            lessons_calls["n"] = 0
+            slow_elapsed, slow_worst, _ = await _measure(
+                lambda: orchestrator._turn_context_async(query, "slow", []))
+            delta = slow_worst - base_worst
+            print(f"       异步路径：基线最长停顿 {base_worst:6.2f} ms；"
+                  f"带 40ms 延迟 {slow_worst:6.2f} ms；差 {delta:6.2f} ms")
+            check("异步路径里 lessons 卸载跑到了",
+                  lessons_calls["n"] >= 1, f"lessons={lessons_calls['n']}")
+            check("lessons 延迟不落循环（带/不带延迟的停顿差 < 15 ms）",
+                  delta < 15.0,
+                  f"差 {delta:.2f} ms（基线 {base_worst:.2f} / 带延迟 {slow_worst:.2f}）")
+        finally:
+            manager.lessons_for = original_lessons
+
         store._conn.close()
 
     print(f"\n=== {len(PASSED)} passed, {len(FAILED)} failed ===")

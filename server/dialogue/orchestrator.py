@@ -584,15 +584,25 @@ class Orchestrator:
         return block
 
     def _retrieve_and_mood(self, user_text: str):
-        """检索 + 昼夜心境，合并成一次线程外执行（见 `_turn_context_async`）。
+        """检索 + 昼夜心境 + lessons，合并成一次线程外执行（见 `_turn_context_async`）。
 
-        两者都是纯 store 读（心境衰减只在到期时写一行，幂等），合并不改变
+        三者都是纯 store 读（心境衰减只在到期时写一行，幂等），合并不改变
         语义，只省一次 `to_thread` 调度。`mark_used` 不并进来：它要等
         `limit_context` 算出本轮真正用到的 id，顺序不可颠倒。
         """
         block = self._retrieve_memory_block(user_text)
         circadian, mood = self._circadian_and_mood(enabled=True)
-        return block, (circadian, mood)
+        procedural = self._lessons_for(user_text)
+        return block, (circadian, mood), procedural
+
+    def _lessons_for(self, user_text: str) -> list:
+        """lessons 检索。单独成方法，为的是能并进线程外批次（#59）。
+
+        返回 [] 当 manager 未提供该方法（测试替身）；调用方负责 enabled 门控。
+        """
+        if callable(getattr(manager, 'lessons_for', None)):
+            return manager.lessons_for(user_text)
+        return []
 
     def _mark_used(self, used_ids: list[int], session_id: str,
                    used_lesson_ids: list[int]) -> None:
@@ -619,10 +629,13 @@ class Orchestrator:
         if not manager.enabled:
             block = ''
             circadian_mood = None
+            procedural = None
         else:
-            block, circadian_mood = await asyncio.to_thread(self._retrieve_and_mood, user_text)
+            block, circadian_mood, procedural = await asyncio.to_thread(
+                self._retrieve_and_mood, user_text)
         result = self._turn_context(user_text, session_id, recent, memory_block=block,
-                                    circadian_mood=circadian_mood, mark_used=False)
+                                    circadian_mood=circadian_mood, procedural=procedural,
+                                    mark_used=False)
         # 缺键宽容：返回字典的 used_lesson_ids 是本单元新增的，测试里的
         # legacy stub（test_aqi_blocks._fake_context）仍按旧四键契约构造，
         # 生产代码读缺键不该把一轮对话打翻。
@@ -636,6 +649,7 @@ class Orchestrator:
     def _turn_context(self, user_text: str, session_id: str, recent, *,
                       memory_block: str | None = None,
                       circadian_mood: tuple | None = None,
+                      procedural: list | None = None,
                       mark_used: bool = True) -> dict[str, Any]:
         from ..interaction.context_budget import limit_context
         enabled = manager.enabled
@@ -666,9 +680,12 @@ class Orchestrator:
         block = self._retrieve_memory_block(user_text) if memory_block is None else memory_block
         # Procedural memory: reusable "when X, do Y" lessons distilled by the
         # self-evolution cycle. Selected only by a matching trigger; never mixed
-        # into the user-fact memory block.
-        procedural = (manager.lessons_for(user_text)
-                      if enabled and callable(getattr(manager, 'lessons_for', None)) else [])
+        # into the user-fact memory block. async 路径已在线程里算好并以
+        # `procedural` 传入；直接同步调用仍然支持，供测试与同步场景使用。
+        procedural = (procedural if procedural is not None
+                      else (manager.lessons_for(user_text)
+                            if enabled and callable(getattr(manager, 'lessons_for', None))
+                            else []))
         session = self.session_state(session_id)
         # V2 §15：昼夜节律与心境惯性。**在这里算一次**，不放在 _render_turn_context 里
         # ——后者同时被 limit_context 当测量函数反复调用，那边只能读、不能写。
