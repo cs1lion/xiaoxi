@@ -24,6 +24,32 @@ _TOUCH_RECENT = _SAMPLE_RECENT
 _SAMPLE_LOCK = threading.Lock()
 
 
+_SAMPLE_DATA: dict[str, Any] | None = None
+_SAMPLE_DATA_KEY: tuple[str, int] | None = None
+
+
+def _sample_lines(key: str) -> list[str]:
+    """读 config/response_examples.json 的 stage_samples[key]，按 (path, mtime) 缓存。
+
+    这个文件不在 config_hot 的 MANAGED 里（非 YAML、无覆盖通道，见
+    config_hot.py:38-40），但运行期手改仍要生效：缓存键带 mtime_ns，
+    文件一变即重读。解析结果是进程内只读数据，并发读同一份安全；
+    两次未命中同时读盘是无害的幂等竞争，不加锁。
+    """
+    global _SAMPLE_DATA, _SAMPLE_DATA_KEY
+    try:
+        from ..config import ROOT
+        path = ROOT / "config" / "response_examples.json"
+        cache_key = (str(path), path.stat().st_mtime_ns)
+        if _SAMPLE_DATA_KEY != cache_key:
+            _SAMPLE_DATA = json.loads(path.read_text(encoding="utf-8"))
+            _SAMPLE_DATA_KEY = cache_key
+        raw = ((_SAMPLE_DATA or {}).get("stage_samples") or {}).get(key) or []
+    except Exception:
+        return []
+    return [line.strip() for line in raw if isinstance(line, str) and line.strip()]
+
+
 def stage_sample_line(key: str) -> str:
     """Pick a real persona sample from config/response_examples.json stage_samples.
 
@@ -33,14 +59,7 @@ def stage_sample_line(key: str) -> str:
     """
     if not isinstance(key, str) or not key:
         return ""
-    try:
-        import json
-        from ..config import ROOT
-        data = json.loads((ROOT / "config" / "response_examples.json").read_text(encoding="utf-8"))
-        lines = ((data.get("stage_samples") or {}).get(key) or [])
-    except Exception:
-        return ""
-    lines = [line.strip() for line in lines if isinstance(line, str) and line.strip()]
+    lines = _sample_lines(key)
     if not lines:
         return ""
     # 旋转状态三步（setdefault/append/clear）必须在锁内完成：整段卸载后

@@ -795,6 +795,65 @@ def test_front_samples_and_report() -> None:
     check("瓶颈分析提熔断", "鬼打墙" in report)
 
 
+def test_sample_cache_keyed_on_mtime() -> None:
+    """stage_sample_line 的样本文件按 (path, mtime) 缓存，不再每次调用读盘。
+
+    touch_head/touch_face 与 idle_proactive 都在快环上调它，每次重读并解析
+    7.7KB JSON 是无谓的同步 IO。判据是行为：数 read_text 次数——命中缓存
+    时零次；文件 mtime 变化（运行期手改）后必须重读，否则热改失效。
+    旋转去重（#31 之后加的锁）不能因缓存退步。
+    """
+    print("[sample cache]")
+    import pathlib
+    import shutil
+    from unittest.mock import patch
+
+    from server.dialogue import orchestrator as O
+    real = ROOT / "config" / "response_examples.json"
+    key = "commission_accept"
+    with tempfile.TemporaryDirectory() as td:
+        holder = Path(td)
+        # 副本必须复刻真实布局 config/response_examples.json：被测代码按
+        # ROOT/config/response_examples.json 取路径，平铺在根目录会静默
+        # 走 except 分支返回空（表现为 read_text 0 次、样本空）。
+        (holder / "config").mkdir()
+        shutil.copy(real, holder / "config" / "response_examples.json")
+        # 清模块级缓存：它在进程内跨用例存活，不清则计数从 0 起不了步。
+        # try/finally 包住复位：with 块内任何一步抛异常（os.utime、copy），
+        # 缓存键不能留在已删除的临时路径上，否则同进程后续用例全拿空样本，
+        # 一个异常被放大成一串互不相干的红。
+        O._SAMPLE_DATA, O._SAMPLE_DATA_KEY = None, None
+        original = pathlib.Path.read_text
+        reads = {"n": 0}
+
+        def counting(self, *args, **kwargs):
+            reads["n"] += 1
+            return original(self, *args, **kwargs)
+
+        try:
+            with patch.object(pathlib.Path, "read_text", counting), \
+                    patch("server.config.ROOT", holder):
+                first = O.stage_sample_line(key)
+                check("首次调用读过盘", reads["n"] == 1, f"read_text {reads['n']} 次")
+                check("样本非空", bool(first))
+                seen = {first}
+                for _ in range(20):
+                    seen.add(O.stage_sample_line(key))
+                check("重复调用不再读盘", reads["n"] == 1, f"read_text {reads['n']} 次")
+                check("旋转去重未退步", len(seen) > 1, f"20 次只拿到 {len(seen)} 句")
+                # mtime 触发必须只碰时间戳：若用 write_text(read_text()) 改写，
+                # 测试自己那一次 read_text 也会被计数补丁收进去，断言的是错数。
+                target = holder / "config" / "response_examples.json"
+                before = reads["n"]
+                os.utime(target, None)
+                O.stage_sample_line(key)
+                check("文件 mtime 变化后重读", reads["n"] == before + 1,
+                      f"read_text {before} -> {reads['n']}")
+        finally:
+            # 还原真实缓存，避免污染同进程后续用例（异常路径也要还原）。
+            O._SAMPLE_DATA, O._SAMPLE_DATA_KEY = None, None
+
+
 def test_orchestrator_route_needs_real_state() -> None:
     print("[orchestrator route]")
     from server.dialogue.orchestrator import Orchestrator
@@ -1101,7 +1160,8 @@ def main() -> int:
                  test_sandbox_cli_worker_real_subprocess_chain,
                  test_delegate_without_worker, test_real_usage_and_partial_failure,
                  test_spinning_alert_lands_in_telemetry, test_front_intents,
-                 test_front_samples_and_report, test_orchestrator_route_needs_real_state,
+                 test_front_samples_and_report, test_sample_cache_keyed_on_mtime,
+                 test_orchestrator_route_needs_real_state,
                  test_orchestrator_clarify_needs_intent,
                  test_starmap_notes_intent_routes, test_ui_nav_value_domain,
                  test_ambient_supervisor_check, test_rest_seam):
