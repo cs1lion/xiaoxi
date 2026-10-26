@@ -1171,10 +1171,25 @@ class MemoryStore:
         params.append(max(1, int(limit)))
         return [_diary_row(row) for row in self._query(sql, params)]
 
-    def messages_between(self, start_ts: float, end_ts: float) -> list[dict[str, Any]]:
-        rows = self._query(
-            """SELECT id, session_id, role, text, mode, created_at FROM messages
-               WHERE created_at >= ? AND created_at < ? ORDER BY id ASC""", (start_ts, end_ts))
+    def messages_between(self, start_ts: float, end_ts: float,
+                         limit: int | None = None) -> list[dict[str, Any]]:
+        """One window of messages, optionally bounded to the newest N.
+
+        limit=None returns the full window. Callers that feed a model or a
+        validator pass an explicit bound (the diary synthesis passes its
+        material cap): a personal day grows without limit, and the unbounded
+        read both slows the background task and feeds the model a prompt
+        that only gets worse. The inner DESC+LIMIT keeps the newest rows;
+        the outer ASC restores the chronological order callers expect.
+        """
+        sql = ("SELECT id, session_id, role, text, mode, created_at FROM messages"
+               " WHERE created_at >= ? AND created_at < ?")
+        if limit is None:
+            rows = self._query(sql + " ORDER BY id ASC", (start_ts, end_ts))
+        else:
+            rows = self._query(
+                "SELECT * FROM (" + sql + " ORDER BY id DESC LIMIT ?) ORDER BY id ASC",
+                (start_ts, end_ts, max(1, int(limit))))
         return [dict(row) for row in rows]
 
     def upsert_drift(self, *, topic: str, attitude: str, weight: float,

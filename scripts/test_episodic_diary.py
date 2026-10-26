@@ -240,6 +240,71 @@ class DiarySynthesisTests(unittest.IsolatedAsyncioTestCase):
                 reopened.close()
 
 
+class DiaryMaterialCapTests(unittest.IsolatedAsyncioTestCase):
+    """日记合成的输入消息按最近上限截断。
+
+    改动前 messages_between 无 LIMIT：一天的讲话全量进 LLM material，也进
+    validate_diary_payload 的引用校验，库随时间增长这个 Prompt 只变大
+    不变好。判据是行为：material 的条数与 id 区间（最老的被截掉、最新的
+    保留、倒取保序），以及截断不打断全链路、不与校验分歧。
+    """
+
+    def _seed_day(self, store: MemoryStore, count: int) -> None:
+        for i in range(1, count + 1):
+            store.add_message("s", "user" if i % 2 else "assistant", f"第{i}句话")
+
+    def _capped_store(self) -> tuple[MemoryStore, int]:
+        store = MemoryStore(":memory:")
+        self.addCleanup(store.close)
+        total = diary.MAX_DIARY_MESSAGES + 5
+        self._seed_day(store, total)
+        return store, total
+
+    def test_messages_between_limit_keeps_newest_in_order(self):
+        import time
+
+        store = MemoryStore(":memory:")
+        self.addCleanup(store.close)
+        self._seed_day(store, 5)
+        horizon = time.time() + 60
+        self.assertEqual([m["id"] for m in store.messages_between(0.0, horizon, limit=3)],
+                         [3, 4, 5])
+        self.assertEqual([m["id"] for m in store.messages_between(0.0, horizon)],
+                         [1, 2, 3, 4, 5])
+        # 边界：limit 大于窗口 = 全窗口；limit=0 与其它 list_* 一致钳到 1 行。
+        self.assertEqual([m["id"] for m in store.messages_between(0.0, horizon, limit=99)],
+                         [1, 2, 3, 4, 5])
+        self.assertEqual([m["id"] for m in store.messages_between(0.0, horizon, limit=0)], [5])
+
+    async def test_capped_day_still_synthesizes(self):
+        """超过上限的一天照常落库：截断只砍输入，不打断全链路。"""
+        store, total = self._capped_store()
+        provider = FakeProvider(valid_payload(source_message_ids=[total]))
+        result = await diary.synthesize_diary(store=store, provider=provider,
+                                              target_date=TODAY)
+        self.assertIsNotNone(result, "超过上限的一天没能合成日记")
+        self.assertIsNotNone(store.diary_for_date(TODAY))
+
+    async def test_material_and_validation_share_the_truncated_set(self):
+        """material 与校验看到同一集合。
+
+        引用被截掉的旧消息必须被拒：若校验拿全量而 material 被截，日记会被
+        接受——这条断言钉住两者不分歧。
+        """
+        store, total = self._capped_store()
+        provider = FakeProvider(valid_payload(source_message_ids=[1]))
+        trace: dict = {}
+        result = await diary.synthesize_diary(store=store, provider=provider,
+                                              target_date=TODAY, trace=trace)
+        self.assertIsNone(result)
+        self.assertEqual(trace.get("diary_rejected"), "source_message_id_not_from_today")
+        material = json.loads(provider.last_messages[1]["content"])
+        ids = [m["id"] for m in material["messages"]]
+        self.assertEqual(len(ids), diary.MAX_DIARY_MESSAGES)
+        self.assertEqual(ids[0], total - diary.MAX_DIARY_MESSAGES + 1)
+        self.assertEqual(ids[-1], total)
+
+
 class BiasBlockTests(unittest.TestCase):
     def test_empty_input_returns_empty_string(self):
         for drifts, sparks in (([], []), (None, None), ([], None), (None, []),

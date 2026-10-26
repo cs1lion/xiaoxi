@@ -27,6 +27,7 @@ MAX_TURN_DRIFTS = 8               # 协议第十节：单轮生效偏置上限
 VERBATIM_QUOTE_LIMIT = 20         # 超过 20 字的用户原话逐字引用即"复述"
 MAX_DIARY_DRIFTS = 3              # 单篇日记最多派生的偏置数（宁缺毋滥）
 MAX_DIARY_SPARKS = 2              # 单篇日记最多诞生的火花数
+MAX_DIARY_MESSAGES = 300          # 单篇日记的输入消息上限：超出按最近截断
 MAX_SPARK_TEXT_CHARS = 120        # 内部约束：与主动开口字数上限一致
 
 
@@ -249,7 +250,7 @@ async def synthesize_diary(
             trace.update(diary_skip="already_written", date=target_date)
         return None
     start_ts, end_ts = _day_bounds(target_date)
-    day_messages = store.messages_between(start_ts, end_ts)
+    day_messages = store.messages_between(start_ts, end_ts, limit=MAX_DIARY_MESSAGES)
     if not any(message.get("role") == "user" for message in day_messages):
         if trace is not None:
             trace.update(diary_skip="no_user_messages", date=target_date)
