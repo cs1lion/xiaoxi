@@ -1,10 +1,12 @@
 from __future__ import annotations
 
+import asyncio
 import io
 import json
 import math
 import os
 import struct
+import threading
 import wave
 from dataclasses import dataclass
 from typing import Any
@@ -68,12 +70,17 @@ class Recognizer:
 
     def __init__(self) -> None:
         self._model: Any = None
+        # 双检锁：_ensure 现在跑在工作线程里（模型加载与转写同一次卸载），
+        # 事件循环不再是天然互斥量——barge-in 重叠或语音/口译双 WS 并发
+        # 首次加载会双重构造 WhisperModel（内存翻倍、HF 回退跑两遍）。
+        # 锁只圈住首次加载，命中后无锁快路径。
+        self._model_lock = threading.Lock()
 
     def _ensure(self) -> Any:
         if self._model is None:
-            from faster_whisper import WhisperModel
-
-            self._model = self._load()
+            with self._model_lock:
+                if self._model is None:
+                    self._model = self._load()
         return self._model
 
     def _load(self) -> Any:
@@ -120,10 +127,12 @@ class Recognizer:
 
     async def _whisper(self, audio: np.ndarray, duration_ms: int, language: str | None = None) -> Transcript:
         language = settings.asr_language if language is None else language
-        model = self._ensure()
-        import anyio
 
         def _run() -> tuple[str, float]:
+            # 模型加载与转写同一次线程外执行：_ensure 会 import faster_whisper
+            # 并构造 WhisperModel（首次还有 HF 下载回退），秒级。放在循环上
+            # 等于首句语音冻住所有连接；搬进闭包后最坏只是这一轮等几秒。
+            model = self._ensure()
             segments, info = model.transcribe(
                 audio,
                 language=language or None,
@@ -142,7 +151,10 @@ class Recognizer:
                 confidence = max(0.0, min(1.0, math.exp(sum(probs) / len(probs))))
             return text.strip(), confidence
 
-        text, confidence = await anyio.to_thread.run_sync(_run)
+        # asyncio.to_thread 而非 anyio.to_thread：实测 anyio 首次调用有约
+        # 29ms 的循环侧设置成本（线程池与 backend 探测），首句语音会吃到；
+        # asyncio.to_thread 首调约 3.5ms，且与 orchestrator/app 的卸载点同款。
+        text, confidence = await asyncio.to_thread(_run)
         return Transcript(
             text=text,
             language=language or "auto",
