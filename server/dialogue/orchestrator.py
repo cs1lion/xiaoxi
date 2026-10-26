@@ -555,23 +555,60 @@ class Orchestrator:
         block, _ids, _found = manager.retriever.build_context(user_text, mark_used=False)
         return block
 
-    async def _turn_context_async(self, user_text: str, session_id: str, recent):
-        """把记忆检索卸载到工作线程后的 `_turn_context`。
+    def _retrieve_and_mood(self, user_text: str):
+        """检索 + 昼夜心境，合并成一次线程外执行（见 `_turn_context_async`）。
 
-        只卸载那一段，不动其余：`_turn_context` 里还读写 `session_state()`，
-        而那是所有会话共享的可变字典，整体搬进线程反而引入并发写。
+        两者都是纯 store 读（心境衰减只在到期时写一行，幂等），合并不改变
+        语义，只省一次 `to_thread` 调度。`mark_used` 不并进来：它要等
+        `limit_context` 算出本轮真正用到的 id，顺序不可颠倒。
+        """
+        block = self._retrieve_memory_block(user_text)
+        circadian, mood = self._circadian_and_mood(enabled=True)
+        return block, (circadian, mood)
+
+    def _mark_used(self, used_ids: list[int], session_id: str,
+                   used_lesson_ids: list[int]) -> None:
+        """记录本轮真正用到的记忆/lessons 注入。单独成方法，为的是能在
+        事件循环外跑（见 `_turn_context_async`）。
+
+        晚几十毫秒落库不影响本轮装配，只让「最近使用」的时间精度粗一点。
+        """
+        manager.retriever.store.mark_used(used_ids, session_id=session_id,
+                                          lesson_ids=used_lesson_ids)
+
+    async def _turn_context_async(self, user_text: str, session_id: str, recent):
+        """把记忆检索与心境衰减卸载到工作线程后的 `_turn_context`。
+
+        只卸载纯 store 读段，不动其余：`_turn_context` 里还读写
+        `session_state()`，而那是所有会话共享的可变字典，整体搬进线程反而
+        引入并发写。`mark_used` 紧随其后单独一次线程外写：它依赖
+        `limit_context` 算出的 used_ids，顺序不可颠倒，也不能与检索合并
+        （那时还不知道用到了什么）。
 
         记忆关闭时连线程都不进：`to_thread` 本身要 ~0.07 ms 加一次调度，
         而这一轮根本不会读库，没必要为「什么都不做」付这笔钱。
         """
         if not manager.enabled:
             block = ''
+            circadian_mood = None
         else:
-            block = await asyncio.to_thread(self._retrieve_memory_block, user_text)
-        return self._turn_context(user_text, session_id, recent, memory_block=block)
+            block, circadian_mood = await asyncio.to_thread(self._retrieve_and_mood, user_text)
+        result = self._turn_context(user_text, session_id, recent, memory_block=block,
+                                    circadian_mood=circadian_mood, mark_used=False)
+        # 缺键宽容：返回字典的 used_lesson_ids 是本单元新增的，测试里的
+        # legacy stub（test_aqi_blocks._fake_context）仍按旧四键契约构造，
+        # 生产代码读缺键不该把一轮对话打翻。
+        used_ids = result.get('used_ids') or []
+        used_lesson_ids = result.get('used_lesson_ids') or []
+        if used_ids or used_lesson_ids:
+            await asyncio.to_thread(self._mark_used, used_ids, session_id,
+                                    used_lesson_ids)
+        return result
 
     def _turn_context(self, user_text: str, session_id: str, recent, *,
-                      memory_block: str | None = None) -> dict[str, Any]:
+                      memory_block: str | None = None,
+                      circadian_mood: tuple | None = None,
+                      mark_used: bool = True) -> dict[str, Any]:
         from ..interaction.context_budget import limit_context
         enabled = manager.enabled
         activity_facade = getattr(self, 'activity_facade', None)
@@ -608,7 +645,10 @@ class Orchestrator:
         # V2 §15：昼夜节律与心境惯性。**在这里算一次**，不放在 _render_turn_context 里
         # ——后者同时被 limit_context 当测量函数反复调用，那边只能读、不能写。
         # 心境衰减是幂等的状态迁移，但也没必要为了量一次长度就写几回库。
-        circadian, mood = self._circadian_and_mood(enabled=enabled)
+        # async 路径已在线程里算好并以 `circadian_mood` 传入；直接同步调用
+        # 仍然支持，供测试与同步场景使用。
+        circadian, mood = (circadian_mood if circadian_mood is not None
+                           else self._circadian_and_mood(enabled=enabled))
         # Fast-loop suspicion (see dialogue.intent_guard). Computed HERE, once,
         # because _render_turn_context doubles as limit_context's measure
         # callback and therefore runs many times per turn. The trace below is a
@@ -632,12 +672,12 @@ class Orchestrator:
                     for record in data['long_term_memory'][group]]
         used_lesson_ids = [item['id'] for item in (data.get('procedural_lessons') or [])
                            if type(item.get('id')) is int]
-        if used_ids or used_lesson_ids:
-            manager.retriever.store.mark_used(used_ids, session_id=session_id,
-                                              lesson_ids=used_lesson_ids)
+        if mark_used and (used_ids or used_lesson_ids):
+            self._mark_used(used_ids, session_id, used_lesson_ids)
         messages = [{'role': 'system', 'content': static_system_prompt()},
                     *self._render_turn_context(data), {'role': 'user', 'content': user_text}]
-        return {'messages': messages, 'usage': limited['usage'], 'used_ids': used_ids, 'data': data}
+        return {'messages': messages, 'usage': limited['usage'], 'used_ids': used_ids,
+                'used_lesson_ids': used_lesson_ids, 'data': data}
 
     async def stream_respond(
         self,

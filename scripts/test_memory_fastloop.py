@@ -164,6 +164,51 @@ async def main_async() -> int:
             orchestrator._retrieve_memory_block = original
         check("manager 关闭时不检索", calls["n"] == 0, f"仍调用了 {calls['n']} 次")
 
+        print("[5] 心境衰减与 mark_used 也不再阻塞事件循环")
+        # 生产里这两个操作是微秒级，心跳分辨不出来。判据换成「即使它们慢，
+        # 循环也不许被卡住」：两段各注入 40ms 假延迟，对应库写入抖动几十
+        # 毫秒的真实形状。同步路径先用同样的延迟做对照——若对照不卡，说
+        # 明这个测量器看不见这种停顿，「异步不卡」就是测量失灵。
+        slow = {"mood": 0, "mark_used": 0}
+        original_mood = orchestrator._circadian_and_mood
+        original_mark = orchestrator._mark_used
+
+        def slow_mood(*, enabled):
+            slow["mood"] += 1
+            time.sleep(0.04)
+            return original_mood(enabled=enabled)
+
+        def slow_mark(used_ids, session_id, used_lesson_ids):
+            slow["mark_used"] += 1
+            time.sleep(0.04)
+            return original_mark(used_ids, session_id, used_lesson_ids)
+
+        orchestrator._circadian_and_mood = slow_mood
+        orchestrator._mark_used = slow_mark
+        try:
+            ctrl_elapsed, ctrl_worst, _ = await _measure(
+                lambda: _run_sync(orchestrator, query))
+            print(f"       对照（同步路径）：耗时 {ctrl_elapsed:6.2f} ms，"
+                  f"循环最长停顿 {ctrl_worst:6.2f} ms")
+            check("对照路径里两段延迟都生效了（对照不是空转）",
+                  slow["mood"] >= 1 and slow["mark_used"] >= 1,
+                  f"mood={slow['mood']} mark_used={slow['mark_used']}")
+            check("注入延迟后同步路径确实卡住（证明测量器看得见）",
+                  ctrl_worst > 20, f"最长停顿仅 {ctrl_worst:.2f} ms")
+            slow["mood"] = slow["mark_used"] = 0
+            slow_elapsed, slow_worst, slow_samples = await _measure(
+                lambda: orchestrator._turn_context_async(query, "slow", []))
+            print(f"       异步路径：耗时 {slow_elapsed:6.2f} ms，"
+                  f"循环最长停顿 {slow_worst:6.2f} ms，采样 {slow_samples} 次")
+            check("异步路径里两段卸载都跑到了",
+                  slow["mood"] >= 1 and slow["mark_used"] >= 1,
+                  f"mood={slow['mood']} mark_used={slow['mark_used']}")
+            check("注入 40ms 延迟后循环最长停顿仍 < 10 ms",
+                  slow_worst < 10.0, f"最长停顿 {slow_worst:.2f} ms")
+        finally:
+            orchestrator._circadian_and_mood = original_mood
+            orchestrator._mark_used = original_mark
+
         store._conn.close()
 
     print(f"\n=== {len(PASSED)} passed, {len(FAILED)} failed ===")
