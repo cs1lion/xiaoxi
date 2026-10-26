@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import base64
 import json
+import logging
 import os
 import secrets
 import subprocess
@@ -614,9 +615,45 @@ async def _maybe_diary(conn: Connection) -> None:
         return
 
 
+_LAST_USAGE_SWEEP_AT = 0.0
+
+
+def _sweep_expired_usage() -> None:
+    """Default-off reaper for memory_usage rows a stopped session never settles.
+
+    Runs ahead of the self-evolution cycle so it is not starved by that cycle's
+    idle/daily gates. Gated by feedback.enabled AND sweep_enabled, throttled by
+    sweep_interval_minutes. Silent by design: observability comes from
+    store.count_open_usage(); any failure is swallowed (background task, never the
+    user's to hear).
+    """
+    global _LAST_USAGE_SWEEP_AT
+    try:
+        from .memory.feedback import feedback_cfg, sweep_expired_usage
+        cfg = feedback_cfg()
+        if not (cfg.get("enabled") and cfg.get("sweep_enabled")):
+            return
+        raw_interval = cfg.get("sweep_interval_minutes")
+        interval = (30.0 if raw_interval is None else max(0.0, float(raw_interval))) * 60.0
+        now = time.time()
+        if now - _LAST_USAGE_SWEEP_AT < interval:
+            return
+        _LAST_USAGE_SWEEP_AT = now
+        result = sweep_expired_usage(store)
+        log = logging.getLogger("server.app")
+        if result.get("error"):
+            log.warning("usage sweep error: %s", result["error"])
+        elif result.get("swept"):
+            log.info("usage sweep settled %d open rows, %d remaining",
+                     result["swept"], result.get("open_remaining"))
+    except Exception:
+        return
+
+
 async def _maybe_self_evolution(conn: Connection) -> None:
     """One bounded idle self-evolution cycle; events are quiet and connection-level."""
     try:
+        _sweep_expired_usage()
         from .assistant.loop import SelfEvolutionCycle
         from .memory.evolution import self_evolution_cfg
         if not self_evolution_cfg().get("enabled"):
@@ -843,7 +880,9 @@ async def _run_turn(conn: Connection, text: str, mode: str, turn: VoiceTurn | No
                 route = None
         if route is not None:
             from .dialogue.orchestrator import store_message
-            store_message(conn.session_id, "user", text, mode)
+            # 消息落库是同步写事务：卸载到工作线程，与 #31 检索卸载、台账读卸载
+            # 同一目的。异常原样在 await 处重抛，外层 except 语义不变。
+            await asyncio.to_thread(store_message, conn.session_id, "user", text, mode)
             # 界面自动领航（协议§二十四）：先于该轮语音下发，让她"亲手拉开面板"
             # 指给老板看；旧客户端读到未知类型整条忽略，不阻塞。
             # 字面量 {"type": "ui_nav"} 供 check_protocol.py 的静态字段扫描识别。
@@ -885,13 +924,15 @@ async def _run_turn(conn: Connection, text: str, mode: str, turn: VoiceTurn | No
         if assistant.should_route(text, conn.session_id) or assistant.waiting_input(conn.session_id):
             from .dialogue.orchestrator import store_message, store_recent
             await conn.send_turn(turn, {"type": "thinking"})
-            result = await assistant.start(text, conn.session_id,
-                history=store_recent(conn.session_id, 3) if manager.enabled else [])
+            recent = (await asyncio.to_thread(store_recent, conn.session_id, 3)
+                      if manager.enabled else [])
+            result = await assistant.start(text, conn.session_id, history=recent)
             if not conn.current(turn):
                 return
             if result.get('status') != 'not_applicable':
-                store_message(conn.session_id, "user", text, mode)
-                store_message(conn.session_id, "assistant", result["text"], "assistant_action")
+                await asyncio.to_thread(store_message, conn.session_id, "user", text, mode)
+                await asyncio.to_thread(store_message, conn.session_id, "assistant",
+                                        result["text"], "assistant_action")
                 await conn.send_turn(turn, {"type": "assistant_result", "result": result})
                 await _present_reply(conn, turn, result['text'], '认真')
                 return
