@@ -4,6 +4,11 @@
 > 证据：`docs/DEMO_RUN_EVIDENCE.md` + `pixel-world/eval/screens/demo-{mock,live}-*-{100.png,400pct.png}`（34 张）
 > 方法：bundled python（PIL 12.3.0 / numpy 2.3.5）+ 脚本 `pixel-world/eval/_art2_temp/s4_recheck.py`（`pixel-world/.gitignore:3` 忽略 `eval/`，未入 git）。nearest-token 归因 = 每像素对 16 个世界色 token 取 RGB 欧氏最近；精确色 = 源值全等；雨天定位用「token×0.72 + cloakDark×0.28」合成色。
 
+> **⚠️ 24 色重建后本文占比数据作废（2026-10-27 标注）**：本文 nearest-token 口径基于 16 个世界色
+> token。24 色 ADR（`d56d64b`，2026-10-21）新增 W17–W24 后，同像素的最近 token 归因已变，
+> §2 识别色分布等数字不再代表当前画面。重测结果见
+> `docs/ART_S4_OBJECTIVE_REVIEW_R2.md`（24 色口径，2026-10-27）；对比需求一律以 R2 为准。
+
 ## 1. 尺寸口径（E-16）
 - 400pct 全部 **1920×1280** = native 480×320 **×4** ✓（同 `docs/ART_SPEC.md` §1.1/§4.1）
 - 100% 整页 995×1359；canvas 在页内 (27,91) 占 960×640 → **canvas 像素块 = 1.99 dev px / native px**（实测草格 bbox 956×636，扣世界土壤边）
