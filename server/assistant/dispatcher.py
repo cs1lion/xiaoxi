@@ -117,6 +117,32 @@ class BriefingPacket:
         return self.as_dict(max_chars=MAX_PACKET_CHARS)
 
 
+# 台账的验收规则词表（server/assistant/evaluator.py:_ACCEPTANCE_RULES）。
+# 契约层的 CheckSpec（规范 §3.1）是另外 7 个类型，两套词表**互不相通**：
+# 规范没定义映射，硬造一个就是臆造（用户口径「规范没写到的先留冻结边界」）。
+# 所以这里不假装能转换，只如实记「有规则，但契约层读不懂」——
+# 绝不能再报成「缺验收标准」，那是对着老板写了三条规则说他没有。
+_LEDGER_RULE_KINDS = (
+    "artifact_exists", "artifact_name", "artifact_contains",
+    "artifact_json", "artifact_regex", "artifact_max_bytes",
+)
+
+# 规则被 _clean_acceptance 降级成的占位 kind：那是「我们写坏了」，不是台账规则。
+_LEDGER_OVERFLOW_KINDS = ("invalid", "acceptance_rule_too_large", "acceptance_rule_overflow")
+
+
+def _ledger_rule_kinds(acceptance: Any) -> list[str]:
+    """台账侧真实写了几条、以及它们各是什么 kind（原样保留，不去猜映射）。"""
+    kinds: list[str] = []
+    for item in (acceptance or ()):
+        if not isinstance(item, dict):
+            kinds.append("invalid")
+            continue
+        kind = str(item.get("kind") or "").strip()
+        kinds.append(kind or "invalid")
+    return kinds
+
+
 def _contract_gaps(commission: dict[str, Any], acceptance: Any) -> tuple[dict[str, Any], ...]:
     """用契约层（server/contract/）检查这一单，返回缺口清单。
 
@@ -141,38 +167,34 @@ def _contract_gaps(commission: dict[str, Any], acceptance: Any) -> tuple[dict[st
             contract_id=str(commission.get("id") or ""),
             utterance=goal_text,
             goal=Slot(value=goal_text, source="user") if goal_text else None,
-            acceptance=tuple(_acceptance_criteria(acceptance)),
+            # 契约的 CheckSpec 词表接不住台账 kind，硬塞就是假转换；
+            # 台账侧规则改由下方 _ledger_rule_kinds 如实点名。
+            acceptance=(),
         )
-        gaps = collect_gaps(draft)
-        return tuple(
+        gaps = [
             {"check": gap.check, "key": gap.key, "missing": list(gap.missing)}
-            for gap in gaps
-        )
+            for gap in collect_gaps(draft)
+        ]
+
+        # 契约层的 acceptance 恒空（词表不通），所以它必然报 G4「缺验收标准」。
+        # 老板真写了规则时这条是假话：就地改写成「有规则，但词表不通」，
+        # 并逐条点名 kind，让人一眼看出缺的是映射而不是标准。
+        kinds = _ledger_rule_kinds(acceptance)
+        real = [kind for kind in kinds if kind and kind not in _LEDGER_OVERFLOW_KINDS]
+        if real:
+            unmappable = sorted({kind for kind in real if kind in _LEDGER_RULE_KINDS})
+            unknown = sorted({kind for kind in real if kind not in _LEDGER_RULE_KINDS})
+            for index, gap in enumerate(gaps):
+                if gap.get("check") == "G4":
+                    missing = ([f"ledger_rule:{kind}" for kind in unmappable]
+                               + [f"unknown_rule:{kind}" for kind in unknown])
+                    if missing:
+                        gaps[index] = {
+                            "check": "G4", "key": "acceptance", "missing": missing,
+                        }
+        return tuple(gaps)
     except Exception:
         return ()
-
-
-def _acceptance_criteria(acceptance: Any) -> list[Any]:
-    """把台账里的验收规则转成契约层的 Criterion，转不了的跳过。"""
-    try:
-        from ..contract import Criterion
-    except Exception:
-        return []
-    out: list[Any] = []
-    for item in (acceptance or ()):
-        if not isinstance(item, dict):
-            continue
-        text = str(item.get("text") or item.get("criterion") or "").strip()
-        if not text:
-            continue
-        try:
-            out.append(Criterion(
-                text=text[:400],
-                required=bool(item.get("required", True)),
-            ))
-        except Exception:
-            continue
-    return out
 
 
 def _clip(text: Any, limit: int) -> str:

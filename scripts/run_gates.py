@@ -134,6 +134,13 @@ GATES: dict[str, dict[str, object]] = {
         "cmd": [str(PY), "scripts/test_contract.py"],
         "skip_regex": r"^\s*SKIP",
     },
+    "contract_ledger_rules": {
+        # 台账验收规则 -> 契约缺口 的桥接：老板写了规则就不许报「缺验收标准」。
+        # 两套词表（台账 artifact_* vs 契约 CheckSpec）规范未定义映射，
+        # 所以只点名 kind、不假装转换。冻结边界见 docs/CONTRACT_V2_SCOPE.md。
+        "cmd": [str(PY), "scripts/test_contract_ledger_rules.py"],
+        "skip_regex": r"^\s*SKIP",
+    },
     "v2_broadcast": {
         # W1（#25）：§25 事件协议 v2 线上广播层（信封/台账桥/五命令）。
         "cmd": [str(PY), "scripts/test_v2_broadcast.py"],
