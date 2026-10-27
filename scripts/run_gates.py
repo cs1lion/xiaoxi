@@ -451,6 +451,15 @@ GATES: dict[str, dict[str, object]] = {
         "cmd": [str(PY), "scripts/test_memory_concurrency.py"],
         "skip_regex": r"^\s*SKIP",
     },
+    "memory_api_offloop": {
+        # memory REST 路由不得独占事件循环：四条路由与语音 WS 共享 loop，
+        # 同步 SQLite 读会把循环停住整个读取时长（实测 3000 条记忆时
+        # starmap 一次 202ms）。判据是调度计数不是墙钟，同步版 beats=0、
+        # to_thread 版 beats~7 万，阈值 10 双向数量级余量。
+        # ALWAYS_REQUIRED：纯逻辑、临时库、无服务依赖。
+        "cmd": [str(PY), "scripts/test_memory_api_offloop.py"],
+        "skip_regex": r"^\s*SKIP",
+    },
     "evals_report": {
         # 评测报告层（docs/EVAL_MECHANISM_PLAN.md）：读 evals/results/ 快照出
         # 通过率（平均与全过概率分列）、与上次的配对差异、token 成本。
@@ -468,6 +477,7 @@ ALWAYS_REQUIRED = ("protocol", "core", "scheduler_health", "budget_scope", "back
                    "self_evolution_send", "config_hot", "config_hot_consumers",
                    "evolution_quality_report", "evals_report", "lessons_cap", "venv_lock",
                    "tmp_sweep", "memory_ranking", "memory_concurrency",
+                   "memory_api_offloop",
                    "durable_adapter", "durable_supervisor", "durable_takeover",
                    "durable_recovery", "durable_revive", "durable_app_wiring",
                    "durable_reconcile", "durable_soak", "durable_storage", "durable_compaction",

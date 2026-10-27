@@ -4,9 +4,17 @@ Same factory pattern as assistant/api.py: the app only needs
 ``app.include_router(create_diary_router(manager))`` and the starmap twin.
 ``prefix`` stays the first keyword argument so scripts/check_protocol.py can
 statically resolve these routes before the app ever includes them.
+
+Every store read goes through ``asyncio.to_thread``: these routes share the
+event loop with the voice WebSocket, and a synchronous read stalls the loop
+for its whole duration, freezing every connection. Measured 2026-10-27 at
+3000 memories: one ``/api/memory/starmap`` call costs 202 ms of loop time,
+91 ms of it the full-table candidate read. Same offload as #31 retrieval,
+executive_route's ledger read and scan_due.
 """
 from __future__ import annotations
 
+import asyncio
 from datetime import datetime, timedelta
 from typing import Any
 
@@ -36,13 +44,15 @@ def create_diary_router(manager: Any) -> APIRouter:
         anchor = _valid_date(date) if date else local_date()
         limit = max(1, min(int(limit), 90))
         since = (datetime.strptime(anchor, "%Y-%m-%d") - timedelta(days=29)).date().isoformat()
+        records = await asyncio.to_thread(
+            manager.store.list_diaries, since_date=since, until_date=anchor, limit=limit)
         items = [{key: value for key, value in record.items() if key != "source_message_ids"}
-                 for record in manager.store.list_diaries(since_date=since, until_date=anchor, limit=limit)]
+                 for record in records]
         return {"items": items, "count": len(items), "enabled": manager.enabled}
 
     @router.get("/diary/{diary_id}")
     async def read_diary(diary_id: int):
-        record = manager.store.get_diary(diary_id)
+        record = await asyncio.to_thread(manager.store.get_diary, diary_id)
         if record is None:
             raise HTTPException(404, "diary_not_found")
         return record
@@ -55,11 +65,12 @@ def create_starmap_router(manager: Any) -> APIRouter:
 
     @router.get("/starmap")
     async def starmap(days: int = 90, kinds: str = "", q: str = "", limit: int = 400):
-        return starmap_graph(manager, days=days, kinds=kinds, q=q, limit=limit)
+        return await asyncio.to_thread(
+            starmap_graph, manager, days=days, kinds=kinds, q=q, limit=limit)
 
     @router.get("/starmap/node/{node_id}")
     async def starmap_node_detail(node_id: str):
-        record = starmap_node(manager, node_id)
+        record = await asyncio.to_thread(starmap_node, manager, node_id)
         if record is None:
             raise HTTPException(404, "node_not_found")
         return record
