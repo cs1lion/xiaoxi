@@ -1289,7 +1289,7 @@ async def websocket_endpoint(ws: WebSocket) -> None:
     _connections.add(conn)
     # §25：这条连接进 v2 广播名单；seq 从 1 起在本连接内单调（§25.1 取舍 1）。
     detach_v2 = v2_hub.attach(conn.session_id, _make_v2_sink(conn, asyncio.get_running_loop()))
-    store.start_session(conn.session_id)
+    await asyncio.to_thread(store.start_session, conn.session_id)
     await conn.send(
         {
             "type": "ready",
@@ -1359,14 +1359,17 @@ async def websocket_endpoint(ws: WebSocket) -> None:
                 # 不回错误帧——重连路径上的失败不该再打断一次。续接后重发
                 # ready（原 id），客户端据此对齐本地记录；v2 广播名单换绑。
                 candidate = event.get("session_id")
-                if (isinstance(candidate, str) and 8 <= len(candidate) <= 32
-                        and all(ch in "0123456789abcdef" for ch in candidate)
-                        and store.has_session(candidate)
-                        and not any(c.session_id == candidate and c is not conn
-                                    for c in _connections)):
-                    store.end_session(conn.session_id)
+                # 会话存在性校验是同步 SQLite 读：卸载到工作线程，短路次序不变
+                # （形状 → 存在过 → 未被占用）。与 #31 检索卸载同一模式。
+                resume_ok = (isinstance(candidate, str) and 8 <= len(candidate) <= 32
+                             and all(ch in "0123456789abcdef" for ch in candidate)
+                             and await asyncio.to_thread(store.has_session, candidate)
+                             and not any(c.session_id == candidate and c is not conn
+                                         for c in _connections))
+                if resume_ok:
+                    await asyncio.to_thread(store.end_session, conn.session_id)
                     conn.session_id = candidate
-                    store.resume_session(candidate)
+                    await asyncio.to_thread(store.resume_session, candidate)
                     detach_v2()
                     detach_v2 = v2_hub.attach(candidate,
                                               _make_v2_sink(conn, asyncio.get_running_loop()))
@@ -1514,7 +1517,7 @@ async def websocket_endpoint(ws: WebSocket) -> None:
         detach_v2()
         _connections.discard(conn)
         await conn.close()
-        store.end_session(conn.session_id)
+        await asyncio.to_thread(store.end_session, conn.session_id)
 
 
 @app.websocket("/ws/proactive")
@@ -1522,7 +1525,7 @@ async def proactive_socket(ws: WebSocket) -> None:
     """Browser-side presence hook: tells the server how long the user has been away."""
     await ws.accept()
     conn = Connection(ws)
-    store.start_session(conn.session_id)
+    await asyncio.to_thread(store.start_session, conn.session_id)
     try:
         while True:
             message = await ws.receive()
@@ -1552,7 +1555,7 @@ async def proactive_socket(ws: WebSocket) -> None:
         pass
     finally:
         await conn.close()
-        store.end_session(conn.session_id)
+        await asyncio.to_thread(store.end_session, conn.session_id)
 
 
 @app.get("/")
