@@ -60,6 +60,13 @@ GATES: dict[str, dict[str, object]] = {
         "cmd": [str(PY), "scripts/test_core.py"],
         "skip_regex": r"^\s*SKIP",
     },
+    "check_staged_scope": {
+        # check_staged_scope 自身回归：判据（暂存区 ⊆ 声明路径）不许退化成
+        # 永真。测试在临时 git 仓库造场景，不碰真实 index。纯逻辑、零网络零
+        # Key、确定性，ALWAYS_REQUIRED。
+        "cmd": [str(PY), "scripts/test_check_staged_scope.py"],
+        "skip_regex": r"^\s*SKIP",
+    },
     "check_probe": {
         # check_probe 自身回归：它的四条判据是三次真实事故逼出来的（等价改动、
         # 锚点撞多处、注入没生效、还原不干净），不许退化。纯进程内逻辑、临时
@@ -994,7 +1001,8 @@ ALWAYS_REQUIRED = ("protocol", "core", "scheduler_health", "budget_scope", "back
                    "thread_conversation", "self_evolution", "agent_loop", "llm_client",
                    "self_evolution_send", "config_hot", "config_hot_consumers",
                    "evolution_quality_report", "evals_report", "evals_health", "lessons_cap", "venv_lock",
-                   "tmp_sweep", "run_gates_verdict", "check_probe", "memory_ranking", "memory_concurrency", "memory_retrieval",
+                   "tmp_sweep", "run_gates_verdict", "check_probe", "check_staged_scope",
+                   "memory_ranking", "memory_concurrency", "memory_retrieval",
                    "memory_api_offloop",
                    "voice_offloop",
                    "router_writes_offloop",
