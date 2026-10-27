@@ -903,6 +903,47 @@ class LoadTimeValidationTests(unittest.TestCase):
                 self.assertEqual(rc, 1, f"offline + {label} + target:reply 必须 fail-fast")
                 self.assertIn("不能用 target: reply", out)
 
+    # ---- R54：seed 记忆良构 ----
+
+    def _mem_case(self, memories_yaml: str) -> str:
+        return ("id: mem\nlayer: offline\norigin: 探针\nruns: 1\nturns: [问一句]\n"
+                + "setup:\n  memories:\n" + memories_yaml
+                + "checks:\n  - {type: contains, value: 我在, target: prompt}\n")
+
+    def test_seed_memory_wellformedness_is_enforced(self):
+        """R54：缺/空 key、缺/空 value、非数值 fact_valid、非 dict 记忆都要 fail-fast。
+
+        空 value（""）会令下游排序检查（current_before_history/future）真空转 PASS；
+        缺 key/value 与非数值 fact_valid 会令 seed_memories 崩整轮——都在加载期拦。
+        """
+        for label, mem in [
+            ("缺 key", "    - {value: v}\n"),
+            ("缺 value", "    - {key: k}\n"),
+            ("空串 value", '    - {key: k, value: ""}\n'),
+            ("纯空格 value", '    - {key: k, value: "   "}\n'),
+            ("非数值 fact_valid_until",
+             '    - {key: k, value: v, fact_valid_until: "2024-12-31"}\n'),
+            ("记忆是字符串", "    - 我不是dict\n"),
+        ]:
+            with self.subTest(shape=label):
+                self._write(self._mem_case(mem))
+                rc, out = self._load()
+                self.assertEqual(rc, 1, f"畸形 seed 记忆（{label}）必须 fail-fast")
+                self.assertIn("良构不达标", out)
+
+    def test_wellformed_seed_memory_is_not_rejected(self):
+        """R54 反向：合法 seed 记忆（含数值 fact_valid）不得被误拦。"""
+        self._write(self._mem_case("    - {key: k, value: v}\n"))
+        rc, out = self._load()
+        self.assertEqual(rc, 0, "合法 seed 记忆应通过加载期校验")
+        self.assertNotIn("良构不达标", out)
+        # 数值 fact_valid 时间戳也应放行
+        self._write(self._mem_case(
+            "    - {key: k, value: v, fact_valid_until: 1735603199}\n"))
+        rc, out = self._load()
+        self.assertEqual(rc, 0, "数值 fact_valid 应放行")
+        self.assertNotIn("良构不达标", out)
+
 
 class ReviewQueueTests(unittest.TestCase):
     """R38：build_review_queue 的跨快照汇总、定位路径、窗口与降级。

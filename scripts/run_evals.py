@@ -514,6 +514,38 @@ async def main_async(args) -> int:
               "调用、offline 的 prompt 失去内容，用例形同虚设）："
               + "、".join(f"{c['_path']}（id: {c.get('id', '?')}）" for c in bad_turns))
         return 1
+    # R54 补：seed 记忆良构。两类退化输入，一类崩整轮、一类空转 PASS：
+    # ① 缺 key/value → seed_memories 的 mem["key"]/mem["value"]（方括号）KeyError，
+    #    而该调用不在 check 的 try 内，会崩掉**整轮**而非单用例 fail；
+    # ② 空字符串 value（value: ""）→ 穿过下游检查的 `value in block`（"" 是任何串
+    #    子串）与 block.find("")==0，令 current_before_history/future 等排序检查
+    #    **真空转 PASS**（R53 审计实测确认：空串 current → ok=True）；
+    # ③ fact_valid_from/until 非数值 → passthrough 的 float() ValueError，同样崩整轮。
+    # 一次遍历全拦。16 条真实用例 12 条记忆全良构、fact_valid 全数值，不会误伤。
+    bad_mem = []
+    for c in cases:
+        for i, m in enumerate(((c.get("setup") or {}).get("memories") or []), 1):
+            if not isinstance(m, dict):
+                bad_mem.append(f"{c['_path']}（id: {c.get('id', '?')}，第{i}条记忆不是 dict）")
+                continue
+            for field in ("key", "value"):
+                v = m.get(field)
+                if not isinstance(v, str) or not v.strip():
+                    bad_mem.append(f"{c['_path']}（id: {c.get('id', '?')}，"
+                                   f"第{i}条 {field} 空/非字符串：{v!r}）")
+            for field in ("fact_valid_from", "fact_valid_until"):
+                fv = m.get(field)
+                if fv is not None:
+                    try:
+                        float(fv)
+                    except (TypeError, ValueError):
+                        bad_mem.append(f"{c['_path']}（id: {c.get('id', '?')}，"
+                                       f"第{i}条 {field} 非数值：{fv!r}）")
+    if bad_mem:
+        print("以下用例的 seed 记忆良构不达标（缺/空 key 或 value 会让排序检查空转 "
+              "PASS 或令 seed_memories 崩整轮；非数值 fact_valid 令 float() 崩整轮）："
+              + "；".join(bad_mem))
+        return 1
 
     offline_cases = [c for c in cases if c.get("layer") != "live"]
     live_cases = [c for c in cases if c.get("layer") == "live"]

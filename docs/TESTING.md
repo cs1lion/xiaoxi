@@ -26,8 +26,7 @@
 为什么单独立这个命令：若干回归脚本在环境不满足时会打印 `SKIP` 并以 0 退出
 （`test-ui-nav-browser.mjs` 在 8000 未起时就是这样；`test-body-coordination-browser.mjs`
 等缺本地夹具时同理）。逐条看退出码全是绿的，但那一轮其实什么都没验。
-`run_gates.py` 把每条命令的退出码与输出一起收上来，命中 `SKIP` 的门禁单独列一行并
-以非零退出——**绿必须来自真跑过，不能来自没跑**。
+`run_gates.py` 把每条命令的退出码与输出一起收上来。裁决口径（R51 修掉的 fail-open）：**退出码非零一律判 FAIL**，哪怕输出里带 `SKIP` 行——所以 `--allow-skip` 也不会把「打印了 `SKIP` 却又退出非零」的真实失败洗成绿；只有退出码为 0 且命中 `SKIP` 才算「这轮没真跑」，单独列一行并以非零退出（`--allow-skip` 时降为告警）。**绿必须来自真跑过，不能来自没跑，也不能来自把失败伪装成跳过。**
 
 浏览器门禁需要本地服务在 8000；服务未起时先
 `.\.venv\Scripts\python.exe scripts\run.py --port 8000`。
@@ -450,3 +449,21 @@ DSH 在本机默认沙箱拒绝写工作目录；花名册/profile 必须显式�
 ## 回归失败时
 
 不允许"已知失败"式汇报。先判断是不是自己改出来的：`git stash` 自己的改动重跑对照（由 Role 0 操作），确认基线后修到全绿再汇报。
+
+## 已核实无缺口：eval 用例配置一致性（2026-10-26）
+
+对 `evals/cases/` 全部 16 个用例（5 live + 11 offline）做过一轮配置一致性核查，结论：**框架本身已堵住主要静默失效入口，本轮只修了两处文档/配置漂移。**
+
+`scripts/run_evals.py` 的加载器已硬校验六类危险配置，任一出现即 `return 1` 让门禁变红，不会静默放过：
+`runs` 不是正整数（0 或负值让 `passed_runs == runs_n` 变成 `0 == 0` 判 PASS）、`checks` 为空或形状损坏（空列表让 `all([])` 恒真、一条断言都不跑却判 PASS；非 list / 条目缺 type 会在 run_case 崩）、offline 用例用 `target: reply`（offline 路径 replies 恒为 `[]`，负向 check 永不命中）、`pass_rule: min_rate:` 阈值不在 (0,1]（阈值 0 会让 `passed_runs/max(1,n) >= 0` 恒真，断言全红仍判过）、`turns` 为空（一次对话都不发生）、seed 记忆良构不达标（`setup.memories` 条目非 dict、`key`/`value` 空或非字符串、`fact_valid_from/until` 非数值——空 value 令排序检查因 `"" in block` 恒真、`block.find("")==0` 而空转 PASS，缺 key/value 与非数值 fact_valid 令 seed_memories 崩整轮）。这六类的修法历史记在加载器注释里，排查时先读那里。
+
+**本轮修的两处**（都不改变行为，只是把"靠默认值兜底"变成显式）：
+- `evals/cases/lesson-injection-offline.yaml` 补 `layer: offline` 与 `status: active`，并删掉行首那行**无人读取的 case 级 `target: prompt`——`target` 是 check 级字段，代码只读 `check.get("target", "reply")`。该文件是 16 个用例中唯一缺 `layer`/`status` 的；此前靠默认值（无 layer → 落入 offline_cases；无 status → 非 xfail）恰好行为正确，但默认语义一旦变更就会静默换层。
+- `docs/TESTING.md` 的 offline 用例清单标题原写"实况 8 条"，实际列 9 条、目录实为 11 条（数字与清单均过期）。已改为不写死数字 + 给出 `grep -l "^layer: offline" evals/cases/*.yaml | wc -l` 的判据。
+
+**排查这类问题时的判据（我本轮被自己的正则骗过三次，别再犯）**：
+1. 找函数定义必须兼容 `async def`——只写 `^def ` 会把所有 judge 类检查函数漏掉，从而报出 5 处"引用了不存在的函数"的假警报。
+2. 匹配 YAML 的 `target:` 必须兼容 `  - target:` 这种带短横的列表项形式——只写 `^\s+target:` 会漏掉绝大多数，把 30 处 `prompt` 误报成 1 处。
+3. 只扫"带 custom 引用的文件"会漏掉无引用的用例——我曾因此以为 live 只有 3 条，与日志"跳过 5 条"对不上，实际是漏扫了 `accuracy-over-persona-live` 与 `hallu-empty-retrieval-offline`。
+
+**带 bug 的校验器比没有校验器更危险**：它会用"全部 OK"或"5 处违例"给出确定语气，而两者都是错的。每条结论落地前先用一个已知答案的样本反验校验器本身。
