@@ -541,7 +541,9 @@ async def _confirm_action(conn: Connection, turn: VoiceTurn, event: dict[str, An
         if not conn.current(turn):
             return
         from .dialogue.orchestrator import store_message
-        store_message(conn.session_id, 'assistant', result['text'], 'assistant_action')
+        # 消息落库是同步写事务：卸载到工作线程，与 #31 检索卸载、台账读卸载同一目的。
+        await asyncio.to_thread(store_message, conn.session_id, 'assistant',
+                                result['text'], 'assistant_action')
         await conn.send_turn(turn, {'type': 'assistant_result', 'result': result})
         await _present_reply(conn, turn, result['text'], '认真')
     except asyncio.CancelledError:
@@ -568,7 +570,8 @@ async def _narrate_turn(conn: Connection, turn: VoiceTurn, node_id: str) -> None
             await conn.finish(turn, {"type": "error", "code": "narrate_unavailable",
                                      "message": "记忆已关闭，打开记忆后就能听小溪讲了。", "terminal": True})
             return
-        record = starmap_node(manager, node_id)
+        # 节点详情是同步单行读：快环内不得出现阻塞调用，与 #31 检索卸载同一模式。
+        record = await asyncio.to_thread(starmap_node, manager, node_id)
         if record is None:
             await conn.finish(turn, {"type": "error", "code": "narrate_unavailable",
                                      "message": "这条记忆已经不在了。", "terminal": True})
@@ -588,7 +591,7 @@ async def _narrate_turn(conn: Connection, turn: VoiceTurn, node_id: str) -> None
             await conn.finish(turn, {"type": "error", "code": "narrate_unavailable",
                                      "message": "这条记忆暂时讲不出来。", "terminal": True})
             return
-        store_message(conn.session_id, "assistant", text, "narration")
+        await asyncio.to_thread(store_message, conn.session_id, "assistant", text, "narration")
         await _present_reply(conn, turn, text, detect_emotion(text))
     except asyncio.CancelledError:
         await conn.finish(turn, {"type": "interrupted"})
@@ -1111,7 +1114,7 @@ async def _proactive_check(conn: Connection, revision: int) -> None:
                 if turn is not None and conn.current(turn):
                     text = event.get("text") or ""
                     await conn.send_turn(turn, {"type": "turn_started", "source": "mumble"})
-                    store_message(conn.session_id, "assistant", text, "mumble")
+                    await asyncio.to_thread(store_message, conn.session_id, "assistant", text, "mumble")
                     await _present_reply(conn, turn, text, detect_emotion(text))
             else:
                 await conn.send(event)  # micro_act (silent) or non-voiced mumble bubble
@@ -1139,7 +1142,7 @@ async def _touch_reply(conn: Connection, revision: int, region: str) -> None:
         if turn is None or conn.revision != revision:
             return
         await conn.send_turn(turn, {"type": "turn_started", "source": "touch"})
-        store_message(conn.session_id, "assistant", line, "touch")
+        await asyncio.to_thread(store_message, conn.session_id, "assistant", line, "touch")
         await _present_reply(conn, turn, line, detect_emotion(line))
     except asyncio.CancelledError:
         raise

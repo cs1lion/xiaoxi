@@ -460,6 +460,16 @@ GATES: dict[str, dict[str, object]] = {
         "cmd": [str(PY), "scripts/test_memory_api_offloop.py"],
         "skip_regex": r"^\s*SKIP",
     },
+    "voice_offloop": {
+        # 语音快环处理器不得在循环线程跑 SQLite：_narrate_turn / _touch_reply /
+        # _proactive_check 的 mumble 分支 / _confirm_action 共 4 处 store_message
+        # 写事务 + _narrate_turn 1 处 starmap_node 读，已全部卸载到 to_thread。
+        # 判据是线程身份不是墙钟：同步版恒在 MainThread（探针实测），to_thread
+        # 版恒在 asyncio_* worker，双向无灰区。同时钉落库参数逐字不变。
+        # ALWAYS_REQUIRED：AST 装载生产 app.py + 假模块，无服务无网络。
+        "cmd": [str(PY), "scripts/test_voice_offloop.py"],
+        "skip_regex": r"^\s*SKIP",
+    },
     "evals_report": {
         # 评测报告层（docs/EVAL_MECHANISM_PLAN.md）：读 evals/results/ 快照出
         # 通过率（平均与全过概率分列）、与上次的配对差异、token 成本。
@@ -478,6 +488,7 @@ ALWAYS_REQUIRED = ("protocol", "core", "scheduler_health", "budget_scope", "back
                    "evolution_quality_report", "evals_report", "lessons_cap", "venv_lock",
                    "tmp_sweep", "memory_ranking", "memory_concurrency",
                    "memory_api_offloop",
+                   "voice_offloop",
                    "durable_adapter", "durable_supervisor", "durable_takeover",
                    "durable_recovery", "durable_revive", "durable_app_wiring",
                    "durable_reconcile", "durable_soak", "durable_storage", "durable_compaction",
