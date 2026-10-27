@@ -101,14 +101,24 @@ def probe_self_check(name: str,
     还原；`restore` 一定会被调用（finally），注入炸了也要还原，否则会把破坏
     留在仓库里——那比探针无效更糟。
 
-    `watch` 是被测文件的路径。给了它，自检会多验一条：**restore 之后该文件
-    必须与 break_it 之前逐字节相同**（sha256 比对）。这条不是锦上添花——
-    plan-111 之前只验「还原后退出码为 0」，而 text 模式读写会在退出码为 0
-    的情况下把 CRLF 改写成 LF：还原跑了、码也绿，仓库却留下格式差异。
-    闭环的正确判据是逐字节相同，不能只写在 docstring 里。
+    `watch` 是被测文件的路径。给了它，自检会多验两条：
+    1. **`break_it` 之后文件必须与注入前不同**——否则说明注入根本没发生
+       （`break_it` 空转，或 `patch_file` 的 `inject` 没被调用）。plan-113
+       正是漏了这条：API 改成「返回 (inject, restore)」后调用点仍写
+       `break_it=lambda: None`，文件纹丝未动，三个门禁全绿，被误判成
+       「恒绿（判据无效）」——而那根本不是等价改动，是什么都没测；
+    2. **`restore` 之后文件必须与注入前逐字节相同**（sha256 比对）。
+       这条不是锦上添花——plan-111 之前只验「还原后退出码为 0」，而 text
+       模式读写会在退出码为 0 的情况下把 CRLF 改写成 LF：还原跑了、码也绿，
+       仓库却留下格式差异。闭环的正确判据是逐字节相同。
 
-    不传 `watch` 时这条校验跳过（用于被测目标不是单个文件的场景），此时
-    「还原干净」仍只由退出码间接保证——那种场景要自己多留神。
+    两条分工明确：第一条管「注入真发生了吗」，第二条管「还原干净吗」。
+    正常的等价改动（文件变了但门禁仍绿）不归第一条管，仍由
+    `break_exit == 0` 判「探针无效」。
+
+    不传 `watch` 时这两条校验都跳过（用于被测目标不是单个文件的场景），
+    此时「注入真的发生了吗」与「还原干净吗」都只由退出码间接保证——那种
+    场景要自己多留神。
     """
     result = ProbeResult(name=name, ok=False)
     want_digest = None
@@ -124,6 +134,27 @@ def probe_self_check(name: str,
         except Exception:
             result.error += "\n还原也失败了，仓库可能留在破坏态，先手动检查！"
         return result
+
+    # 注入生效校验：break_it 之后文件必须与注入前不同。plan-113 踩过这条——
+    # API 从「patch_file 返回前就注入」改成「返回 (inject, restore)」后，调用点
+    # 仍写 break_it=lambda: None，inject 从未被调用，文件纹丝未动，三个门禁
+    # 全绿，被误判成「恒绿（判据无效）」。那不是等价改动，是根本没注入。
+    #
+    # 与「还原后逐字节相同」分工明确：这条管「注入真发生了吗」，那条管
+    # 「还原干净吗」。正常的等价改动（文件变了但门禁仍绿）不归这条管，仍由
+    # break_exit == 0 判「探针无效」。
+    if want_digest is not None:
+        broke_digest = hashlib.sha256(watch.read_bytes()).hexdigest()
+        if broke_digest == want_digest:
+            result.error = (f"注入没有生效：break_it 之后 {watch.name} 与注入前逐字节"
+                            f"相同（sha256 {broke_digest[:16]}）。break_it 是空转，"
+                            f"还是 patch_file 的 inject 根本没被调用？")
+            result.notes.append("注入没生效——这不是「门禁恒绿」，是这次审计什么都没测")
+            try:
+                restore()
+            except Exception:
+                result.error += "\n还原也失败了，仓库可能留在破坏态，先手动检查！"
+            return result
 
     try:
         result.break_exit = run()
