@@ -113,6 +113,9 @@ def load_ws():
     names |= {"list_memories", "memories_context", "correct_memory", "delete_memory",
               "memory_history", "forget_key", "toggle_memory", "reset_memory",
               "add_memory", "transcript", "health"}
+    # 第十六批：_aqi_action 的 reassign 分支 spawn _executive_reassign_drive，
+    # 不编译进来该分支在隔离环境 NameError，被内层 except 吞成错误收尾。
+    names |= {"_executive_reassign_drive"}
     nodes = []
     for node in tree.body:
         # 同步 def 也要收：_transcribe_error_message 是普通函数（S3 加的 ASR

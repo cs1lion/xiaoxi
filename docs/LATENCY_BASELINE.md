@@ -88,6 +88,32 @@ p90 仅 8.3ms，疑为周期性 GC 尖峰；作为已知尖峰记录，不影响
 装配段里，检索（50 条库）只占约 2ms**，大头是装配周边（context broker、limit_context
 反复测量、历史读写）——优化装配时应先看那里。
 
+## 写提交与读的耗时分野（2026-10-27 · 第十一至十六批离环 sweep）
+
+**锚点：2026-10-27 本机，临时 SQLite 库（1000-5000 行），`.venv` Python；一次性探针，n=30-50，worst 或 median/max。** 探针已删，引用连本锚点一起抄。
+
+第十至十六批把 app.py 的同步 SQLite 逐一卸载出事件循环，分界判据从「读耗时 vs to_thread 调度开销」演进到「写提交 vs 读」：
+
+| 调用 | 形态 | 实测 |
+|---|---|---|
+| store.count() | 读（覆盖索引） | 1000 行 0.34ms / 5000 行 2.16ms |
+| manager.snapshot(200)+count | 读（建 200 对象） | 19.39ms |
+| manager.context_with_status | 读（TF-IDF 装配） | 75.73ms |
+| manager.history_of | 读（无 key 索引，全表扫描） | .46ms@1000 行，O(表长) |
+| store.recent_messages(100) | 读（命中 idx_msg_session） | 0.31ms |
+| executive.pending_reports | 读（BEGIN IMMEDIATE 无脏页） | 0.22ms |
+| executive.accept | **写提交** | worst 9.42ms |
+| dispatcher.cancel | **写提交** | worst 12.02ms（第十三批） |
+| spend_spark | **写提交** | median 9.05 / max 12.12ms |
+| manager.set_disabled | **写提交** | median 3.97 / max 10.93ms |
+| to_thread 调度（空函数） | — | worst 0.248ms |
+
+**机制**：`MemoryStore._transaction` 是 `BEGIN IMMEDIATE` + `commit()`，默认 `synchronous=FULL`，每个写提交一次 fsync（`store.py:1043` 注释印证量级）；读不脏页，commit 近乎零成本。结论：**写一律卸、不问实测**；亚毫秒的有界索引读留同步。
+
+**一次测量事故与纠正**：第十五批把 set_disabled 判为 0.50ms 保留同步，那是「反复拨同一行」探针的缓存快速路径假象（页与 WAL 尾部皆热、只脏同一页，fsync 代价被摊薄）。第十六批逐行翻一次复测得 median 3.97ms，补卸。两条教训：判据不该贴着阈值（0.50 vs 0.248 只有 2x 余量而实测误差 8x）；「不修」的结论比「修」的结论更需要证明测的是真路径（第十四批同款事故：探针文本被正则提前截断，量的不是目标分支）。
+
+**残余限界**：store 是单连接 + 单 RLock，保留同步的轻读若撞上已卸载的写正持锁，会阻塞在 RLock 上连带卡住循环；CommissionStore 的 `_transaction` 是 BEGIN IMMEDIATE（读也拿写锁），pending_reports 同样暴露在这个争用面下。
+
 ## 发现与立案（零静默）
 
 | # | 发现 | 处置 |

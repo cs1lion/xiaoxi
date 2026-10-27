@@ -465,9 +465,13 @@ GATES: dict[str, dict[str, object]] = {
         # （_narrate_turn / _touch_reply / _proactive_check 的 mumble 分支 /
         # _confirm_action）的 4 处 store_message 写 + _narrate_turn 1 处
         # starmap_node 读，两个 WS 端点（websocket_endpoint / proactive_socket）
-        # 的 7 处会话调用，加 9 条 memory REST 路由（snapshot/context/correct/
-        # forget/forget_key/forget_all/remember/history_of/count，实测 15-76ms
-        # 或 O(表长)全表扫描），已全部卸载到 to_thread。
+        # 的 7 处会话调用，10 条 memory REST 路由（snapshot/context/correct/
+        # forget/forget_key/forget_all/remember/history_of/count/set_disabled，
+        # 实测 15-76ms 或 O(表长)全表扫描），加 _aqi_action / _executive_finish
+        # 的 executive 台账写（accept/reassign/reject 实测 9.42ms）与
+        # _proactive_check 自发话题分支的 spend_spark（median 9.05ms），
+        # 已全部卸载到 to_thread。写提交（BEGIN IMMEDIATE + fsync）卸、亚毫秒
+        # 有界索引读（runtime.get / pending_reports / recent_messages）留同步。
         # 判据是线程身份不是墙钟：同步版恒在 MainThread（探针实测），to_thread
         # 版恒在 asyncio_* worker，双向无灰区。同时钉落库与会话参数逐字不变。
         # ALWAYS_REQUIRED：AST 装载生产 app.py + 假模块，无服务无网络。

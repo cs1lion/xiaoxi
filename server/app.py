@@ -254,7 +254,7 @@ async def correct_memory(memory_id: int, payload: dict[str, Any]) -> Any:
     if value and disabled is not None:
         raise HTTPException(status_code=400, detail="value and disabled are exclusive")
     if disabled is not None:
-        memory = manager.set_disabled(memory_id, disabled)
+        memory = await asyncio.to_thread(manager.set_disabled, memory_id, disabled)
         if memory is None:
             raise HTTPException(status_code=404, detail="memory not found")
         return memory.to_dict()
@@ -739,9 +739,17 @@ async def _aqi_action(conn: Connection, cmd: str) -> None:
         await conn.send_turn(turn, {"type": "turn_started", "source": "aqi_action"})
         try:
             if action == "accept":
-                executive.accept(commission_id)
+                await asyncio.to_thread(executive.accept, commission_id)
             else:
-                executive.reassign(commission_id)
+                try:
+                    await asyncio.to_thread(executive.reassign, commission_id)
+                except asyncio.CancelledError:
+                    # 卸载后「提交成功」与「spawn 驱动」之间有了挂起点：这期间被
+                    # 取消（新轮次 begin→cancel）会留下 RUNNING 但无人驱动的单，
+                    # 只有重启 recover_interrupted 才收口。同步写占住循环时不可
+                    # 能发生，卸载后必须自己补上驱动再重抛。
+                    conn.spawn(_executive_reassign_drive(commission_id))
+                    raise
                 # 换将之后这一单还得有人跑：驱动放后台，确认语音不傻等。
                 conn.spawn(_executive_reassign_drive(commission_id))
         except Exception:
@@ -1104,7 +1112,7 @@ async def _proactive_check(conn: Connection, revision: int) -> None:
                 spark_id = getattr(result, "spark_id", None)
                 if spark_id:
                     from .memory.diary import spend_spark
-                    spend_spark(store, spark_id)
+                    await asyncio.to_thread(spend_spark, store, spark_id)
             return
         # No voiced proactive this tick: surface an ambient tier (§16).
         event = orchestrator.ambient_event(idle_seconds=time.time() - conn.last_spoke_at)
@@ -1175,9 +1183,9 @@ async def _executive_finish(commission_id: str, action: str, feedback: str = "")
     """收工归档 / 挑刺打回。打回会顺手把漏审点炼成新判例。"""
     try:
         if action == "accept":
-            executive.accept(commission_id)
+            await asyncio.to_thread(executive.accept, commission_id)
         else:
-            executive.reject(commission_id, feedback)
+            await asyncio.to_thread(executive.reject, commission_id, feedback)
     except Exception:
         return
 

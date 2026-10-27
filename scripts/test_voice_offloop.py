@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""语音快环与 REST 路由不离环门禁（第十一至十五批，2026-10-27）。
+"""语音快环与 REST 路由不离环门禁（第十一至十六批，2026-10-27）。
 
 第十批把 memory REST 路由（server/memory/api.py）卸载出事件循环后，review
 发现同一模式在 app.py 自己身上还有多批存量：
@@ -10,20 +10,34 @@
   同步会话调用（start_session ×2、has_session、end_session ×2、
   resume_session），其中 resume 分支的存在性校验直接在 await ws.receive()
   循环体内，卡的是整条事件循环（含其他连接）；
-- 第十五批：app.py 自有的 memory REST 路由实测（千级记忆库）后全部卸走：
+- 第十五批：app.py 自有的 memory REST 路由实测（千级记忆库）后卸走 9 条：
   8 条 15-76ms 的重路由（list_memories / memories_context /
   correct_memory 的 correct 分支 / delete_memory / forget_key /
   reset_memory / add_memory / health 的 count），加 review 指出同为无界
   全表扫描的 history_of（memories 表没有 key 单列索引，EXPLAIN 实测
-  SCAN memories + USE TEMP B-TREE FOR ORDER BY）。仅剩两条有界索引读
-  保留同步：set_disabled（主键 UPDATE，0.50ms）与 recent_messages（命中
-  idx_msg_session，成本被单 session 消息数钳制，0.31ms）——第十四批实测
-  to_thread 调度开销本身 0.248ms，卸它们是净亏。
+  SCAN memories + USE TEMP B-TREE FOR ORDER BY）；
+- 第十六批：判据从「读耗时 vs 调度开销」换成「写提交 vs 读」——store 的
+  写事务（BEGIN IMMEDIATE + commit，synchronous=FULL 每次 fsync）实测
+  中位数几毫秒、最坏约 11ms（executive.accept 9.42ms / spend_spark
+  median 9.05ms / set_disabled 逐行 median 3.97ms max 10.93ms），读
+  （无脏页）亚毫秒（pending_reports 0.22ms / recent_messages 0.31ms）。
+  按此卸掉 _aqi_action 的 executive.accept/reassign、_executive_finish 的
+  accept/reject、_proactive_check 自发话题分支的 spend_spark，并**纠正
+  第十五批的误判**：set_disabled 当时量的 0.50ms 是「反复拨同一行」的
+  缓存快速路径假象（页与 WAL 尾部皆热、只脏同一页），逐行翻一次的干净
+  分布是 median 3.97ms，故本批补卸。
+
+保留同步的只剩有界索引读：_confirm_action 的 assistant.runtime.get（单表
+主键 + json.loads）、_send_proactive_blocks 的 executive.pending_reports
+（0.22ms）、transcript 的 store.recent_messages（0.31ms，命中
+idx_msg_session）。
 
 残余限界（勿误读「保留同步 = 绝不卡循环」）：store 是单连接 + 单 RLock，
-所有读写串行；保留同步的轻路由若撞上已卸载的写正持锁，会阻塞在 RLock 上
-连带卡住循环，阻塞时长约等于那个写的时长。相较改前（全同步、重活
-15-76ms 卡循环）仍是严格改进，残余被写时长限界。
+所有读写串行；保留同步的轻读若撞上已卸载的写正持锁，会阻塞在 RLock 上
+连带卡住循环，阻塞时长约等于那个写的时长。CommissionStore 的
+_transaction 是 BEGIN IMMEDIATE（读也拿写锁），pending_reports 同样暴露
+在这个争用面下。相较改前（全同步、重活 15-76ms 卡循环）仍是严格改进，
+残余被写时长限界。
 
 已全部改走 asyncio.to_thread（与 #31 检索卸载、executive_route 台账读
 卸载、scan_due 卸载同一模式）。
@@ -105,14 +119,22 @@ class FakeTTS:
 
 
 def fake_conn(session_id: str = "s1", revision: int = 0):
-    turn = SimpleNamespace(turn_id="t1", live=False)
+    turn = SimpleNamespace(turn_id="t1", live=False, editor_insight=None)
+    spawned: list = []
+
+    def spawn(coro):
+        task = asyncio.create_task(coro)
+        spawned.append(task)
+        return task
+
     conn = SimpleNamespace(
         session_id=session_id, closed=False, revision=revision,
         recording=False, playing=False, turn=None, last_spoke_at=0.0,
-        emotion_override=None,
+        emotion_override=None, spawn=spawn,
         current=lambda t: True, editor_current=lambda t: True,
         begin=AsyncMock(return_value=turn),
         send=AsyncMock(), send_turn=AsyncMock(), finish=AsyncMock())
+    conn.spawned = spawned
     return turn, conn
 
 
@@ -258,8 +280,29 @@ async def drive_proactive_socket(env):
     await asyncio.wait_for(task, 10)
 
 
+async def drive_executive_writes(env, executive):
+    """驱动 _executive_finish 的两个分支与 _aqi_action 的两个分支。"""
+    await env["_executive_finish"]("c1", "accept")
+    await env["_executive_finish"]("c1", "reject", "这段得改")
+    turn, conn = fake_conn()
+    await env["_aqi_action"](conn, "dispatch:accept:c1")
+    await env["_aqi_action"](conn, "dispatch:reassign:c1")
+    for task in list(getattr(conn, "spawned", [])):
+        await asyncio.wait_for(task, 10)
+    return conn
+
+
+async def drive_proactive_selftopic(env):
+    """驱动 _proactive_check 的自发话题分支（proactive_turn 静默 →
+    self_topic_turn 产出带 spark_id 的结果 → _run_turn 的 proactive 分支 →
+    spend_spark）。"""
+    turn, conn = fake_conn()
+    await env["_proactive_check"](conn, 0)
+    return conn
+
+
 async def drive_rest_routes(env):
-    """驱动 8 条重路由：顺序调用，记录每次 SQLite 工作的执行线程。"""
+    """驱动 10 条重路由：顺序调用，记录每次 SQLite 工作的执行线程。"""
     await env["list_memories"]()
     await env["memories_context"](query="测试")
     await env["correct_memory"](7, {"value": "改正后的内容"})
@@ -269,6 +312,7 @@ async def drive_rest_routes(env):
     await env["add_memory"]({"value": "手动记一条"})
     await env["health"]()
     await env["memory_history"](key="某键")
+    await env["correct_memory"](8, {"disabled": True})
 
 
 def assert_store_offloop(name: str, store_recorder: StoreRecorder,
@@ -343,7 +387,7 @@ def main() -> int:
           len(proactive_sids) == 2 and proactive_sids[0] == proactive_sids[1]
           and bool(proactive_sids[0]), repr(proactive_sids))
 
-    print("[REST 路由：8 条重路由的 SQLite 在工作线程]")
+    print("[REST 路由：10 条路由的 SQLite 在工作线程]")
     rest_calls: list[tuple[str, threading.Thread]] = []
 
     class _RestManager:
@@ -379,6 +423,10 @@ def main() -> int:
             rest_calls.append(("history_of", threading.current_thread()))
             return []
 
+        def set_disabled(self, memory_id, disabled):
+            rest_calls.append(("set_disabled", threading.current_thread()))
+            return SimpleNamespace(to_dict=lambda: {"id": memory_id})
+
         def remember(self, **item):
             rest_calls.append(("remember", threading.current_thread()))
             return SimpleNamespace(to_dict=lambda: {"id": 1})
@@ -388,9 +436,54 @@ def main() -> int:
             rest_calls.append(("count", threading.current_thread()))
             return 3
 
+    class _Executive:
+        """app.py 后台处理器（_aqi_action / _executive_finish / _proactive_check
+        的 _send_proactive_blocks）的 executive 替身：记录台账写、参数与线程。"""
+
+        def __init__(self):
+            self.calls: list[tuple[str, tuple, threading.Thread]] = []
+
+        def _record(self, name, *args):
+            self.calls.append((name, args, threading.current_thread()))
+            return {"commission": {"id": "c1"}}
+
+        def accept(self, commission_id):
+            return self._record("accept", commission_id)
+
+        def reassign(self, commission_id):
+            return self._record("reassign", commission_id)
+
+        def reject(self, commission_id, feedback):
+            return self._record("reject", commission_id, feedback)
+
+        def spinning_alerts(self):
+            return []
+
+        def pending_reports(self):
+            return []
+
+        async def run_commission(self, commission_id):
+            return {"commission": {"id": commission_id}}
+
+    class _SparkStore:
+        """spend_spark 的 store 替身：update_spark_state + get_spark 记录参数与线程。"""
+
+        def __init__(self):
+            self.calls: list[tuple[str, tuple, threading.Thread]] = []
+
+        def update_spark_state(self, spark_id, state, **kw):
+            self.calls.append(("update_spark_state", (spark_id, state),
+                               threading.current_thread()))
+            return True
+
+        def get_spark(self, spark_id):
+            self.calls.append(("get_spark", (spark_id,), threading.current_thread()))
+            return {"id": spark_id, "text": "一个念头", "state": "spent"}
+
     env3, patch_ctx3 = build_ws_env(Recorder())
     env3["manager"] = _RestManager()
     env3["store"] = _RestStore()
+    env3["executive"] = _Executive()
     # health 读 llm/settings 的属性面与 BUILD：隔离 env 的 llm 只有 aclose，
     # settings 只有语音字段，补上 health 真正读的那些。
     env3["llm"] = SimpleNamespace(provider="test", model="test-model",
@@ -409,13 +502,76 @@ def main() -> int:
     # 其余路由是顺序 await，次序确定。
     expected_rest = ["snapshot", "count", "context_with_status", "snapshot",
                      "correct", "forget", "forget_key", "forget_all",
-                     "remember", "count", "history_of"]
-    check("REST：9 条路由的调用一次不少一次不多",
+                     "remember", "count", "history_of", "set_disabled"]
+    check("REST：10 条路由的调用一次不少一次不多",
           sorted(rest_names) == sorted(expected_rest),
           f"got={rest_names!r} want={expected_rest!r}")
     check("REST：全部 SQLite 调用跑在工作线程（不在循环线程）",
           bool(rest_calls) and all(t is not loop_thread3 for _n, t in rest_calls),
           repr([(n, t.name) for n, t in rest_calls]))
+
+    print("[executive 后台写：_executive_finish 与 _aqi_action 的台账写在工作线程]")
+    executive = _Executive()
+    env4, patch_ctx4 = build_ws_env(Recorder())
+    env4["executive"] = executive
+    env4["spinning_intercept_line"] = lambda: "换将成功。"
+    with patch_ctx4:
+        loop_thread4 = threading.current_thread()
+        conn4 = asyncio.run(drive_executive_writes(env4, executive))
+    exec_records = [(name, args) for name, args, _thread in executive.calls]
+    check("executive：accept×2 / reassign / reject 都被调用且带对单号",
+          sorted(exec_records) == [("accept", ("c1",)), ("accept", ("c1",)),
+                                   ("reassign", ("c1",)), ("reject", ("c1", "这段得改"))],
+          repr(exec_records))
+    check("executive：全部台账写跑在工作线程（不在循环线程）",
+          bool(executive.calls) and all(t is not loop_thread4 for _n, _a, t in executive.calls),
+          repr([(n, t.name) for n, _a, t in executive.calls]))
+    assert_clean_finish("executive", conn4)
+
+    print("[spend_spark：_proactive_check 自发话题分支的火花写在工作线程]")
+    spark_store = _SparkStore()
+    env5, patch_ctx5 = build_ws_env(Recorder())
+    env5["store"] = spark_store
+    env5["executive"] = _Executive()
+
+    async def self_topic(**kwargs):
+        return SimpleNamespace(text="想起那盆多肉", spark_id=42)
+
+    async def silent_proactive(**kwargs):
+        return None
+
+    async def stream_respond(**kwargs):
+        yield {"type": "thinking"}
+        await kwargs["on_memories"]([])
+        yield {"type": "done", "text": "想起那盆多肉", "emotion": "base",
+               "latency_ms": 0}
+
+    env5["orchestrator"] = SimpleNamespace(
+        proactive_turn=silent_proactive, self_topic_turn=self_topic,
+        stream_respond=stream_respond, state={"proactivity_enabled": False},
+        set_proactivity=lambda _: None, executive_route=lambda *a, **k: None)
+    env5["assistant"] = SimpleNamespace(
+        should_route=lambda _t, session_id="": False,
+        waiting_input=lambda _s: None,
+        start=AsyncMock(return_value={"status": "not_applicable", "text": ""}))
+    # _proactive_check 里 `from .memory.diary import spend_spark` 是相对导入，
+    # 隔离环境解析成 voice_offloop_test.memory.diary；不补丁会 ImportError 被
+    # 外层 except 吞掉、整条分支静默返回。补上真模块，让真 spend_spark 配
+    # _SparkStore 走完整链路。
+    import server.memory.diary as real_diary
+    diary_patch = patch.dict(sys.modules, {f"{PACKAGE}.memory.diary": real_diary})
+    with patch_ctx5, diary_patch:
+        loop_thread5 = threading.current_thread()
+        conn5 = asyncio.run(drive_proactive_selftopic(env5))
+    spark_records = [(name, args) for name, args, _thread in spark_store.calls]
+    check("spend_spark：update_spark_state 与 get_spark 都被调用且火花号/状态正确",
+          sorted(spark_records) == [("get_spark", (42,)),
+                                    ("update_spark_state", (42, "spent"))],
+          repr(spark_records))
+    check("spend_spark：火花写跑在工作线程（不在循环线程）",
+          bool(spark_store.calls) and all(t is not loop_thread5 for _n, _a, t in spark_store.calls),
+          repr([(n, t.name) for n, _a, t in spark_store.calls]))
+    assert_clean_finish("spend_spark", conn5)
 
     print(f"\n=== {len(PASSED)} passed, {len(FAILED)} failed ===")
     return 1 if FAILED else 0
