@@ -161,3 +161,39 @@ python scripts/check_staged_scope.py <本批要提交的路径> [<路径> ...]
 那份改动是不是你的。声明之后仍要 `git diff --cached` 看一眼实际差异。本检查只抓
 「整份文件都不该在这」这一形态，它恰好是那 8 次事故的共同形态。
 
+## 探针有效性自检（2026-10-28 起）
+
+**一个探针说「绿」，你无法区分「被测性质成立」和「探针根本没在测」——除非先证明它红过。**
+
+2026-10-27 一个长会话里，「探针/判据无效」类事故出现 23 次，是最高频的失败形态。
+三种典型：**等价改动**（把 `is_absolute()` 从断言里去掉、把 `all(...)` 换成 `True`，
+以为在造破坏版，实际造的是等价改写，破坏版照样全绿——曾据此误判「helper 没被共用」，
+差点删掉正确的重构）；**量错路径**（探针量的不是目标分支，「不修」的结论比「修」
+的结论更容易被它伪证成数据）；**锚点撞多处**（注入脚本的锚点在文件里出现两次，
+`replace` 改错地方或直接 assert 失败）。
+
+共同根因是**验证工具本身没被验证**。用 `scripts/check_probe.py` 跑两步自检：
+
+```python
+from check_probe import probe_self_check, patch_file
+
+restore = patch_file(HELPER, ORIG_SNIPPET, BROKEN_SNIPPET)   # 锚点撞多处会当场炸
+result = probe_self_check(
+    name="<要证的性质>",
+    run=lambda: <被测目标的退出码，0=绿>,
+    break_it=lambda: None,      # patch_file 已注入
+    restore=restore,
+)
+if not result.ok:
+    raise SystemExit(result.report())
+```
+
+判据：`break_it()` 之后必须 exit≠0（探针能红），`restore()` 之后必须 exit==0
+（还原干净）。两步都过才认这个探针有效。**这个判据正好抓住那三种失败**：等价改动
+→ 破坏版也绿；量错路径 → 破坏版动的不是被测分支；锚点撞多处 → `patch_file` 的
+`assert count==1` 当场炸，不会静默改错地方。
+
+**边界**：本工具只证「探针对这个注入敏感」，不证「这个注入覆盖了所有该覆盖的回归」。
+后者仍需人判断注入点选得对不对——所以 `break_it` 要写在探针旁边，让 review 的人
+看见你注入了什么。
+
