@@ -461,14 +461,15 @@ GATES: dict[str, dict[str, object]] = {
         "skip_regex": r"^\s*SKIP",
     },
     "voice_offloop": {
-        # 语音快环不得在循环线程跑 SQLite：四个处理器（_narrate_turn /
-        # _touch_reply / _proactive_check 的 mumble 分支 / _confirm_action）的
-        # 4 处 store_message 写 + _narrate_turn 1 处 starmap_node 读，加两个
-        # WS 端点（websocket_endpoint / proactive_socket）的 7 处会话调用
-        # （start_session ×2 / has_session / end_session ×2 / resume_session），
-        # 已全部卸载到 to_thread。
+        # app.py 的异步面不得在循环线程跑 SQLite：四个语音处理器
+        # （_narrate_turn / _touch_reply / _proactive_check 的 mumble 分支 /
+        # _confirm_action）的 4 处 store_message 写 + _narrate_turn 1 处
+        # starmap_node 读，两个 WS 端点（websocket_endpoint / proactive_socket）
+        # 的 7 处会话调用，加 9 条 memory REST 路由（snapshot/context/correct/
+        # forget/forget_key/forget_all/remember/history_of/count，实测 15-76ms
+        # 或 O(表长)全表扫描），已全部卸载到 to_thread。
         # 判据是线程身份不是墙钟：同步版恒在 MainThread（探针实测），to_thread
-        # 版恒在 asyncio_* worker，双向无灰区。同时钉落库参数逐字不变。
+        # 版恒在 asyncio_* worker，双向无灰区。同时钉落库与会话参数逐字不变。
         # ALWAYS_REQUIRED：AST 装载生产 app.py + 假模块，无服务无网络。
         "cmd": [str(PY), "scripts/test_voice_offloop.py"],
         "skip_regex": r"^\s*SKIP",

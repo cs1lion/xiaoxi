@@ -1,29 +1,45 @@
 # -*- coding: utf-8 -*-
-"""语音快环不离环门禁（第十一、十二批，2026-10-27）。
+"""语音快环与 REST 路由不离环门禁（第十一至十五批，2026-10-27）。
 
-第十批把 memory REST 路由卸载出事件循环后，review 发现同一模式在语音快环
-自己身上还有两批存量：
+第十批把 memory REST 路由（server/memory/api.py）卸载出事件循环后，review
+发现同一模式在 app.py 自己身上还有多批存量：
 - 第十一批：_narrate_turn / _touch_reply / _proactive_check 的 mumble
   分支 / _confirm_action 里共 4 处同步 store_message 写事务，加
   _narrate_turn 里 1 处同步 starmap_node 读；
 - 第十二批：websocket_endpoint 与 proactive_socket 两个 WS 端点里共 7 处
   同步会话调用（start_session ×2、has_session、end_session ×2、
   resume_session），其中 resume 分支的存在性校验直接在 await ws.receive()
-  循环体内，卡的是整条事件循环（含其他连接）。
+  循环体内，卡的是整条事件循环（含其他连接）；
+- 第十五批：app.py 自有的 memory REST 路由实测（千级记忆库）后全部卸走：
+  8 条 15-76ms 的重路由（list_memories / memories_context /
+  correct_memory 的 correct 分支 / delete_memory / forget_key /
+  reset_memory / add_memory / health 的 count），加 review 指出同为无界
+  全表扫描的 history_of（memories 表没有 key 单列索引，EXPLAIN 实测
+  SCAN memories + USE TEMP B-TREE FOR ORDER BY）。仅剩两条有界索引读
+  保留同步：set_disabled（主键 UPDATE，0.50ms）与 recent_messages（命中
+  idx_msg_session，成本被单 session 消息数钳制，0.31ms）——第十四批实测
+  to_thread 调度开销本身 0.248ms，卸它们是净亏。
+
+残余限界（勿误读「保留同步 = 绝不卡循环」）：store 是单连接 + 单 RLock，
+所有读写串行；保留同步的轻路由若撞上已卸载的写正持锁，会阻塞在 RLock 上
+连带卡住循环，阻塞时长约等于那个写的时长。相较改前（全同步、重活
+15-76ms 卡循环）仍是严格改进，残余被写时长限界。
+
 已全部改走 asyncio.to_thread（与 #31 检索卸载、executive_route 台账读
 卸载、scan_due 卸载同一模式）。
 
 本门禁钉两条行为：
 
-1. 卸载落位：这些处理器与端点的 SQLite 工作必须发生在工作线程，不在循环
-   线程上。判据是线程身份，不是墙钟——同步版恒在循环线程，to_thread 版
-   恒在 asyncio_* worker，双向无灰区，故可进 ALWAYS_REQUIRED；
+1. 卸载落位：这些处理器、端点与路由的 SQLite 工作必须发生在工作线程，
+   不在循环线程上。判据是线程身份，不是墙钟——同步版恒在循环线程，
+   to_thread 版恒在 asyncio_* worker，双向无灰区，故可进 ALWAYS_REQUIRED；
 2. 行为不变：落库与会话调用参数逐字不变（session_id / role / text / mode），
    happy path 不出现错误收尾，重连后重发的 ready 帧带原 session_id。
 
 驱动方式与 test_activity_websocket.py 相同：AST 装载生产 app.py，用
 __package__ + sys.modules 补丁让处理器里的懒导入命中记录线程的假模块；
-两个 WS 端点用 FakeSocket 完整驱动（ready → 合法 resume → 断开）。
+两个 WS 端点用 FakeSocket 完整驱动（ready → 合法 resume → 断开），REST
+路由用记录线程的 manager/store 替身直接调用。
 """
 from __future__ import annotations
 
@@ -242,6 +258,19 @@ async def drive_proactive_socket(env):
     await asyncio.wait_for(task, 10)
 
 
+async def drive_rest_routes(env):
+    """驱动 8 条重路由：顺序调用，记录每次 SQLite 工作的执行线程。"""
+    await env["list_memories"]()
+    await env["memories_context"](query="测试")
+    await env["correct_memory"](7, {"value": "改正后的内容"})
+    await env["delete_memory"](7)
+    await env["forget_key"]({"key": "某键"})
+    await env["reset_memory"]({})
+    await env["add_memory"]({"value": "手动记一条"})
+    await env["health"]()
+    await env["memory_history"](key="某键")
+
+
 def assert_store_offloop(name: str, store_recorder: StoreRecorder,
                          loop_thread: threading.Thread) -> None:
     on_loop = [call for call in store_recorder.calls if call[2] is loop_thread]
@@ -313,6 +342,80 @@ def main() -> int:
     check("proactive：start/end 带同一非空 session_id",
           len(proactive_sids) == 2 and proactive_sids[0] == proactive_sids[1]
           and bool(proactive_sids[0]), repr(proactive_sids))
+
+    print("[REST 路由：8 条重路由的 SQLite 在工作线程]")
+    rest_calls: list[tuple[str, threading.Thread]] = []
+
+    class _RestManager:
+        """只实现路由会碰的方法；其余属性走 __getattr__ 到真 env manager。"""
+
+        enabled = True
+
+        def snapshot(self, **kw):
+            rest_calls.append(("snapshot", threading.current_thread()))
+            return []
+
+        def context_with_status(self, query, subject=None):
+            rest_calls.append(("context_with_status", threading.current_thread()))
+            return "", False
+
+        def correct(self, memory_id, value):
+            rest_calls.append(("correct", threading.current_thread()))
+            return SimpleNamespace(to_dict=lambda: {"id": memory_id})
+
+        def forget(self, memory_id, purge_history=True):
+            rest_calls.append(("forget", threading.current_thread()))
+            return 1
+
+        def forget_key(self, key):
+            rest_calls.append(("forget_key", threading.current_thread()))
+            return 1
+
+        def forget_all(self, **filters):
+            rest_calls.append(("forget_all", threading.current_thread()))
+            return 1
+
+        def history_of(self, key):
+            rest_calls.append(("history_of", threading.current_thread()))
+            return []
+
+        def remember(self, **item):
+            rest_calls.append(("remember", threading.current_thread()))
+            return SimpleNamespace(to_dict=lambda: {"id": 1})
+
+    class _RestStore:
+        def count(self):
+            rest_calls.append(("count", threading.current_thread()))
+            return 3
+
+    env3, patch_ctx3 = build_ws_env(Recorder())
+    env3["manager"] = _RestManager()
+    env3["store"] = _RestStore()
+    # health 读 llm/settings 的属性面与 BUILD：隔离 env 的 llm 只有 aclose，
+    # settings 只有语音字段，补上 health 真正读的那些。
+    env3["llm"] = SimpleNamespace(provider="test", model="test-model",
+                                  offline=True, aclose=None)
+    env3["settings"] = SimpleNamespace(
+        audio_sample_rate=16000, tts_default_emotion="base",
+        llm_extract_model=None, tts_engine="test", tts_model="test",
+        tts_voice="test", asr_engine="test", asr_model_id="test",
+        asr_model="test")
+    with patch_ctx3:
+        loop_thread3 = threading.current_thread()
+        asyncio.run(drive_rest_routes(env3))
+    rest_names = [name for name, _thread in rest_calls]
+    # list_memories 的 snapshot/count 走 asyncio.gather 并发派发，两个替身的
+    # append 先后无保证（多 worker + GIL），故用多重集合比对而非精确序列；
+    # 其余路由是顺序 await，次序确定。
+    expected_rest = ["snapshot", "count", "context_with_status", "snapshot",
+                     "correct", "forget", "forget_key", "forget_all",
+                     "remember", "count", "history_of"]
+    check("REST：9 条路由的调用一次不少一次不多",
+          sorted(rest_names) == sorted(expected_rest),
+          f"got={rest_names!r} want={expected_rest!r}")
+    check("REST：全部 SQLite 调用跑在工作线程（不在循环线程）",
+          bool(rest_calls) and all(t is not loop_thread3 for _n, t in rest_calls),
+          repr([(n, t.name) for n, t in rest_calls]))
 
     print(f"\n=== {len(PASSED)} passed, {len(FAILED)} failed ===")
     return 1 if FAILED else 0

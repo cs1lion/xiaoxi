@@ -214,9 +214,13 @@ async def get_avatar() -> dict[str, Any]:
 
 @app.get("/api/memories")
 async def list_memories(include_history: bool = False, kind: str | None = None, limit: int = 200) -> Any:
+    items, count = await asyncio.gather(
+        asyncio.to_thread(manager.snapshot, include_history=include_history, limit=limit),
+        asyncio.to_thread(store.count),
+    )
     return {
-        "items": manager.snapshot(include_history=include_history, limit=limit),
-        "count": store.count(),
+        "items": items,
+        "count": count,
         "enabled": manager.enabled,
     }
 
@@ -225,8 +229,8 @@ async def memories_context(query: str, subject: str | None = None, limit: int = 
     """获取与查询相关的记忆，用于驱动表情/动作"""
     if not manager.enabled:
         return {"items": [], "found": False}
-    block, found = manager.context_with_status(query, subject=subject)
-    items = manager.snapshot(include_history=False, limit=limit)
+    block, found = await asyncio.to_thread(manager.context_with_status, query, subject=subject)
+    items = await asyncio.to_thread(manager.snapshot, include_history=False, limit=limit)
     # 过滤相关记忆
     relevant = [m for m in items if any(kw in m["value"].lower() for kw in query.lower().split())]
     return {
@@ -256,7 +260,7 @@ async def correct_memory(memory_id: int, payload: dict[str, Any]) -> Any:
         return memory.to_dict()
     if not value:
         raise HTTPException(status_code=400, detail="value required")
-    memory = manager.correct(memory_id, value)
+    memory = await asyncio.to_thread(manager.correct, memory_id, value)
     if memory is None:
         raise HTTPException(status_code=404, detail="memory not found")
     return memory.to_dict()
@@ -264,7 +268,7 @@ async def correct_memory(memory_id: int, payload: dict[str, Any]) -> Any:
 
 @app.delete("/api/memories/{memory_id}")
 async def delete_memory(memory_id: int, purge_history: bool = True) -> Any:
-    removed = manager.forget(memory_id, purge_history=purge_history)
+    removed = await asyncio.to_thread(manager.forget, memory_id, purge_history=purge_history)
     if not removed:
         raise HTTPException(status_code=404, detail="memory not found")
     return {"deleted": memory_id, "removed_rows": removed}
@@ -272,7 +276,7 @@ async def delete_memory(memory_id: int, purge_history: bool = True) -> Any:
 
 @app.get("/api/memories/history")
 async def memory_history(key: str) -> Any:
-    return {"key": key, "items": manager.history_of(key)}
+    return {"key": key, "items": await asyncio.to_thread(manager.history_of, key)}
 
 
 @app.post("/api/memories/forget-key")
@@ -280,7 +284,7 @@ async def forget_key(payload: dict[str, Any]) -> Any:
     key = (payload.get("key") or "").strip()
     if not key:
         raise HTTPException(status_code=400, detail="key required")
-    return {"deleted": manager.forget_key(key)}
+    return {"deleted": await asyncio.to_thread(manager.forget_key, key)}
 
 
 @app.post("/api/memory/toggle")
@@ -291,7 +295,7 @@ async def toggle_memory(payload: dict[str, Any]) -> Any:
 
 @app.post("/api/memory/reset")
 async def reset_memory(payload: dict[str, Any]) -> Any:
-    count = manager.forget_all(kind=payload.get("kind"), subject=payload.get("subject"))
+    count = await asyncio.to_thread(manager.forget_all, kind=payload.get("kind"), subject=payload.get("subject"))
     return {"deleted": count}
 
 
@@ -300,7 +304,7 @@ async def add_memory(payload: dict[str, Any]) -> Any:
     value = (payload.get("value") or "").strip()
     if not value:
         raise HTTPException(status_code=400, detail="value required")
-    memory = manager.remember(
+    memory = await asyncio.to_thread(manager.remember,
         kind=payload.get("kind", "fact"),
         subject=payload.get("subject", "user"),
         key=payload.get("key") or value,
@@ -331,6 +335,9 @@ def _scheduler_done(task: asyncio.Task) -> None:
 @app.get("/api/health")
 async def health() -> Any:
     scheduler_state = scheduler_snapshot()
+    # count() 是 O(表长) 的无界读（实测 1000 行 0.34ms、5000 行 2.16ms），
+    # 与其余 memory 路由一同卸载；健康页由 interpret 页打开时预检一次。
+    memories = await asyncio.to_thread(store.count)
     return {
         "ok": True,
         "build": BUILD,
@@ -344,7 +351,7 @@ async def health() -> Any:
         "asr": {"engine": settings.asr_engine, "model": settings.asr_model_id if settings.asr_engine == "stepaudio" else settings.asr_model},
         "scheduler": scheduler_state,
         "degraded": bool(scheduler_state["degraded"]),
-        "memories": store.count(),
+        "memories": memories,
         "proactivity": orchestrator.state["proactivity_enabled"],
     }
 

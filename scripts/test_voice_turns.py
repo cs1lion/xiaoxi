@@ -20,6 +20,7 @@ import unittest
 import uuid
 
 import numpy as np
+from fastapi import HTTPException
 
 
 class Disconnect(Exception):
@@ -107,6 +108,11 @@ def load_ws():
     # 不编译进来时该调用点在隔离环境里 NameError，被 _proactive_check 的 except 吞掉，
     # turn_started 永不到达——proactive 两条测试表现为超时而不是失败原因。
     names = {"VoiceTurn", "Connection", "_present_reply", "_confirm_action", "_run_turn", "_transcribe_turn", "_proactive_check", "websocket_endpoint", "proactive_socket", "_maybe_diary", "_maybe_self_evolution", "_narrate_turn", "_node_snippet", "_aqi_action", "_executive_delegate", "_executive_finish", "_touch_reply", "_send_proactive_blocks", "_transcribe_error_message"}
+    # REST 路由（第十五批离环门禁驱动用）：app.py 的 memory 路由与 health 都是
+    # async def，不编译进来时隔离环境里无法直接调用验证 to_thread 卸载。
+    names |= {"list_memories", "memories_context", "correct_memory", "delete_memory",
+              "memory_history", "forget_key", "toggle_memory", "reset_memory",
+              "add_memory", "transcript", "health"}
     nodes = []
     for node in tree.body:
         # 同步 def 也要收：_transcribe_error_message 是普通函数（S3 加的 ASR
@@ -134,6 +140,10 @@ def load_ws():
                    key: {} for key in ("base", "调侃", "得意", "认真", "收敛", "轻微不服", "变小气")}},
                store=SimpleNamespace(start_session=lambda _: None, end_session=lambda _: None),
                llm=SimpleNamespace(aclose=noop), manager=SimpleNamespace(enabled=True),
+               # REST 路由（第十五批）引用的模块级名：HTTPException 走 404/400
+               # 分支，BUILD 与 scheduler_snapshot 只被 /api/health 读。
+               HTTPException=HTTPException, BUILD="test-build",
+               scheduler_snapshot=lambda: {"degraded": False},
                # 打磨轮：_proactive_check 的有声 mumble 分支改用模块级导入，
                # 隔离环境注入内存假实现即可验证整条真声链路。
                detect_emotion=lambda text: "base",
