@@ -405,7 +405,7 @@ class V2CommandActions:
 
     async def _confirm_contract(self, command: dict[str, Any], reply: Reply) -> None:
         cid = str(command["task_id"])
-        commission = self.executive.commission(cid)
+        commission = await asyncio.to_thread(self.executive.commission, cid)
         if str(command["contract_id"]) != cid:
             raise ValueError("contract_id 与当前委托不一致")
         expected = int(commission.get("retry_count") or 0) + 1
@@ -416,13 +416,13 @@ class V2CommandActions:
             # 确认契约 = 放行：dispatch 组密件（drafting -> briefing，正是 bridge
             # 发 CONTRACT_PROPOSED 的那次迁移），然后走同一条放行链。
             intent = str(commission.get("brief") or commission.get("title") or "")
-            self.executive.dispatch(cid, intent=intent)
+            await asyncio.to_thread(self.executive.dispatch, cid, intent=intent)
             status = "briefing"
         if status == "briefing":
             # briefing -> running -> 后台驱动到终态：与 begin_commission 同一条
             # 链，只是入口从「自动放行」换成「老板确认」。停在 briefing 的单
             # （REST 派过没 start 的）也由确认放行，不留原地。
-            self.executive.start(cid)
+            await asyncio.to_thread(self.executive.start, cid)
             self._spawn(self.executive.drive(cid))
         elif status == "done":
             raise ValueError("这单已收口，没有待确认的契约")
@@ -431,7 +431,7 @@ class V2CommandActions:
 
     async def _answer(self, command: dict[str, Any], reply: Reply) -> None:
         cid = str(command["task_id"])
-        commission = self.executive.commission(cid)
+        commission = await asyncio.to_thread(self.executive.commission, cid)
         if str(commission.get("status")) != "blocked":
             raise ValueError("这单不在等回答")
         # answer() 会驱动执行体跑完——可能跑满一个 Worker 超时，不能占 /ws
@@ -440,17 +440,17 @@ class V2CommandActions:
 
     async def _cancel_task(self, command: dict[str, Any], reply: Reply) -> None:
         cid = str(command["task_id"])
-        commission = self.executive.commission(cid)
+        commission = await asyncio.to_thread(self.executive.commission, cid)
         reason = str(command.get("reason") or "user_abort")
         # reason 要进 audit.cancel_reason（dispatcher.cancel 的真实字段），但门面
         # ExecutiveService.cancel 不带 reason 参数——executive.py 是项目红线不改，
         # 照 durable_api.py 的既有先例直达 dispatcher：能力已存在，只是没从门面过。
-        self.executive.dispatcher.cancel(cid, reason=reason)
+        await asyncio.to_thread(self.executive.dispatcher.cancel, cid, reason=reason)
         # cancel 幂等（已 done 原样返回），台账迁移自然流出 TASK_STATE_CHANGE。
 
     async def _approve_side_effect(self, command: dict[str, Any], reply: Reply) -> None:
         cid = str(command["task_id"])
-        commission = self.executive.commission(cid)
+        commission = await asyncio.to_thread(self.executive.commission, cid)
         if (str(commission.get("status")) != "blocked"
                 or str(commission.get("blocked_kind")) != "approval"):
             raise ValueError("这单没有在等的副作用批准")
@@ -462,7 +462,7 @@ class V2CommandActions:
 
     async def _retry_step(self, command: dict[str, Any], reply: Reply) -> None:
         cid = str(command["task_id"])
-        commission = self.executive.commission(cid)
+        commission = await asyncio.to_thread(self.executive.commission, cid)
         if str(commission.get("status")) != "blocked":
             raise ValueError("这单不在可重试的阻塞态")
         # 慢环的重做以单为最小单位（dispatcher 没有单步重试入口）；解阻塞

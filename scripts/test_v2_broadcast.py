@@ -7,12 +7,15 @@ A. 信封语义：连接级 seq 单调、同一逻辑事件跨连接共享 id、
 B. 真实事件流：T2 沙盒工跑一单全链，台账订阅 diff 出六类委托事件（task 生命周期）。
 C. 五命令校验表：validate_command 的合法/非法逐条。
 D. 命令动作：V2CommandActions 的幂等重放、显式错误回执、取消真链路。
+E. 命令动作不离环：commission 读与 dispatcher 写跑在工作线程（线程身份判据，
+   实测 CANCEL_TASK 整条在循环上最坏 12.02ms，其中读只 0.34ms，大头是写事务）。
 """
 from __future__ import annotations
 
 import asyncio
 import sys
 import tempfile
+import threading
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -222,8 +225,8 @@ async def _drive_command_actions() -> None:
     replies.clear()
     await actions.handle({"type": "CANCEL_TASK", "task_id": "no-such-id",
                           "request_id": "req-404"}, reply)
-    check("未知单号有错误回执（不静默落空）",
-          any(code.startswith("v2_") for code, _ in replies), str(replies))
+    check("未知单号有错误回执（KeyError 精确分类成 task_not_found，不落进 failed）",
+          any(code == "v2_task_not_found" for code, _ in replies), str(replies))
 
     replies.clear()
     await actions.handle({"type": "ANSWER", "task_id": cid, "answer": "x",
@@ -266,11 +269,61 @@ async def _drive_command_actions() -> None:
           any("已收口" in msg for _, msg in done_replies), str(done_replies))
 
 
+async def _drive_command_offloop() -> None:
+    print("[E command actions off-loop]")
+    service = _sandbox_service()
+    calls: list[tuple[str, threading.Thread]] = []
+
+    class _RecordingDispatcher:
+        def __init__(self, inner):
+            self._inner = inner
+
+        def cancel(self, cid, **kw):
+            calls.append(("dispatcher.cancel", threading.current_thread()))
+            return self._inner.cancel(cid, **kw)
+
+        def __getattr__(self, name):
+            return getattr(self._inner, name)
+
+    class _RecordingExecutive:
+        def __init__(self, inner):
+            self._inner = inner
+            self.dispatcher = _RecordingDispatcher(inner.dispatcher)
+
+        def commission(self, cid):
+            calls.append(("commission", threading.current_thread()))
+            return self._inner.commission(cid)
+
+        def __getattr__(self, name):
+            return getattr(self._inner, name)
+
+    recording = _RecordingExecutive(service)
+    actions = V2CommandActions(recording)
+    loop_thread = threading.current_thread()
+
+    async def reply(code, message):
+        pass
+
+    opened = service.open("E 卸载打样", "给命令动作离环用的一单")
+    cid = opened["id"]
+    await actions.handle({"type": "CANCEL_TASK", "task_id": cid,
+                          "request_id": "req-offloop-1", "reason": "wrong_task"}, reply)
+    names = [name for name, _thread in calls]
+    check("CANCEL_TASK 的 commission 读与 dispatcher 写都跑在工作线程",
+          bool(calls) and all(thread is not loop_thread for _name, thread in calls),
+          repr([(name, thread.name) for name, thread in calls]))
+    check("commission 与 dispatcher.cancel 都被调用（驱动真实发生）",
+          names == ["commission", "dispatcher.cancel"], repr(names))
+    check("卸载后取消仍真生效", service.commission(cid)["status"] == "done",
+          repr(service.commission(cid).get("status")))
+
+
 def main() -> int:
     test_hub_envelope_semantics()
     test_bridge_real_chain()
     test_validate_command_table()
     asyncio.run(_drive_command_actions())
+    asyncio.run(_drive_command_offloop())
     print(f"\n=== {len(PASSED)} passed, {len(FAILED)} failed ===")
     return 1 if FAILED else 0
 
