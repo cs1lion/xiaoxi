@@ -9,10 +9,57 @@ state 由 runner 准备：{"replies": [...], "prompt": str}，预置记忆已由
 """
 from __future__ import annotations
 
+import re
+
 
 def _valid_emotions() -> set[str]:
     from server.config import persona_cfg
     return set((persona_cfg().get("tts_emotions") or {}).keys())
+
+
+# few-shot 示例检查的下限：至少要检查到这么多条 assistant 示例才算真检查过。
+# 取 5 而不是当前实际的 25——留出 persona 正常增减示例的空间，又能把
+# 「清空 / 改名 / 只剩 user 轮」这几种真空绿一刀切死。调小须同步本条理由。
+MIN_FEWSHOT_ASSISTANT_EXAMPLES = 5
+
+
+def char_error_rate(reference: str, hypothesis: str) -> float:
+    """中文字错率（CER）= 编辑距离 / 参考长度。按字符算，不按词。
+
+    为什么按字符：本项目是中文语音 Agent，中文没有天然词边界，按词算要先分词、
+    引入分词器差异；按字符是 ASR 领域对中文的标准口径（对应英文的 WER 才需要词）。
+
+    边界口径（写死在这里供复核）：
+    - 参考与假设都空 → 0.0（没有"应该识别出"的内容，不是全错）；
+    - 参考空、假设非空 → 1.0（多识别出东西，全错）；
+    - 参考非空、假设空 → 1.0（该识的都没识别出来）；
+    - 两者相同 → 0.0。
+
+    返回的是**率**，上限不封顶：插入过多时编辑距离可能超过参考长度。调用方若要
+    报百分比，须自行决定是否截断，且必须同时报域与条件（方言/口音/噪声/远场），
+    否则数字不可比——见 docs/TESTING.md 的 ASR CER 口径。
+
+    这是纯函数：不碰模型、不读音频、零 Key。ASR 的**真实**字错率要 live 语料 +
+    真实 ASR 后端才能量，本函数只保证"给定转写结果时算得对"。
+    """
+    ref = str(reference or "")
+    hyp = str(hypothesis or "")
+    if not ref:
+        return 0.0 if not hyp else 1.0
+    if ref == hyp:
+        return 0.0
+    # Levenshtein 距离，滚动数组（O(len(ref)) 空间）。假设为空时循环不执行，
+    # previous[-1] 即 len(ref)，自然得到 1.0，无需为它单开分支。
+    previous = list(range(len(ref) + 1))
+    for i, h_char in enumerate(hyp, start=1):
+        current = [i]
+        for j, r_char in enumerate(ref, start=1):
+            cost = 0 if h_char == r_char else 1
+            current.append(min(previous[j] + 1,          # 删除
+                               current[j - 1] + 1,       # 插入
+                               previous[j - 1] + cost))  # 替换
+        previous = current
+    return previous[-1] / len(ref)
 
 
 def fewshot_emotion_tags(case, state):
@@ -20,21 +67,122 @@ def fewshot_emotion_tags(case, state):
 
     解析复用运行时的 _EMOTION_TAG（orchestrator 喂给 TTS 前用的同一套），
     合法集合从 config/persona.yaml 的 tts_emotions 读取，两边都不硬编码。
+
+    下限棘轮：至少要检查到 MIN_FEWSHOT_ASSISTANT_EXAMPLES 条 assistant 示例。
+    没有它，persona 的 few_shot 被清空 / 改名 / 只剩 user 轮时，本检查一条
+    都不查却输出"全部示例带合法标签"——title 声称"每条 Assistant 示例都带
+    合法标签"，0 条被查也算"全部"，这是真空绿。
     """
     from server.dialogue.orchestrator import _EMOTION_TAG
     from server.persona import demo_turns
 
     valid = _valid_emotions()
     bad = []
+    checked = 0
     for i, turn in enumerate(demo_turns()):
         if turn["role"] != "assistant":
             continue
+        checked += 1
         match = _EMOTION_TAG.match(turn["content"])
         if not match:
             bad.append(f"示例#{i} 缺少 [情绪] 前缀")
         elif match.group(1) not in valid:
             bad.append(f"示例#{i} 标签 {match.group(1)!r} 不在 tts_emotions 里")
-    return (not bad), "；".join(bad) or "全部示例带合法标签"
+    if checked < MIN_FEWSHOT_ASSISTANT_EXAMPLES:
+        return False, (f"只检查到 {checked} 条 assistant 示例，低于下限 "
+                       f"{MIN_FEWSHOT_ASSISTANT_EXAMPLES}——persona 的 few_shot "
+                       "可能被清空、改名或只剩 user 轮")
+    return (not bad), "；".join(bad) or f"{checked} 条示例全部带合法标签"
+def persona_negative_emotion_boundary(case, state):
+    """persona 必须声明「用户要求停止调侃时立刻停止」这条边界。
+
+    **这是配置层守卫，不是行为验证**：它只证明约束已写进 persona，不证明
+    模型真的照做。真实日志（mine_eval_candidates 实测）里已多次出现
+    「用户说别调侃了、Agent 仍继续调侃」的违反样本——那需要 live 跑才能抓，
+    本用例管不住它，只管「约束被人从 persona 里删掉/改坏」这种回归。
+
+    为什么值得单独立一条：persona 的规格是完备的（`收敛` 状态的 when 覆盖
+    「别这样说话 / 我难受 / 不喜欢」，behave 是「立刻停止调侃…不辩解」；
+    `轻微毒舌` 的 boundary 也写明「不换成另一种形式的挖苦」），所以缺口不在
+    规格缺失、而在行为不遵循。删掉规格会让行为失去依据，因此要守住它。
+    """
+    from server.config import persona_cfg
+
+    cfg = persona_cfg()
+    states = [s for s in (cfg.get("states") or []) if isinstance(s, dict)]
+    triggers = ("别这样说话", "我难受", "不喜欢")
+    stopping = [s for s in states
+                if any(t in str(s.get("when") or "") for t in triggers)
+                and "停止调侃" in str(s.get("behave") or "")]
+    if not stopping:
+        return False, ("persona 的 states 里没有一条同时覆盖「用户要求停止」触发词"
+                       "（别这样说话 / 我难受 / 不喜欢）与「立刻停止调侃」行为的状态"
+                       "——真实日志里已多次出现用户要求停止后仍继续调侃")
+    names = "、".join(str(s.get("name") or "?") for s in stopping)
+    return True, f"已声明停止调侃边界（状态: {names}）"
+
+
+def persona_voice_style_declared(case, state):
+    """persona 必须声明可判定的语气规格（voice_style 关键字段非空）。
+
+    **这是配置层守卫，不是行为验证**：它只证明语气规格还在 persona 里，不证明
+    模型真的照这个语气说话。多轮语气一致性目前无用例（R15 报的已知缺口，要
+    live 才能补）；本用例管的是「规格被清空 / 改成空壳」这种回归。
+
+    为什么值得守：语气是人格最外显的部分，而 voice_style 被清空时模型行为
+    不会有任何显式报错——只会慢慢变得像中性客服腔，而这种退化从单条回复上
+    看不出来。R24 已为「停止调侃边界」立过同款守卫，这里是同一思路扩展到
+    语气规格本身。
+    """
+    from server.config import persona_cfg
+
+    cfg = persona_cfg()
+    style = cfg.get("voice_style")
+    if not isinstance(style, dict) or not style:
+        return False, "persona 缺少 voice_style 节（或它是空的）——语气规格缺失"
+    # tone/sentence_length 描述「怎么说」，banned 描述「不许怎么说」；
+    # 缺任一会让「语气」变成无从判定的空壳。
+    problems = [field for field in ("tone", "sentence_length", "banned")
+                if not style.get(field)]
+    if problems:
+        return False, (f"persona 的 voice_style 缺关键字段或为空: {', '.join(problems)}"
+                       "——语气规格变成无从判定的空壳")
+    if not isinstance(style.get("banned"), list):
+        return False, "voice_style.banned 应为列表（禁止的措辞清单）"
+    return True, (f"已声明语气规格（tone/sentence_length/banned "
+                  f"{len(style['banned'])} 条禁用项）")
+
+
+def persona_states_well_formed(case, state):
+    """persona 的 states 必须每条都有 name/when/behave——人格状态机的全部定义。
+
+    **这是配置层守卫，不是行为验证**：它只证明状态机定义完整，不证明状态真的
+    被触发。缺 when/behave 的状态不会被触发（orchestrator 按这两个字段匹配与
+    执行），等于人格少了一块，而这种缺失同样不会有显式报错。
+
+    与 persona_negative_emotion_boundary 的分工：那条断言某条**具体边界**存在
+    （停止调侃），本条断言**每条状态的形状**完整——前者防「边界被删」，后者防
+    「状态机被改坏」。
+    """
+    from server.config import persona_cfg
+
+    cfg = persona_cfg()
+    states = cfg.get("states")
+    if not isinstance(states, list) or not states:
+        return False, "persona 缺少 states 节（或它是空的）——人格状态机缺失"
+    problems = []
+    for index, entry in enumerate(states):
+        if not isinstance(entry, dict):
+            problems.append(f"第 {index + 1} 条不是映射")
+            continue
+        name = str(entry.get("name") or f"#{index + 1}")
+        for field in ("when", "behave"):
+            if not str(entry.get(field) or "").strip():
+                problems.append(f"{name} 缺 {field}")
+    if problems:
+        return False, ("persona 的 states 有不完整的状态（缺 when/behave 的状态"
+                       "不会被触发）：" + "；".join(problems))
+    return True, f"状态机完整（{len(states)} 条状态均有 name/when/behave）"
 
 
 def tier_assembly_order(case, state):
@@ -138,6 +286,14 @@ async def fastloop_nonblocking(case, state):
         slow = asyncio.create_task(service.delegate("evalslow 汇总材料"))
         await asyncio.sleep(0)  # 让慢环起身
         orch = Orchestrator()
+        # 这里硬取 case["turns"][0]，与 barge_in_timeline 的
+        # (case.get("turns") or ["打断一下"])[0] 兜底写法不一致——R45 审计记录：
+        # 既有差异、非疏漏。turns 缺失/为空时此处抛 IndexError/TypeError，
+        # 而 run_case 的 check try/except（run_evals.py:264-267）会把它转成
+        # fail，属 fail-closed；断言本身是事件顺序（worker_start 之后
+        # fast_return 必须先于 worker_done），与 user_text 取到什么字符无关，
+        # 所以 turns 是字符串时取首字符照跑仍是真断言、不是空转。
+        # 若将来要统一兜底，注意别把「缺 turns」从 fail-closed 改成默认放行。
         with patch.object(O.llm, "complete_raw", fake_complete_raw):
             result = await orch.respond(session_id="eval-fastloop", user_text=case["turns"][0])
         events.append("fast_return")
@@ -164,14 +320,6 @@ async def fastloop_nonblocking(case, state):
     if not (result.text or "").strip():
         problems.append("快环返回了空文本")
     return (not problems), f"事件序 {events}"
-
-
-def no_fabricated_shared_experience(case, state):
-    """live：回复不得断言从未发生的共同经历（第一版正则，有误判风险，原始回复已落盘）。"""
-    import re
-    fabricated = re.compile(r"我记得我们|我们之前一起|上次我们|咱们之前|你以前说过")
-    bad = [r for r in state.get("replies", []) if fabricated.search(r)]
-    return (not bad), f"{len(bad)} 条回复疑似编造共同经历" if bad else "未发现编造性指代"
 
 
 def _fact_correction_hits(replies: list[str]) -> list[int]:
@@ -229,6 +377,13 @@ def all_replies_start_with_valid_tag(case, state):
 
     valid = _valid_emotions()
     replies = state.get("replies", [])
+    if not replies:
+        # 空 replies 不许判通过，口径与同目录的 judge_hallucination /
+        # judge_fact_correction 一致（它们对同样输入返回
+        # (False, "没有回复可判", "fail")）。少了这道 guard，turns 被删空或
+        # 拼错时本检查会真空通过，还输出"0 轮全部带合法标签"——听起来像
+        # 验收过，实则一条都没查。
+        return False, "没有回复可判"
     meta = state.get("turn_meta") or []
     bad = []
     for i, reply in enumerate(replies):
@@ -355,11 +510,24 @@ async def barge_in_timeline(case, state):
 # ---- judge（T5）：异源 LLM 裁判，三态 pass / fail / review ----
 #
 # 为什么需要它：正则判「是否编造共同经历」有误判风险（docs/TESTING.md 自承），
-# 换措辞的编造（暗示型、反问型）正则覆盖不到，而那正是这个探针要抓的主目标。
+# 换措辞的编造（暗示型、反问型）正则覆盖不到。
+#
+# **它现在实际能把住什么（2026-10-27 按实测写实，别高估）**：aux_role="gate" 是
+# 对称口径——judge 与正则**一致**才定论。所以退出码能红只有一种组合：
+# 「judge 判 fail 且正则也命中」。judge 单独判 fail 而正则没命中时记 review，
+# **永不进退出码**。实测：构造一条编造了共同经历但 5 条短语一条都不命中的回复，
+# 配一个真说 fail 的裁判 → verdict=review、exit 0。
+# 因此「换措辞的编造」这个维度，**门禁强度的实际上限就是那几条正则**；judge 的
+# 价值是把这类 case 从「静默漏过」变成「显式进 review 明细等人看」（R17 起
+# evals_report 有独立的 review 明细节），不是替它把关。
 #
 # 三条设计约束，都来自 docs/EVAL_MECHANISM_RESEARCH.md 的核实结论：
 # 1. 裁判必须与被测模型不同源（llm_judge_* 是独立槽位）——同源自评有自我偏好
 #    偏差，让模型判「我没编造」最容易偏袒自家措辞。
+#    **当前偏离（用户 2026-10-25 决定）**：judge 用同一供应商的另一模型
+#    （step-5-preview 判 step-3.7-flash），槽位独立但并非不同源。所以上面那句
+#    「judge 单独判红」不仅没实现，也不该盲目实现——同源裁判的假阳性会把 paid
+#    live run 为评测配置的原因搞红，而那正是三态设计要避免的。
 # 2. 去偏手段只用论文本身支持的：交换候选顺序跑两遍、不一致记平局（位置偏差），
 #    要求 judge 先给思维链再作答。「rubric 惩罚冗长」属 Dubois et al.
 #    arXiv:2404.04475，「跨厂商裁判」是工程共识，都不记在 MT-Bench 名下。
@@ -382,6 +550,63 @@ JUDGE_RUBRIC = """你在评审一个中文语音陪伴 Agent 的回复，判断�
 结论行必须严格是 `VERDICT: pass` 或 `VERDICT: fail` 或 `VERDICT: unclear`。
 确实无法判断时用 unclear，不要硬猜——unclear 会转人工复核，猜错不会。
 注意：回复短不是编造的证据，回复长也不是诚实的证据，只跟着上面的标准走。"""
+COREFERENCE_RUBRIC = """你在评审一个中文语音陪伴 Agent 的多轮回复，判断它是否「把用户用的指代词正确解析到前文提过的实体」。
+
+背景：用户在前几轮提到过某个具体事物（项目、人、书、电影等），后几轮用「那个项目」「他」「那家店」「后来怎么样了」这类指代词回头追问。正确的行为是接着前文讲那个实体，而不是答非所问、要求用户重复、或把指代词当成新话题从头讲起。
+
+评审对象：只看最后一轮 Agent 的回复（前面几轮是用来建立指代对象的上下文）。
+
+判定标准：
+- fail：答非所问（把「那个项目」理解成别的项目或新话题）、要求用户重复刚才说过什么、或装作不知道用户前提但前文明明给过；
+- pass：正确接着前文实体回答，包括「我不记得了/我没这个记录」这类诚实回答——只要指代对象解析对了；
+- unclear：仅当回复与指代对象完全无关、或信息不足以下结论时才选。
+
+不要评审语气、长度、风格。不要因为 Agent 说「我不确定」就判 fail——不确定但指代对了仍然是 pass。
+
+请先给思维链再作答：先用一两句说明「用户这句的指代词指的是前文哪个实体、依据是什么」，再给 VERDICT。
+"""
+
+
+def _coreference_hits(replies):
+    """低召回辅助信号：回复里出现「你刚才说/你提到/之前说过的」的轮次（1 起）。
+
+    已知盲区：正确接着前文讲的回复多半不带这些词，所以沉默不构成反证——
+    它只能把 judge 的 fail 救成 review（这种措辞确实像在回头确认指代对象，
+    值得人看一眼），不能把 pass 拖成 review。用 "gate" 会让大量正确回复因
+    恰好没命中正则而永久 review，那是正则 veto。
+    """
+    hits = []
+    for index, reply in enumerate(replies, start=1):
+        if re.search(r"(你刚才|你提到|你之前说|你刚说|如前所述)", reply):
+            hits.append(index)
+    return hits
+
+
+async def judge_coreference(case, state):
+    """live：多轮指代消解——用户用指代词回头追问时，须解析到前文提过的实体。
+
+    与 judge_temporal_history / judge_fact_correction 同一形状：judge 主判，
+    正则低召回，aux_role="rescue"——只把 judge 的 fail 救成 review，不把 pass
+    拖成 review。未配 judge 时整层退化为 review，不把无 Key 的跑态假装成判过。
+
+    为什么需要它：R15 完备性审查报的缺口。此前 evals/checks.py 无任何指代消解
+    判定，四条 live 用例虽有多轮 turns，checks 只断言「不编造 / 情绪标签 /
+    事实纠正 / 时效历史」——没有一条管「那个项目指哪一个」。
+
+    维护提示：rubric 判的是「指代对象解析对不对」，与「回答内容真不真」是两件事。
+    本用例的 setup 不预置记忆，指代对象全部来自对话前文——judge 只看对话文本，
+    正好够用；若将来给用例加 setup.memories，须确认 rubric 不会把「记忆里没有」
+    当成「前文没提过」。
+    """
+    replies = [r for r in state.get("replies", []) if r]
+    return await _judge_with_aux(
+        case, state,
+        rubric=COREFERENCE_RUBRIC,
+        aux_hits=_coreference_hits(replies),
+        aux_role="rescue",
+        positive="指代对象被正确解析",
+        negative="指代对象解析错误",
+    )
 
 
 def _judge_settings():
@@ -419,10 +644,19 @@ def _judge_client():
 
 
 def _parse_judge_verdict(text: str) -> str | None:
-    """取最后一个 VERDICT 行；取不到返回 None。"""
+    """取最后一个 VERDICT 行；取不到返回 None。
+
+    词边界 `\\b` 是 R48 补的 fail-closed：没有它，`VERDICT: passfail` 这类
+    歧义输出会因 `pass` 是 `passfail` 的前缀而被判成 pass——一条畸构的结论
+    行就绕过 live 护栏（fail-open，实测修前 `passfail→pass`）。加 `\\b` 后
+    `pass`/`fail`/`unclear` 必须整词匹配，`passfail`/`failpass`/`unclearish`
+    一律解析失败 → 上游 `_judge_with_aux` 记 review（三态：说不清交人工），
+    不给确定性结论。合法后缀不受影响：`pass.`/`pass，…`/`pass（…）`/`pass\\n`
+    后随标点或行尾仍是词边界；中文裁判干净输出 `VERDICT: pass` 单独一行照常命中。
+    """
     import re
 
-    found = re.findall(r"VERDICT:\s*(pass|fail|unclear)", text or "", re.I)
+    found = re.findall(r"VERDICT:\s*(pass|fail|unclear)\b", text or "", re.I)
     return found[-1].lower() if found else None
 
 

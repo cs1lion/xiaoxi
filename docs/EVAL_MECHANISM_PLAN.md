@@ -2,7 +2,7 @@
 
 日期：2026-10-25
 依据：`docs/EVAL_MECHANISM_RESEARCH.md`（外部一手调研，含逐条 URL）；本轮工作流对现状的三路对抗核实（外部参考 / 内部摸排 / 覆盖矩阵）与完整性质检。
-状态：**T1–T6 全部落地，T5 已 live 验收通过；余两项既有检查缺口待用户拍板**。截至 2026-10-25 已落地：T1 报告层（`scripts/evals_report.py` + `run_gates` 的 `evals_report` 门禁）、T2 `origin` fail-fast、T3a 日志漏斗（`scripts/mine_eval_candidates.py` 及其测试）、T3b `test_memory_eval.py` 内联夹具化（19 条真跑）、T4 `barge-in-timeline-offline`（offline 层 6→7 条）、T5 judge 三态**已 live 验收通过**（`evals/checks.py` 的 `judge_hallucination`、`run_evals.py` 的三态聚合与 `classify_results` 退出码分桶、`llm_judge_*` 配置、`scripts/test_judge_three_state.py` 37 条其中 14 条走真实 `run_case` / HTTP / `main_async` 路径；`--live --case hallu-empty-retrieval-live` 实测 3/3 通过、0 review）、T6 其余 5 个程序性记忆测试由「整组 SkipTest」改为「逐条/逐类 skipUnless」（25 条转真跑，34 条按名跳过）。
+状态：**T1–T6 全部落地，T5 已 live 验收通过；余两项既有检查缺口待用户拍板**。截至 2026-10-25 已落地：T1 报告层（`scripts/evals_report.py` + `run_gates` 的 `evals_report` 门禁）、T2 `origin` fail-fast、T3a 日志漏斗（`scripts/mine_eval_candidates.py` 及其测试）、T3b `test_memory_eval.py` 内联夹具化（19 条真跑）、T4 `barge-in-timeline-offline`（offline 层 6→7 条）、T5 judge 三态**已 live 验收通过**（`evals/checks.py` 的 `judge_hallucination`、`scripts/run_evals.py` 的三态聚合与 `classify_results` 退出码分桶、`llm_judge_*` 配置、`scripts/test_judge_three_state.py` 的离线契约覆盖三态判定 / `run_case` 端到端 / 真实 HTTP / 退出码分桶 / `main_async --live` 五类，其中走真实路径的那些零凭据零外网；**条数以实跑输出为准，本文不写死**；`--live --case hallu-empty-retrieval-live` 实测 3/3 通过、0 review）、T6 其余 5 个程序性记忆测试由「整组 SkipTest」改为「逐条/逐类 skipUnless」（真跑与按名跳过的条数见 `docs/TESTING.md` 的夹具表格，同样以实跑为准）。
 **余两项待用户拍板**（2026-10-25 live 全层实跑发现，均非本轮改动引入，已用 git diff 证实两个检查函数体未被触碰）：① `accuracy-over-persona-live` 的 `fact_correction_earth` 正则漏判多种自然纠正措辞；② `emotion-tag-retention-live` 偶发缺 `[情绪]` 标签或空回复。实锤样本见 `evals/results/20261025T064545Z.json` 与 `20261025T065401Z.json`。
 
 **离线阶段抓到并修掉的一个真 bug**（2026-10-25）：`_judge_client()` 最初只给 `SimpleNamespace` 传了四个 `llm_*` 字段，而 `LLM.complete_raw` 还会读 `llm_temperature` / `llm_max_tokens` / `llm_frequency_penalty` / `llm_presence_penalty` / `llm_reasoning_effort`（`server/llm.py:109-121`）——真实调用会 `AttributeError`，又被 `judge_hallucination` 的 `except Exception` 吞成「review」，看起来像"裁判没配"实为配置残缺。原有的 12 条单测把 `_judge_client` 整个 patch 掉，从未走到这条真实路径。已改为从 `settings.as_dict()` 全量派生再覆盖四个 judge 字段，并补回归测试 `test_judge_client_construction_survives_real_complete_raw_fields`（用不可达地址把请求打到建 payload 之后，证明失败原因是连网而非缺字段）。这类"静默降级"正是 paid live run 里最难发现的一类，值得在接任何外部裁判前先补。
@@ -23,16 +23,16 @@
 
 | 事实 | 证据 |
 |---|---|
-| 结构是「一门禁 + 一 runner + 一堆不进门的评测」 | `run_gates.py` 的 `GATES` 实有 71 条（当日逐条枚举）；`run_evals.py` 的 offline 层是唯一进 CI 的评测 runner（`ci.yaml:49`）；11 个 `eval_*.py` 与 9 个 `test_*eval*.py` 全是按需手动 |
-| 设计约束覆盖扎实：AGENTS.md 六/七条约束中 6 条完整覆盖，Worker 可插拔那条在 `run_gates` 的 `adapter_ext` 而不在 `evals/` 体系 | `evals/cases/` 6 条 offline 中 5 条对应约束（`lesson-injection-offline` 属程序性记忆检索，在约束矩阵外）；准确性优先与情绪标签的线上保持是 live-only；`run_gates.py:107-108,387` |
-| 但「逐条有 test_core 断言」言过其实：仅三档 / 空检索 / 硬删除三条有直接断言；准确性与快环两条在 `test_core` 全无对应；情绪标签只有 `demo_turns()` 计数的弱断言 | `test_core.py:100,124,94`；登记表 `test_core.py:510-526` |
-| 产出无人消费：`evals/results/` 已积 152 个运行快照（当日实枚举，数量在漂），全仓无任何读取方 | 除 `.gitignore:61` 与 `run_evals.py:257-261` 的写入方外零读取 |
-| 通过率只有单一数字：`passed_runs/total_runs`，不区分「最低单轮通过率」与「平均通过率」 | `run_evals.py:268,280-281` |
-| 全部 9 条用例都是 `pass_rule: all + runs: 3`，单轮抖动即翻转整条；`min_rate` 分支是无用例覆盖的死代码 | `run_evals.py:207-218`；`evals/cases/` 全量检索 |
+| 结构是「一门禁 + 一 runner + 一堆不进门的评测」 | `scripts/run_gates.py` 的 `GATES` 条数与 `ALWAYS_REQUIRED` 名单以 `.\\.venv\\Scripts\\python.exe -c "import sys;sys.path.insert(0,'scripts');import run_gates;print(len(run_gates.GATES),len(run_gates.ALWAYS_REQUIRED))" 实跑为准（本文不写死，数字随门禁增减漂移）；`scripts/run_evals.py` 的 offline 层是唯一进 CI 的评测 runner（`ci.yaml:49`）；11 个 `eval_*.py` 与 9 个 `test_*eval*.py` 全是按需手动 |
+| 设计约束覆盖扎实：AGENTS.md 六/七条约束中 6 条完整覆盖，Worker 可插拔那条在 `run_gates` 的 `adapter_ext` 而不在 `evals/` 体系 | `evals/cases/` 6 条 offline 中 5 条对应约束（`lesson-injection-offline` 属程序性记忆检索，在约束矩阵外）；准确性优先与情绪标签的线上保持是 live-only；`scripts/run_gates.py:107-108,387` |
+| 但「逐条有 test_core 断言」言过其实：仅三档 / 空检索 / 硬删除三条有直接断言；准确性与快环两条在 `test_core` 全无对应；情绪标签只有 `demo_turns()` 计数的弱断言 | `scripts/test_core.py:100,124,94`；登记表 `scripts/test_core.py:510-526` |
+| 产出无人消费：`evals/results/` 已积 152 个运行快照（当日实枚举，数量在漂），全仓无任何读取方 | 除 `.gitignore:61` 与 `scripts/run_evals.py:257-261` 的写入方外零读取 |
+| 通过率只有单一数字：`passed_runs/total_runs`，不区分「最低单轮通过率」与「平均通过率」 | `scripts/run_evals.py:268,280-281` |
+| 用例的 `pass_rule` 与 `runs` 以 `evals/cases/` 各 YAML 实况为准（`.\\.venv\\Scripts\\python.exe -c "import sys;sys.path.insert(0,'scripts');from run_evals import load_cases;print([(c['id'],c.get('pass_rule','all'),c.get('runs')) for c in load_cases(None)])"）；`min_rate` 分支的覆盖也以该输出为准，不写死条数 | `scripts/run_evals.py:207-218`；`evals/cases/` 全量检索 |
 | CI 假绿：6 个 `scripts/test_*eval*.py` 因夹具随 `/eval` 清理丢失而 `SkipTest`，`ci.yaml:71-78` 的循环把跳过算通过 | `docs/TESTING.md:51-58`；`ci.yaml:5` 注释「跳过计通过」 |
-| offline 零网络零 Key 是**主动设防**而非天然无害 | `evals/checks.py:140` patch 掉 `complete_raw` + `executive.py:28,35` 的 `self.llm=None`；`:130-133` 记录去掉 patch 会退化成真实调用 |
-| live 是「装配级」不是生产全链路 | `run_evals.py:116-117`；`docs/TESTING.md:43` 明确划界 |
-| `server/assistant/evaluator.py` 不是对话质量评测器 | 两层全确定性，评慢环 Worker 交付物；`evaluator.py:1-11` 文件头自述 |
+| offline 零网络零 Key 是**主动设防**而非天然无害 | `evals/checks.py:140` patch 掉 `complete_raw` + `server/assistant/executive.py:35` 的 `self.llm = llm`（签名处 `llm: Any = None`，默认不配 LLM）；`:130-133` 记录去掉 patch 会退化成真实调用 |
+| live 是「装配级」不是生产全链路 | `scripts/run_evals.py:116-117`；`docs/TESTING.md:43` 明确划界 |
+| `server/assistant/evaluator.py` 不是对话质量评测器 | 两层全确定性，评慢环 Worker 交付物；`server/assistant/evaluator.py:1-11` 文件头自述 |
 
 **判断**：门禁不严，缺的是**消费**。已跑过 152 次评测，没有任何东西读它。收益最大、风险最小的一侧是补报告层，而不是动门禁。
 
@@ -44,7 +44,7 @@
 
 | 分区 | 进退出码 | 装什么 | 判定器 | 谁跑 |
 |---|---|---|---|---|
-| **门禁**（gate） | 是，失败即非零 | offline 6 条回归用例 + 新增的 barge-in 事件链用例 + 内联夹具化后的 `test_*eval*.py` | 纯代码（contains/regex/custom/事件序） | CI 与 `run_gates` 自动跑 |
+| **门禁**（gate） | 是，失败即非零 | offline 回归用例（条数以 `.\\.venv\\Scripts\\python.exe scripts\\run_evals.py` 输出的通过率表为准，本文不写死）+ 新增的 barge-in 事件链用例 + 内联夹具化后的 `test_*eval*.py` | 纯代码（contains/regex/custom/事件序） | CI 与 `run_gates` 自动跑 |
 | **报告**（report） | 否，只出报告 | `evals_report.py` 读 `evals/results/` 快照：趋势、配对差异、成本 | 纯代码（统计） | `run_gates` 里作为一条「报告跑得完」的断言；不进 `ci.yaml` |
 | **探针**（probe） | 否 | live 三脚本、程序性记忆家族、judge 型用例 | 正则 / custom / judge / 人工 | 手动 `--live`，需 Key |
 
@@ -61,8 +61,8 @@
 落到本项目：
 
 1. **代码**（门禁 + 报告两层的主力）：现有 `contains / not_contains / regex_any / not_regex / custom` 五种 check 继续承担全部 offline 判定；新增的 barge-in 事件链也用事件序断言而非墙钟（`evals/checks.py:74` 已是这个模式）。
-2. **LLM 裁判**（只加在 live 探针层）：新增 `check.type: judge`，复用 `run_evals.py:91-96` 已支持的 awaitable custom 通道，不需要新调度机制。三态输出 `pass / fail / review`：judge 缺 Key、调用异常、与正则不一致一律记 `review` 不记 `fail`。去偏手段只用论文本身支持的：交换顺序跑两遍、只在两次一致时采纳、否则记平局，并要求 judge 先给思维链（[arXiv:2306.05685](https://arxiv.org/abs/2306.05685)）；长度受控估计另引 [arXiv:2404.04475](https://arxiv.org/abs/2404.04475)。**judge 永不进 CI**（CI 无 Key，`ci.yaml:11` 明示）。
-3. **人工**：live 落盘的原始回复已有（`run_evals.py:201-204`，只存回复与判定、不存 prompt 与凭据），补一份抽查清单即可，不建新机制。
+2. **LLM 裁判**（只加在 live 探针层）：新增 `check.type: judge`，复用 `scripts/run_evals.py:91-96` 已支持的 awaitable custom 通道，不需要新调度机制。三态输出 `pass / fail / review`：judge 缺 Key、调用异常、与正则不一致一律记 `review` 不记 `fail`。去偏手段只用论文本身支持的：交换顺序跑两遍、只在两次一致时采纳、否则记平局，并要求 judge 先给思维链（[arXiv:2306.05685](https://arxiv.org/abs/2306.05685)）；长度受控估计另引 [arXiv:2404.04475](https://arxiv.org/abs/2404.04475)。**judge 永不进 CI**（CI 无 Key，`ci.yaml:11` 明示）。
+3. **人工**：live 落盘的原始回复已有（`scripts/run_evals.py:201-204`，只存回复与判定、不存 prompt 与凭据），补一份抽查清单即可，不建新机制。
 
 ---
 
@@ -70,14 +70,14 @@
 
 ### 5.1 origin fail-fast（T2，约 5 行）
 
-`origin` 目前只是文档约定，`run_evals.py:44-52` 的 `load_cases` 不校验。加 fail-fast：缺失或空串则收集用例名，在 `main` 打印并 `return 1`。让「`origin` 必填」（`docs/TESTING.md:59`）从愿望变成机械保证。现有 9 条 origin 均非空，不会误伤。
+`origin` 目前只是文档约定，`scripts/run_evals.py:44-52` 的 `load_cases` 不校验。加 fail-fast：缺失或空串则收集用例名，在 `main` 打印并 `return 1`。让「`origin` 必填」（`docs/TESTING.md:59`）从愿望变成机械保证。现有 9 条 origin 均非空，不会误伤。
 
 ### 5.2 日志漏斗（T3，约 150–200 行 + 80–120 行测试）
 
 `scripts/mine_eval_candidates.py`：
 
 - 纯 `sqlite3` 以 `mode=ro` 打开 `data/memory.db`（先例 `scripts/archive_durable.py:38`、`scripts/backup_local_databases.py:100`），**不得 import `server.memory.store`**（那会按 `server/config.py` 的 settings 打开活库、可能触发真实副作用）。
-- 读 `messages` 表（schema 抄 `server/memory/store.py:80-88`，时间窗范式照 `store.py:1096-1100`），用确定性启发式提名四类候选：共指/省略追问（"那个/它/上次/我们之前/还记得吗"）、疑似幻觉面（空检索历史 + 共同经历断言）、事实挑战（"其实是…/不对吧"）、负面情绪边界。归一化去重与打标。
+- 读 `messages` 表（schema 抄 `server/memory/store.py:80-88`，`now` 注入范式（`stamp = time.time() if now is None else float(now)`）照 `server/memory/store.py:1096-1100`），用确定性启发式提名四类候选：共指/省略追问（"那个/它/上次/我们之前/还记得吗"）、疑似幻觉面（空检索历史 + 共同经历断言）、事实挑战（"其实是…/不对吧"）、负面情绪边界。归一化去重与打标。
 - 输出 JSON 到 `eval/research/case_candidates_<stamp>.json`（`.gitignore:54` 已覆盖 `/eval/`），字段 `heuristic / session_id / created_at / user_text / assistant_text / suggested_layer / suggested_origin`，内置凭据与个人信息正则脱敏（思路可复用 `scripts/eval_memory.py:32-35` 的 `_CREDENTIAL`）。
 - **不写 `evals/cases/`**。候选经人工脱敏与改写后才手写进受版本控制的目录——这是隐私红线：`evals/cases/` 受版本控制，`.gitignore` 只覆盖 `/eval/`（:54）与 `evals/results/`（:61）。
 - 不 import 任何 server 模块、无网络无 Key；库不存在时打印说明并 `exit 0`。
@@ -101,16 +101,16 @@
 **输出三段**：
 
 1. **通过率表**：每条用例一行，分列「最低单轮通过率」与「平均通过率」。这是本方案最核心的一列：`pass_rule: all` 语义上就是 pass^k，`min_rate` 是均值阈值折中，两者混成一个数字时「有能力但不稳定」与「能力不足」不可区分（[Anthropic evals 博客](https://www.anthropic.com/engineering/demystifying-evals-for-ai-agents)）。数据直接从已有 `runs` 数组算，**零新采集**。
-2. **配对差异**：与上一次同名用例逐条比，标 `↑ ↓ =`。不引入 `latest.json`、不改 `run_evals.py`——排序取末两份快照即可。
-3. **成本**：每条用例 `completion_tokens` 合计与每轮均值。口径必须显式标注：**这是评测进程口径，不是生产 usage 口径**。项目已有第二套记账通道（`server/llm.py:50` 的 `last_usage`、`server/assistant/adapters/base.py:40` 的 `token_event(..., ttft_ms=...)`、dispatcher 的 `audit_inputs` / `commission_usage`、`evaluator.py:151` 的 `_check_token_budget`），第一步**不接**，避免产出两套互不相等的成本数字；接入留第二轮。
+2. **配对差异**：与上一次同名用例逐条比，标 `↑ ↓ =`。不引入 `latest.json`、不改 `scripts/run_evals.py`——排序取末两份快照即可。
+3. **成本**：每条用例 `completion_tokens` 合计与每轮均值。口径必须显式标注：**这是评测进程口径，不是生产 usage 口径**。项目已有第二套记账通道（`server/llm.py:50` 的 `last_usage`、`server/assistant/adapters/base.py:40` 的 `token_event(..., ttft_ms=...)`、dispatcher 的 `audit_inputs` / `commission_usage`、`server/assistant/evaluator.py:151` 的 `_check_token_budget`），第一步**不接**，避免产出两套互不相等的成本数字；接入留第二轮。
 
 **必须处理的两种边界态**：
 
 - 空目录（新克隆上 `evals/results/` 被 `.gitignore:61` 忽略，目录为空）：打印「无历史数据」并 `exit 0`。
 - 单快照：打印「仅一份快照，无配对基线」并 `exit 0`。
-- 输出中**不得出现行首 `SKIP`**，否则会被 `run_gates` 的 `skip_regex` 判为跳过（`run_gates.py:445-450,469-474`：SKIP 且非 `--allow-skip` 即非零）。
+- 输出中**不得出现行首 `SKIP`**，否则会被 `run_gates` 的 `skip_regex` 判为跳过（`scripts/run_gates.py:445-450,469-474`：SKIP 且非 `--allow-skip` 即非零）。
 
-**跨层比较口径**：offline 运行只落 6 条、`--live` 落 9 条（`run_evals.py:227-254`），live 才有 `turn_meta`、offline 的 `turns` 恒为空（`:203`）。报告必须标注每份快照的 layer 构成，否则用户看到「通过率 100%→67%」无法判断是退化还是 run 数变了。
+**跨层比较口径**：offline 运行只落 offline 用例、`--live` 才额外落 live 用例（条数以 `evals/cases/` 目录实枚举为准：2026-10-27 为 offline 8 条 / live 4 条，会随用例增减变化，别写死），live 才有 `turn_meta`、offline 的 `turns` 恒为空。报告必须标注每份快照的 layer 构成，否则用户看到「通过率 100%→67%」无法判断是退化还是 run 数变了。
 
 ---
 
@@ -128,7 +128,7 @@
 
 三分类，两处关键修正：
 
-1. **内联夹具化**：6 个因夹具缺失而 `SkipTest` 的离线契约测试（`test_memory_eval.py`、`test_procedural_memory_eval.py`、`_induction.py`、`_diagnostics.py`、`_source_projection.py`、`_boundaries.py`）。正解**不是**恢复被 `.gitignore:54` 忽略的 `eval/research/*.json`（本地恢复了 CI 仍空跑），而是照两个现成样板改写成自包含：`test_editor_quality_eval.py:54`（注入 `ScriptedModel` + `fixture()` 内联构造）与 `test_procedural_memory_eval_snapshot.py:19-36`（`setUp` 建临时目录）。先做 `test_memory_eval.py`（约 40–80 行，它是 5 层导入链的根、样板效应最大）。
+1. **内联夹具化**：6 个因夹具缺失而 `SkipTest` 的离线契约测试（`test_memory_eval.py`、`test_procedural_memory_eval.py`、`_induction.py`、`_diagnostics.py`、`_source_projection.py`、`_boundaries.py`）。正解**不是**恢复被 `.gitignore:54` 忽略的 `eval/research/*.json`（本地恢复了 CI 仍空跑），而是照两个现成样板改写成自包含：`scripts/test_editor_quality_eval.py:54`（注入 `ScriptedModel` + `fixture()` 内联构造）与 `scripts/test_procedural_memory_eval_snapshot.py:19-36`（`setUp` 建临时目录）。先做 `test_memory_eval.py`（约 40–80 行，它是 5 层导入链的根、样板效应最大）。
 2. **保留为探针**：程序性记忆家族是 5 层导入链（`eval_memory → eval_procedural_memory → _induction → {_diagnostics, _boundaries}`），删中间任一层会断掉后代 import，整体保留并加固离线契约测试，归入探针区。
 3. **删除**：`scripts/eval_scenarios.py`（约 121 行）——导入期即 `FileNotFoundError`（`:26` 顶层读 `eval/scenarios.json`）、功能已被 `evals/cases/` + `evals/checks.py` 覆盖、文档指向已漂移（`docs/REQUIREMENTS.md:48`、`docs/COMPANION_ASSISTANT_DESIGN.md:350` 需同步改）。
 
@@ -138,10 +138,10 @@ live-only 三脚本（`eval_draft_grounding.py` / `eval_personalization.py` / `e
 
 ## 九、CI 与门禁接线
 
-- `ci.yaml` **不改**：现有四步（`check_protocol.py` / `run_evals.py` offline / `scripts/test_*.py` 循环 / `npm test`）继续承担门禁轨。
-- `run_gates.py` 加一条 `evals_report` gate（约 8–12 行，逐字仿 `:322-327` 的 `evolution_quality_report`），并列入 `ALWAYS_REQUIRED`。语义是「让报告跑得完本身成为一条断言」——报告不进退出码，报告的可执行性进。
+- `ci.yaml` **不改**：现有四步（`check_protocol.py` / `scripts/run_evals.py` offline / `scripts/test_*.py` 循环 / `npm test`）继续承担门禁轨。
+- `scripts/run_gates.py` 加一条 `evals_report` gate（约 8–12 行，逐字仿 `:322-327` 的 `evolution_quality_report`），并列入 `ALWAYS_REQUIRED`。语义是「让报告跑得完本身成为一条断言」——报告不进退出码，报告的可执行性进。
 - `docs/TESTING.md:312` 的分区判据从「按文件前缀」改成「按是否调用真实模型 / 有固定预算」，`scripts/evals_report.py` 因此不被误判成"验收不要跑"的评测。
-- judge 永不进 CI（无 Key）；`--live` 仍是手动触发，且带 Key 实跑时 live 失败计入退出码（`run_evals.py:282`，文档口径已按此修正）。
+- judge 永不进 CI（无 Key）；`--live` 仍是手动触发，且带 Key 实跑时 live 失败计入退出码（`scripts/run_evals.py` 的 `main_async` 末尾 `return 1 if failures else 0`；**行号会漂移，以函数为准**）。
 
 ---
 
@@ -152,7 +152,7 @@ live-only 三脚本（`eval_draft_grounding.py` / `eval_personalization.py` / `e
 | 改 `server/assistant/executive.py` | 否。全部改动落在 `scripts/`、`evals/`、`docs/` |
 | 新增调色板颜色 | 否。不涉及任何前端 |
 | 自造 `PROTOCOL.md` 之外的 WS 事件 / API 字段 | 否。judge 的 verdict/reason 只进 stdout 与 `evals/results/*.json`，不经 `Connection.send_turn`；语音层只读既有事件 |
-| 重启 8000 / 8010 | 否。全部离线进程；若复用 bench 的 uvicorn 基础设施必须沿用其自起自停端口（`bench_voice_loop.py:48,511-513`） |
+| 重启 8000 / 8010 | 否。全部离线进程；若复用 bench 的 uvicorn 基础设施必须沿用其自起自停端口（`scripts/bench_voice_loop.py:48,511-513`） |
 | 删数据 | 否。报告层只读，禁止轮转或清理 `evals/results/` |
 | 快环内不得阻塞 | 否。judge 与报告都跑在评测进程里，不在 `Orchestrator.respond()` 路径上 |
 
@@ -168,7 +168,7 @@ live-only 三脚本（`eval_draft_grounding.py` / `eval_personalization.py` / `e
 | **T1b** | 报告层接 CI（可选） | `.github/workflows/ci.yaml` | 约 3 行 | T1 | 否 | CI 上单快照态 `exit 0` |
 | **T2** | origin fail-fast | `scripts/run_evals.py` | 约 5 行 | 无 | 否 | offline 全绿；临时用例缺 origin 返回 1（验后删） |
 | **T3** | 日志漏斗 + 内联夹具样板 | `scripts/mine_eval_candidates.py`、`scripts/test_mine_eval_candidates.py`、`scripts/test_memory_eval.py` | 150–200 + 80–120 行 | T2 | 否 | 自建同 schema 临时 sqlite 验命中/不命中/去重/脱敏/空库；`run_evals` 零回归；`check_protocol` PASS |
-| **T4** | barge-in 事件链 | `evals/checks.py`、`evals/cases/barge-in-timeline-offline.yaml` | 60–90 + 12 行 | 无 | 否 | `run_evals` offline 全绿 + `test_core.py` 全绿 |
+| **T4** | barge-in 事件链 | `evals/checks.py`、`evals/cases/barge-in-timeline-offline.yaml` | 60–90 + 12 行 | 无 | 否 | `run_evals` offline 全绿 + `scripts/test_core.py` 全绿 |
 | **T5** | judge 三态 | `evals/checks.py`、`scripts/run_evals.py`、`evals/cases/hallu-empty-retrieval-live.yaml`、`server/config.py`、`.env.example`、`docs/TESTING.md` | 60–100 + 45–70 + 8 + 6 + 5 + 10 行 | T1 | **是** | `--live` 实跑；judge 缺 Key 时记 review 不记 fail、退出码仍 0 |
 | **T6** | 资产处置 | 其余 5 个 `test_*eval*.py`、删 `scripts/eval_scenarios.py`、两处文档指向 | 约 40–80 行 × 5 | T3 | 否 | 各 test 从 `SkipTest` 变真跑；grep 确认 `eval_scenarios` 无 import 方 |
 | **T7** | 第二轮可选 | ASR 字错率小集合 / 真人面板 / 成本接 usage 通道 / `latest.json` | 待定 | T1 | 部分 | 待定 |
@@ -199,18 +199,25 @@ npm test
 3. **成本记账是否接既有 usage 通道**（`last_usage` / `token_event(ttft_ms)` / `commission_usage`）。
 4. **ASR 字错率小集合**：固定合成 mp3 语料、版本钉死、按 condition 分报，live-only。
 5. **真人面板**：与聚合器、基线锚三件套同时交付。
+6. **安全/危机维度：拆成两层，只有一层需要拍板**（2026-10-27 外部完备性审查报出，此前三份文档均未承认；同日实测漏斗后修正了初版判断——初版把整块都挂成了待拍板，实测证明其中大半**不需要拍板**）。
+   **第一层｜可自判、已自行落地，不需拍板**：用户明确要求停止调侃（"别调侃了 / 别这样说话 / 我难受"）之后 Agent 不得继续调侃；用户表达负面情绪时不得否定其感受、不得立刻转移话题。这属 persona 礼貌边界，与危机政策无关，且 `config/persona.yaml` 的规格**本就完备**（`收敛` 状态的 `when` 覆盖这三个触发词、`behave` 是「立刻停止调侃…不辩解」；`轻微毒舌` 的 `boundary` 写明「不换成另一种形式的挖苦」）。
+   **已落地**：offline 用例 `persona-negative-emotion-boundary-offline`（配置层守卫，断言 persona 里这条状态仍在）。注意它是**配置层守卫、不是行为验证**——真实日志里已多次出现违反样本（用户说别调侃了仍继续，如「行。刚才谁让我别调侃的，你自己数着。」「知道了。说真的，面得怎么样？」），那需要 live 跑才能抓，配置层管不住。
+   **第二层｜仍需用户拍板**：真正的自伤危机回应（"不想活"类）——是否给热线、如何措辞、何时转人工、无人工在场时能否独自应对。这是产品决策、有真实后果，不自行代拍。
+   **必须 live 验证的部分**（需 Key，成本自负）：危机话术实际质量；以及**是否误伤正常负面情绪倾诉**——D4 受控实验已证明"负面情绪轮次不会更易触发空回复"（0/8 对 0/8），所以别把倾诉当危机，那是另一种误判。
+   **漏斗现状**：`scripts/mine_eval_candidates.py` 的 `negative_emotion_boundary` 启发式已能提名此类日志，实测 18 条候选里 17 条属这一类——但**归类偏宽**：其中多数是「礼貌边界」而非「危机」，另有 1 条 `suspected_hallucination_surface` 实际是 Agent 质疑用户记忆（属事实优先级问题）。要按上面两层重新分流，别让"提名了危机"变成"其实是语气问题"。
 
 ---
 
-## 附、评测健康度层（H1，2026-10-26 设计，2026-10-27 核：未落地）
+## 附、评测健康度层（H1，2026-10-26 设计，2026-10-26 落地）
 
-`scripts/evals_health.py` 横向扫 `evals/results/` 的**全史**快照（报告层只比对末两份），回答三个报告层不回答的问题：
+`scripts/evals_health.py` 横向扫 `evals/results/` 的**全史**快照（报告层只比对末两份），回答四个报告层不回答的问题：
 
 1. **offline 确定性不变量**——offline 用例近期窗口内失效即非确定性 bug（exit 1）。offline 的定义就是"无网络、无 Key、确定性」，任何抖动都是 bug。窗口 `RECENT_WINDOW_DAYS=7`（按自然日不按份数：抗单日快照突发，并把建制日的历史欠账排除在门外，只进报告不判红）。
 2. **live 抖动画像**——每条 live 用例的全史通过率与失效日期分布，一眼看出「一直抖」还是「最近退化」。这是人工扫过十几份快照才干成的活，现在一次给出。
 3. **快照数据质量**——损坏快照、缺字段、xfail 占比、与 `evals/cases/` 的用例差集。
+4. **防过拟合检测**——刷穿嫌疑（长期失效后突然持续转绿）、从未失效的 live 用例（断言可能不够狠）、重复/冗余用例。**只标记不判定**，不自动退役任何用例，退役是用户决策。
 
-退出码语义：**仅当近期窗口内 offline 用例失效才 exit 1**；live 抖动、历史欠账、数据质量提示、空目录、快照全损坏一律 exit 0，只在输出里标注。`xfail` 用例照常跑但不计入失败（`run_evals.py` 的口径），因此也不进通过率与门禁判定，只进占比统计。**当前状态（2026-10-27 核）**：`scripts/evals_health.py` 尚未落盘，`run_gates` 中也无 `evals_health` 门禁，本节为计划口径；落地时脚本、门禁登记、`ALWAYS_REQUIRED` 三处必须同时进，否则就是「文档声称已进门禁而实际不存在」的幽灵门禁。
+退出码语义：**仅当近期窗口内 offline 用例失效才 exit 1**；live 抖动、历史欠账、数据质量提示、空目录、快照全损坏一律 exit 0，只在输出里标注。`xfail` 用例照常跑但不计入失败（`scripts/run_evals.py` 的口径），因此也不进通过率与门禁判定，只进占比统计。**已落地（2026-10-26）**：脚本已落盘，`run_gates` 的 `GATES` 有 `evals_health` 条目且已进 `ALWAYS_REQUIRED`，与 `evals_report` 同级；复跑 `.\\.venv\\Scripts\\python.exe scripts\\run_gates.py --only evals,evals_report,evals_health` 应见三条 PASS。三处（脚本、门禁登记、`ALWAYS_REQUIRED`）必须同进，否则就是「文档声称已进门禁而实际不存在」的幽灵门禁。
 
 实现上防了四类「静默失效」——都是会让门禁在该红时不红、或不该红时红的陷阱：字段类型损坏（`total_runs` 是 `"abc"`）不崩不红、归入缺字段告警；`SKIP` 开头的用例名不会让门禁误判成「跳过」（`run_gates` 的 `skip_regex` 是 `^\s*SKIP`，行锚定且大小写敏感，缩进救不了，只有让 id 不以行首 SKIP 形式出现）；`--json` 不许指向快照目录之内（否则自我污染，下次运行把摘要当损坏快照）；`cases` 目录缺失时不谎报「用例集合一致」。
 
@@ -220,5 +227,5 @@ npm test
 
 - 本方案的全部外部依据与 URL：`docs/EVAL_MECHANISM_RESEARCH.md`（已于 2026-10-25 按对抗核实修正 4 处事实：MT-Bench 缓解归属、声网 `llm_ftfs` 口径、Sources 两处标题归属、用例条数误写）。
 - 本方案的现状事实来自 2026-10-24 的三路对抗核实工作流（外部来源核查 / 代码事实核查 / 覆盖矩阵核查），关键论断均带 `文件:行号`。
-- `docs/TESTING.md:42` 的 live 退出码口径已按 `scripts/run_evals.py:282` 修正。
+- `docs/TESTING.md` 的 live 退出码口径已按 `scripts/run_evals.py` 的 `main_async` 末尾 `return 1 if failures else 0` 修正（行号会漂移，以函数为准）。
 

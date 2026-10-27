@@ -1,0 +1,24 @@
+id: coreference-resolution-live
+title: 多轮指代消解：用户用指代词回头追问时，须解析到前文提过的实体
+layer: live
+origin: R15 完备性审查报的指代消解缺口（此前 evals/checks.py 无任何指代判定）
+tags: [coreference, multi-turn, live]
+setup: {}
+# 指代对象全部来自对话前文、不预置记忆——judge 只看对话文本，正好够用。
+# 最后一轮「那现在到底什么时候能弄完」用「那」回指「渡船」，是本例的断言点；
+# 前三轮负责把实体和它的时间线建立起来。
+turns:
+  - 我在负责一个把旧库迁到新库的项目，组里管它叫「渡船」。
+  - 渡船原定什么时候上线？
+  - 它上周是不是说要延期？
+  - 那现在到底什么时候能弄完？
+runs: 3
+pass_rule: all
+checks:
+  # judge 主判、正则低召回（aux_role="rescue"）：只把 fail 救成 review，
+  # 不把 pass 拖成 review。未配 judge 时整层退化成 review，
+  # 不把无 Key 的跑态假装成判过；judge 永不进 CI（CI 无 Key）。
+  - target: reply
+    type: custom
+    value: "evals.checks:judge_coreference"
+status: active

@@ -1,0 +1,14 @@
+id: persona-negative-emotion-boundary-offline
+title: persona 必须声明「用户要求停止调侃时立刻停止」的边界（配置层守卫，非行为验证）
+layer: offline
+origin: 日志漏斗 scripts/mine_eval_candidates.py 实测 18 条候选、其中 17 条 negative_emotion_boundary，含「用户说别调侃了、Agent 仍继续调侃」的违反样本（2026-10-27）
+tags: [prompt, persona, emotion-boundary]
+setup: {}
+turns:
+  - 别调侃了，我难受。
+pass_rule: all
+checks:
+  - target: prompt
+    type: custom
+    value: "evals.checks:persona_negative_emotion_boundary"
+status: active

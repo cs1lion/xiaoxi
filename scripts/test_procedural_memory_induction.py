@@ -16,6 +16,7 @@ from unittest.mock import AsyncMock, patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import eval_procedural_memory_induction as target
+import pm_induction_fixture
 
 
 def candidate(ids):
@@ -25,26 +26,32 @@ def candidate(ids):
 
 
 def setUpModule():
-    """共享域夹具缺失时整组跳过。
+    """内联共享域夹具，不再整组跳过（2026-10-26 重建；H4 的成果曾被并行会话的
+    提交 20d9710 回退成「检查文件是否存在、缺失就整组 SkipTest」，此处重新接上）。
 
-    2026-10-25 更正：这个跳过**不是**纯遗留。PipelineTests.asyncSetUp 经
-    target.load_sources()（scripts/eval_procedural_memory_induction.py:50-57）
-    读 eval/research/procedural_memory_eval_cases.json；test_plan_* 与
-    test_real_frozen_prepare_* 也各自间接依赖它。该文件随 /eval 清理被删、
-    从未入 git，还被 procedural_memory_eval_snapshot.py 的 SOURCE_FILES
-    收进冻结白名单（:35）。
+    旧实现的假绿：检查 eval/research/procedural_memory_eval_cases.json 是否存在，
+    缺失就整组 SkipTest——退出码 0、CI 判绿，其实一条都没跑。该文件随 /eval
+    清理被删、从未入 git，PipelineTests 经 target.load_sources()
+    （eval_procedural_memory_induction.py:50-57）真实依赖它，grep 测试文件
+    看不见这个依赖。
 
-    曾据「测试文件里没有 read_text」误判它自包含而删掉跳过，结果 5 条立刻红——
-    夹具依赖在被测模块里，grep 测试文件看不见。要做真修复得重建共享夹具
-    （3 个 source_bundle、各 2 条 recipe、id 互异，另需 eval_procedural_memory.py
-    用的 oracles 文件），并让 domain.prepare() 能对其真实执行；那是独立一张票，
-    补齐之前，跳过是诚实的，假绿不是。
+    现在夹具由 pm_induction_fixture.build_sources() 内存构造（3 bundle × 2
+    recipe，形状由 load_sources 与 domain.prepare() 的校验钉死），写临时 JSON
+    后 monkeypatch target.load_sources 指向它，并在退出时清理。与 T3b 给
+    test_memory_eval.py 做的内联化同一套路。
     """
-    fixture = Path(__file__).resolve().parents[1] / "eval/research/procedural_memory_eval_cases.json"
-    if not fixture.exists():
-        raise unittest.SkipTest(
-            "缺少共享域夹具 procedural_memory_eval_cases.json（随 /eval 清理被删、从未入 git）；"
-            "PipelineTests 经 target.load_sources() 真实依赖它，补夹具前整组跳过")
+    pm_induction_fixture.install(target)
+
+
+def tearDownModule():
+    """还原 load_sources，避免 monkeypatch 泄漏到同进程后跑的模块。
+
+    与 T3b（scripts/test_memory_eval.py）的 tearDownModule 同款：只在
+    setUpModule 打补丁而不还原时，同进程合跑会让
+    eval_procedural_memory_diagnostics.py 的 lesson_sources() 读到内联夹具，
+    报 StopIteration 而非干净错误码，排障会找错方向。
+    """
+    pm_induction_fixture.restore(target)
 
 
 class FormatTests(unittest.TestCase):

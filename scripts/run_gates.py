@@ -961,6 +961,17 @@ GATES: dict[str, dict[str, object]] = {
         "cmd": [str(PY), "scripts/evals_report.py"],
         "skip_regex": r"^\s*SKIP",
     },
+    "evals_health": {
+        # 评测健康度层（docs/EVAL_MECHANISM_PLAN.md）：横向扫全史快照，回答报告层
+        # 不回答的四个问题——offline 是否还确定 / live 是一直抖还是最近退化 /
+        # 快照数据质量 / 评测体系自己是否在过拟合。退出码语义与报告层不同：仅近期
+        # 窗口（RECENT_WINDOW_DAYS 天）内 offline 用例失效才 exit 1；live 抖动、
+        # 历史欠账、数据质量、空目录、快照全损坏一律 exit 0。xfail 用例不计失败，
+        # 故也不进门禁判定。空态不许退化成跳过，输出不得出行首 SKIP。
+        # 2026-10-26：本条目曾被并行会话的提交误删，已按原样接回。
+        "cmd": [str(PY), "scripts/evals_health.py"],
+        "skip_regex": r"^\s*SKIP",
+    },
 }
 
 # 这些门禁的本体是纯逻辑单测，不需要本地服务，永远必须真跑。
@@ -968,7 +979,7 @@ ALWAYS_REQUIRED = ("protocol", "core", "scheduler_health", "budget_scope", "back
                    "codex_shim", "claude_shim", "gateway", "task_planning", "cross_day",
                    "thread_conversation", "self_evolution", "agent_loop", "llm_client",
                    "self_evolution_send", "config_hot", "config_hot_consumers",
-                   "evolution_quality_report", "evals_report", "lessons_cap", "venv_lock",
+                   "evolution_quality_report", "evals_report", "evals_health", "lessons_cap", "venv_lock",
                    "tmp_sweep", "memory_ranking", "memory_concurrency", "memory_retrieval",
                    "memory_api_offloop",
                    "voice_offloop",
@@ -1053,8 +1064,20 @@ def main() -> int:
     for name in names:
         print(f"[run ] {name}", flush=True)
         row = run_gate(name, GATES[name])
-        verdict = "PASS" if row["exit"] == 0 and not row["skipped"] else (
-            "SKIP" if row["skipped"] else "FAIL")
+        # R51：非零退出码一律 FAIL（fail-closed），SKIP 只在 exit==0 时成立。
+        # 曾经的裁决式把 `skipped` 排在非零退出码之前——一个「打印了 SKIP 行
+        # 却又 exit!=0」的门禁会被误判成 SKIP，于是：① 失败输出不被贴（下面
+        # 只对 FAIL 贴）；② 末尾 `if failed` 不含它；③ `--allow-skip` 又放过
+        # skipped——三者叠加，一句真实失败被洗成绿，结论还打印「所有门禁都真
+        # 跑过并断言」（2026-10-27 合成门禁实证：exit=1+SKIP 行 + --allow-skip
+        # → main() exit 0）。SKIP 的语义是「环境不满足、没跑、退出码 0」；
+        # 退出码非零意味着门禁真跑了且有失败，绝不能算 SKIP。
+        if row["exit"] != 0:
+            verdict = "FAIL"
+        elif row["skipped"]:
+            verdict = "SKIP"
+        else:
+            verdict = "PASS"
         row["verdict"] = verdict
         rows.append(row)
         print(f"[{verdict:4}] {name:20} exit={row['exit']:<4} {row['seconds']:>6}s"
@@ -1070,7 +1093,10 @@ def main() -> int:
 
     failed = [r for r in rows if r["verdict"] == "FAIL"]
     skipped = [r for r in rows if r["verdict"] == "SKIP"]
-    must_not_skip = [r for r in skipped if r["name"] in ALWAYS_REQUIRED]
+    # 注意判据：**任何**门禁跳过即失败（除非 --allow-skip），并不区分它是否在
+    # ALWAYS_REQUIRED 里——实际比 ALWAYS_REQUIRED 更严。这里不再保留一个
+    # 「ALWAYS_REQUIRED 专属」的过滤变量：它从未被使用，留着会让人以为跳过有
+    # 两种语义（2026-10-27 删）。
 
     print("\n=== 门禁报告 ===")
     print(f"  跑过并断言 : {sum(1 for r in rows if r['verdict'] == 'PASS')}")

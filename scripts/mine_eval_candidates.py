@@ -25,9 +25,12 @@ import re
 import sqlite3
 import sys
 import time
+from collections import defaultdict
 from datetime import datetime, timezone
 from pathlib import Path
 from uuid import uuid4
+
+import yaml
 
 # Windows GBK 控制台曾让同类报告脚本崩过（run_gates 的 evolution_quality_report
 # 注释记有此事）；强制 UTF-8 输出，宁可替换字符也不要崩——「库缺失必须 exit 0」
@@ -248,6 +251,64 @@ def _parse_epoch(value):
     return parsed.timestamp()
 
 
+def conversion_stats(research_dir: Path, cases_dir: Path) -> dict:
+    """漏斗转化率：累计提名 vs 已转成 evals/cases 用例。
+
+    为什么需要：漏斗每跑只报「本次提名 N 条」，至于提名过多少、其中多少真的
+    写成了 evals/cases/*.yaml，全无统计——R15 完备性审查称之为「漏斗有、
+    转化率不可见」。没有这个数，就无法判断漏斗是在产出价值还是在空转。
+
+    口径（必须随数字一起读，否则会被误读）：
+    - **累计提名**按 user_text 去重跨全部历史候选文件——同一条日志会被多次
+      提名，不去重会把重复计成多次转化机会；
+    - **已转化**按 user_text 与用例 turns 首轮**精确匹配**。所以报出来的是
+      **下限**：用例一旦改写措辞（人工改写是常态），就匹配不上、被算作未转化。
+      真实转化率只会比这个数高，不会低。
+
+    只读，不写任何地方。research_dir 不存在或没有候选文件时返回空统计（不崩）。
+    """
+    nominated: dict[str, set] = defaultdict(set)
+    for path in sorted(research_dir.glob('case_candidates_*.json')):
+        try:
+            data = json.loads(path.read_text(encoding='utf-8'))
+        except Exception:
+            continue  # 半截写入的候选文件不该让统计崩
+        for item in data.get('candidates') or []:
+            text = normalize(str(item.get('user_text') or ''))
+            if text:
+                nominated[str(item.get('heuristic') or '?')].add(text)
+
+    case_turns: set[str] = set()
+    if cases_dir.is_dir():
+        for path in sorted(cases_dir.glob('*.yaml')):
+            try:
+                data = yaml.safe_load(path.read_text(encoding='utf-8'))
+            except Exception:
+                continue
+            if not isinstance(data, dict):
+                continue
+            turns = data.get('turns') or []
+            if turns and isinstance(turns[0], str):
+                case_turns.add(normalize(turns[0]))
+
+    by_heuristic = {}
+    total_n = converted_n = 0
+    for heuristic in sorted(nominated):
+        texts = nominated[heuristic]
+        hit = sum(1 for t in texts if t in case_turns)
+        by_heuristic[heuristic] = {"nominated": len(texts), "converted": hit}
+        total_n += len(texts)
+        converted_n += hit
+    return {
+        "nominated_total": total_n,
+        "converted_total": converted_n,
+        "rate": (converted_n / total_n) if total_n else None,
+        "by_heuristic": by_heuristic,
+        "basis": "user_text 精确匹配用例 turns 首轮；用例改写措辞后即匹配不上，"
+                 "故本数是转化率的下限，真实值只会更高",
+    }
+
+
 def parser():
     result = argparse.ArgumentParser(description=__doc__)
     result.add_argument('--db', default=str(DEFAULT_DB))
@@ -256,6 +317,8 @@ def parser():
     result.add_argument('--until', default=None, help='覆盖结束（epoch 秒或 ISO-8601）')
     result.add_argument('--output', default=None)
     result.add_argument('--limit', type=int, default=None)
+    result.add_argument('--no-conversion', action='store_true',
+                        help='不输出漏斗转化率统计（默认输出）')
     return result
 
 
@@ -282,6 +345,10 @@ def main(argv=None):
                'counts': report['counts'], 'output': str(output)}
     if report.get('error'):
         summary['error'] = report['error']
+    # 漏斗转化率（R35）：不接进输出就只是死代码。默认开，--no-conversion 可关。
+    if not args.no_conversion:
+        summary['conversion'] = conversion_stats(DEFAULT_OUTPUT_DIR,
+                                                 ROOT / 'evals' / 'cases')
     print(json.dumps(summary, ensure_ascii=False))
     return 0
 

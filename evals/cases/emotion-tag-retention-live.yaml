@@ -11,8 +11,18 @@ turns:
   - 你说我是不是该直接摊牌
   - 算了，先不想这个，晚上吃什么好
   - 推荐个下饭的东西
-runs: 3
-pass_rule: all
+runs: 5
+# min_rate 必须和 runs 一起看：runs=3 时 min_rate:0.8 与 all 等价（3/3=1.0 过、
+# 2/3=0.667 不过），提高 runs 才让阈值有意义。runs=5 + 0.8 = 容忍 5 次里 1 次失败。
+#
+# 为什么改：D5 已定性本用例的抖动来自每轮低概率空回复（finish_reason=stop，
+# 非 length，现有截断救援覆盖不到），不是格式保持能力退化。按 all 判时
+# 「全过全败」——单轮抖动就翻转整条，历史通过率 42.9%（2026-10-25 健康度层实测），
+# 这种红无法区分"模型退步"和"供应商抖了一下"。
+#
+# 代价（要知情）：live 实跑从 3×6=18 次调用变成 5×6=30 次。判定用
+# passed_runs/total_runs >= 0.8，见 scripts/run_evals.py:237-242。
+pass_rule: min_rate:0.8
 checks:
   - target: reply
     type: custom

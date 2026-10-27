@@ -1,0 +1,20 @@
+id: persona-voice-style-offline
+title: persona 必须声明可判定的语气规格与完整的人格状态机（配置层守卫，非行为验证）
+layer: offline
+origin: R15 完备性审查报的人格/语气一致性缺口（此前 evals/checks.py 无任何语气护栏）
+tags: [prompt, persona, voice-style, states]
+setup: {}
+turns:
+  - 在吗
+pass_rule: all
+checks:
+  # 两个都是配置层守卫：只证明规格还在 persona 里，不证明模型照做。
+  # 真实效果（多轮语气一致性）要 live 才能抓，属已知缺口；
+  # 这里防的是「规格被清空/改成空壳/状态机被改坏」这种无显式报错的回归。
+  - target: prompt
+    type: custom
+    value: "evals.checks:persona_voice_style_declared"
+  - target: prompt
+    type: custom
+    value: "evals.checks:persona_states_well_formed"
+status: active

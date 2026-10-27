@@ -3,8 +3,12 @@
 
 **只测量、不改判据**：输出混淆矩阵与错误清单，为 B2 的阈值/判据调整提供基线。
 
-    .\.venv\Scripts\python.exe scripts\measure_intent_corpus.py
-    .\.venv\Scripts\python.exe scripts\measure_intent_corpus.py --verbose   # 列出全部错误
+作为 `run_gates` 的 `intent_corpus` 门禁，它还断言两条底线（见下方常量）：
+真实语料准确率地板线、两份语料的差距上限。没有这两条，`run_gates` 报的
+「跑过并断言」对它是空话——准确率掉到 60% 也退出 0。
+
+    .\\.venv\\Scripts\\python.exe scripts\\measure_intent_corpus.py
+    .\\.venv\\Scripts\\python.exe scripts\\measure_intent_corpus.py --verbose   # 列出全部错误
 """
 from __future__ import annotations
 
@@ -24,6 +28,18 @@ CORPUS = ROOT / "evals" / "intent_corpus.jsonl"
 # 用户真实语料：判据调整的**真实基准**。自造语料容易过拟合（实测同一判定器
 # 在自造 90.3%、真实 80.8%），所以两份都要量、都要报。
 CORPUS_USER = ROOT / "evals" / "intent_corpus_user.jsonl"
+
+# 真实语料准确率地板线。文档既定纪律是「判据调整时以真实语料为准」——
+# 既然以它为准，就必须对它设下限，否则回归无人把守。
+# 取 0.80：2026-10-27 实测 85.0%，下方留 5pt 余量；能抓住真实退化，
+# 又不因判据微调的正常波动误红。抬高地线前先确认不是语料本身变了。
+REAL_ACCURACY_FLOOR = 0.80
+
+# 两份语料准确率差距上限。脚本原有口径就是「差距 >5pt 说明判据正在拟合
+# 自造语料」（见 main() 的打印），但那只是警告、从不产生退出码——过度拟合
+# 因此可以静默发生。这里把它变成断言。当前实测 4.5pt，有余量；若有人只优化
+# 自造语料而真实语料不动，差距涨过上限即红，那正是过度拟合的信号。
+MAX_CORPUS_GAP = 0.05
 
 # 判定器把一句话分到哪个「通道」。这里只对照语料的 label 与判定器的落点，
 # 不评价每种通道内部实现。
@@ -108,6 +124,38 @@ def main() -> int:
     report.write_text(json.dumps(results, ensure_ascii=False, indent=1), encoding="utf-8")
     print(f"\n基线写入 {report}")
     service.close()
+
+    # 门禁断言（R22）：没有这几条，本脚本作为 run_gates 的 intent_corpus 门禁
+    # 永远退出 0，「跑过并断言」对它是一句空话。失败信息一律不以 SKIP 开头
+    # （run_gates 的 skip_regex 是行锚定，会被误判成「跳过」）。
+    # R50：真实语料是权威输入（既定纪律：以真实语料为准）。它缺失时地板线与
+    # 差距断言会双双跳过——旧代码在此分支打印「地板线仍生效」却实则一条断言
+    # 都没跑、exit 0，门禁空转还撒谎。权威输入缺失必须 fail-closed，不静默绿。
+    failures: list[str] = []
+    if "真实语料" not in results:
+        failures.append(
+            f"真实语料缺失（{CORPUS_USER.name} 不存在或读不到）——既定断言以真实语料"
+            "为权威输入，缺失即无法判定路由质量；该文件受 git 跟踪，若误删请恢复")
+    else:
+        real = results["真实语料"]["accuracy"]
+        if real < REAL_ACCURACY_FLOOR:
+            failures.append(
+                f"真实语料准确率 {real:.1%} 低于地板线 {REAL_ACCURACY_FLOOR:.1%}"
+                "——判据在真实分布上退化了（文档既定纪律：以真实语料为准）")
+        if "自造语料" in results:
+            gap = results["自造语料"]["accuracy"] - real
+            if gap > MAX_CORPUS_GAP:
+                failures.append(
+                    f"两份语料差 {gap:.1%} 超过上限 {MAX_CORPUS_GAP:.1%}"
+                    "——判据可能在拟合自造语料；请以真实语料为准复核判据")
+        else:
+            # 自造语料缺失只影响差距断言；地板线仍对真实语料生效（这句现在是真话）。
+            print("自造语料缺失，跳过差距断言（地板线仍对真实语料生效）。")
+    if failures:
+        print("\n门禁失败：")
+        for line in failures:
+            print(f"  {line}")
+        return 1
     return 0
 
 
