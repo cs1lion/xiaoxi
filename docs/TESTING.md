@@ -35,6 +35,27 @@
 改动 `web/` 前端文件后必须杀掉旧服务进程再重启，否则 `StaticFiles` 缓存的目录
 列表会让新增前端文件持续 404，浏览器回归会假失败。
 
+### 门禁外的测试（本地不跑，CI 跑）
+
+`scripts/gates_unregistered.txt` 是一份棘轮基线，列着**不在本地 `run_gates`
+里、但会被 CI 的 `for f in scripts/test_*.py` 跑到**的测试脚本。所以「本地
+`run_gates` 全绿」不等于「CI 绿」。清单由 `scripts/test_gate_coverage.py
+--write` 生成，条数与登记数以该脚本输出为准，不在这里写死。
+
+留在清单外的通常是这几种，都不是疏漏：
+
+- **需要外部条件**：缺本地夹具或真实服务就整组 `skipUnless` 跳过（如
+  `test_procedural_memory_*` 系）。`exit=0` 是跳过算通过，登记进门禁后反会被
+  「任何门禁跳过即失败」判红。
+- **探针/一次性脚本**：写在 `scripts/` 下但不是回归断言。
+- **非 unittest 壳**：没有 `def test_`，只是被 glob 到的辅助脚本。
+- **他人在途文件**：未提交的新测试，登记它会让别人 checkout 后门禁必红。
+
+要认领其中一个：在 `scripts/run_gates.py` 的 `GATES` 里加一条、从清单删掉、
+再跑 `python scripts/test_gate_coverage.py --write` 对齐。**先确认它已
+`git ls-files` 跟踪**，且在 `TEST_SENTINEL=1` 下真跑真过——后者是
+`run_gates` 给每个门禁子进程的真实环境，普通环境 `exit=0` 推断不了它。
+
 ### 环境与机制门禁（2026-10-27 起，全部 ALWAYS_REQUIRED）
 
 2026-10-25 事故的形状是「门禁全绿但 `.venv` 缺整个语音栈」——离线门禁把
