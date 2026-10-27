@@ -39,8 +39,21 @@ import check_staged_scope as css  # noqa: E402
 
 
 def _init_repo() -> Path:
-    """造一个临时 git 仓库，返回其路径。"""
+    """造一个临时 git 仓库，返回其路径。
+
+    **断言沙盘不落在仓库内**：`tempfile.mkdtemp()` 默认用 `TMP`/`TEMP`
+    环境变量，本机是 `C:\\Users\\...\\AppData\\Local\\Temp`。若将来有人把
+    这两个变量改成仓库内路径，本测试的沙盘就会落进仓库 `tmp/`，每次跑门禁都
+    给 `tmp_sweep` 的计数棘轮添项——那正是 plan-45 修过的泄漏形态。这条断言
+    让那种改法当场红，而不是静默泄漏。
+    """
     sandbox = Path(tempfile.mkdtemp(prefix="staged-scope-test-"))
+    repo_tmp = (ROOT / "tmp").resolve()
+    resolved = sandbox.resolve()
+    if repo_tmp == resolved or repo_tmp in resolved.parents:
+        raise AssertionError(
+            f"测试沙盘落在仓库 tmp/ 内：{resolved}。TMP/TEMP 环境变量被改成"
+            f"仓库内路径了——这会让每次跑门禁都污染 tmp_sweep 的计数棘轮。")
     subprocess.run(["git", "init", "-q"], cwd=str(sandbox), check=True,
                    capture_output=True)
     # git init 默认分支名各版本不同，但 add/commit 不依赖分支名。

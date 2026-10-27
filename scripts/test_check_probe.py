@@ -37,8 +37,22 @@ ANCHOR = "MARKER = 1"
 
 
 def _make_target() -> tuple[Path, Path]:
-    """造一个临时 CRLF 目标文件，返回 (sandbox_dir, target_path)。"""
+    """造一个临时 CRLF 目标文件，返回 (sandbox_dir, target_path)。
+
+    **断言沙盘不落在仓库内**：`tempfile.mkdtemp()` 默认用 `TMP`/`TEMP`
+    环境变量，本机是 `C:\\Users\\...\\AppData\\Local\\Temp`。但若将来有人把
+    这两个变量改成仓库内路径（比如为了「让临时文件好找」），本测试的沙盘就会
+    落进仓库 `tmp/`，每次跑门禁都给 `tmp_sweep` 的计数棘轮添项——那正是
+    plan-45 修过的泄漏形态（四个浏览器门禁的沙盘曾让 tmp_sweep 长期红）。
+    这条断言让那种改法当场红，而不是静默泄漏。
+    """
     sandbox = Path(tempfile.mkdtemp(prefix="check-probe-test-"))
+    repo_tmp = (ROOT / "tmp").resolve()
+    resolved = sandbox.resolve()
+    if repo_tmp == resolved or repo_tmp in resolved.parents:
+        raise AssertionError(
+            f"测试沙盘落在仓库 tmp/ 内：{resolved}。TMP/TEMP 环境变量被改成"
+            f"仓库内路径了——这会让每次跑门禁都污染 tmp_sweep 的计数棘轮。")
     target = sandbox / "gate.py"
     target.write_bytes(ORIG)
     return sandbox, target
