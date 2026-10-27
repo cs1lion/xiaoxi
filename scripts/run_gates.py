@@ -499,6 +499,16 @@ GATES: dict[str, dict[str, object]] = {
         "cmd": [str(PY), "scripts/test_broadcast_e2e.py"],
         "skip_regex": r"^\s*SKIP",
     },
+    "shared_retriever_concurrency": {
+        # 多连接共享同一 retriever 实例（manager.retriever，manager.py:59）
+        # 的并发检索不变量：无死锁、读内部自洽、零匹配查询恒落空、top-1
+        # 锚点不被并发写挤掉、收敛后共享实例与全新实例逐位相等。判据全是
+        # 行为与值相等，无墙钟依赖。注意「无撕裂读」此刻在单锁下不可观察
+        # （探针实证），是有牙齿的惰性断言，docstring 已写明定位。
+        # ALWAYS_REQUIRED。
+        "cmd": [str(PY), "scripts/test_shared_retriever_concurrency.py"],
+        "skip_regex": r"^\s*SKIP",
+    },
     "evals_report": {
         # 评测报告层（docs/EVAL_MECHANISM_PLAN.md）：读 evals/results/ 快照出
         # 通过率（平均与全过概率分列）、与上次的配对差异、token 成本。
@@ -520,6 +530,7 @@ ALWAYS_REQUIRED = ("protocol", "core", "scheduler_health", "budget_scope", "back
                    "voice_offloop",
                    "router_writes_offloop",
                    "broadcast_e2e",
+                   "shared_retriever_concurrency",
                    "durable_adapter", "durable_supervisor", "durable_takeover",
                    "durable_recovery", "durable_revive", "durable_app_wiring",
                    "durable_reconcile", "durable_soak", "durable_storage", "durable_compaction",
