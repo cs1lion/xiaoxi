@@ -883,12 +883,14 @@ class SelfEvolutionCycle:
                 proposal = validate_spark_proposal(raw_spark)
                 if proposal is None or changes >= self.MAX_STATE_CHANGES:
                     continue
-                if self.store.add_spark(born_diary_id=diaries[0]['id'], **proposal) is not None:
+                if await asyncio.to_thread(self.store.add_spark,
+                                           born_diary_id=diaries[0]['id'],
+                                           **proposal) is not None:
                     sparks_created += 1
                     changes += 1
         surfaced = None
         if 'spark' in allow_sources and changes < self.MAX_STATE_CHANGES:
-            surfaced = surface_next_spark(self.store)
+            surfaced = await asyncio.to_thread(surface_next_spark, self.store)
             if surfaced is not None:
                 changes += 1
 
@@ -896,7 +898,7 @@ class SelfEvolutionCycle:
         new_state['cycles_on'] = today
         new_state['cycles_today'] = (1 if state.get('cycles_on') != today
                                      else int(state.get('cycles_today') or 0) + 1)
-        save_self_state(self.store, new_state)
+        await asyncio.to_thread(save_self_state, self.store, new_state)
 
         events = []
         for change in applied:
@@ -958,8 +960,8 @@ class SelfEvolutionCycle:
             return {'status': 'skipped', 'reason': 'daily_cap', 'events': [], 'trace': trace}
 
         if self.store.count_seeds() == 0:
-            if seed_mod.migrate_legacy_seeds(self.store) == 0:
-                seed_mod.bootstrap_seeds(self.store, now_iso=today)
+            if await asyncio.to_thread(seed_mod.migrate_legacy_seeds, self.store) == 0:
+                await asyncio.to_thread(seed_mod.bootstrap_seeds, self.store, now_iso=today)
         seed = seed_mod.pick_seed_to_reflect(self.store, now=now)
         if seed is None:
             return {'status': 'skipped', 'reason': 'no_seed', 'events': [], 'trace': trace}
@@ -1003,12 +1005,14 @@ class SelfEvolutionCycle:
 
         refl = normalized['reflection']
         reflection_id = f"reflection_{seed['id']}_{int(now)}"
-        self.store.add_reflection(id=reflection_id, seed_id=seed['id'], narrative=refl['narrative'],
-                                  discovery=refl['discovery'], source_refs=refl['source_refs'], processed=False)
+        await asyncio.to_thread(self.store.add_reflection, id=reflection_id, seed_id=seed['id'],
+                                narrative=refl['narrative'], discovery=refl['discovery'],
+                                source_refs=refl['source_refs'], processed=False)
         child_ids: list[str] = []
         for child in normalized['child_seeds']:
-            created = seed_mod.fork_child_seed(
-                self.store, seed['id'], title=child['title'], question=child['question'], reason=child['reason'],
+            created = await asyncio.to_thread(
+                seed_mod.fork_child_seed, self.store, seed['id'], title=child['title'],
+                question=child['question'], reason=child['reason'],
                 source_refs=child['source_refs'] or [f"seed:{seed['id']}", f"reflection:{reflection_id}"],
                 now_iso=today)
             if created is not None:
@@ -1021,32 +1025,37 @@ class SelfEvolutionCycle:
         # evidence-linked "when X, do Y" lessons. Optional and additive; a
         # malformed lesson never fails a reflection that otherwise passed.
         from ..memory import lessons as lesson_mod
-        lesson_counts = lesson_mod.record_lessons(
-            self.store, normalized.get('lessons') or [],
+        lesson_counts = await asyncio.to_thread(
+            lesson_mod.record_lessons, self.store, normalized.get('lessons') or [],
             material_refs={item['ref'] for item in material}, now=now)
         trace['lessons'] = lesson_counts
 
         status_changes: list[dict[str, str]] = []
-        if seed_mod.transition_seed(self.store, seed['id'], 'digested', now=now) is not None:
+        if await asyncio.to_thread(seed_mod.transition_seed, self.store, seed['id'],
+                                   'digested', now=now) is not None:
             status_changes.append({'seed_id': seed['id'], 'from': seed['status'], 'to': 'digested'})
         edges_created = 0
         for item in material:
             if item['ref'] == f"seed:{seed['id']}":
                 continue
-            if self.store.add_edge(source=f"seed:{seed['id']}", target=item['ref'], kind='related_memory',
-                                   weight=float(seed.get('heat') or 0.5), reason=f"反思选材：{item['kind']}"):
+            if await asyncio.to_thread(self.store.add_edge, source=f"seed:{seed['id']}",
+                                       target=item['ref'], kind='related_memory',
+                                       weight=float(seed.get('heat') or 0.5),
+                                       reason=f"反思选材：{item['kind']}"):
                 edges_created += 1
         epiphany: list[dict[str, str]] = []
         for edge in normalized['epiphany_edges']:
-            if self.store.add_edge(source=edge['source_ref'], target=edge['target_ref'], kind='epiphany',
-                                   weight=0.7, reason=edge['reason']):
+            if await asyncio.to_thread(self.store.add_edge, source=edge['source_ref'],
+                                       target=edge['target_ref'], kind='epiphany',
+                                       weight=0.7, reason=edge['reason']):
                 edges_created += 1
                 epiphany.append(edge)
         trace['edges_created'] = edges_created
-        self.store.add_reflection(id=reflection_id, seed_id=seed['id'], narrative=refl['narrative'],
-                                  discovery=refl['discovery'], source_refs=refl['source_refs'],
-                                  child_seed_ids=child_ids, status_changes=status_changes,
-                                  epiphany_edges=epiphany, processed=True)
+        await asyncio.to_thread(self.store.add_reflection, id=reflection_id, seed_id=seed['id'],
+                                narrative=refl['narrative'], discovery=refl['discovery'],
+                                source_refs=refl['source_refs'], child_seed_ids=child_ids,
+                                status_changes=status_changes, epiphany_edges=epiphany,
+                                processed=True)
 
         events: list[dict[str, Any]] = []
         new_state, applied, _skipped = plan_state_changes(
@@ -1060,7 +1069,7 @@ class SelfEvolutionCycle:
         new_state['cycles_on'] = today
         new_state['cycles_today'] = (1 if state.get('cycles_on') != today
                                      else int(state.get('cycles_today') or 0) + 1)
-        save_self_state(self.store, new_state)
+        await asyncio.to_thread(save_self_state, self.store, new_state)
 
         # Mood is the one narrative state that had no writer. Only a successful
         # idle reflection may write it; a low-novelty discovery must not erase
@@ -1080,8 +1089,9 @@ class SelfEvolutionCycle:
                 trace['mood_overlap'] = round(overlap, 3)
                 if narrative and (not current_text or overlap < limit):
                     ttl = float(mood_cfg.get('default_ttl_minutes', 30) or 30)
-                    self.store.save_mood(
-                        narrative=narrative, reason=f'idle_reflection:{reflection_id}',
+                    await asyncio.to_thread(
+                        self.store.save_mood, narrative=narrative,
+                        reason=f'idle_reflection:{reflection_id}',
                         source_refs=refl.get('source_refs') or [],
                         influence_note='来自一次安静反思，只作余温',
                         related_summary=str(refl.get('discovery') or '')[:120],

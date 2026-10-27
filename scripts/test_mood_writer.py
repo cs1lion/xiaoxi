@@ -5,6 +5,7 @@ import asyncio
 import json
 import sys
 import tempfile
+import threading
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -35,7 +36,13 @@ GOOD = {
         "reason": "白天被切碎会导致晚上补偿性推翻，需要验证完整时间块是否改变判断",
         "source_refs": ["diary:2026-10-17", "note:n1"],
     }],
-    "epiphany_edges": [],
+    # 一条 epiphany 边是 off-loop 断言的覆盖面保证：没有它，_reflect 里
+    # epiphany 循环的 add_edge 根本不执行，那处卸载被单点回退也测不出。
+    "epiphany_edges": [{
+        "source_ref": "diary:2026-10-17",
+        "target_ref": "note:n1",
+        "reason": "日记里的熬夜和笔记里的打断，说的是同一件事",
+    }],
 }
 
 
@@ -108,6 +115,55 @@ def main() -> int:
                   and result["trace"].get("curiosity_reflection", {}).get("child_seed_ids"),
                   str(result))
         finally:
+            store.close()
+
+    print("[off-loop：reflect 的全部写跑在工作线程]")
+    with tempfile.TemporaryDirectory() as raw:
+        now = 2_000_000_000.0
+        store = new_store(Path(raw))
+        seen: list[tuple[str, threading.Thread]] = []
+
+        def wrap(obj, name):
+            real = getattr(obj, name)
+
+            def recorder(*args, **kwargs):
+                seen.append((name, threading.current_thread()))
+                return real(*args, **kwargs)
+
+            setattr(obj, name, recorder)
+            return obj, name, real
+
+        # store 实例方法（add_reflection/add_edge/save_mood）与模块级函数
+        # （loop.py 在函数体内 from-import，调用时解析模块属性，打补丁生效）。
+        from server.memory import evolution as evolution_pkg
+        from server.memory import lessons as lesson_pkg
+        patched = [wrap(store, method)
+                   for method in ("add_reflection", "add_edge", "save_mood")]
+        patched += [wrap(seed_mod, "fork_child_seed"),
+                    wrap(seed_mod, "transition_seed"),
+                    wrap(lesson_pkg, "record_lessons"),
+                    wrap(evolution_pkg, "save_self_state")]
+        try:
+            loop_thread = threading.current_thread()
+            result = asyncio.run(SelfEvolutionCycle(
+                store=store, provider=Reflector([GOOD]), cfg=cfg(), clock=lambda: now
+            ).reflect(idle_seconds=99999, notes_provider=notes))
+            check("off-loop reflect succeeds", result["status"] == "ok",
+                  str(result["trace"]))
+            names = [name for name, _thread in seen]
+            expected = {"add_reflection", "add_edge", "save_mood", "fork_child_seed",
+                        "transition_seed", "record_lessons", "save_self_state"}
+            check("off-loop：reflect 的写全部发生", expected <= set(names), repr(names))
+            on_loop = [name for name, thread in seen if thread is loop_thread]
+            check("off-loop：没有写跑在循环线程上", not on_loop, repr(on_loop))
+        finally:
+            # 还原进程级补丁：store 的实例属性遮蔽用 delattr 移除即露出类方法，
+            # 模块属性写回原函数。不还原会污染同进程内后续 section。
+            for obj, name, real in patched:
+                if obj is store:
+                    delattr(obj, name)
+                else:
+                    setattr(obj, name, real)
             store.close()
 
     with tempfile.TemporaryDirectory() as raw:
