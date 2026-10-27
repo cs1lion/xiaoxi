@@ -445,6 +445,12 @@ GATES: dict[str, dict[str, object]] = {
                 "--ceiling", "scripts/tmp_ceiling.txt"],
         "skip_regex": r"^\s*SKIP",
     },
+    "memory_concurrency": {
+        # memory 检索并发不变量：读+写竞争下索引三代状态自洽、无死锁、
+        # 无半边索引。纯逻辑、临时库、无服务依赖，ALWAYS_REQUIRED。
+        "cmd": [str(PY), "scripts/test_memory_concurrency.py"],
+        "skip_regex": r"^\s*SKIP",
+    },
     "evals_report": {
         # 评测报告层（docs/EVAL_MECHANISM_PLAN.md）：读 evals/results/ 快照出
         # 通过率（平均与全过概率分列）、与上次的配对差异、token 成本。
@@ -461,7 +467,7 @@ ALWAYS_REQUIRED = ("protocol", "core", "scheduler_health", "budget_scope", "back
                    "thread_conversation", "self_evolution", "agent_loop", "llm_client",
                    "self_evolution_send", "config_hot", "config_hot_consumers",
                    "evolution_quality_report", "evals_report", "lessons_cap", "venv_lock",
-                   "tmp_sweep", "memory_ranking",
+                   "tmp_sweep", "memory_ranking", "memory_concurrency",
                    "durable_adapter", "durable_supervisor", "durable_takeover",
                    "durable_recovery", "durable_revive", "durable_app_wiring",
                    "durable_reconcile", "durable_soak", "durable_storage", "durable_compaction",
