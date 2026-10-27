@@ -54,6 +54,10 @@ assert result.ok, result.report()
 
 判据是「破坏版必须红、还原后必须绿、且 `watch` 文件逐字节复原」。它抓的正是上面那三种失败：等价改动 → 破坏版也绿；只抹一处 → 破坏版也绿；锚点撞多处 → `patch_file` 的 `assert count==1` 当场炸。
 
+plan-114 又加了第四条：**`break_it` 之后文件必须与注入前不同**（否则报「注入没有生效」）。它抓的是本文第二轮自己栽的那种坑——API 从「`patch_file` 返回前就注入」改成「返回 `(inject, restore)`」后，调用点仍写 `break_it=lambda: None`，inject 从未被调用，文件纹丝未动，三个门禁全绿，被误判成「恒绿（判据无效）」。那不是等价改动，是什么都没测。
+
+四条判据分工：等价改动/只抹一处由 `break_exit == 0` 判「探针无效」；锚点撞多处由 `patch_file` 的断言当场炸；注入没生效与还原不干净由 `watch` 的两次 sha256 比对分别把守（一次在 `break_it` 后，一次在 `restore` 后）。
+
 ## 第二轮：新 API 在真实 CRLF 文件上的复验（plan-113）
 
 第一轮之后 `check_probe` 的 API 变了（plan-112：`patch_file` 返回 `(inject, restore)`
