@@ -177,21 +177,32 @@ python scripts/check_staged_scope.py <本批要提交的路径> [<路径> ...]
 ```python
 from check_probe import probe_self_check, patch_file
 
-restore = patch_file(HELPER, ORIG_SNIPPET, BROKEN_SNIPPET)   # 锚点撞多处会当场炸
+inject, restore = patch_file(PATH, ORIG_SNIPPET, BROKEN_SNIPPET)   # 锚点撞多处会当场炸
 result = probe_self_check(
     name="<要证的性质>",
     run=lambda: <被测目标的退出码，0=绿>,
-    break_it=lambda: None,      # patch_file 已注入
+    break_it=inject,
     restore=restore,
+    watch=PATH,
 )
 if not result.ok:
     raise SystemExit(result.report())
 ```
 
 判据：`break_it()` 之后必须 exit≠0（探针能红），`restore()` 之后必须 exit==0
-（还原干净）。两步都过才认这个探针有效。**这个判据正好抓住那三种失败**：等价改动
+（还原干净），给了 `watch` 时还多一条——还原后该文件必须与注入前**逐字节相同**
+（sha256 比对）。三步都过才认这个探针有效。**这个判据正好抓住那三种失败**：等价改动
 → 破坏版也绿；量错路径 → 破坏版动的不是被测分支；锚点撞多处 → `patch_file` 的
 `assert count==1` 当场炸，不会静默改错地方。
+
+**`patch_file` 不立即注入，返回 `(inject, restore)`**：注入必须交给 `break_it`，
+因为 `probe_self_check` 在 `break_it` 之前拍「原文」快照。谁负责注入，快照就必须拍在
+它之前——plan-112 第一版让 `patch_file` 返回前就注入，快照拍到破坏版，还原后必然对不上，
+误报「还原不干净」（同一行打印的「逐字节还原: True」当场戳穿了矛盾）。
+
+**`watch` 那一检不是形式主义**：plan-111 之前只验「还原后退出码为 0」，而 text 模式
+读写会在退出码为 0 的情况下把 CRLF 改写成 LF——还原跑了、码也绿，仓库却留下格式差异。
+判据必须是逐字节相同，不能只写在 docstring 里。
 
 **边界**：本工具只证「探针对这个注入敏感」，不证「这个注入覆盖了所有该覆盖的回归」。
 后者仍需人判断注入点选得对不对——所以 `break_it` 要写在探针旁边，让 review 的人
