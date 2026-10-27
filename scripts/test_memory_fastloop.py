@@ -245,12 +245,23 @@ async def main_async() -> int:
         # lessons。桩打在 manager.lessons_for 上——那是 _lessons_for 与内联
         # 路径共同的真实调用点，同步/异步两条路都拦得到。
         #
-        # 判据是**增量**，不是绝对阈值：`_turn_context` 收尾段本身就在循环
-        # 上跑（limit_context 的测量回调反复 JSON 序列化），它的耗时随语料
-        # 与机器负载波动（并发 session 跑门禁时实测到 67ms），绝对阈值会把
-        # 这份固有成本误判成本单回归。增量判据直接隔离变量：同一异步路径
-        # 「带 40ms 延迟」与「不带」的最长停顿差——延迟落 worker 则差接近
-        # 零，落循环则差约 40ms。同步对照仍保留，证明测量器看得见阻塞。
+        # 判据同 [2]/[5]：同步对照的心跳数比值。这里换过一次判据，两次都不对，
+        # 记下来免得回退：
+        #
+        # 第一版是绝对阈值「最长停顿 < 15 ms」——错在 `_turn_context` 收尾段
+        # 本身就在循环上跑（limit_context 的测量回调反复 JSON 序列化），耗时随
+        # 语料与机器负载波动（实测 32-51 ms，并发 session 跑门禁时到过 67ms），
+        # 把这份固有成本误判成本单回归。
+        #
+        # 第二版改成增量「带/不带 40ms 延迟的最长停顿差 < 15 ms」，想隔离变量。
+        # 实测 5 次采样，差值恒为负（-21.87 至 -40.92 ms）：基线停顿 32-51ms
+        # 反而**大于**带延迟的 7-12ms。原因是 to_thread 把活交给 worker 后让出
+        # 了循环，心跳采样点更密、最大间隔更小——注入的阻塞延迟「改善」了测量
+        # 值。判据于是恒绿，但它量的不是「卸载有没有发生」，而是一次与负载相关
+        # 的排序巧合。**恒绿的判据比会假红的判据更危险**：它给人确定的信心。
+        #
+        # 比值判据直接问那个唯一有意义的问题：同步对照被 40ms 延迟卡住时，
+        # 异步路径的心跳还有多少次。卸载被改回同步则异步同样卡住，比值归一即红。
         lessons_calls = {"n": 0}
         original_lessons = manager.lessons_for
 
@@ -261,28 +272,29 @@ async def main_async() -> int:
 
         manager.lessons_for = slow_lessons
         try:
-            ctrl2_elapsed, ctrl2_worst, _ = await _measure(
+            ctrl2_elapsed, ctrl2_worst, ctrl2_beats = await _measure(
                 lambda: _run_sync(orchestrator, query))
             print(f"       对照（同步路径）：耗时 {ctrl2_elapsed:6.2f} ms，"
-                  f"循环最长停顿 {ctrl2_worst:6.2f} ms")
+                  f"循环最长停顿 {ctrl2_worst:6.2f} ms，心跳 {ctrl2_beats} 次")
             check("对照路径里 lessons 延迟生效了（对照不是空转）",
                   lessons_calls["n"] >= 1, f"lessons={lessons_calls['n']}")
             check("注入延迟后同步路径确实卡住（证明测量器看得见）",
                   ctrl2_worst > 20, f"最长停顿仅 {ctrl2_worst:.2f} ms")
 
-            base_elapsed, base_worst, _ = await _measure(
+            base_elapsed, base_worst, base_beats = await _measure(
                 lambda: orchestrator._turn_context_async(query, "base", []))
             lessons_calls["n"] = 0
-            slow_elapsed, slow_worst, _ = await _measure(
+            slow_elapsed, slow_worst, slow_beats = await _measure(
                 lambda: orchestrator._turn_context_async(query, "slow", []))
-            delta = slow_worst - base_worst
-            print(f"       异步路径：基线最长停顿 {base_worst:6.2f} ms；"
-                  f"带 40ms 延迟 {slow_worst:6.2f} ms；差 {delta:6.2f} ms")
+            print(f"       异步路径：基线最长停顿 {base_worst:6.2f} ms（心跳 {base_beats} 次）；"
+                  f"带 40ms 延迟 {slow_worst:6.2f} ms（心跳 {slow_beats} 次）")
             check("异步路径里 lessons 卸载跑到了",
                   lessons_calls["n"] >= 1, f"lessons={lessons_calls['n']}")
-            check("lessons 延迟不落循环（带/不带延迟的停顿差 < 15 ms）",
-                  delta < 15.0,
-                  f"差 {delta:.2f} ms（基线 {base_worst:.2f} / 带延迟 {slow_worst:.2f}）")
+            # 比值判据：对照刚被 40ms 卡住，异步若也卡住（卸载被改回同步），
+            # 心跳数会掉到对照量级，比值归一即红。
+            check(f"注入 40ms 延迟后异步心跳数 >= 对照的 {BEAT_RATIO:.0f} 倍（lessons 真卸载了）",
+                  slow_beats >= BEAT_RATIO * max(ctrl2_beats, 1),
+                  f"异步 {slow_beats} 次 vs 对照 {ctrl2_beats} 次")
         finally:
             manager.lessons_for = original_lessons
 
