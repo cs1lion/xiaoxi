@@ -439,6 +439,102 @@ GATES: dict[str, dict[str, object]] = {
         "cmd": [str(PY), "scripts/test_editor_insight_outputs.py"],
         "skip_regex": r"^\s*SKIP",
     },
+    "editor_insights": {
+        "cmd": [str(PY), "scripts/test_editor_insights.py"],
+        "skip_regex": r"^\s*SKIP",
+    },
+    "editor_insights_api": {
+        "cmd": [str(PY), "scripts/test_editor_insights_api.py"],
+        "skip_regex": r"^\s*SKIP",
+    },
+    "editor_quality_eval": {
+        "cmd": [str(PY), "scripts/test_editor_quality_eval.py"],
+        "skip_regex": r"^\s*SKIP",
+    },
+    "episodic_diary": {
+        "cmd": [str(PY), "scripts/test_episodic_diary.py"],
+        "skip_regex": r"^\s*SKIP",
+    },
+    "event_emitter": {
+        "cmd": [str(PY), "scripts/test_event_emitter.py"],
+        "skip_regex": r"^\s*SKIP",
+    },
+    "events_v2": {
+        "cmd": [str(PY), "scripts/test_events_v2.py"],
+        "skip_regex": r"^\s*SKIP",
+    },
+    "evolution_soak": {
+        "cmd": [str(PY), "scripts/test_evolution_soak.py"],
+        "skip_regex": r"^\s*SKIP",
+    },
+    "experience": {
+        "cmd": [str(PY), "scripts/test_experience.py"],
+        "skip_regex": r"^\s*SKIP",
+    },
+    "experience_websocket": {
+        "cmd": [str(PY), "scripts/test_experience_websocket.py"],
+        "skip_regex": r"^\s*SKIP",
+    },
+    "intent_gate_bridge": {
+        "cmd": [str(PY), "scripts/test_intent_gate_bridge.py"],
+        "skip_regex": r"^\s*SKIP",
+    },
+    "intent_parser": {
+        "cmd": [str(PY), "scripts/test_intent_parser.py"],
+        "skip_regex": r"^\s*SKIP",
+    },
+    "intent_parser_contract": {
+        "cmd": [str(PY), "scripts/test_intent_parser_contract.py"],
+        "skip_regex": r"^\s*SKIP",
+    },
+    "intent_probe": {
+        "cmd": [str(PY), "scripts/test_intent_probe.py"],
+        "skip_regex": r"^\s*SKIP",
+    },
+    "interpretation": {
+        "cmd": [str(PY), "scripts/test_interpretation.py"],
+        "skip_regex": r"^\s*SKIP",
+    },
+    "judge_three_state": {
+        "cmd": [str(PY), "scripts/test_judge_three_state.py"],
+        "skip_regex": r"^\s*SKIP",
+    },
+    "memory_api": {
+        "cmd": [str(PY), "scripts/test_memory_api.py"],
+        "skip_regex": r"^\s*SKIP",
+    },
+    "memory_eval": {
+        "cmd": [str(PY), "scripts/test_memory_eval.py"],
+        "skip_regex": r"^\s*SKIP",
+    },
+    "memory_evidence": {
+        "cmd": [str(PY), "scripts/test_memory_evidence.py"],
+        "skip_regex": r"^\s*SKIP",
+    },
+    "memory_extraction_contract": {
+        "cmd": [str(PY), "scripts/test_memory_extraction_contract.py"],
+        "skip_regex": r"^\s*SKIP",
+    },
+    "memory_orchestrator": {
+        "cmd": [str(PY), "scripts/test_memory_orchestrator.py"],
+        "skip_regex": r"^\s*SKIP",
+    },
+    "memory_preference": {
+        "cmd": [str(PY), "scripts/test_memory_preference.py"],
+        "skip_regex": r"^\s*SKIP",
+    },
+    "memory_preference_parser": {
+        "cmd": [str(PY), "scripts/test_memory_preference_parser.py"],
+        "skip_regex": r"^\s*SKIP",
+    },
+    "memory_presentation": {
+        "cmd": [str(PY), "scripts/test_memory_presentation.py"],
+        "skip_regex": r"^\s*SKIP",
+    },
+    "memory_self_evolution": {
+        "cmd": [str(PY), "scripts/test_memory_self_evolution.py"],
+        "skip_regex": r"^\s*SKIP",
+    },
     # ---- 浏览器门禁：环境不满足时 SKIP 且退出 0，是本次要盯住的那一类 ----
     "ui_browser": {
         "cmd": ["node", "scripts/test-ui-browser.mjs"],
