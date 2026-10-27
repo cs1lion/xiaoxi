@@ -60,13 +60,11 @@ GATES: dict[str, dict[str, object]] = {
         "cmd": [str(PY), "scripts/test_core.py"],
         "skip_regex": r"^\s*SKIP",
     },
-    "gate_verdict_r51": {
+    "run_gates_verdict": {
         # R51 裁决口径：退出码非零一律 FAIL，只有 exit==0 且命中 skip_regex
-        # 才算 SKIP。真实门禁覆盖不到这条——ui_nav_browser 只在 8000 未起时
-        # SKIP，8000 运行时判 PASS。用合成门禁钉住完整裁决表（四条腿）加
-        # --allow-skip 不得洗绿真实失败这条边界。
+        # 才算 SKIP。合成门禁驱出各 verdict 分支，零网络零 Key、不跑真实门禁。
         # ALWAYS_REQUIRED：纯进程内逻辑，不碰磁盘仓库文件，无服务依赖。
-        "cmd": [str(PY), "scripts/test_gate_verdict_r51.py"],
+        "cmd": [str(PY), "scripts/test_run_gates.py"],
         "skip_regex": r"^\s*SKIP",
     },
     "gate_coverage": {
@@ -989,7 +987,7 @@ ALWAYS_REQUIRED = ("protocol", "core", "scheduler_health", "budget_scope", "back
                    "thread_conversation", "self_evolution", "agent_loop", "llm_client",
                    "self_evolution_send", "config_hot", "config_hot_consumers",
                    "evolution_quality_report", "evals_report", "evals_health", "lessons_cap", "venv_lock",
-                   "tmp_sweep", "gate_verdict_r51", "memory_ranking", "memory_concurrency", "memory_retrieval",
+                   "tmp_sweep", "run_gates_verdict", "memory_ranking", "memory_concurrency", "memory_retrieval",
                    "memory_api_offloop",
                    "voice_offloop",
                    "router_writes_offloop",
