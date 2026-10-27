@@ -473,7 +473,9 @@ GATES: dict[str, dict[str, object]] = {
         # 已全部卸载到 to_thread。写提交（BEGIN IMMEDIATE + fsync）卸、亚毫秒
         # 有界索引读（runtime.get / pending_reports / recent_messages）留同步。
         # 判据是线程身份不是墙钟：同步版恒在 MainThread（探针实测），to_thread
-        # 版恒在 asyncio_* worker，双向无灰区。同时钉落库与会话参数逐字不变。
+        # 版恒在 asyncio_* worker，双向无灰区。同时钉落库与会话参数逐字不变，
+        # 以及 REST 路由的 limit 夹取（-1/0 夹成 1、超大值夹到路由帽；
+        # SQLite 的 LIMIT -1 是无限制）。
         # ALWAYS_REQUIRED：AST 装载生产 app.py + 假模块，无服务无网络。
         "cmd": [str(PY), "scripts/test_voice_offloop.py"],
         "skip_regex": r"^\s*SKIP",

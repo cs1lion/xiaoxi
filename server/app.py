@@ -214,6 +214,10 @@ async def get_avatar() -> dict[str, Any]:
 
 @app.get("/api/memories")
 async def list_memories(include_history: bool = False, kind: str | None = None, limit: int = 200) -> Any:
+    # limit 夹在路由层：store.list_memories 把客户端 limit 原样送进 LIMIT
+    # 占位符，SQLite 里 LIMIT -1 是无限制，一个 ?limit=-1 就能拉走全表建
+    # 对象。与 memory/api.py 的 list_diary / starmap 同一模式。
+    limit = max(1, min(int(limit), 500))
     items, count = await asyncio.gather(
         asyncio.to_thread(manager.snapshot, include_history=include_history, limit=limit),
         asyncio.to_thread(store.count),
@@ -227,6 +231,7 @@ async def list_memories(include_history: bool = False, kind: str | None = None, 
 @app.get("/api/memories/context")
 async def memories_context(query: str, subject: str | None = None, limit: int = 10) -> Any:
     """获取与查询相关的记忆，用于驱动表情/动作"""
+    limit = max(1, min(int(limit), 50))
     if not manager.enabled:
         return {"items": [], "found": False}
     block, found = await asyncio.to_thread(manager.context_with_status, query, subject=subject)
@@ -318,6 +323,9 @@ async def add_memory(payload: dict[str, Any]) -> Any:
 
 @app.get("/api/session/{session_id}/transcript")
 async def transcript(session_id: str, limit: int = 100) -> Any:
+    # 同上：recent_messages 把客户端 limit 原样送进 LIMIT 占位符，-1 即
+    # 无限制，整个 session 的消息会被全捞回并物化成 dict。
+    limit = max(1, min(int(limit), 200))
     return {"items": store.recent_messages(session_id, limit=limit)}
 
 

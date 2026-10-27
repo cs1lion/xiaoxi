@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""语音快环与 REST 路由不离环门禁（第十一至十六批，2026-10-27）。
+"""语音快环与 REST 路由不离环门禁（第十一至十七批，2026-10-27）。
 
 第十批把 memory REST 路由（server/memory/api.py）卸载出事件循环后，review
 发现同一模式在 app.py 自己身上还有多批存量：
@@ -49,6 +49,11 @@ _transaction 是 BEGIN IMMEDIATE（读也拿写锁），pending_reports 同样�
    to_thread 版恒在 asyncio_* worker，双向无灰区，故可进 ALWAYS_REQUIRED；
 2. 行为不变：落库与会话调用参数逐字不变（session_id / role / text / mode），
    happy path 不出现错误收尾，重连后重发的 ready 帧带原 session_id。
+
+第十七批追加第三条：REST 路由的 limit 夹取——客户端 limit 无界直通
+`LIMIT ?` 时，SQLite 的 `LIMIT -1` 是无限制（一个 `?limit=-1` 拉走全表）。
+list_memories / memories_context / transcript 三条路由在路由层夹成
+max(1, min(limit, 帽))，门禁断言 -1 与 0 夹成 1、超大值夹到各路由帽。
 
 驱动方式与 test_activity_websocket.py 相同：AST 装载生产 app.py，用
 __package__ + sys.modules 补丁让处理器里的懒导入命中记录线程的假模块；
@@ -218,6 +223,17 @@ async def drive_confirm(env):
     await env["_confirm_action"](conn, turn, {
         "run_id": "r1", "confirmation_id": "c1", "approve": True})
     return conn
+
+
+async def drive_limit_clamps(env):
+    """用恶意 limit 驱动三条路由：-1/0 应被夹成 1（SQLite 的 LIMIT -1 是
+    无限制），超大值应被夹到路由帽。"""
+    await env["list_memories"](limit=-1)
+    await env["list_memories"](limit=99999)
+    await env["memories_context"](query="测试", limit=99999)
+    await env["transcript"](session_id="s1", limit=-1)
+    await env["transcript"](session_id="s1", limit=0)
+    await env["transcript"](session_id="s1", limit=99999)
 
 
 CASES = [
@@ -572,6 +588,44 @@ def main() -> int:
           bool(spark_store.calls) and all(t is not loop_thread5 for _n, _a, t in spark_store.calls),
           repr([(n, t.name) for n, _a, t in spark_store.calls]))
     assert_clean_finish("spend_spark", conn5)
+
+    print("[limit 夹取：恶意 limit 到不了 SQLite]")
+    limits_seen: list[tuple[str, object]] = []
+
+    class _LimitManager:
+        enabled = True
+
+        def snapshot(self, **kw):
+            limits_seen.append(("snapshot", kw.get("limit")))
+            return []
+
+        def context_with_status(self, query, subject=None):
+            limits_seen.append(("context_with_status", None))
+            return "", False
+
+    class _LimitStore:
+        def count(self):
+            return 3
+
+        def recent_messages(self, session_id, limit=100):
+            limits_seen.append(("recent_messages", limit))
+            return []
+
+    env6, patch_ctx6 = build_ws_env(Recorder())
+    env6["manager"] = _LimitManager()
+    env6["store"] = _LimitStore()
+    with patch_ctx6:
+        asyncio.run(drive_limit_clamps(env6))
+    snap_limits = [value for name, value in limits_seen if name == "snapshot"]
+    msg_limits = [value for name, value in limits_seen if name == "recent_messages"]
+    # list_memories(-1 → 1)、list_memories(99999 → 500 帽)、
+    # memories_context(99999 → 50 帽)；transcript(-1 → 1、0 → 1)。
+    check("limit：list_memories 的 -1 夹成 1、99999 夹成 500 帽",
+          snap_limits[:2] == [1, 500], repr(snap_limits))
+    check("limit：memories_context 的 99999 夹成 50 帽",
+          len(snap_limits) > 2 and snap_limits[2] == 50, repr(snap_limits))
+    check("limit：transcript 的 -1 与 0 都夹成 1、99999 夹成 200 帽",
+          msg_limits == [1, 1, 200], repr(msg_limits))
 
     print(f"\n=== {len(PASSED)} passed, {len(FAILED)} failed ===")
     return 1 if FAILED else 0
