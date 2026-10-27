@@ -122,7 +122,9 @@
 
 **四个既有失败门禁**（全量 191 跑过并断言 / 6 失败，均与本次改动无关，stash 隔离验证过）：`self_evolution_send`、`config_hot_consumers`、`durable_mcp`（缺 `scripts/mcp_servers/echo_server.py`，属并发 session 的 M1-M4 WIP 范围）、`ui_browser`（需 8000 上可交互前端，点击超时）。另两个：`tmp_sweep`（见待拍板项）、`memory_fastloop`（第四十八批前的墙钟假红，改造后已消除）。
 
-**`gate_verdict_r51`**（第六十四批）：钉住 `run_gates` 的完整裁决表。真实门禁覆盖不到这条——`ui_nav_browser` 只在 8000 未起时 SKIP，8000 运行时判 PASS，即「打印 SKIP 行却 exit≠0 必须判 FAIL」这条 R51 本体在真实门禁里根本跑不到。用合成门禁钉四条腿（exit≠0+SKIP行→FAIL、exit≠0无SKIP→FAIL、exit=0+SKIP→SKIP、exit=0无SKIP→PASS）加 `--allow-skip` 不得洗绿真实失败这条边界。第三条腿容易漏：把「环境不满足、没跑」误判成 FAIL 同样危险，会让一条本该跳过的门禁把整套报告染红，训练人忽略红色。判别力验证：把裁决式改回 R51 之前的形态（`skipped` 优先于 `exit`），门禁立刻翻红。
+**`run_gates_verdict`**（指向 `scripts/test_run_gates.py`）：钉住 `run_gates` 的完整裁决表。真实门禁覆盖不到这条——`ui_nav_browser` 只在 8000 未起时 SKIP，8000 运行时判 PASS，即「打印 SKIP 行却 exit≠0 必须判 FAIL」这条 R51 本体在真实门禁里根本跑不到。用合成门禁钉四条腿（exit≠0+SKIP行→FAIL、exit≠0无SKIP→FAIL、exit=0+SKIP→SKIP、exit=0无SKIP→PASS）加 `--allow-skip` 不得洗绿真实失败这条边界。第三条腿容易漏：把「环境不满足、没跑」误判成 FAIL 同样危险，会让一条本该跳过的门禁把整套报告染红，训练人忽略红色。
+
+**这段资产换过一次手，教训比结论值钱**：第六十四批我自己建了 `test_gate_verdict_r51.py`（173 行）钉同一件事，第六十六批逐条比对后发现并发 session 的 `aa9c633` 里已有 `test_run_gates.py`（97 行标准 unittest）测同一件事且覆盖更严（他们的 `:61` 多断言「不打印全绿结论」、`:78` 多断言「跳过仍让整体 exit 1」），遂删我的、改登记他们的。**成因是立项时没先搜是否已有资产**——两份资产的 docstring 里写着同一个 2026-10-27 合成门禁实证，信息就在手边。立项「补覆盖」类任务前，先搜一遍同名/同主题测试文件。
 
 **`check_staged_scope.py`**（第六十一批，刻意**不**进 GATES）：共享仓库里 `git add <我的文件> && git commit` 不等于只提交我的文件——`git commit` 提交的是整个索引。本会话这个形态重复了至少 8 次。脚本把「提交前核对范围」从一句纪律变成一个退出码（暂存区 ⊆ 声明路径）。不进门禁的理由：它是开发时工具，依赖暂存区状态，在门禁子进程里跑没有意义；`scripts/` 下四个 `check_*.py` 先例也都没进。它的位置是派单宪章的完工标准（第六十二批写入）。工具建立后的第一批就抓到真实污染。
 
