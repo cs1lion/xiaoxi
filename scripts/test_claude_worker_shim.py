@@ -22,6 +22,7 @@ sys.path.insert(0, str(ROOT))
 from server.assistant.adapters.base import EVENT_TYPES  # noqa: E402
 from server.assistant.adapters.cli_subproc import CliSubprocessAdapter  # noqa: E402
 from server.assistant.telemetry import normalize_signature  # noqa: E402
+from worker_shim_contract import check_contract, check_failure_contract  # noqa: E402
 
 SHIM = ROOT / "scripts" / "worker_shims" / "claude_worker.py"
 PY = sys.executable
@@ -156,8 +157,6 @@ async def main() -> int:
               str([event.get("text") for event in writes]))
         check("log is emitted for a tool result", "log" in types)
         check("token is emitted once", types.count("token") == 1, str(types))
-        check("artifact terminates the happy run", types[-1] == "artifact", str(types))
-        check("no error on the happy path", "error" not in types)
 
         token = next(event for event in events if event.get("type") == "token")
         check("token carries real usage",
@@ -165,22 +164,15 @@ async def main() -> int:
         check("token carries duration and ttft",
               token.get("duration_ms") == 1200 and token.get("ttft_ms") == 300, str(token))
 
-        artifact = next(event for event in events if event.get("type") == "artifact")
-        card = artifact.get("artifact") or {}
-        refs = [str(item.get("ref")) for item in card.get("artifacts") or []]
-        check("artifact card has summary and intercepted",
-              bool(card.get("summary")) and bool(card.get("intercepted")), str(card))
-        check("artifact ref is one real absolute file",
-              len(refs) == 1 and Path(refs[0]).is_absolute() and Path(refs[0]).is_file(), str(refs))
-        check("artifact file content matches",
-              Path(refs[0]).read_text(encoding="utf-8") == "OK\n")
+        # 共享契约（PROTOCOL §22 五事件 + artifact 真实性）走 helper，
+        # 与另外三个 worker shim 同一处定义。
+        check_contract(check, events, label="claude happy path")
 
         bad = make_fake(temp, "bad_claude", BAD_CLAUDE)
         bad_events = await collect(build_adapter(temp, bad), "c_bad")
         bad_types = [str(event.get("type")) for event in bad_events]
         print("\n[failure path]")
-        check("failure emits the error terminal", bad_types[-1] == "error", str(bad_types))
-        check("failure never emits an artifact", "artifact" not in bad_types)
+        check_failure_contract(check, bad_events, label="claude failure path")
         error = next(event for event in bad_events if event.get("type") == "error")
         check("error text explains the failure", "permission denied" in str(error.get("text")), str(error))
 

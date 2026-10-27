@@ -23,6 +23,7 @@ sys.path.insert(0, str(ROOT))
 
 from server.assistant.adapters.base import EVENT_TYPES  # noqa: E402
 from server.assistant.adapters.cli_subproc import CliSubprocessAdapter  # noqa: E402
+from worker_shim_contract import check_contract, check_failure_contract  # noqa: E402
 
 SHIM = ROOT / "scripts" / "worker_shims" / "dsh_worker.py"
 PY = sys.executable
@@ -214,9 +215,6 @@ async def main() -> int:
         events = await collect(build_adapter(good_work, good), "c_good")
         types = types_of(events)
         print("\n[happy path]")
-        check("all emitted types are protocol events",
-              all(kind in EVENT_TYPES for kind in types), str(types))
-        check("progress is emitted", "progress" in types)
         check("session maps to step 1 progress",
               any(event.get("step_idx") == 1 and "session" in str(event.get("text"))
                   for event in events if event.get("type") == "progress"), str(types))
@@ -251,19 +249,15 @@ async def main() -> int:
         check("token names the model",
               all(event.get("model") == "deepseek-flash" for event in tokens))
 
-        check("artifact terminates the happy run", types[-1] == "artifact", str(types))
-        check("no error on the happy path", "error" not in types)
+        # dsh 特有：summary 取最后一段文本，不是通用「有 summary 就行」
         artifact = next(event for event in events if event.get("type") == "artifact")
         card = artifact.get("artifact") or {}
-        refs = [str(item.get("ref")) for item in card.get("artifacts") or []]
         check("artifact card uses the final text as summary and has an intercepted note",
               card.get("summary") == "Wrote note.txt." and bool(card.get("intercepted")),
               str(card))
-        check("artifact ref is one real absolute file",
-              len(refs) == 1 and Path(refs[0]).is_absolute() and Path(refs[0]).is_file(),
-              str(refs))
-        check("artifact file content matches",
-              Path(refs[0]).read_text(encoding="utf-8") == "OK\n")
+        # 共享契约（PROTOCOL §22 五事件 + artifact 真实性）走 helper，
+        # 与另外三个 worker shim 同一处定义。
+        check_contract(check, events, label="dsh happy path")
 
         prompt = (good_work / "prompt.txt").read_text(encoding="utf-8")
         check("the constructed prompt reaches the launcher",

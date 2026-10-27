@@ -21,6 +21,7 @@ sys.path.insert(0, str(ROOT))
 
 from server.assistant.adapters.base import EVENT_TYPES  # noqa: E402
 from server.assistant.adapters.cli_subproc import CliSubprocessAdapter  # noqa: E402
+from worker_shim_contract import check_contract, check_failure_contract  # noqa: E402
 
 SHIM = ROOT / "scripts" / "worker_shims" / "workbuddy_worker.py"
 PY = sys.executable
@@ -220,9 +221,6 @@ async def main() -> int:
         events = await collect(build_adapter(good_dir, good, argv_file), "c_good")
         types = [str(event.get("type")) for event in events]
         print("\n[happy path]")
-        check("all emitted types are protocol events",
-              all(kind in EVENT_TYPES for kind in types), str(types))
-        check("progress is emitted", "progress" in types)
         check("init progress names the model",
               any("step-5-preview" in str(event.get("text"))
                   for event in events if event.get("type") == "progress"))
@@ -231,8 +229,6 @@ async def main() -> int:
                   for event in events if event.get("type") == "progress"))
         check("log is emitted for a tool result", "tool result" in logs(events), str(logs(events)))
         check("token is emitted once", types.count("token") == 1, str(types))
-        check("artifact terminates the happy run", types[-1] == "artifact", str(types))
-        check("no error on the happy path", "error" not in types)
 
         token = next(event for event in events if event.get("type") == "token")
         check("token carries real usage",
@@ -242,18 +238,16 @@ async def main() -> int:
         check("token never invents ttft",
               token.get("ttft_ms") == token.get("duration_ms"), str(token))
 
-        artifact = next(event for event in events if event.get("type") == "artifact")
-        card = artifact.get("artifact") or {}
-        refs = [str(item.get("ref")) for item in card.get("artifacts") or []]
-        check("artifact card has summary and intercepted",
-              bool(card.get("summary")) and bool(card.get("intercepted")), str(card))
-        check("artifact ref is one real absolute file",
-              len(refs) == 1 and Path(refs[0]).is_absolute() and Path(refs[0]).is_file(),
-              str(refs))
-        check("artifact file content matches",
-              Path(refs[0]).read_text(encoding="utf-8") == "OK\n")
+        # 共享契约（PROTOCOL §22 五事件 + artifact 真实性）走 helper，
+        # 与另外三个 worker shim 同一处定义。
+        check_contract(check, events, label="workbuddy happy path")
+        # workbuddy 特有：产物必须落在 commission 的 out/ 下
+        wb_artifact = next(e for e in events if e.get("type") == "artifact")
+        wb_refs = [str(item.get("ref")) for item in
+                   (wb_artifact.get("artifact") or {}).get("artifacts") or []]
         check("artifact ref lives under the out directory",
-              Path(refs[0]).parent == (good_dir / "out").resolve(), refs[0])
+              bool(wb_refs) and Path(wb_refs[0]).parent == (good_dir / "out").resolve(),
+              str(wb_refs))
 
         artifact_at = types.index("artifact")
         check("token precedes the artifact",
@@ -300,8 +294,8 @@ async def main() -> int:
             build_adapter(temp / "bad", bad, temp / "bad-argv.json"), "c_bad")
         bad_types = [str(event.get("type")) for event in bad_events]
         print("\n[failure path]")
-        check("failure emits the error terminal", bad_types[-1] == "error", str(bad_types))
-        check("failure never emits an artifact", "artifact" not in bad_types, str(bad_types))
+        # 共享契约走 helper，与另外三个 worker shim 同一处定义。
+        check_failure_contract(check, bad_events, label="workbuddy failure path")
         error = next(event for event in bad_events if event.get("type") == "error")
         check("error text reports the reason, not just the exit code",
               "permission denied" in str(error.get("text")), str(error))

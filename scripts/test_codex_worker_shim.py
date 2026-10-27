@@ -27,6 +27,7 @@ sys.path.insert(0, str(ROOT))
 
 from server.assistant.adapters.base import EVENT_TYPES  # noqa: E402
 from server.assistant.adapters.cli_subproc import CliSubprocessAdapter  # noqa: E402
+from worker_shim_contract import check_contract, check_failure_contract  # noqa: E402
 
 SHIM = ROOT / "scripts" / "worker_shims" / "codex_worker.py"
 PY = sys.executable
@@ -133,13 +134,8 @@ async def main() -> int:
         good_events = await collect(build_adapter(temp, good), "c_good")
         good_types = [str(event.get("type")) for event in good_events]
         print("\n[happy path]")
-        check("all emitted types are protocol events",
-              all(kind in EVENT_TYPES for kind in good_types), str(good_types))
-        check("progress is emitted", "progress" in good_types)
         check("log is emitted for reasoning", "log" in good_types)
         check("token is emitted once", good_types.count("token") == 1, str(good_types))
-        check("artifact terminates the happy run", good_types[-1] == "artifact", str(good_types))
-        check("no error on the happy path", "error" not in good_types)
 
         progress = [event for event in good_events if event.get("type") == "progress"]
         check("progress carries step_idx and text",
@@ -152,22 +148,15 @@ async def main() -> int:
               token.get("ttft_ms") == token.get("duration_ms") and token.get("duration_ms", 0) > 0,
               str(token))
 
-        artifact = next(event for event in good_events if event.get("type") == "artifact")
-        card = artifact.get("artifact") or {}
-        refs = [str(item.get("ref")) for item in card.get("artifacts") or []]
-        check("artifact card has summary and intercepted",
-              bool(card.get("summary")) and bool(card.get("intercepted")), str(card))
-        check("artifact ref is one real absolute file",
-              len(refs) == 1 and Path(refs[0]).is_absolute() and Path(refs[0]).is_file(), str(refs))
-        check("artifact file content matches",
-              Path(refs[0]).read_text(encoding="utf-8") == "OK\n")
+        # 共享契约（PROTOCOL §22 五事件 + artifact 真实性）走 helper，
+        # 与另外三个 worker shim 同一处定义。
+        check_contract(check, good_events, label="codex happy path")
 
         bad = make_fake(temp, "bad_codex", BAD_CODEX)
         bad_events = await collect(build_adapter(temp, bad), "c_bad")
         bad_types = [str(event.get("type")) for event in bad_events]
         print("\n[failure path]")
-        check("failure emits the error terminal", bad_types[-1] == "error", str(bad_types))
-        check("failure never emits an artifact", "artifact" not in bad_types)
+        check_failure_contract(check, bad_events, label="codex failure path")
         error = next(event for event in bad_events if event.get("type") == "error")
         check("error text explains the exit", "exited 3" in str(error.get("text")), str(error))
 
