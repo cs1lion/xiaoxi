@@ -11,7 +11,7 @@
 ```bash
 .\.venv\Scripts\python.exe scripts\check_protocol.py   # 协议漂移 + REST 接缝，必须 PASS
 .\.venv\Scripts\python.exe scripts\check_memory_contract.py  # 记忆装配接缝静态契约门（ast；build_context/context_with_status 不得单目标赋值、元数不得漂移），必须 PASS
-.\.venv\Scripts\python.exe scripts\test_core.py        # 基线 40 passed / 0 failed，零回归
+.\.venv\Scripts\python.exe scripts\test_core.py        # 基线 passed 数以实跑输出为准，零回归
 .\.venv\Scripts\python.exe scripts\run_evals.py        # 回归评测离线层，失败即非零退出码
 ```
 
