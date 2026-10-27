@@ -125,11 +125,18 @@ def probe_self_check(name: str,
 def patch_file(path: Path, old: str, new: str) -> Callable[[], None]:
     """造一个「把 old 换成 new」的注入，返回还原函数。
 
-    自带 `assert path.read_text().count(old) == 1`——锚点撞多处时当场炸，
-    不会静默改错地方（plan-108 第三次失败的形态）。原内容备份在调用方的
-    临时目录里，由返回的 restore 负责写回。
+    自带 `count(old) == 1` 检查——锚点撞多处时当场炸，不会静默改错地方
+    （plan-108 第三次失败的形态）。
+
+    **二进制读写，不用 text 模式**：text 模式在 Windows 上会把 CRLF 文件的行尾
+    改写成 LF。plan-110 审计四个 CRLF 测试文件后，`git status` 显示 4 个 M，
+    内容虽逐字节一致（sha256 相同）但行尾已变，只能靠 `git checkout HEAD --`
+    归位。还原必须逐字节复原，否则下次忘了归位就会把格式改动混进提交。
+
+    原内容备份在调用方的临时目录里，由返回的 restore 负责写回。
     """
-    text = path.read_text(encoding="utf-8")
+    raw = path.read_bytes()
+    text = raw.decode("utf-8")
     count = text.count(old)
     if count != 1:
         raise AssertionError(
@@ -138,14 +145,14 @@ def patch_file(path: Path, old: str, new: str) -> Callable[[], None]:
 
     backup_dir = Path(tempfile.mkdtemp(prefix="probe-backup-"))
     backup = backup_dir / path.name
-    backup.write_text(text, encoding="utf-8")
+    backup.write_bytes(raw)
 
     def restore() -> None:
-        path.write_text(backup.read_text(encoding="utf-8"), encoding="utf-8")
+        path.write_bytes(backup.read_bytes())
         shutil.rmtree(backup_dir, ignore_errors=True)
 
     def inject() -> None:
-        path.write_text(text.replace(old, new), encoding="utf-8")
+        path.write_bytes(text.replace(old, new).encode("utf-8"))
 
     inject()
     return restore
