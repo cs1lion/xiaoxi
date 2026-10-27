@@ -2,7 +2,7 @@
 
 作者：Chief（poteto-mode A 档）｜日期：2026-10-27｜会话形态：ultracode 8 小时不间断迭代，方向与决策自主。
 
-本档是 31 个提交的决策 trail 提炼版，完整版（含每次探针的原始数据、每次 review 的逐条结论、每次共享文件手术的细节）在本机 `tmp/ITERATION_LOG.md`（gitignored）。本档只留**需要跨会话存活的部分**：判定、触发器、待拍板项。
+本档是 46 个提交的决策 trail 提炼版，完整版（含每次探针的原始数据、每次 review 的逐条结论、每次共享文件手术的细节）在本机 `tmp/ITERATION_LOG.md`（gitignored）。本档只留**需要跨会话存活的部分**：判定、触发器、待拍板项。
 
 ## 一、批次总表
 
@@ -36,10 +36,32 @@
 | 26 | `0996b92` | 两个 REST 路由器 6 处 service 写卸载 |
 | 27 | `91b56e6` | 首字延迟受控 A/B 测量归档进 LATENCY_BASELINE.md |
 | 28 | `0fe3357` | TESTING.md 去掉无锚现状数字 |
+| 29 | `379926f` | 本决策记录首版入库 |
+| 30 | — | 引擎侧检索连接方盘点：#31 触发器②未触发 |
+| 31 | — | 增量索引方案实测不可行（`fit`+`transform` ≠ `fit_transform`），#31 判定链补证据 |
+| 32 | — | #9 toAltar 判定：两项修复已在 HEAD，真跑需隔离实例 + 真实 Key |
+| 33 | `bdbf8c1` | S4 占比 24 色重测 R2，关闭 #15 |
+| 34 | `1d53607` | broadcast_e2e 门禁：跨线程广播链端到端（判别力：破坏版 0 帧） |
+| 35 | `21320cc` | shared_retriever_concurrency 门禁：共享 retriever 实例并发检索 |
+| 36 | — | 并发 session 的 M1-M4 WIP 只读审查：四套测试真跑真过 |
+| 37 | — | 索引冷重建成本门禁：三个判据全部被实测证伪，判定不交付 |
+| 38 | `faa4a88` | memory_retrieval 门禁登记进 run_gates（认领机制首例） |
+| 39-42 | `52dd162` `ee8c28b` `9be5bb8` `c811e56` | 门禁认领四批：71 个未登记测试进门禁，本地门禁 51→146 |
+| 43 | `c1663a5` | TESTING.md 补「门禁外的测试」一节，说明清单构成与认领方式 |
+| 44 | `b03b792` | 逐条判定剩余 16 个门禁外测试，再认领 12 个，清单降到 8 条 |
+| 45 | `fee1516` | 四个浏览器门禁删掉自己的沙盘目录，止住 tmp/ 只增不减 |
+| 46 | `c1dd5a7` | `--always` 参数：一条命令跑「必须永不跳过」那一档 |
+| 47 | — | 沙盘修复后全量终验：190 跑过并断言 / 6 失败，逐个归因 |
+| 48 | `47aadb5` | fastloop [2]/[5] 判据：绝对毫秒换成同步对照的心跳数比值 |
+| 49 | `89c8036` | fastloop [6] 段同改；原增量判据实测恒为负 |
+| 50 | — | ALWAYS_REQUIRED 判据安全边际巡检：49 个门禁无可疑项 |
+| 51 | — | #31 触发器②复验（HEAD `89c8036`）：仍未触发 |
+
+并发 session 同期提交 `aa9c633`（评测机制加固，含 evals_health 层与检索质量门禁），本会话未改动其文件。
 
 另有 `1b993cf`（会话前既有提交）与 `abe6bd9`/`3afb386`（文档入库与门禁裁定）。
 
-每批均过四道黄金门禁（`check_protocol.py` EXIT=0、`test_core.py` 92 passed、`run_evals.py` 7→9 passed、`npm test` EXIT=0）+ 本批新增/扩展门禁 + subagent review。
+每批均过四道黄金门禁（`check_protocol.py` EXIT=0、`test_core.py` 92 passed、`run_evals.py` 11 passed 0 failed、`npm test` EXIT=0）+ 本批新增/扩展门禁 + subagent review。passed 数会随用例增长，以实跑输出为准，此处是 2026-10-27 21:35（HEAD `89c8036`）的记录值。
 
 ## 二、卸载判据（第十六批定型，后续各批沿用）
 
@@ -66,20 +88,30 @@
 1. **受控 A/B 分离环境漂移**。跨天比延迟数字等于把环境和代码混在一个量里。第二十六批用 `git worktree add` 到会话前父提交做同时段同机器对照，证明卸载批次对首字延迟零影响（会话前 109.8ms vs 卸载后 108.4-108.8ms），与 2026-10-24 基线的 +13ms 全归环境漂移。worktree 用完即 `git worktree remove --force`。
 2. **探针必须打点验证测的是真路径**。本会话三次踩坑：第十四批探针文本被正则提前截断，量的不是目标分支；第二十八批 settle_pending 探针用同一条消息当 current，行不够结算条件，量到的是读路径；第二十三批 epiphany 边为空使一处卸载不可达。「不修」的结论比「修」的结论更需要这个证明——一个量错分支的探针能把误判伪证成数据。
 3. **「保留同步」的代价不只是它自己的读耗时**。store 单连接 + 单 RLock，轻读会排在已卸载的写后面等锁（第二十五批实测混合负载读中位数被写抬到 18-33ms）。判轻路由要在「读耗时 + 等锁时长」上算，不是单机空载数字。
+4. **判据本身要先被验证，别拿字面印象当判据**。本会话有五次「判据被实测推翻」：冷重建成本门禁的三个判据全证伪（绝对毫秒随机器漂移、冷热比值被同比例变化免疫、规模比被固定基数稀释）；「检索层不变量无覆盖」被穷尽检索推翻（`test_memory_retrieval.py` 早有四个专用用例）；「有 `skipUnless` 就不能登记门禁」被推翻（判据实现是「输出有行首 SKIP」，`OK (skipped=N)` 不命中）；fastloop 两处绝对毫秒阈值假红；fastloop [6] 段的增量判据恒为负。五次同源：**拿规则的字面印象当判据，没读判据的实现**。读实现的成本远低于反复证伪的成本。
+5. **恒绿的判据比会假红的判据更危险**。假红吵一次就有人去修；恒绿给人确定的信心，而被测性质其实从未被检验。fastloop [6] 段的增量判据「带/不带 40ms 延迟的停顿差 < 15ms」实测 5 次全为负（-21.87 至 -40.92ms）——注入的阻塞延迟反而「改善」了测量值，因为 `to_thread` 让出循环后心跳更密。它已经这样绿了很久。检出这类问题要**定期看判据的实际输出值**，不只问 pass/fail：一个恒为 -25ms 的「差 < 15ms」和一个恒为 +2ms 的，安全性完全不同。
+6. **plumbing 提交后必须逐项验证**。第五十四批用临时索引 + `commit-tree` 落库时，`write-tree` 那次调用漏传 `GIT_INDEX_FILE`，读到被并发 session 污染的主索引，把他们的 12 个文件（2970 insertions）一起提交。`git update-ref` 回退到父提交后重做。plain commit 会明明白白提交整个暂存区（所以一直警惕），plumbing 里一个环境变量漏传会让「我以为只提交了 X」变成「实际提交了 X+Y」且提交前无任何提示。
 
 ## 五、门禁资产（本会话新增，均 ALWAYS_REQUIRED）
 
 `memory_concurrency`（检索并发不变量，补此前的零覆盖）、`memory_api_offloop`、`voice_offloop`（第四批起覆盖至第二十六批的全部 app.py 异步面）、`router_writes_offloop`（两个 REST 路由器 6 个写端点）、`lessons_cap`、`venv_lock`、`tmp_sweep`。
 
-判据全是线程身份或行为不变量，不是墙钟——`memory_fastloop` 的 10ms 墙钟阈值因重载假红被 `3afb386` 裁定刻意不进 ALWAYS_REQUIRED，本会话复现两次（第二十四批全套跑时红、单独跑绿），每次都按该裁定分流，不当回归处理。
+**第三十九批起的门禁认领**（本地/CI 差距补齐）：`gates_unregistered.txt` 列着只被 CI 的 `for f in scripts/test_*.py` 跑到、本地 `run_gates` 从不跑的脚本，即「本地全绿 ≠ CI 绿」。四批共认领 71 个（`52dd162` `ee8c28b` `9be5bb8` `c811e56`），第五批逐条判定后再认领 12 个（`b03b792`），本地门禁从 51 扩到 158，清单从 114 条降到 8 条。新增 `broadcast_e2e`（跨线程广播链）、`shared_retriever_concurrency`（共享实例并发检索）、`memory_retrieval`（valid-time 降权不变量）。认领的两个前置条件写进了 `docs/TESTING.md`：先 `git ls-files` 确认已跟踪（未跟踪文件登记进去，别人 checkout 后必红），再在 `TEST_SENTINEL=1` 下真跑真过（那才是 `run_gates` 给门禁子进程的真实环境，普通环境 `exit=0` 推断不了）。后者是本会话用 6 个文件的代价换来的——全部同因：`import server.memory.store` 触发 `store.py:1684` 的模块级单例落默认路径，被 #39 哨兵拦在 import 期。
+
+**`memory_fastloop` 判据改造**（第四十八、四十九批）：原 10ms 墙钟阈值因重载假红被 `3afb386` 裁定刻意不进 ALWAYS_REQUIRED，本会话复现两次都按该裁定分流。第四十八批把 [2]/[5] 两段、第四十九批把 [6] 段全部换成**同步对照的心跳数比值**（异步心跳 >= 对照 `BEAT_RATIO` 倍）。改造后判据不再吃机器负载，且判别力经过双向验证（破坏版把 `asyncio.to_thread` patch 成同步执行，三处判据全红；连跑 5 次不假红）。
+
+**判据健康度巡检**（第五十批）：49 个 `.py` 门禁逐个跑并抓完整 stdout，按「数值+单位」筛出带阈值的判据。结论是布尔断言占绝大多数（不存在「离阈值多远」的问题），唯一墙钟类判据（`scheduler_health` 的 scan_due）实测余量 20-40 倍。这个「无发现」证明 fastloop 三处是历史遗留个例，不是系统性缺陷。
+
+**四个既有失败门禁**（全量 191 跑过并断言 / 6 失败，均与本次改动无关，stash 隔离验证过）：`self_evolution_send`、`config_hot_consumers`、`durable_mcp`（缺 `scripts/mcp_servers/echo_server.py`，属并发 session 的 M1-M4 WIP 范围）、`ui_browser`（需 8000 上可交互前端，点击超时）。另两个：`tmp_sweep`（见待拍板项）、`memory_fastloop`（第四十八批前的墙钟假红，改造后已消除）。
 
 ## 六、待用户拍板（本会话不擅自做）
 
-1. **#54 迁移交接三项决策**：8000 重启（15+ 提交未进 runtime，服务代码冻结在 2026-10-25）、#52 头像退役、#49/#50 挂引擎 #8。
-2. **#31 索引拆分批准**：增量索引已实测不可行（TF-IDF `fit+transform` 与 `fit_transform` 非逐位相等，2000 文档 nnz 差 17195），冷热 delta 是固有成本，消除需换检索子系统 + ADR。
+1. **#54 迁移交接三项决策**：8000 重启（提交未进 runtime，服务代码冻结在 2026-10-25）、#52 头像退役、#49/#50 挂引擎 #8。
+2. **#31 索引拆分批准**：增量索引已实测不可行（TF-IDF `fit+transform` 与 `fit_transform` 非逐位相等，2000 文档 nnz 差 17195），冷热 delta 是固有成本，消除需换检索子系统 + ADR。第三十批与第五十一批两次复验引擎侧均无第二检索连接方，触发条件未到。
 3. **#9 toAltar 复跑**：需隔离 8001+5189 实例 + 真实 LLM_API_KEY + ego-browser + dsh worker，Mock 跑不到 toAltar，按「不可为绿而绿」不造假跑。
-4. **`tmp_sweep --yes`**：346 项过期项含并发 session 与他人历史工作，批量删除不可逆，等批准。
+4. **`tmp_sweep --yes`**：过期项含并发 session 与他人历史工作，批量删除不可逆，等批准。第四十五批修掉了四个浏览器门禁的沙盘泄漏（全量跑一次净增 3-5 个目录），现在超限的构成是修复前攒下的历史残留，不再是新增泄漏；清完过期项后需再跑 `--write` 重置水位。
 5. **`.agents/` 入库**（AGENTS.md 待办第 1 条）：`.gitignore:57` 忽略整目录，本会话对 DSH.md 等适配层的修正只在本机。
+6. **`durable_mcp` 缺 `scripts/mcp_servers/echo_server.py`**（第五十一批盘点）：`config/agents_roster.yaml` 的 `mcp_echo` 条目与 `config/mcp.json` 的 echo 登记都指向这个文件，但 `scripts/mcp_servers/` 目录整个不存在、HEAD 里也没有。影响面只有 `durable_mcp` 一个门禁（15 条断言里唯一失败的那条）。缺口形态完整（配置、门禁断言、设计文档三样都在，只缺实现），属并发 session 的 M1-M4 WIP 范围，等他们提交即好；若最终不提交，则需在「补一个纯标准库的 stdio JSON-RPC echo server」与「回退 roster/mcp.json 两条目」之间选一个，这个决定属 M1 的 owner。
 
 ## 七、共享工作区纪律（本会话的实操约定）
 
