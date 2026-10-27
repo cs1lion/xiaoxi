@@ -627,6 +627,102 @@ GATES: dict[str, dict[str, object]] = {
         "cmd": [str(PY), "scripts/test_response_composer.py"],
         "skip_regex": r"^\s*SKIP",
     },
+    "response_integration": {
+        "cmd": [str(PY), "scripts/test_response_integration.py"],
+        "skip_regex": r"^\s*SKIP",
+    },
+    "restart_recovery": {
+        "cmd": [str(PY), "scripts/test_restart_recovery.py"],
+        "skip_regex": r"^\s*SKIP",
+    },
+    "seed_eye_expression": {
+        "cmd": [str(PY), "scripts/test_seed_eye_expression.py"],
+        "skip_regex": r"^\s*SKIP",
+    },
+    "seed_eye_lids": {
+        "cmd": [str(PY), "scripts/test_seed_eye_lids.py"],
+        "skip_regex": r"^\s*SKIP",
+    },
+    "soul_polish": {
+        "cmd": [str(PY), "scripts/test_soul_polish.py"],
+        "skip_regex": r"^\s*SKIP",
+    },
+    "speech_performance": {
+        "cmd": [str(PY), "scripts/test_speech_performance.py"],
+        "skip_regex": r"^\s*SKIP",
+    },
+    "speech_performance_route": {
+        "cmd": [str(PY), "scripts/test_speech_performance_route.py"],
+        "skip_regex": r"^\s*SKIP",
+    },
+    "static_cache": {
+        "cmd": [str(PY), "scripts/test_static_cache.py"],
+        "skip_regex": r"^\s*SKIP",
+    },
+    "step_stream": {
+        "cmd": [str(PY), "scripts/test_step_stream.py"],
+        "skip_regex": r"^\s*SKIP",
+    },
+    "stream_delivery": {
+        "cmd": [str(PY), "scripts/test_stream_delivery.py"],
+        "skip_regex": r"^\s*SKIP",
+    },
+    "stream_interpretation": {
+        "cmd": [str(PY), "scripts/test_stream_interpretation.py"],
+        "skip_regex": r"^\s*SKIP",
+    },
+    "thread_continuity": {
+        "cmd": [str(PY), "scripts/test_thread_continuity.py"],
+        "skip_regex": r"^\s*SKIP",
+    },
+    "thread_history": {
+        "cmd": [str(PY), "scripts/test_thread_history.py"],
+        "skip_regex": r"^\s*SKIP",
+    },
+    "thread_history_api": {
+        "cmd": [str(PY), "scripts/test_thread_history_api.py"],
+        "skip_regex": r"^\s*SKIP",
+    },
+    "thread_materials": {
+        "cmd": [str(PY), "scripts/test_thread_materials.py"],
+        "skip_regex": r"^\s*SKIP",
+    },
+    "thread_materials_api": {
+        "cmd": [str(PY), "scripts/test_thread_materials_api.py"],
+        "skip_regex": r"^\s*SKIP",
+    },
+    "thread_proposals": {
+        "cmd": [str(PY), "scripts/test_thread_proposals.py"],
+        "skip_regex": r"^\s*SKIP",
+    },
+    "thread_recall": {
+        "cmd": [str(PY), "scripts/test_thread_recall.py"],
+        "skip_regex": r"^\s*SKIP",
+    },
+    "threads": {
+        "cmd": [str(PY), "scripts/test_threads.py"],
+        "skip_regex": r"^\s*SKIP",
+    },
+    "tts_trim_silence": {
+        "cmd": [str(PY), "scripts/test_tts_trim_silence.py"],
+        "skip_regex": r"^\s*SKIP",
+    },
+    "voice_taste": {
+        "cmd": [str(PY), "scripts/test_voice_taste.py"],
+        "skip_regex": r"^\s*SKIP",
+    },
+    "voice_turns": {
+        "cmd": [str(PY), "scripts/test_voice_turns.py"],
+        "skip_regex": r"^\s*SKIP",
+    },
+    "world_intent": {
+        "cmd": [str(PY), "scripts/test_world_intent.py"],
+        "skip_regex": r"^\s*SKIP",
+    },
+    "ws_origin": {
+        "cmd": [str(PY), "scripts/test_ws_origin.py"],
+        "skip_regex": r"^\s*SKIP",
+    },
     # ---- 浏览器门禁：环境不满足时 SKIP 且退出 0，是本次要盯住的那一类 ----
     "ui_browser": {
         "cmd": ["node", "scripts/test-ui-browser.mjs"],
