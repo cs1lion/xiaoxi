@@ -1,5 +1,6 @@
 """Candidate editing is not confirmation. Only exact preview versions save."""
 from urllib.parse import urlsplit
+import asyncio
 from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import JSONResponse
 from .threads import RevisionConflict
@@ -36,14 +37,20 @@ def create_proposals_router(service):
 
     @router.patch('/{proposal_id}')
     async def revise(proposal_id:str,request:Request):
-        return call(service.proposals.revise,proposal_id,**await data(request,['expected_version','text']))
+        payload = await data(request,['expected_version','text'])
+        return await asyncio.to_thread(
+            lambda: call(service.proposals.revise, proposal_id, **payload))
 
     @router.post('/{proposal_id}/confirm')
     async def confirm(proposal_id:str,request:Request):
-        return call(service.proposals.confirm,proposal_id,**await data(request,['expected_version']))
+        payload = await data(request,['expected_version'])
+        return await asyncio.to_thread(
+            lambda: call(service.proposals.confirm, proposal_id, **payload))
 
     @router.post('/{proposal_id}/reject')
     async def reject(proposal_id:str,request:Request):
-        return call(service.proposals.reject,proposal_id,**await data(request,['expected_version']))
+        payload = await data(request,['expected_version'])
+        return await asyncio.to_thread(
+            lambda: call(service.proposals.reject, proposal_id, **payload))
 
     return router

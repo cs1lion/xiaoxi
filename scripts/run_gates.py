@@ -480,6 +480,16 @@ GATES: dict[str, dict[str, object]] = {
         "cmd": [str(PY), "scripts/test_voice_offloop.py"],
         "skip_regex": r"^\s*SKIP",
     },
+    "router_writes_offloop": {
+        # 两个 REST 路由器的 6 个写端点（thread-proposals 与 note-proposals 的
+        # revise/confirm/reject）的 service 写必须跑在工作线程。判据是线程
+        # 身份：同步版恒在 MainThread（探针实测 6 个写全落），to_thread 版
+        # 恒在 asyncio_* worker。editor-insights 的 dismiss/feedback 按判据
+        # 不卸（纯内存写无 fsync，且 dismiss 会跨线程取消 analyze 的 Task）。
+        # ALWAYS_REQUIRED：ASGI 内场，无服务无网络。
+        "cmd": [str(PY), "scripts/test_router_writes_offloop.py"],
+        "skip_regex": r"^\s*SKIP",
+    },
     "evals_report": {
         # 评测报告层（docs/EVAL_MECHANISM_PLAN.md）：读 evals/results/ 快照出
         # 通过率（平均与全过概率分列）、与上次的配对差异、token 成本。
@@ -499,6 +509,7 @@ ALWAYS_REQUIRED = ("protocol", "core", "scheduler_health", "budget_scope", "back
                    "tmp_sweep", "memory_ranking", "memory_concurrency",
                    "memory_api_offloop",
                    "voice_offloop",
+                   "router_writes_offloop",
                    "durable_adapter", "durable_supervisor", "durable_takeover",
                    "durable_recovery", "durable_revive", "durable_app_wiring",
                    "durable_reconcile", "durable_soak", "durable_storage", "durable_compaction",

@@ -1,6 +1,7 @@
 """Same-origin review actions; only confirmation writes a saved note version."""
 
 from urllib.parse import urlsplit
+import asyncio
 
 from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import JSONResponse
@@ -54,17 +55,20 @@ def create_note_proposals_router(service):
 
     @router.patch('/note-proposals/{proposal_id}')
     async def revise(proposal_id: str, request: Request):
-        return call(service.note_proposals.revise, proposal_id,
-                    **await data(request, ('expected_version', 'title', 'body')))
+        payload = await data(request, ('expected_version', 'title', 'body'))
+        return await asyncio.to_thread(
+            lambda: call(service.note_proposals.revise, proposal_id, **payload))
 
     @router.post('/note-proposals/{proposal_id}/confirm')
     async def confirm(proposal_id: str, request: Request):
-        return call(service.note_proposals.confirm, proposal_id,
-                    **await data(request, ('expected_version',)))
+        payload = await data(request, ('expected_version',))
+        return await asyncio.to_thread(
+            lambda: call(service.note_proposals.confirm, proposal_id, **payload))
 
     @router.post('/note-proposals/{proposal_id}/reject')
     async def reject(proposal_id: str, request: Request):
-        return call(service.note_proposals.reject, proposal_id,
-                    **await data(request, ('expected_version',)))
+        payload = await data(request, ('expected_version',))
+        return await asyncio.to_thread(
+            lambda: call(service.note_proposals.reject, proposal_id, **payload))
 
     return router
