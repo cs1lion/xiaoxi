@@ -679,7 +679,11 @@ def _sweep_expired_usage() -> None:
 async def _maybe_self_evolution(conn: Connection) -> None:
     """One bounded idle self-evolution cycle; events are quiet and connection-level."""
     try:
-        _sweep_expired_usage()
+        # usage sweep 是批量写事务（200 行实测最坏 37.86ms 循环时间，per-row
+        # fsync 的坑早先已由 settle_usage_bulk 修掉但批量仍够重）：卸载到
+        # 工作线程，与 #31 检索卸载、v2 命令卸载、其余后台写同一模式。
+        # 出厂配置 sweep_enabled 默认 false，只有运营打开开关后才真有批量写。
+        await asyncio.to_thread(_sweep_expired_usage)
         from .assistant.loop import SelfEvolutionCycle
         from .memory.evolution import self_evolution_cfg
         if not self_evolution_cfg().get("enabled"):

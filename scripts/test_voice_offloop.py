@@ -317,6 +317,15 @@ async def drive_proactive_selftopic(env):
     return conn
 
 
+async def drive_usage_sweep(env):
+    """驱动 _maybe_self_evolution：第一站就是 usage sweep（第十九批已卸载到
+    to_thread），其后的 SelfEvolutionCycle 懒导入在隔离环境必然失败、被自身
+    except 吞掉——不影响对 sweep 的断言。"""
+    turn, conn = fake_conn()
+    await env["_maybe_self_evolution"](conn)
+    return conn
+
+
 async def drive_rest_routes(env):
     """驱动 10 条重路由：顺序调用，记录每次 SQLite 工作的执行线程。"""
     await env["list_memories"]()
@@ -626,6 +635,30 @@ def main() -> int:
           len(snap_limits) > 2 and snap_limits[2] == 50, repr(snap_limits))
     check("limit：transcript 的 -1 与 0 都夹成 1、99999 夹成 200 帽",
           msg_limits == [1, 1, 200], repr(msg_limits))
+
+    print("[usage sweep：_maybe_self_evolution 的批量写在工作线程]")
+    sweep_calls: list[tuple[str, threading.Thread]] = []
+    feedback_mod = ModuleType(f"{PACKAGE}.memory.feedback")
+    feedback_mod.feedback_cfg = lambda: {
+        "enabled": True, "sweep_enabled": True, "sweep_interval_minutes": 0.0}
+
+    def recording_sweep(store, **kw):
+        sweep_calls.append(("sweep_expired_usage", threading.current_thread()))
+        return {"enabled": True, "swept": 200, "open_remaining": 0, "error": None}
+
+    feedback_mod.sweep_expired_usage = recording_sweep
+    env7, patch_ctx7 = build_ws_env(Recorder())
+    sweep_patch = patch.dict(sys.modules, {f"{PACKAGE}.memory.feedback": feedback_mod})
+    with patch_ctx7, sweep_patch:
+        loop_thread7 = threading.current_thread()
+        asyncio.run(drive_usage_sweep(env7))
+    check("usage sweep：sweep_expired_usage 被调用（驱动真实发生）",
+          len(sweep_calls) == 1, repr(sweep_calls))
+    check("usage sweep：节流时间戳被推进（防未来优化掉节流）",
+          env7["_LAST_USAGE_SWEEP_AT"] > 0, repr(env7["_LAST_USAGE_SWEEP_AT"]))
+    check("usage sweep：批量写跑在工作线程（不在循环线程）",
+          bool(sweep_calls) and all(t is not loop_thread7 for _n, t in sweep_calls),
+          repr([(n, t.name) for n, t in sweep_calls]))
 
     print(f"\n=== {len(PASSED)} passed, {len(FAILED)} failed ===")
     return 1 if FAILED else 0

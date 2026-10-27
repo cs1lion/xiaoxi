@@ -116,6 +116,10 @@ def load_ws():
     # 第十六批：_aqi_action 的 reassign 分支 spawn _executive_reassign_drive，
     # 不编译进来该分支在隔离环境 NameError，被内层 except 吞成错误收尾。
     names |= {"_executive_reassign_drive"}
+    # 第十九批：_maybe_self_evolution 调 _sweep_expired_usage（已卸载到
+    # to_thread）；不编译进来该名字在 _maybe_self_evolution 帧内就查不到，
+    # NameError 被 _maybe_self_evolution 自己的 except 吞掉、sweep 从未进入。
+    names |= {"_sweep_expired_usage"}
     nodes = []
     for node in tree.body:
         # 同步 def 也要收：_transcribe_error_message 是普通函数（S3 加的 ASR
@@ -160,6 +164,12 @@ def load_ws():
                # app.py 顶层定义了该集合，但 AST 隔离装载只编译函数、不执行模块级赋值；
                # 不注入的话所有 WebSocket 测试都会在这里 NameError。
                _connections=set(),
+               # 第十九批：_sweep_expired_usage 用 global 读写的节流时间戳，
+               # 与 _connections 同理——AST 装载不执行模块级赋值。本 harness
+               # 没设 __package__，该函数先死在相对懒导入上（KeyError:
+               # __name__）；注入是为了设了 __package__ 的环境（如
+               # test_voice_offloop）里导入能解析时，第一读不会静默返回。
+               _LAST_USAGE_SWEEP_AT=0.0,
                tts=SimpleNamespace(engine='silent'), deliver_reply=module.deliver_reply,
                aqi_blocks_message=blocks_module.aqi_blocks_message,
                note_snippet=blocks_module.note_snippet,
