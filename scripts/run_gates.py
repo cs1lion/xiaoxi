@@ -490,6 +490,15 @@ GATES: dict[str, dict[str, object]] = {
         "cmd": [str(PY), "scripts/test_router_writes_offloop.py"],
         "skip_regex": r"^\s*SKIP",
     },
+    "broadcast_e2e": {
+        # 广播链端到端：台账回调/v2 hub 从 worker 线程触发，经
+        # call_soon_threadsafe 转回循环后真到达对端连接。判据是帧到达
+        # 与内容正确，非时序。破坏版（就地 create_task）实测两连接收 0 帧，
+        # 断言必红。真 Connection + 真 sink + FakeSocket，无服务无网络。
+        # ALWAYS_REQUIRED。
+        "cmd": [str(PY), "scripts/test_broadcast_e2e.py"],
+        "skip_regex": r"^\s*SKIP",
+    },
     "evals_report": {
         # 评测报告层（docs/EVAL_MECHANISM_PLAN.md）：读 evals/results/ 快照出
         # 通过率（平均与全过概率分列）、与上次的配对差异、token 成本。
@@ -510,6 +519,7 @@ ALWAYS_REQUIRED = ("protocol", "core", "scheduler_health", "budget_scope", "back
                    "memory_api_offloop",
                    "voice_offloop",
                    "router_writes_offloop",
+                   "broadcast_e2e",
                    "durable_adapter", "durable_supervisor", "durable_takeover",
                    "durable_recovery", "durable_revive", "durable_app_wiring",
                    "durable_reconcile", "durable_soak", "durable_storage", "durable_compaction",
