@@ -46,10 +46,14 @@
 ```python
 from check_probe import probe_self_check, patch_file
 
-restore = patch_file(PATH, ORIG_SNIPPET, BROKEN_SNIPPET)
-result = probe_self_check(name=..., run=..., break_it=lambda: None, restore=restore)
+inject, restore = patch_file(PATH, ORIG_SNIPPET, BROKEN_SNIPPET)
+result = probe_self_check(name=..., run=..., break_it=inject, restore=restore,
+                          watch=PATH)
 assert result.ok, result.report()
 ```
 
-判据是「破坏版必须红且原版必须绿」。它抓的正是上面那三种失败：等价改动 → 破坏版
-也绿；只抹一处 → 破坏版也绿；锚点撞多处 → `patch_file` 的 `assert count==1` 当场炸。
+判据是「破坏版必须红、还原后必须绿、且 `watch` 文件逐字节复原」。它抓的正是上面那三种失败：等价改动 → 破坏版也绿；只抹一处 → 破坏版也绿；锚点撞多处 → `patch_file` 的 `assert count==1` 当场炸。
+
+**`patch_file` 不立即注入，返回 `(inject, restore)`**：注入交给 `break_it`，因为 `probe_self_check` 在 `break_it` 之前拍「原文」快照。谁负责注入，快照就必须拍在它之前。
+
+**`watch` 那一检是这次审计的副产物**：本文写于 plan-110，当时只验「还原后退出码为 0」；plan-111 发现那会被 text 模式读写的 CRLF 破坏蒙混过关（还原跑了、码也绿、仓库留下格式差异），plan-112 遂把逐字节比对编进判据。照本文旧示例跑的人会漏掉这一检。
