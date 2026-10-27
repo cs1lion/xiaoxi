@@ -17,6 +17,14 @@ import unittest
 from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+
+# The suite only uses temp stores, but importing server.memory.store builds its
+# module-level singleton against the default path. Pin :memory: before any
+# server import so the #39 production-db sentinel (TEST_SENTINEL=1, set by
+# run_gates for every gate subprocess) does not stop this file at import time.
+import os
+os.environ['DB_PATH'] = ':memory:'
+
 import dotenv
 from fastapi import FastAPI
 from fastapi.testclient import TestClient

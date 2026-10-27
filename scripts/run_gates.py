@@ -535,6 +535,98 @@ GATES: dict[str, dict[str, object]] = {
         "cmd": [str(PY), "scripts/test_memory_self_evolution.py"],
         "skip_regex": r"^\s*SKIP",
     },
+    "memory_store_contract": {
+        "cmd": [str(PY), "scripts/test_memory_store_contract.py"],
+        "skip_regex": r"^\s*SKIP",
+    },
+    "micro_delivery": {
+        "cmd": [str(PY), "scripts/test_micro_delivery.py"],
+        "skip_regex": r"^\s*SKIP",
+    },
+    "mine_eval_candidates": {
+        "cmd": [str(PY), "scripts/test_mine_eval_candidates.py"],
+        "skip_regex": r"^\s*SKIP",
+    },
+    "music": {
+        "cmd": [str(PY), "scripts/test_music.py"],
+        "skip_regex": r"^\s*SKIP",
+    },
+    "music_api": {
+        "cmd": [str(PY), "scripts/test_music_api.py"],
+        "skip_regex": r"^\s*SKIP",
+    },
+    "note_conversation": {
+        "cmd": [str(PY), "scripts/test_note_conversation.py"],
+        "skip_regex": r"^\s*SKIP",
+    },
+    "note_edit_integration": {
+        "cmd": [str(PY), "scripts/test_note_edit_integration.py"],
+        "skip_regex": r"^\s*SKIP",
+    },
+    "note_edit_websocket": {
+        "cmd": [str(PY), "scripts/test_note_edit_websocket.py"],
+        "skip_regex": r"^\s*SKIP",
+    },
+    "note_material_scope": {
+        "cmd": [str(PY), "scripts/test_note_material_scope.py"],
+        "skip_regex": r"^\s*SKIP",
+    },
+    "note_proposals": {
+        "cmd": [str(PY), "scripts/test_note_proposals.py"],
+        "skip_regex": r"^\s*SKIP",
+    },
+    "note_proposals_api": {
+        "cmd": [str(PY), "scripts/test_note_proposals_api.py"],
+        "skip_regex": r"^\s*SKIP",
+    },
+    "note_versions": {
+        "cmd": [str(PY), "scripts/test_note_versions.py"],
+        "skip_regex": r"^\s*SKIP",
+    },
+    "notes": {
+        "cmd": [str(PY), "scripts/test_notes.py"],
+        "skip_regex": r"^\s*SKIP",
+    },
+    "practice": {
+        "cmd": [str(PY), "scripts/test_practice.py"],
+        "skip_regex": r"^\s*SKIP",
+    },
+    "practice_websocket": {
+        "cmd": [str(PY), "scripts/test_practice_websocket.py"],
+        "skip_regex": r"^\s*SKIP",
+    },
+    "preferences": {
+        "cmd": [str(PY), "scripts/test_preferences.py"],
+        "skip_regex": r"^\s*SKIP",
+    },
+    "procedural_memory_eval_snapshot": {
+        "cmd": [str(PY), "scripts/test_procedural_memory_eval_snapshot.py"],
+        "skip_regex": r"^\s*SKIP",
+    },
+    "procedural_memory_induction": {
+        "cmd": [str(PY), "scripts/test_procedural_memory_induction.py"],
+        "skip_regex": r"^\s*SKIP",
+    },
+    "proposals_integration": {
+        "cmd": [str(PY), "scripts/test_proposals_integration.py"],
+        "skip_regex": r"^\s*SKIP",
+    },
+    "reading_trial_loop": {
+        "cmd": [str(PY), "scripts/test_reading_trial_loop.py"],
+        "skip_regex": r"^\s*SKIP",
+    },
+    "reflect_cycle": {
+        "cmd": [str(PY), "scripts/test_reflect_cycle.py"],
+        "skip_regex": r"^\s*SKIP",
+    },
+    "reply_delivery": {
+        "cmd": [str(PY), "scripts/test_reply_delivery.py"],
+        "skip_regex": r"^\s*SKIP",
+    },
+    "response_composer": {
+        "cmd": [str(PY), "scripts/test_response_composer.py"],
+        "skip_regex": r"^\s*SKIP",
+    },
     # ---- 浏览器门禁：环境不满足时 SKIP 且退出 0，是本次要盯住的那一类 ----
     "ui_browser": {
         "cmd": ["node", "scripts/test-ui-browser.mjs"],
