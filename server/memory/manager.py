@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import math
 import json
 import re
@@ -106,8 +107,9 @@ class MemoryManager:
             # feedback failure must never suppress memory extraction.
             try:
                 from .feedback import settle_pending
-                outcome = settle_pending(self.store, session_id=session_id,
-                                         current_message_id=user_message_id)
+                outcome = await asyncio.to_thread(
+                    settle_pending, self.store, session_id=session_id,
+                    current_message_id=user_message_id)
                 if trace is not None:
                     trace['feedback_settled'] = outcome.get('settled', 0)
             except Exception as exc:
@@ -143,7 +145,8 @@ class MemoryManager:
             item = self._linked_candidate(raw, message)
             if item is None or (item["source"] != "stated" and infer_budget <= 0):
                 continue
-            memory = self._persist(item, session_id=session_id, expected_write_epoch=expected_epoch)
+            memory = await asyncio.to_thread(self._persist, item, session_id=session_id,
+                                             expected_write_epoch=expected_write_epoch)
             if memory is not None:
                 if item["source"] != "stated":
                     infer_budget -= 1

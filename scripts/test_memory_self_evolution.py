@@ -14,10 +14,11 @@ from __future__ import annotations
 import json
 import os
 import sys
+import threading
 import time
 import unittest
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import AsyncMock, patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 os.environ["DB_PATH"] = ":memory:"
@@ -25,6 +26,7 @@ os.environ["LLM_PROVIDER"] = "mock"
 os.environ["LLM_API_KEY"] = ""
 
 from server.memory.store import MemoryStore  # noqa: E402
+from server.memory.manager import MemoryManager  # noqa: E402
 from server.memory.retriever import MemoryRetriever  # noqa: E402
 from server.memory import feedback, lessons  # noqa: E402
 from server.assistant.loop import validate_reflection_payload  # noqa: E402
@@ -345,6 +347,84 @@ class ReflectionLessonGateTests(unittest.TestCase):
         normalized, reason = validate_reflection_payload(payload, self.MATERIAL)
         self.assertIsNone(reason)
         self.assertEqual(normalized["lessons"], [])
+
+
+class ObserveTurnOffloopTests(unittest.IsolatedAsyncioTestCase):
+    """第二十批：observe_turn 的两个写必须跑在工作线程，不在循环线程。
+
+    settle_pending（结算上一轮注入的 feedback 写）与 _persist（落新记忆）
+    原先在 async 的 observe_turn 里同步跑。extraction 虽由 orchestrator 放
+    进后台任务，但后台任务仍在同一事件循环上——实测（本机 2026-10-27）：
+    真结算的 settle_pending median 9.13ms、_persist median 9.82ms，都会
+    卡住循环（含语音 WS 的音帧处理）。判据是线程身份：同步版恒在循环线程，
+    to_thread 版恒在 asyncio_* worker，双向无灰区。
+    """
+
+    async def asyncSetUp(self):
+        self.store = MemoryStore(":memory:")
+        self.addCleanup(self.store.close)
+        self.manager = MemoryManager(self.store)
+        self.session = self.store.start_session("offloop-observe")
+        guard = patch("server.llm.llm.complete_raw",
+                      side_effect=AssertionError("Network/model calls are forbidden"))
+        guard.start()
+        self.addCleanup(guard.stop)
+
+    async def test_feedback_and_persist_writes_run_off_the_event_loop(self):
+        loop_thread = threading.current_thread()
+        seen: list[tuple] = []
+
+        # 上一轮的用户消息 + 绑定它的 usage 行；本轮的 text/current 作为 settle
+        # 的 current_message_id（usage 的「下一条用户消息」已入库）。
+        self.store.add_message(self.session, "user", "我在甲公司工作，岗位是设计师。")
+        self.store.upsert(kind="fact", subject="user",
+                          key="工作:公司", value="用户在甲公司工作")
+        self.store.record_usage(session_id=self.session, memory_ids=[1])
+        text = "我在甲公司工作，岗位是设计师。"
+        current = self.store.add_message(self.session, "user", text)
+
+        # 两个写都包「记录线程后调真身」的包装器：既钉线程身份与参数，又不
+        # 放弃真实写路径的覆盖。注意 settle_pending 只 bump store 的内存
+        # version（检索器失效用），不动 DB 的 write_epoch——observe_turn 的
+        # epoch 守卫读的是后者，所以真结算不会跳过本轮抽取（2026-10-27 实测
+        # saved=1 复核）；结算语义本身由 FeedbackTests 直接覆盖。
+        real_settle = feedback.settle_pending
+
+        def recording_settle(*args, **kwargs):
+            seen.append(("settle_pending", threading.current_thread(), args, kwargs))
+            return real_settle(*args, **kwargs)
+
+        real_persist = self.manager._persist
+
+        def recording_persist(*args, **kwargs):
+            seen.append(("_persist", threading.current_thread(), args, kwargs))
+            return real_persist(*args, **kwargs)
+
+        self.manager._persist = recording_persist
+        item = {"kind": "fact", "subject": "user", "key": "工作:公司",
+                "value": "用户在甲公司工作", "source": "stated",
+                "importance": .8, "confidence": .95, "operation": "add",
+                "evidence_quote": text}
+        with patch("server.memory.feedback.settle_pending", recording_settle), \
+                patch("server.memory.manager.extract_memories",
+                      AsyncMock(return_value=[item])):
+            saved = await self.manager.observe_turn(
+                session_id=self.session, user_text=text,
+                assistant_text="合成测试回复", user_message_id=current)
+
+        names = [entry[0] for entry in seen]
+        self.assertIn("settle_pending", names, f"settle_pending 未被调用：{names}")
+        self.assertIn("_persist", names, f"_persist 未被调用：{names}")
+        on_loop = [entry[0] for entry in seen if entry[1] is loop_thread]
+        self.assertEqual(on_loop, [], f"这些写跑在了循环线程上：{on_loop}")
+        settle_call = next(entry for entry in seen if entry[0] == "settle_pending")
+        self.assertEqual(settle_call[2], (self.store,))
+        self.assertEqual(settle_call[3]["session_id"], self.session)
+        self.assertEqual(settle_call[3]["current_message_id"], current)
+        persist_call = next(entry for entry in seen if entry[0] == "_persist")
+        self.assertEqual(persist_call[3]["session_id"], self.session)
+        self.assertIsInstance(persist_call[3]["expected_write_epoch"], int)
+        self.assertEqual(len(saved), 1, "卸载后落库行为应不变")
 
 
 if __name__ == "__main__":
