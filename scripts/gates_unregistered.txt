@@ -64,7 +64,6 @@ test_memory_orchestrator.py
 test_memory_preference.py
 test_memory_preference_parser.py
 test_memory_presentation.py
-test_memory_retrieval.py
 test_memory_retrieval_gate.py
 test_memory_self_evolution.py
 test_memory_store_contract.py

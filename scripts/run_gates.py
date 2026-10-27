@@ -460,6 +460,18 @@ GATES: dict[str, dict[str, object]] = {
         "cmd": [str(PY), "scripts/test_memory_api_offloop.py"],
         "skip_regex": r"^\s*SKIP",
     },
+    "memory_retrieval": {
+        # Retrieval-layer behavior invariants: a valid-time bound (fact_valid_until
+        # in the past, or fact_valid_from in the future) must demote the row, never
+        # drop it -- a historical question still has to reach a fact the user
+        # explicitly bounded. A NULL bound must not affect ordinary retrieval. A
+        # superseded row carrying an explicit bound stays reachable. Every check is
+        # a score or position comparison; fixtures use relative time.time() bounds
+        # (1000s slack), so there is no wall-clock threshold, sleep, network, or
+        # randomness. 49 cases run in 0.4s, hence ALWAYS_REQUIRED.
+        "cmd": [str(PY), "scripts/test_memory_retrieval.py"],
+        "skip_regex": r"^\s*SKIP",
+    },
     "voice_offloop": {
         # app.py 的异步面不得在循环线程跑 SQLite：四个语音处理器
         # （_narrate_turn / _touch_reply / _proactive_check 的 mumble 分支 /
@@ -525,7 +537,7 @@ ALWAYS_REQUIRED = ("protocol", "core", "scheduler_health", "budget_scope", "back
                    "thread_conversation", "self_evolution", "agent_loop", "llm_client",
                    "self_evolution_send", "config_hot", "config_hot_consumers",
                    "evolution_quality_report", "evals_report", "lessons_cap", "venv_lock",
-                   "tmp_sweep", "memory_ranking", "memory_concurrency",
+                   "tmp_sweep", "memory_ranking", "memory_concurrency", "memory_retrieval",
                    "memory_api_offloop",
                    "voice_offloop",
                    "router_writes_offloop",
