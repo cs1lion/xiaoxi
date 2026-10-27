@@ -323,8 +323,16 @@ async def add_memory(payload: dict[str, Any]) -> Any:
 
 @app.get("/api/session/{session_id}/transcript")
 async def transcript(session_id: str, limit: int = 100) -> Any:
-    # 同上：recent_messages 把客户端 limit 原样送进 LIMIT 占位符，-1 即
-    # 无限制，整个 session 的消息会被全捞回并物化成 dict。
+    """一个 session 的最近消息（默认 100，帽 200）。
+
+    刻意不返回总数/截断标志：三个消费方（dogfood-sim、drill-s3 重连演练、
+    test_memory_api）都只读 items，且校验的目标消息都在帽内的近端，没有
+    分页消费者；加无人使用的响应字段是投机。响应形状不在 PROTOCOL.md 里
+    （非契约），将来真有分页需求时加字段是自由改动。帽的存在是为防
+    ?limit=-1 的无界读（SQLite 的 LIMIT -1 是无限制），不是分页边界。
+    """
+    # recent_messages 把客户端 limit 原样送进 LIMIT 占位符，-1 即无限制，
+    # 整个 session 的消息会被全捞回并物化成 dict。
     limit = max(1, min(int(limit), 200))
     return {"items": store.recent_messages(session_id, limit=limit)}
 
@@ -808,8 +816,14 @@ async def _run_turn(conn: Connection, text: str, mode: str, turn: VoiceTurn | No
         async def _notice(memories: list[Any]) -> None:
             await conn.send_turn(turn, {
                 "type": "memory_notice",
+                # `status` is load-bearing: the panel branches on it to tell a
+                # saved fact ("记下了") from a pending conflict ("待核对"), and
+                # PROTOCOL.md §11 forbids showing a conflict as an applied fact.
+                # Omitting it made both branches dead code -- every item filtered
+                # out as status-less. Memory carries it, so this is one field.
                 "items": [
-                    {"id": m.id, "kind": m.kind, "value": m.value, "source": m.source}
+                    {"id": m.id, "kind": m.kind, "value": m.value,
+                     "source": m.source, "status": m.status}
                     for m in memories
                 ],
             })
