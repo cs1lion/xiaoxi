@@ -10,32 +10,8 @@
 # 由 test_gate_coverage.py --write 生成；条数与登记数以
 # python scripts/test_gate_coverage.py 的输出为准，不写在这里。
 
-test_acceptance_dispatch.py
-test_activity.py
-test_activity_dialogue.py
-test_activity_integration.py
-test_activity_material_scope.py
-test_activity_websocket.py
-test_ambient_orchestration.py
-test_ambient_tiers.py
-test_aqi_blocks.py
-test_asr_language.py
-test_assistant_api.py
-test_assistant_context.py
-test_assistant_continuation.py
-test_assistant_store.py
 test_assistant_ui_contract.py
-test_assistant_websocket.py
-test_cli_subproc_adapter.py
-test_companion_integration.py
-test_context_broker.py
-test_context_budget.py
-test_context_budget_integration.py
-test_curiosity_graph.py
 test_dsh_worker_shim.py
-test_durable_shadow.py
-test_editor_discussion_websocket.py
-test_editor_insight_outputs.py
 test_editor_insights.py
 test_editor_insights_api.py
 test_editor_quality_eval.py

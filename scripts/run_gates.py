@@ -339,6 +339,106 @@ GATES: dict[str, dict[str, object]] = {
         "cmd": [str(PY), "scripts/eval_self_evolution_quality.py"],
         "skip_regex": r"^\s*SKIP",
     },
+    # ---- 第四十九批认领：gates_unregistered 里的确定性离线测试 ----
+    # 认领前逐个实跑过（绿 97/97；剔除 PIL 缺失整组跳过的
+    # test_eye_calibration_analysis 后剩 96），按字母序分批登记。
+    # 判据：unittest 或 check() 断言、无外部服务/Key/端口、无墙钟阈值。
+    "acceptance_dispatch": {
+        "cmd": [str(PY), "scripts/test_acceptance_dispatch.py"],
+        "skip_regex": r"^\s*SKIP",
+    },
+    "activity": {
+        "cmd": [str(PY), "scripts/test_activity.py"],
+        "skip_regex": r"^\s*SKIP",
+    },
+    "activity_dialogue": {
+        "cmd": [str(PY), "scripts/test_activity_dialogue.py"],
+        "skip_regex": r"^\s*SKIP",
+    },
+    "activity_integration": {
+        "cmd": [str(PY), "scripts/test_activity_integration.py"],
+        "skip_regex": r"^\s*SKIP",
+    },
+    "activity_material_scope": {
+        "cmd": [str(PY), "scripts/test_activity_material_scope.py"],
+        "skip_regex": r"^\s*SKIP",
+    },
+    "activity_websocket": {
+        "cmd": [str(PY), "scripts/test_activity_websocket.py"],
+        "skip_regex": r"^\s*SKIP",
+    },
+    "ambient_orchestration": {
+        "cmd": [str(PY), "scripts/test_ambient_orchestration.py"],
+        "skip_regex": r"^\s*SKIP",
+    },
+    "ambient_tiers": {
+        "cmd": [str(PY), "scripts/test_ambient_tiers.py"],
+        "skip_regex": r"^\s*SKIP",
+    },
+    "aqi_blocks": {
+        "cmd": [str(PY), "scripts/test_aqi_blocks.py"],
+        "skip_regex": r"^\s*SKIP",
+    },
+    "asr_language": {
+        "cmd": [str(PY), "scripts/test_asr_language.py"],
+        "skip_regex": r"^\s*SKIP",
+    },
+    "assistant_api": {
+        "cmd": [str(PY), "scripts/test_assistant_api.py"],
+        "skip_regex": r"^\s*SKIP",
+    },
+    "assistant_context": {
+        "cmd": [str(PY), "scripts/test_assistant_context.py"],
+        "skip_regex": r"^\s*SKIP",
+    },
+    "assistant_continuation": {
+        "cmd": [str(PY), "scripts/test_assistant_continuation.py"],
+        "skip_regex": r"^\s*SKIP",
+    },
+    "assistant_store": {
+        "cmd": [str(PY), "scripts/test_assistant_store.py"],
+        "skip_regex": r"^\s*SKIP",
+    },
+    "assistant_websocket": {
+        "cmd": [str(PY), "scripts/test_assistant_websocket.py"],
+        "skip_regex": r"^\s*SKIP",
+    },
+    "cli_subproc_adapter": {
+        "cmd": [str(PY), "scripts/test_cli_subproc_adapter.py"],
+        "skip_regex": r"^\s*SKIP",
+    },
+    "companion_integration": {
+        "cmd": [str(PY), "scripts/test_companion_integration.py"],
+        "skip_regex": r"^\s*SKIP",
+    },
+    "context_broker": {
+        "cmd": [str(PY), "scripts/test_context_broker.py"],
+        "skip_regex": r"^\s*SKIP",
+    },
+    "context_budget": {
+        "cmd": [str(PY), "scripts/test_context_budget.py"],
+        "skip_regex": r"^\s*SKIP",
+    },
+    "context_budget_integration": {
+        "cmd": [str(PY), "scripts/test_context_budget_integration.py"],
+        "skip_regex": r"^\s*SKIP",
+    },
+    "curiosity_graph": {
+        "cmd": [str(PY), "scripts/test_curiosity_graph.py"],
+        "skip_regex": r"^\s*SKIP",
+    },
+    "durable_shadow": {
+        "cmd": [str(PY), "scripts/test_durable_shadow.py"],
+        "skip_regex": r"^\s*SKIP",
+    },
+    "editor_discussion_websocket": {
+        "cmd": [str(PY), "scripts/test_editor_discussion_websocket.py"],
+        "skip_regex": r"^\s*SKIP",
+    },
+    "editor_insight_outputs": {
+        "cmd": [str(PY), "scripts/test_editor_insight_outputs.py"],
+        "skip_regex": r"^\s*SKIP",
+    },
     # ---- 浏览器门禁：环境不满足时 SKIP 且退出 0，是本次要盯住的那一类 ----
     "ui_browser": {
         "cmd": ["node", "scripts/test-ui-browser.mjs"],
