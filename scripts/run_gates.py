@@ -723,6 +723,54 @@ GATES: dict[str, dict[str, object]] = {
         "cmd": [str(PY), "scripts/test_ws_origin.py"],
         "skip_regex": r"^\s*SKIP",
     },
+    "procedural_memory_boundaries": {
+        "cmd": [str(PY), "scripts/test_procedural_memory_boundaries.py"],
+        "skip_regex": r"^\s*SKIP",
+    },
+    "procedural_memory_diagnostics": {
+        "cmd": [str(PY), "scripts/test_procedural_memory_diagnostics.py"],
+        "skip_regex": r"^\s*SKIP",
+    },
+    "procedural_memory_eval": {
+        "cmd": [str(PY), "scripts/test_procedural_memory_eval.py"],
+        "skip_regex": r"^\s*SKIP",
+    },
+    "procedural_memory_source_projection": {
+        "cmd": [str(PY), "scripts/test_procedural_memory_source_projection.py"],
+        "skip_regex": r"^\s*SKIP",
+    },
+    "assistant_ui_contract": {
+        "cmd": [str(PY), "scripts/test_assistant_ui_contract.py"],
+        "skip_regex": r"^\s*SKIP",
+    },
+    "dsh_worker_shim": {
+        "cmd": [str(PY), "scripts/test_dsh_worker_shim.py"],
+        "skip_regex": r"^\s*SKIP",
+    },
+    "intent_gate_wiring": {
+        "cmd": [str(PY), "scripts/test_intent_gate_wiring.py"],
+        "skip_regex": r"^\s*SKIP",
+    },
+    "intent_guard": {
+        "cmd": [str(PY), "scripts/test_intent_guard.py"],
+        "skip_regex": r"^\s*SKIP",
+    },
+    "memory_retrieval_gate": {
+        "cmd": [str(PY), "scripts/test_memory_retrieval_gate.py"],
+        "skip_regex": r"^\s*SKIP",
+    },
+    "pixel_world_hosting": {
+        "cmd": [str(PY), "scripts/test_pixel_world_hosting.py"],
+        "skip_regex": r"^\s*SKIP",
+    },
+    "stream_route": {
+        "cmd": [str(PY), "scripts/test_stream_route.py"],
+        "skip_regex": r"^\s*SKIP",
+    },
+    "workbuddy_worker_shim": {
+        "cmd": [str(PY), "scripts/test_workbuddy_worker_shim.py"],
+        "skip_regex": r"^\s*SKIP",
+    },
     # ---- 浏览器门禁：环境不满足时 SKIP 且退出 0，是本次要盯住的那一类 ----
     "ui_browser": {
         "cmd": ["node", "scripts/test-ui-browser.mjs"],

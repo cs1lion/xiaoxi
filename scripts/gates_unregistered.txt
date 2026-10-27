@@ -10,18 +10,6 @@
 # 由 test_gate_coverage.py --write 生成；条数与登记数以
 # python scripts/test_gate_coverage.py 的输出为准，不写在这里。
 
-test_assistant_ui_contract.py
-test_dsh_worker_shim.py
 test_eye_calibration_analysis.py
-test_intent_gate_wiring.py
-test_intent_guard.py
 test_intent_parser_e2e.py
-test_memory_retrieval_gate.py
 test_pixel_world.py
-test_pixel_world_hosting.py
-test_procedural_memory_boundaries.py
-test_procedural_memory_diagnostics.py
-test_procedural_memory_eval.py
-test_procedural_memory_source_projection.py
-test_stream_route.py
-test_workbuddy_worker_shim.py

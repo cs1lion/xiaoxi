@@ -33,6 +33,14 @@ from types import SimpleNamespace
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 
+# The suite only uses temp stores, but importing server.dialogue.orchestrator
+# pulls in server.memory.store, whose module-level singleton is built against the
+# default path. Pin :memory: before any server import so the #39 production-db
+# sentinel (TEST_SENTINEL=1, set by run_gates for every gate subprocess) does not
+# stop this file at import time.
+import os
+os.environ['DB_PATH'] = ':memory:'
+
 from server.dialogue.orchestrator import Orchestrator  # noqa: E402
 
 passed, failed = 0, []
