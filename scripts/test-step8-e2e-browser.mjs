@@ -13,6 +13,7 @@
  */
 import { chromium } from '@playwright/test';
 import { spawn } from 'node:child_process';
+import { rmSync } from 'node:fs';
 import path from 'node:path';
 
 const root = path.resolve(import.meta.dirname, '..');
@@ -35,6 +36,7 @@ const ok = (cond, name, detail = '') => (cond ? pass(name) : fail(name, detail))
  * 原先这里会「把 data/commissions.db 改名到 tmp/，跑完再改回来」——动的是
  * 用户正在用的文件：常驻服务占着就只能 SKIP，中途崩溃则台账留在 tmp/。 */
 const stamp = Date.now().toString(36);
+const SANDBOX_DB = path.join(root, 'tmp', `step8-e2e-${stamp}`, 'memory.db');
 
 const server = spawn(PY, ['-m', 'uvicorn', 'server.app:app',
   '--host', '127.0.0.1', '--port', String(PORT), '--log-level', 'warning'],
@@ -45,7 +47,7 @@ const server = spawn(PY, ['-m', 'uvicorn', 'server.app:app',
      * _service_data_dir() 跟随它——台账/线程/偏好全落在 tmp/ 里自建，于是
      * **不用去改名用户的 data/commissions.db**（此前没给 env，服务直接开
      * 仓库 data/，只能靠 rename 真实台账隔离；用户常驻服务占着时就只能 SKIP）。 */
-    DB_PATH: path.join(root, 'tmp', `step8-e2e-${stamp}`, 'memory.db'),
+    DB_PATH: SANDBOX_DB,
     TEST_SENTINEL: '1',
   }, stdio: ['ignore', 'pipe', 'pipe'] });
 let serverErr = '';
@@ -216,6 +218,25 @@ try {
 } finally {
   if (browser) await browser.close().catch(() => {});
   spawn('taskkill', ['/PID', String(server.pid), '/T', '/F'], { stdio: 'ignore' });
+  // Sandbox dirs are created per run by the server opening the DB, so tmp/ grew by
+  // one entry per gate run and tmp_sweep's ceiling ratchet went red after every
+  // full pass. Remove it only when the run passed: a failing gate keeps its
+  // sandbox for debugging.
+  //
+  // taskkill /T is asynchronous and Windows releases the .db handles a moment
+  // after the parent exits, so a single rmSync hits EBUSY. Retry with a short
+  // delay; if it still fails, leave the dir for tmp_sweep rather than failing.
+  if (!failed) {
+    await new Promise((resolve) => {
+      if (server.exitCode !== null) { resolve(); return; }
+      const timer = setTimeout(resolve, 5000);
+      server.once('exit', () => { clearTimeout(timer); resolve(); });
+    });
+    for (let attempt = 0; attempt < 6; attempt += 1) {
+      try { rmSync(path.dirname(SANDBOX_DB), { recursive: true, force: true }); break; }
+      catch { await new Promise((r) => setTimeout(r, 300)); }
+    }
+  }
 }
 
 console.log(`\n${checks.length} passed, ${failed} failed`);

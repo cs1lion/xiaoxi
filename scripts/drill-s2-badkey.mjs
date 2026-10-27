@@ -19,6 +19,7 @@
 import { chromium } from '@playwright/test';
 import { spawn } from 'node:child_process';
 import http from 'node:http';
+import { rmSync } from 'node:fs';
 import path from 'node:path';
 
 const root = path.resolve(import.meta.dirname, '..');
@@ -222,6 +223,20 @@ try {
     const timer = setTimeout(resolve, 5000);
     server.once('exit', () => { clearTimeout(timer); resolve(); });
   });
+  // Sandbox dirs are created per run by the server opening the DB, so tmp/ grew by
+  // one entry per gate run and tmp_sweep's ceiling ratchet went red after every
+  // full pass. Remove it only when the run passed: a failing gate keeps its
+  // sandbox for debugging.
+  //
+  // taskkill /T is asynchronous and Windows releases the .db handles a moment
+  // after the parent exits, so a single rmSync hits EBUSY. Retry with a short
+  // delay; if it still fails, leave the dir for tmp_sweep rather than failing.
+  if (!failed && !OBSERVE) {
+    for (let attempt = 0; attempt < 6; attempt += 1) {
+      try { rmSync(path.dirname(DB), { recursive: true, force: true }); break; }
+      catch { await new Promise((r) => setTimeout(r, 300)); }
+    }
+  }
 }
 
 log(`\n${OBSERVE ? 'observe mode' : 'assert mode'}: ${failed} failed`);
