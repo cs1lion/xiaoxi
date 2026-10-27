@@ -1035,10 +1035,14 @@ def main() -> int:
     parser.add_argument("--allow-skip", action="store_true",
                         help="跳过的门禁只告警，不算失败（兼容旧口径）")
     parser.add_argument("--only", default="", help="逗号分隔的门禁名")
+    parser.add_argument("--always", action="store_true",
+                        help="只跑 ALWAYS_REQUIRED 那一档（必须永不跳过的门禁）")
     parser.add_argument("--json", default="", help="把报告写到这个 JSON 文件")
     args = parser.parse_args()
 
     wanted = [n.strip() for n in args.only.split(",") if n.strip()]
+    if args.always:
+        wanted = list(ALWAYS_REQUIRED)
     names = [n for n in GATES if not wanted or n in wanted]
     unknown = [n for n in wanted if n not in GATES]
     if unknown:
