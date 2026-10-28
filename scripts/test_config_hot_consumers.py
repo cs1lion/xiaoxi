@@ -58,13 +58,47 @@ def _dotted_calls(node: ast.AST, dotted: str) -> list[ast.Call]:
 
 
 def _is_self_pacing(node: ast.AST) -> bool:
-    """True for `self.pacing[...]`, including nested subscripts like
-    `self.pacing["cooldown"]["on_refuse_keywords"]`."""
-    while isinstance(node, ast.Subscript):
-        node = node.value
+    """True for `self.pacing[...]`, including the shapes real code uses.
+
+    支持三种形态（第三种 2026-10-28 补，此前漏了导致假红）：
+    1. `self.pacing["cooldown"]["on_refuse_keywords"]`——嵌套 subscript；
+    2. `self.pacing.get("cooldown", {})`——外层是 Call，剥 subscript 后是 Call，
+       交给 _dotted_calls 那条路，不走这里；
+    3. `self.pacing["cooldown"].get("on_refuse_keywords") or []`——**外层是
+       BoolOp**（`or []` 兜底）。只剥 Subscript 会停在 BoolOp 上判 False，
+       于是 orchestrator.py:764/1194 那两个真正的现读循环全认不出来，
+       本条断言假红报「拒识循环应改为 self.pacing[...] 现读」。
+
+    修法：剥 subscript 之后若落在 BoolOp 上，取它的任一枝（`or []` 两边
+    语义等价，左边才是真来源）继续判。
+    """
+    node = _peel_to_pacing_root(node)
     return (isinstance(node, ast.Attribute)
             and isinstance(node.value, ast.Name)
             and node.value.id == "self" and node.attr == "pacing")
+
+
+def _peel_to_pacing_root(node: ast.AST) -> ast.AST:
+    """把 `self.pacing[...]...` 的各种包裹形态剥到 `self.pacing` 这个 Attribute。
+
+    实测要穿透的层次（2026-10-28 逐层打印 orchestrator.py:764 得出）：
+        BoolOp → Call → Attribute(.get) → Subscript → Attribute(self.pacing)
+    四处都要剥：`self.pacing['cooldown'].get('on_refuse_keywords') or []`
+    最外层是 `or []` 兜底的 BoolOp，往里是 `.get(...)` 的 Call，Call 的 func
+    是 `.get` 这个 Attribute，它的 value 才是 subscript。
+    """
+    for _ in range(8):                      # 有界：防畸形 AST 上死循环
+        if isinstance(node, ast.Subscript):
+            node = node.value
+        elif isinstance(node, ast.BoolOp):  # `... or []` / `... and ...`
+            node = node.values[0]
+        elif isinstance(node, ast.Call):    # `.get(...)`
+            node = node.func
+        elif (isinstance(node, ast.Attribute) and node.attr == "get"):
+            node = node.value               # `.get` 本身不是来源，剥掉它
+        else:
+            return node
+    return node
 
 
 class WiringTest(unittest.TestCase):
