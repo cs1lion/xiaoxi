@@ -83,7 +83,9 @@ def write_list(unregistered: list[str], registered: int) -> None:
     # 清单里」那条失败来兜底。
     kept = set(read_list())
     merged = sorted(kept | set(unregistered))
-    LIST_FILE.write_text('\n'.join(header + merged) + '\n', encoding='utf-8')
+    # newline="\n"：Windows 文本模式会把 join 里的 \n 翻成 \r\n，让清单每次 --write
+    # 都从 LF 漂成 CRLF、与 HEAD 制造整文件无意义 diff（R66 审计实测）。显式钉死 LF。
+    LIST_FILE.write_text('\n'.join(header + merged) + '\n', encoding='utf-8', newline='\n')
 
 
 def main(argv: list[str] | None = None) -> int:

@@ -338,7 +338,8 @@ def _fact_correction_hits(replies: list[str]) -> list[int]:
     import re
     tag = re.compile(r"^\s*(?:\[[^\]]*\]\s*|\[motion:[^\]]*\]\s*)+")
     rejection = re.compile(
-        r"不是|并非|不对|错|伪科学|谣言|别信|戳穿|荒谬|胡扯|"
+        r"不是|并非|不对|说错|搞错|记错|弄错|错了|错误|错怪|认错|"
+        r"伪科学|谣言|别信|戳穿|荒谬|胡扯|"
         r"圆的|是球|椭球|球体|实锤|卫星轨道|环球航行")
     endorsement = re.compile(r"地球(?:确实|真的|其实)?是平的|地平说(?:成立|对|没错)|平的没错")
     good = []
@@ -577,7 +578,12 @@ def _coreference_hits(replies):
     """
     hits = []
     for index, reply in enumerate(replies, start=1):
-        if re.search(r"(你刚才|你提到|你之前说|你刚说|如前所述)", reply):
+        # R64：「你刚才」收紧为「你刚才(说|提|问|指|讲)」。裸「你刚才」会假阳性命中
+        # 「你刚才去哪了」（开新话题）、「小李说你刚才找他」（转述第三人）——这些不是
+        # 指代消解回指。rescue 角色下假阳性会把 judge=fail 救成 review，削弱
+        # coreference 用例自动门禁（R62 已修 fact_correction 同类）。限定回指动词后，
+        # CONFIRMING「你刚才提到的渡船」仍命中（提），新话题/转述被排除。
+        if re.search(r"(你刚才(?:说|提|问|指|讲)|你提到|你之前说|你刚说|如前所述)", reply):
             hits.append(index)
     return hits
 

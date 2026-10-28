@@ -10,6 +10,11 @@
 # 由 test_gate_coverage.py --write 生成；条数与登记数以
 # python scripts/test_gate_coverage.py 的输出为准，不写在这里。
 
+test_evals_guards.py
 test_eye_calibration_analysis.py
 test_intent_parser_e2e.py
+test_measure_intent_corpus.py
+test_memory_retrieval_quality.py
+test_memory_snapshot.py
+test_memory_temporal.py
 test_pixel_world.py

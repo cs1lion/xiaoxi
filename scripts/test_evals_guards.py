@@ -1144,5 +1144,127 @@ class CharErrorRateTests(unittest.TestCase):
         self.assertEqual(checks.char_error_rate(None, "x"), 1.0)
 
 
+class SnapshotRobustnessTests(unittest.TestCase):
+    """R65：报告/健康层对**结构畸形**快照的韧性（R45/R16 只审了类型损坏字段）。
+
+    契约：报告层「永不因内容失败、永远 exit 0」；健康层退出码只由真实 offline fail
+    驱动，不被畸形快照歪曲。R65 实测九种结构畸形（snapshot 是 list / results 是 dict /
+    results 含字符串·None / case 缺 runs / at 缺失·非字符串 / 顶层标量 / 空对象）在三层
+    （load / analyze-render / 退出码）全部 graceful。本类锚定，防回归。
+    """
+
+    # load 层就该拦进 broken 的（结构不合法）
+    REJECT = {
+        "snapshot 是 list": "[1,2,3]",
+        "results 是 dict": '{"at":"20261027T120000Z","results":{"a":1}}',
+        "顶层是标量": "just a string",
+        "空 JSON 对象": "{}",
+    }
+    # load 放行、但结构可疑，须由 analyze/render/退出码 graceful 处理
+    SUSPECT = {
+        "results 含字符串": '{"at":"20261027T120000Z","results":["我是字符串"]}',
+        "results 含 None": '{"at":"20261027T120000Z","results":[null]}',
+        "case 缺 total_runs": '{"at":"20261027T120000Z","results":[{"id":"x","layer":"offline","passed":true,"failed_runs":0}]}',
+        "at 缺失": '{"results":[{"id":"x","layer":"offline","total_runs":1,"passed_runs":1,"failed_runs":0,"passed":true}]}',
+        "at 非字符串": '{"at":12345,"results":[{"id":"x","layer":"offline","total_runs":1,"passed_runs":1,"failed_runs":0,"passed":true}]}',
+    }
+
+    def _write(self, directory: Path, content: str) -> Path:
+        (directory / "s.json").write_text(content, encoding="utf-8")
+        return directory
+
+    def test_malformed_snapshots_land_in_broken_bucket(self):
+        """结构不合法的快照必须进 broken 节，不崩、不计入统计。"""
+        for label, content in self.REJECT.items():
+            with self.subTest(shape=label):
+                with tempfile.TemporaryDirectory(prefix="r65-") as d:
+                    self._write(Path(d), content)
+                    rep_snaps, rep_broken = evals_report.load_snapshots(Path(d))
+                    h_snaps, h_broken = evals_health.load_snapshots(Path(d))
+                    # broken 元素是描述字符串（含文件名与原因），不是 Path
+                    self.assertTrue(rep_broken and all("s.json" in b for b in rep_broken),
+                                    f"报告层应把 {label} 判损坏: {rep_broken}")
+                    self.assertTrue(h_broken and all("s.json" in b for b in h_broken),
+                                    f"健康层应把 {label} 判损坏: {h_broken}")
+                    self.assertEqual(rep_snaps, [])
+                    self.assertEqual(h_snaps, [])
+
+    def test_suspect_snapshots_do_not_crash_analyze_or_render(self):
+        """load 放行的可疑快照，analyze/render/build_json 不得崩。"""
+        for label, content in self.SUSPECT.items():
+            with self.subTest(shape=label):
+                with tempfile.TemporaryDirectory(prefix="r65-") as d:
+                    self._write(Path(d), content)
+                    snaps, _broken = evals_report.load_snapshots(Path(d))
+                    evals_report.build_trend(snaps)          # 不得抛
+                    evals_report.render(snaps, _broken, Path(d))  # 不得抛
+                    evals_report.build_json(snaps, _broken)  # 不得抛
+                    h_snaps, _hb = evals_health.load_snapshots(Path(d))
+                    evals_health.analyze(h_snaps, Path("no-cases"),
+                                         datetime.now(timezone.utc))  # 不得抛
+
+    def test_malformed_snapshots_do_not_distort_health_exit_code(self):
+        """畸形快照不得伪造 exit 1，也不得掩盖真 offline 失效。"""
+        import io
+        from contextlib import redirect_stdout
+
+        def run_health(content: str) -> int:
+            with tempfile.TemporaryDirectory(prefix="r65-") as d:
+                self._write(Path(d), content)
+                buf = io.StringIO()
+                with patch.object(sys, "argv",
+                                  ["evals_health", "--results-dir", d,
+                                   "--cases-dir", "no-such-cases"]), \
+                        redirect_stdout(buf):
+                    return evals_health.main()
+
+        # 畸形快照 → exit 0（不伪造红）
+        for label, content in self.SUSPECT.items():
+            with self.subTest(shape=label):
+                self.assertEqual(run_health(content), 0,
+                                 f"畸形快照 {label} 不得让门禁伪造 exit 1")
+        # 真 offline 失效 → exit 1（不被畸形掩盖）
+        real_fail = ('{"at":"20261027T120000Z","results":[{"id":"bad","layer":"offline",'
+                     '"total_runs":1,"passed_runs":0,"failed_runs":1,"passed":false,'
+                     '"runs":[{"verdict":"fail","passed":false}]}]}')
+        self.assertEqual(run_health(real_fail), 1, "真 offline 失效必须 exit 1")
+
+
+class GateCoverageAnchorTests(unittest.TestCase):
+    """R66：gate_coverage 元门禁的 fail-closed 与 LF 写入锚定。
+
+    审计结论：元门禁 fail-closed（磁盘新增未登记→红、清单混入已登记→红），
+    且 write_list 必须产 LF——Windows 文本模式会把 join 的 \\n 翻成 \\r\n，
+    让清单每次 --write 都从 LF 漂成 CRLF、与 HEAD 制造整文件无意义 diff。
+    """
+
+    def test_write_list_emits_lf_not_crlf(self):
+        """R66：write_list 必须产 LF，不得被 Windows 文本模式翻成 CRLF。"""
+        import test_gate_coverage as tgc
+        with tempfile.TemporaryDirectory(prefix="r66-") as d:
+            target = Path(d) / "list.txt"
+            with patch.object(tgc, "LIST_FILE", target):
+                tgc.write_list(["test_probe_x.py"], 1)
+            raw = target.read_bytes()
+            self.assertNotIn(b"\r\n", raw, "write_list 不得产 CRLF（会污染清单行尾）")
+            self.assertIn(b"\n", raw, "write_list 应产 LF")
+
+    def test_gate_coverage_fails_closed_on_unregistered(self):
+        """R66：磁盘新增未登记测试 → 门禁必须红（fail-closed，元门禁核心职责）。"""
+        import test_gate_coverage as tgc
+        probe = tgc.SCRIPTS_DIR / "test_r66_probe_unreg.py"
+        probe.write_text("# probe\n", encoding="utf-8", newline="\n")
+        try:
+            import io
+            from contextlib import redirect_stdout
+            buf = io.StringIO()
+            with redirect_stdout(buf):
+                rc = tgc.main([])
+            self.assertEqual(rc, 1, "新增未登记测试文件必须让 gate_coverage 变红")
+            self.assertIn("未登记也不在清单里", buf.getvalue())
+        finally:
+            probe.unlink(missing_ok=True)
+
+
 if __name__ == "__main__":
     unittest.main()

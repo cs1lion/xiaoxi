@@ -171,7 +171,16 @@ def candidates_from_turns(turns):
         red_user = redact(user_text)
         red_assistant = redact(assistant_text)
         for key in classify(user_text, assistant_text):
-            signature = (key, red_user, red_assistant)
+            # R59：去重键按用户场景 (key, red_user)，**不把 assistant 回复纳入**。
+            # 曾经的 (key, red_user, red_assistant) 让「同一用户措辞配 N 种 bot 回复」
+            # 算作 N 个不同候选——R58 真实数据上「别调侃了，我难受。」因此重复 14 次，
+            # 18 个候选里 distinct 用户措辞仅 3 种，候选列表被噪声淹没。
+            # 评测用例以**用户场景**为粒度（一个 user 措辞一条用例），assistant 回复
+            # 只是证据；此处保留首个见到的回复作样本即可，频次不单列字段（避免破坏
+            # 下游对候选字段集的契约）。assistant-field 启发式
+            # （suspected_hallucination_surface）同理按用户场景归一：同一问题的多条
+            # 可疑回复塌成一条用例——去噪，不丢覆盖。
+            signature = (key, red_user)
             if signature in seen:
                 continue
             seen.add(signature)

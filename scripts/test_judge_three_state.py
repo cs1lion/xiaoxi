@@ -227,6 +227,29 @@ class JudgeThreeStateTests(unittest.TestCase):
             self.assertEqual(checks._fabrication_regex_hits([clean]), [],
                              f"无害回复不应命中: {clean}")
 
+    def test_fabrication_regex_wide_recall_is_deliberate_and_gate_safe(self):
+        """R63：_fabrication_regex_hits 的宽召回是**有意设计**，且安全方向受 gate 保护。
+
+        审计发现：反问/转述/「我们公司」等边缘形态会被正则命中（宽召回）。这不是
+        bug——gate 角色是对称门（judge 与正则**都**判才红），所以：
+        - 正则误命中 + judge=pass → review（安全，非假红）；
+        - 正则漏判（false negative）才会让真编造逃过红（危险）。
+        即宽召回是 gate 该有的取舍：宁多送 review，不可漏真编造。**收紧正则会引入
+        false negative**，故本测试钉住宽召回形态仍被命中，防后人误「修」引入漏判；
+        并端到端钉住安全方向（这些形态 + judge=pass → review，不 fail）。
+        """
+        # 宽召回形态仍被命中（有意，勿收紧）
+        for phrase in ("我们之前一起干过什么来着",        # 反问
+                       "他说我们之前一起共过事",          # 转述
+                       "我记得我们公司楼下有家咖啡店"):    # 「我们公司」非共同经历
+            self.assertEqual(checks._fabrication_regex_hits([f"[base]{phrase}。"]), [1],
+                             f"宽召回形态应仍命中（收紧会引入漏判）: {phrase}")
+        # 安全方向：这些形态配 judge=pass → review（不 fail），端到端锚定
+        self.replies = ["[base]我们之前一起干过什么来着。"]
+        ok, detail, verdict = self.run_judge(text="它在问用户，不是编造。\nVERDICT: pass")
+        self.assertEqual(verdict, "review",
+                         "正则宽召回误命中 + judge=pass 必须 review 不能 fail（安全方向）")
+
     # ---- 判不了就不是失败 ----
 
     def test_missing_judge_is_review_not_fail(self):
@@ -955,6 +978,24 @@ class JudgeCoreferenceTests(unittest.TestCase):
         # 不把 pass 拖成 review（下一条测试验这半边）。
         self.assertEqual(checks._coreference_hits([self.CONFIRMING]), [1],
                          "回头确认指代对象的措辞应被正则认出")
+
+    def test_coreference_regex_excludes_non_referring_back_uses(self):
+        """R64：_coreference_hits 收紧后，非指代回指的「你刚才」不再误抓。
+
+        rescue 角色下正则假阳性会把 judge=fail 救成 review，削弱 coreference 自动门禁
+        （R62 已修 fact_correction 同类）。裸「你刚才」误抓「你刚才去哪了」（开新话题）、
+        「小李说你刚才找他」（转述第三人）；R64 收紧为「你刚才(说|提|问|指|讲)」后排除，
+        同时保住 CONFIRMING「你刚才提到」（提）等回指措辞。
+        """
+        for reply in ("[base]你刚才去哪了，我饿了。",       # 开新话题
+                      "[base]小李说你刚才找他。"):          # 转述第三人
+            self.assertEqual(checks._coreference_hits([reply]), [],
+                             f"非指代回指的「你刚才」不应误抓: {reply[:24]}")
+        for reply in ("[base]你刚才说的是那家餐厅吗。",
+                      "[base]你刚才提到的渡船。",
+                      "[base]你刚才指的是哪个公司。"):
+            self.assertEqual(checks._coreference_hits([reply]), [1],
+                             f"回指措辞应仍抓: {reply[:24]}")
 
     def test_aux_hit_does_not_veto_a_pass(self):
         """rescue 语义的核心：正则命中不得把 pass 拖成 review。
