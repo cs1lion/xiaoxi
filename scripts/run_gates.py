@@ -60,6 +60,18 @@ GATES: dict[str, dict[str, object]] = {
         "cmd": [str(PY), "scripts/test_core.py"],
         "skip_regex": r"^\s*SKIP",
     },
+    "gate_tmp_leak": {
+        # 门禁沙盘泄漏棘轮（差分检测）：跑最可能漏 tmp/ 的那批门禁，每次前后
+        # 量 tmp/ 条目数，净增即红。plan-45 的四个浏览器门禁曾长期漏沙盘把
+        # tmp_sweep 顶红，plan-118 差分法实测全部门禁后确认仅那四处，本棘轮
+        # 把那个快照变成常驻保护。
+        # 刻意**不**进 ALWAYS_REQUIRED：单轮约 140s（最重业务门禁的 10 倍），
+        # 进那一档会把「每次改完必跑」推到 9 分多。它验的是元性质，跟
+        # check_staged_scope / check_probe 同类，但量级差两个数量级，故只进
+        # 全量层。判据用差分不用绝对值（绝对值随 tmp/ 自然增长假红）。
+        "cmd": [str(PY), "scripts/test_gate_tmp_leak.py"],
+        "skip_regex": r"^\s*SKIP",
+    },
     "check_staged_scope": {
         # check_staged_scope 自身回归：判据（暂存区 ⊆ 声明路径）不许退化成
         # 永真。测试在临时 git 仓库造场景，不碰真实 index。纯逻辑、零网络零
