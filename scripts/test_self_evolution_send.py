@@ -104,6 +104,12 @@ def load_maybe_self_evolution():
     # NameError，被函数末尾的 `except Exception: return` 静默吞掉——于是测试
     # 看到的是"什么都没发"，而不是真正的原因。必须显式给一个占位。
     module.__dict__["llm"] = object()
+    # `_sweep_expired_usage` 同理：它定义在 app.py 但不在本测试抽取的节点里，
+    # 而 `_maybe_self_evolution` 的第一行就调它（2026-10-28 补）。缺它会在那一行
+    # NameError 并被静默吞掉，于是 [legacy cycle] 与 [bare change] 两段看到
+    # sent=[]——4 个 FAIL 全是这一个原因，不是被测行为退化。占位符不做事：
+    # 该函数双闸门默认关闭、失败全吞，与 self_evolution 发送路径无关。
+    module.__dict__["_sweep_expired_usage"] = lambda: None
     sys.modules["server.app"] = module
     exec(compile(ast.Module(body=nodes, type_ignores=[]), str(APP_PY), "exec"),
          module.__dict__)
