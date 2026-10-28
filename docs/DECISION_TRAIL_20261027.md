@@ -74,10 +74,30 @@
 | 62 | `0485013` | 派单宪章补「提交范围自检」节 |
 | 63 | — | R51 裁决口径与门禁认领的相容性核验：天然一致，无欠账 |
 | 64 | `c633eb1` | R51 裁决口径门禁：合成门禁钉住完整裁决表 |
+| 65 | `21321d4` | 删掉与 `test_run_gates` 重复的 R51 门禁资产（立项前没搜已有资产） |
+| 66 | `6ec7dc7` | 决策记录补第 52-64 批，方法论加到八条 |
+| 67 | `3fcfba4` | 四个 worker shim 的共享契约断言抽成 helper（plan-107 扫出的复制四份） |
+| 68 | `3cd836e` | `check_probe`：把「探针必须证明自己有效」变成两步自检 |
+| 69 | `2e8c498` | 门禁沙盘泄漏棘轮：差分检测变成常驻资产 |
+| 70 | `addbd31` | 门禁判别力审计记录（四门禁全有牙，但注入设计连错三次） |
+| 71 | `894c774` | `check_probe.patch_file` 改二进制读写，止住 CRLF 行尾破坏 |
+| 72 | `ad4ca9b` | 「逐字节还原」判据编码进 `probe_self_check`（此前只写在 docstring 里） |
+| 73 | `0f8bcb0` | 判别力审计追加第二轮：新 API 在真实 CRLF 文件上复验 |
+| 74 | `df765ad` | 「注入必须真的发生」判据（plan-113 踩的 `break_it` 空转坑） |
+| 75 | `606f72f` | 宪章的 check_probe 示例同步到新 API |
+| 76 | `c1bc03d` | 判别力审计文档的复用示例同步到新 API |
+| 77 | `d15d8c3` | 两个元检查门禁加沙盘落点断言，防 TMP/TEMP 把泄漏引进仓库 |
+| 78 | — | 实测全部门禁的 tmp/ 净增（199 个门禁差分，除一次偶然采样外零泄漏） |
+| 79 | `baf3f8d` | 泄漏棘轮登记进 GATES，刻意不进 ALWAYS_REQUIRED（单轮 140s） |
+| 80 | `475a6e9` | 待拍板节的 tmp_sweep 项补判据审查数据 |
+| 81 | — | 审 tmp_sweep 判据形态：判据正确、红得对，等 `--yes` |
+| 82 | `d604d63` | `self_evolution_send` 补 `_sweep_expired_usage` 占位符，修 4 个假红 FAIL |
+| 83 | `ad15a41` | `config_hot_consumers` 判据穿透 BoolOp/Call/.get，修一处假红 |
+| 84 | — | 审 `durable_mcp` 判据：红得对、断言有牙，等并发 session 提交 M1-M4 |
 
 另有 `1b993cf`（会话前既有提交）与 `abe6bd9`/`3afb386`（文档入库与门禁裁定）。
 
-每批均过四道黄金门禁（`check_protocol.py` EXIT=0、`test_core.py` 92 passed、`run_evals.py` 11 passed 0 failed、`npm test` EXIT=0）+ 本批新增/扩展门禁 + subagent review。passed 数会随用例增长，以实跑输出为准，此处是 2026-10-27 21:35（HEAD `89c8036`）的记录值。
+每批均过四道黄金门禁（`check_protocol.py` EXIT=0、`test_core.py` 119 passed、`run_evals.py` 12 passed 0 failed、`npm test` EXIT=0）+ 本批新增/扩展门禁 + subagent review。passed 数会随用例增长，以实跑输出为准，此处是 2026-10-28（HEAD `ad15a41`）的记录值。
 
 ## 二、卸载判据（第十六批定型，后续各批沿用）
 
@@ -120,7 +140,18 @@
 
 **判据健康度巡检**（第五十批）：49 个 `.py` 门禁逐个跑并抓完整 stdout，按「数值+单位」筛出带阈值的判据。结论是布尔断言占绝大多数（不存在「离阈值多远」的问题），唯一墙钟类判据（`scheduler_health` 的 scan_due）实测余量 20-40 倍。这个「无发现」证明 fastloop 三处是历史遗留个例，不是系统性缺陷。
 
-**四个既有失败门禁**（全量 191 跑过并断言 / 6 失败，均与本次改动无关，stash 隔离验证过）：`self_evolution_send`、`config_hot_consumers`、`durable_mcp`（缺 `scripts/mcp_servers/echo_server.py`，属并发 session 的 M1-M4 WIP 范围）、`ui_browser`（需 8000 上可交互前端，点击超时）。另两个：`tmp_sweep`（见待拍板项）、`memory_fastloop`（第四十八批前的墙钟假红，改造后已消除）。
+**既有失败门禁逐个审完（第八十二至八十四批），集合从 4 降到 2。** 此前三次归因都只做 stash 隔离（确认与本次改动无关），从没审过判据本身——逐个审下来，**四个里三个不是真失败**：
+
+| 门禁 | 审查结论 | 处置 |
+|---|---|---|
+| `self_evolution_send` | 4 个 FAIL 全是测试注入缺占位符：AST 抽取的受控模块没给 `_sweep_expired_usage`，而 `_maybe_self_evolution` 第一行就调它，NameError 被 `except Exception: return` 静默吞掉，测试看到 `sent=[]` | 已修（`d604d63`），判别力验证过 |
+| `config_hot_consumers` | 判据没跟上代码形态：`_is_self_pacing` 只剥 `ast.Subscript`，而真实循环的 iter 是 `self.pacing["cooldown"].get(...) or []`（外层 BoolOp），两个真正的现读循环全认不出来 | 已修（`ad15a41`，新增 `_peel_to_pacing_root` 穿透 BoolOp/Call/.get），判别力验证过 |
+| `tmp_sweep` | 判据正确、红得对。未过期项 891 比当期水位 1140 还少 249 项，超限全来自 380 项过期残留（全在 7-14 天，无老档案） | 见待拍板第 4 项（等 `--yes`） |
+| `durable_mcp` | 判据正确、红得对。断言有牙——把 echo 的 args 改成指向存在但错误的文件照样红，即它抓「配置与实现不一致」不只抓「文件不存在」；其余 14 条断言真跑真过 | 见待拍板第 6 项（等并发 session 提交 M1-M4） |
+
+另两个曾经在列的：`memory_fastloop`（第四十八批前的墙钟假红，判据改造后已消除）、`ui_browser`（需 8000 上可交互前端，点击超时；plan-118 差分实测确认它不再漏 tmp/ 沙盘）。
+
+**「既有失败」这个标签本身会掩盖真问题**：每次全量看到红就归类为老问题、不再看为什么。四个审下来三个是判据或注入问题——若继续挂着标签，`self_evolution_send` 那 4 个 FAIL 会被永远当成环境噪音，而它们其实在保护一条真实路径（协议 §十 的 self_evolution 事件发送）。
 
 **`run_gates_verdict`**（指向 `scripts/test_run_gates.py`）：钉住 `run_gates` 的完整裁决表。真实门禁覆盖不到这条——`ui_nav_browser` 只在 8000 未起时 SKIP，8000 运行时判 PASS，即「打印 SKIP 行却 exit≠0 必须判 FAIL」这条 R51 本体在真实门禁里根本跑不到。用合成门禁钉四条腿（exit≠0+SKIP行→FAIL、exit≠0无SKIP→FAIL、exit=0+SKIP→SKIP、exit=0无SKIP→PASS）加 `--allow-skip` 不得洗绿真实失败这条边界。第三条腿容易漏：把「环境不满足、没跑」误判成 FAIL 同样危险，会让一条本该跳过的门禁把整套报告染红，训练人忽略红色。
 
@@ -158,7 +189,11 @@
    - **过期项没有老档案**：380 项全部落在 7-14 天区间（最新的刚过 TTL 7.0 天，最老的才 13 天），是「刚到 TTL 还没扫」的正常积压，不是有用档案。
    - **删除的影响面可算**：删完总数降到 891，距上限余量 349。并发 session 的 80 个在途文件按 mtime 都在 7 天内，不在删除范围。删后需再跑 `--write` 按 AGENTS.md 三分法重置水位锚。
 5. **`.agents/` 入库**（AGENTS.md 待办第 1 条）：`.gitignore:57` 忽略整目录，本会话对 DSH.md 等适配层的修正只在本机。
-6. **`durable_mcp` 缺 `scripts/mcp_servers/echo_server.py`**（第五十一批盘点）：`config/agents_roster.yaml` 的 `mcp_echo` 条目与 `config/mcp.json` 的 echo 登记都指向这个文件，但 `scripts/mcp_servers/` 目录整个不存在、HEAD 里也没有。影响面只有 `durable_mcp` 一个门禁（15 条断言里唯一失败的那条）。缺口形态完整（配置、门禁断言、设计文档三样都在，只缺实现），属并发 session 的 M1-M4 WIP 范围，等他们提交即好；若最终不提交，则需在「补一个纯标准库的 stdio JSON-RPC echo server」与「回退 roster/mcp.json 两条目」之间选一个，这个决定属 M1 的 owner。
+6. **`durable_mcp` 缺 `scripts/mcp_servers/echo_server.py`**（第五十一批盘点 + 第八十四批判据审查）：`config/agents_roster.yaml` 的 `mcp_echo` 条目与 `config/mcp.json` 的 echo 登记都指向这个文件，但 `scripts/mcp_servers/` 目录整个不存在、HEAD 里也没有。影响面只有 `durable_mcp` 一个门禁（node 门禁 `agent-runtime/test-mcp.ts`，15 条断言里唯一失败的那条）。
+
+   判据审查结论（第八十四批）：**这条红得对，且断言有牙**。把 `mcp.json` 的 echo args 改成指向一个存在但错误的文件（`scripts/run.py`），断言照样红——它抓的是「配置与实现不一致」这一类，不只抓「文件不存在」这一种。其余 14 条断言（工具名净化、重放安全、审批链、isError 透传、截断、环境变量展开、approval/cwd 显式性）都真跑真过，没有恒绿或空转。
+
+   缺口形态完整（配置、门禁断言、设计文档三样都在，只缺实现），属并发 session 的 M1-M4 WIP 范围，等他们提交即好。本会话无可做部分：补一个实现等于替他们做 M1，且可能与他们的设计冲突（roster 注释已写明 executable 用 venv 解释器、`AQI_MCP_ECHO_ROOT` 等约定）。若最终不提交，则需在「补一个纯标准库的 stdio JSON-RPC echo server」与「回退 roster/mcp.json 两条目」之间选一个，这个决定属 M1 的 owner。
 
 ## 七、共享工作区纪律（本会话的实操约定）
 
