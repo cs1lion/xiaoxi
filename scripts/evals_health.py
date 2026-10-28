@@ -21,7 +21,8 @@
     以及「窗口内曾失效但最近一次已转绿」）一律 exit 0，只在输出里标注。
   live 抖动不是门禁失败——live 不进 CI，抖动是预期内的。
 
-  为什么「曾失效但已转绿」不判红（R21，2026-10-27）：窗口按自然日算，会把并发
+  为什么「曾失效但已转绿」不判红（R21，2026-10-27）：窗口按 RECENT_WINDOW_DAYS 个
+  24 小时算（cutoff = now - timedelta，比自然日窗口更宽、偏多红，见 R69），会把并发
   会话开发新用例过程中的瞬态失效算进来。实测踩过——某新用例在 50 秒内 3 次失效、
   前后 11 份快照全 PASS、连跑 10 次全绿，却让这条 ALWAYS_REQUIRED 门禁红满一周。
   「曾经抖过」与「现在还在抖」性质相反：前者已不是当前的确定性问题，据此判红只会
@@ -51,7 +52,8 @@ ROOT = Path(__file__).resolve().parent.parent
 DEFAULT_RESULTS_DIR = ROOT / "evals" / "results"
 DEFAULT_CASES_DIR = ROOT / "evals" / "cases"
 
-# 近期窗口：按自然日算，不按快照份数算。三条理由：
+# 近期窗口：按 RECENT_WINDOW_DAYS 个 24 小时算（cutoff = now - timedelta），
+# 不按快照份数算。三条理由：
 #   ① "近期"是时间语义——只有按天才能把建制日的历史欠账与现行破坏分开，
 #      欠账落在窗外只进报告、不判红；
 #   ② 抗单日突发——按份数取窗会被某一天的密集运行挤空，按天则无论一天落
@@ -249,7 +251,11 @@ def analyze(snapshots: list[dict], cases_dir: Path, now: datetime) -> dict:
     offline_recent_n = offline_total_n = 0
     # 每个 offline 用例的「窗口内失效轨迹」：{cid: {"failed_dates": [...],
     # "last_ok": bool, "last_date": str, "total": int}}。
-    # R21 新增：窗口按自然日算，会把并发会话开发新用例过程中的瞬态失效算进来。
+    # R21 新增：窗口按 RECENT_WINDOW_DAYS 个 24 小时算（cutoff = now - timedelta），
+    # 不是自然日。两者边界最多差 24h：本实现的 cutoff 比「含今天起前 N 个历日」
+    # 的自然日 cutoff 更早，故窗口更宽——落在分歧区间的失效快照本实现判「近期该红」、
+    # 自然日判「过期不红」，即偏多红（fail-closed 安全方向），不会漏红。R69 审计钉死。
+    # 窗口会把并发会话开发新用例过程中的瞬态失效算进来。
     # 「曾经失效但最近一次已通过」与「最近一次仍在失效」性质相反——前者是开发
     # 瞬态（不该红一周），后者是真实回归（必须红）。没有这份轨迹就无法区分。
     offline_track: dict[str, dict] = {}
@@ -461,7 +467,7 @@ def render(snapshots: list[dict], broken: list[str], res: dict,
         out.append(f"近期窗口内 offline 无失效（{res['offline_recent_n']} 次采样全绿）："
                    "确定性当前成立。")
     if recovered:
-        # 「失效过但已转绿」——并发会话开发新用例过程中的瞬态。窗口按自然日算、
+        # 「失效过但已转绿」——并发会话开发新用例过程中的瞬态。窗口按 N×24h 算、
         # 会把这类开发事件算进来；若据此判红，门禁会红满一周而没有信息量，
         # 只会训练人忽略它。转绿即说明它已不是当前的确定性问题。
         out.append(f"已转绿的历史失效 {len(recovered)} 条（窗口内曾失效、最近一次已通过，"

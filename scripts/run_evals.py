@@ -246,13 +246,30 @@ async def run_case(case: dict, *, live: bool, llm) -> dict:
         prompt, memory_block = ("", "")
         replies: list[str] = []
         turn_meta: list[dict] = []
-        if is_live:
-            replies, turn_meta = await run_live_turns(case, llm)
-        else:
-            prompt, memory_block = build_offline_prompt(case)
+        reply_error: str | None = None
+        try:
+            if is_live:
+                replies, turn_meta = await run_live_turns(case, llm)
+            else:
+                prompt, memory_block = build_offline_prompt(case)
+        except Exception as exc:
+            # R68：取回复阶段（live 的 run_live_turns / offline 的 build_offline_prompt）
+            # 原先在 try 之外，一个用例的网络超时/装配异常会穿透 run_case 直达
+            # main_async，崩掉整轮、连快照都不留——而同轮其他用例本可正常跑完。
+            # 这与下方「check 炸记 fail、继续」的设计不一致。纳入 try：该 run 记 fail，
+            # 其余用例继续、快照照常落盘（fail-closed，不吞成 pass）。
+            replies, turn_meta, prompt, memory_block = [], [], "", ""
+            reply_error = f"取回复阶段抛异常 {type(exc).__name__}: {exc}"
         state = {"case": case, "replies": replies, "prompt": prompt,
                  "memory_block": memory_block, "turn_meta": turn_meta}
         check_results = []
+        if reply_error is not None:
+            # 取回复就失败了，没必要再跑 check（空 replies/prompt 上跑只会得到一排
+            # 次生的「没有回复可判」）；直接记一条 fail，detail 说清是取回复阶段炸的。
+            check_results.append({
+                "type": "_reply", "target": "reply", "value": "",
+                "pass": False, "verdict": "fail", "detail": reply_error,
+            })
         for check in case.get("checks") or []:
             try:
                 ok, detail, verdict = await run_check(check, state)
@@ -329,11 +346,13 @@ def classify_results(results: list[dict]) -> dict:
         elif reviewed_runs:
             mark = "REVIEW"
             reviewed.append(r["id"])
-        elif r.get("passed"):
-            mark = "PASS"
         else:
             # 不是通过、又没有 fail/review 轮次（含缺 verdict 的旧形状）：
             # 未知状态按失败算，别让漏判静默变成放行。
+            # R71：此处原有一个 `elif r.get("passed"): mark="PASS"` 分支，已删——
+            # passed 若为真，上面第 344 行的 `elif r.get("passed")` 早已捕获并判
+            # PASS，能走到这里的 passed 必为假，该分支永不生效（死代码）。留着会
+            # 让人误以为此处还有个 passed 兜底，实则没有。
             mark = "FAIL"
             failures.append(r["id"])
         marks.append(mark)

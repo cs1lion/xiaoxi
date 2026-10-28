@@ -664,6 +664,52 @@ class RunEvalsClassificationTests(unittest.TestCase):
         self.assertEqual(out["reviewed"], ["rv"])
         self.assertEqual(out["xfails"], ["xf"])
 
+    def test_contradictory_runs_total_fields_do_not_skew_marks(self):
+        """R71：runs/total_runs 矛盾不影响 marks——分桶只读 passed/failed/reviewed_runs。
+
+        classify_results 不用 len(runs) 也不用 total_runs 判通过/失败，故 total_runs
+        与 runs 条数不符、或 passed_runs+failed+reviewed ≠ total 时，marks 仍确定。
+        passed 是权威字段（min_rate 容差靠它兑现，Q2-1）；「全失败却 passed=True」
+        需阈值≤0，已被加载期 pass_rule 护栏堵死。锚定防后人改用 runs 长度算通过率。
+        """
+        # total_runs=5 但 runs 只 3 条、passed=True → 仍 PASS（不因 runs 少而改判）
+        out = run_evals.classify_results([
+            {"id": "t5r3", "xfail": False, "passed": True, "passed_runs": 3,
+             "total_runs": 5, "failed_runs": 0, "reviewed_runs": 0,
+             "runs": [{"verdict": "pass", "passed": True}] * 3}])
+        self.assertEqual(out["marks"], ["PASS"])
+        # review+fail 混合 → fail 主导（有 fail 轮次即 FAIL）
+        out = run_evals.classify_results([
+            {"id": "mix", "xfail": False, "passed": False, "passed_runs": 0,
+             "total_runs": 2, "failed_runs": 1, "reviewed_runs": 1,
+             "runs": [{"verdict": "fail"}, {"verdict": "review"}]}])
+        self.assertEqual(out["marks"], ["FAIL"])
+        self.assertEqual(out["failures"], ["mix"])
+        # 三者计数皆 0 且 passed=False（缺 verdict 的未知态）→ fail-closed 记 FAIL
+        out = run_evals.classify_results([
+            {"id": "unknown", "xfail": False, "passed": False, "passed_runs": 0,
+             "total_runs": 0, "failed_runs": 0, "reviewed_runs": 0, "runs": []}])
+        self.assertEqual(out["marks"], ["FAIL"])
+        self.assertEqual(out["failures"], ["unknown"],
+                         "未知态必须 fail-closed，不能让漏判静默放行")
+
+    def test_no_dead_passed_branch_in_classify(self):
+        """R71：classify_results 不得有永不可达的 passed 兜底分支。
+
+        曾有一个 `elif r.get("passed"): mark=PASS"` 排在有效 passed 分支之后——
+        passed 若为真早已被前面捕获，能走到此处必为假，该分支永不生效（死代码），
+        却让人误以为还有个兜底。已删。用 AST 反编译每个 If 的 test 来数可执行的
+        passed 分支（不数源码文本——注释里提这个名字会被 getsource 算进去）。
+        """
+        import ast
+        import inspect
+        tests = [ast.unparse(n.test)
+                 for n in ast.walk(ast.parse(inspect.getsource(run_evals.classify_results)))
+                 if isinstance(n, ast.If)]
+        passed_branches = [t for t in tests if t == "r.get('passed')"]
+        self.assertEqual(len(passed_branches), 1,
+                         f"可执行的 passed 分支只应有一个，实得 {len(passed_branches)}: {tests}")
+
 
 class MainAsyncLivePathTests(unittest.TestCase):
     """main_async 的 --live 路径端到端（离线版，零凭据零外网）。

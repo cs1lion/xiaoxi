@@ -19,7 +19,7 @@ import sys
 import tempfile
 import unittest
 from contextlib import redirect_stdout
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
@@ -86,6 +86,45 @@ class HealthLayerGuardTests(unittest.TestCase):
         recovered = set(evals_health.recovered_cases(track))
         self.assertEqual(still & recovered, set(), "同一条用例不能既是回归又已转绿")
         self.assertEqual(still | recovered, {"x", "y"})
+
+    def test_window_boundary_dt_none_and_cutoff_closed(self):
+        """R69：窗口边界锚定——dt=None 算过期不红；cutoff 闭区间算近期该红。
+
+        判据是 in_window = bool(dt and dt >= cutoff)（evals_health.py:275）。
+        ① at 与文件名 stem 都坏 → parse_at 返回 None → dt=None → 算窗口外（过期），
+           坏时间戳快照的 offline 失效不被算成「近期该红」——fail-closed，防时钟漂移
+           或手工坏档绕过窗口判定。
+        ② at 恰在 cutoff 当刻 → dt >= cutoff 成立 → 算近期该红（>= 闭区间）。
+        二者都是 fail-closed 方向，钉住防后人收紧窗口让近期失效逃过红。
+        """
+        now = datetime(2026, 10, 28, 12, 0, tzinfo=timezone.utc)
+        cutoff = now - timedelta(days=evals_health.RECENT_WINDOW_DAYS)
+        fail = {"id": "c1", "layer": "offline", "total_runs": 1, "passed_runs": 0,
+                "failed_runs": 1, "passed": False,
+                "runs": [{"verdict": "fail", "passed": False}]}
+        # ① dt=None：at 坏 + 文件名 stem 也坏（非时间戳命名）→ parse_at 返回 None
+        with tempfile.TemporaryDirectory(prefix="r69-") as d:
+            (Path(d) / "totally-broken-name.json").write_text(
+                json.dumps({"at": "garbage", "results": [fail]}, ensure_ascii=False),
+                encoding="utf-8")
+            snaps, _ = evals_health.load_snapshots(Path(d))
+            res = evals_health.analyze(snaps, Path("no-cases"), now)
+            self.assertEqual(res["offline_recent_n"], 0,
+                             "dt=None 的快照不得算进近期窗口")
+            self.assertEqual(evals_health.still_failing_cases(res["offline_track"]), [],
+                             "坏时间戳的 offline 失效不得让门禁红")
+        # ② cutoff 闭区间：at 恰在 cutoff 当刻 → 算近期（该红）
+        stamp = cutoff.strftime("%Y%m%dT%H%M%SZ")
+        with tempfile.TemporaryDirectory(prefix="r69-") as d:
+            (Path(d) / f"{stamp}.json").write_text(
+                json.dumps({"at": stamp, "results": [fail]}, ensure_ascii=False),
+                encoding="utf-8")
+            snaps, _ = evals_health.load_snapshots(Path(d))
+            res = evals_health.analyze(snaps, Path("no-cases"), now)
+            self.assertEqual(res["offline_recent_n"], 1,
+                             "恰在 cutoff 当刻的 offline 失效应算近期")
+            self.assertTrue(evals_health.still_failing_cases(res["offline_track"]),
+                            "cutoff 当刻的 offline 失响应让门禁红（>= 闭区间）")
 
     def test_empty_and_none_track(self):
         self.assertEqual(evals_health.still_failing_cases({}), [])
@@ -563,6 +602,49 @@ class TrendBuilderTests(unittest.TestCase):
         # 2 个点不足判定 → 数据不足，不会因 xfail 被算成抖动
         self.assertEqual(trend["c"]["verdict"], "数据不足")
 
+    def test_xfail_never_turns_red_across_all_layers(self):
+        """R70 全链不变量：xfail 且 passed=False 时，run_evals / evals_health 都不判红。
+
+        xfail 是「已知失效、显式标记、不计红也不计绿」的第三态，与 pass/fail/review
+        正交。run_evals.classify_results 把它排除在 failures 外（进 xfails），
+        evals_health 的 still_failing_cases 不含它（门禁退出码 0）。若某层把 xfail
+        算进失败/近期失效，会误红这条 ALWAYS_REQUIRED 门禁。
+        """
+        from datetime import datetime, timezone
+        xfail_fail = {"id": "xf", "layer": "offline", "xfail": True,
+                      "total_runs": 1, "passed_runs": 0, "failed_runs": 1,
+                      "reviewed_runs": 0, "passed": False,
+                      "runs": [{"verdict": "fail", "passed": False, "checks": []}]}
+        # ① run_evals：xfail+passed=False → 标记 XFAIL，不进 failures
+        b = run_evals.classify_results([xfail_fail])
+        self.assertEqual(b["marks"], ["XFAIL"])
+        self.assertEqual(b["failures"], [], "xfail 不得进 failures")
+        self.assertEqual(b["xfails"], ["xf"], "xfail 应单列进 xfails")
+        # ② evals_health：xfail+passed=False → still_failing 不含它，退出码 0
+        now = datetime(2026, 10, 28, 12, 0, tzinfo=timezone.utc)
+        stamp = now.strftime("%Y%m%dT%H%M%SZ")
+        with tempfile.TemporaryDirectory(prefix="r70-") as d:
+            (Path(d) / f"{stamp}.json").write_text(
+                json.dumps({"at": stamp, "results": [xfail_fail]},
+                           ensure_ascii=False), encoding="utf-8")
+            snaps, _ = evals_health.load_snapshots(Path(d))
+            res = evals_health.analyze(snaps, Path("no-cases"), now)
+            self.assertEqual(evals_health.still_failing_cases(res["offline_track"]), [],
+                             "xfail 的 offline 失效不得让健康度层判红")
+            self.assertEqual(res["xfail_n"], 1, "xfail 应计入占比统计")
+        # ③ 对照：同形状但非 xfail → 必须红（证明不是「凡 fail 都不红」）
+        plain_fail = dict(xfail_fail, id="nf", xfail=False)
+        b2 = run_evals.classify_results([plain_fail])
+        self.assertEqual(b2["failures"], ["nf"], "非 xfail 的 fail 必须进 failures")
+        with tempfile.TemporaryDirectory(prefix="r70-") as d:
+            (Path(d) / f"{stamp}.json").write_text(
+                json.dumps({"at": stamp, "results": [plain_fail]},
+                           ensure_ascii=False), encoding="utf-8")
+            snaps, _ = evals_health.load_snapshots(Path(d))
+            res = evals_health.analyze(snaps, Path("no-cases"), now)
+            self.assertEqual(evals_health.still_failing_cases(res["offline_track"]),
+                             ["nf"], "非 xfail 的 offline 失效必须让健康度层判红")
+
     # ---- 损坏跳过 ----
 
     def test_corrupt_occurrence_skipped(self):
@@ -745,6 +827,29 @@ class LoadTimeValidationTests(unittest.TestCase):
             rc = asyncio.run(run_evals.main_async(
                 SimpleNamespace(live=False, case=None)))
         return rc, buffer.getvalue()
+
+    def test_nonexistent_case_filter_fails_fast(self):
+        """R72：--case 指定不存在的 id → 零匹配必须 fail-fast，不得静默 0 passed 判绿。
+
+        load_cases(only) 对不匹配的 id 返回空列表；main_async 靠 `if not cases:
+        return 1` 拦下。若这道防线没了，--case 拼错会跑出「=== 0 passed, 0 failed ===」
+        并 exit 0——门禁绿却什么都没验，伪造「跑过并断言」。锚定 rc=1、文案在位、
+        且零匹配不得落快照。
+        """
+        self._write("id: real\nlayer: offline\norigin: 探针\nruns: 1\nturns: [在吗]\n"
+                    "setup: {memories: []}\n"
+                    "checks:\n  - {type: contains, value: 我在, target: prompt}\n")
+        buffer = io.StringIO()
+        with patch.object(run_evals, "CASES_DIR", self.cases), \
+                patch.object(run_evals, "RESULTS_DIR", self.results), \
+                redirect_stdout(buffer):
+            rc = asyncio.run(run_evals.main_async(
+                SimpleNamespace(live=False, case="no-such-id")))
+        out = buffer.getvalue()
+        self.assertEqual(rc, 1, "--case 零匹配必须 fail-fast，不得静默判绿")
+        self.assertIn("没有匹配的用例", out)
+        self.assertEqual(list(self.results.glob("*.json")), [],
+                         "零匹配不得落快照（0 用例不该产出证据）")
 
     # ---- R16 第一条：runs 不是正整数 ----
 
@@ -1264,6 +1369,58 @@ class GateCoverageAnchorTests(unittest.TestCase):
             self.assertIn("未登记也不在清单里", buf.getvalue())
         finally:
             probe.unlink(missing_ok=True)
+
+
+class ReplyPhaseFailureTests(unittest.TestCase):
+    """R68：取回复阶段（live run_live_turns / offline build_offline_prompt）抛异常时，
+    run_case 必须记 fail 而不穿透。
+
+    修复前：取回复在 try 之外，一个用例的网络超时/装配异常穿透 run_case 直达
+    main_async，崩掉整轮、连快照都不留——而同轮其他用例本可正常跑完。这与下方
+    「check 炸记 fail、继续」的设计不一致。修复后：该 run 记 fail，其余用例继续、
+    快照照常落盘（fail-closed，不吞成 pass）。
+    """
+
+    @staticmethod
+    def _case(cid, layer):
+        return {"id": cid, "layer": layer, "runs": 1, "turns": ["你好"],
+                "checks": [{"type": "custom",
+                            "value": "evals.checks:all_replies_start_with_valid_tag"}],
+                "setup": {"memories": []}}
+
+    def test_live_timeout_is_recorded_as_fail_not_propagated(self):
+        """live 网络超时 → run_case 记 failed_runs≥1，不抛异常穿透。"""
+        class TimeoutLLM:
+            offline = False
+
+            async def complete_raw(self, messages, **kw):
+                raise TimeoutError("read timeout")
+
+        out = asyncio.run(run_evals.run_case(
+            self._case("live-timeout", "live"), live=True, llm=TimeoutLLM()))
+        self.assertFalse(out["passed"])
+        self.assertGreaterEqual(out["failed_runs"], 1,
+                                "live 超时必须记 fail，不能穿透崩整轮")
+        self.assertIn("取回复阶段抛异常", out["runs"][0]["checks"][0]["detail"])
+
+    def test_offline_build_failure_is_recorded_as_fail_not_propagated(self):
+        """offline build_offline_prompt 抛异常 → run_case 记 failed_runs≥1，不穿透。"""
+        with patch.object(run_evals, "build_offline_prompt",
+                          side_effect=RuntimeError("boom")):
+            out = asyncio.run(run_evals.run_case(
+                self._case("off-build-fail", "offline"), live=False, llm=None))
+        self.assertFalse(out["passed"])
+        self.assertGreaterEqual(out["failed_runs"], 1,
+                                "offline 装配异常必须记 fail，不能穿透崩整轮")
+
+    def test_healthy_case_is_not_affected(self):
+        """反向：正常 offline 用例不受修复影响，仍 passed、failed_runs=0。"""
+        case = {"id": "off-ok", "layer": "offline", "runs": 1, "turns": ["在吗"],
+                "checks": [{"type": "contains", "value": "在", "target": "prompt"}],
+                "setup": {"memories": []}}
+        out = asyncio.run(run_evals.run_case(case, live=False, llm=None))
+        self.assertTrue(out["passed"], "正常用例不得被误伤")
+        self.assertEqual(out["failed_runs"], 0)
 
 
 if __name__ == "__main__":
