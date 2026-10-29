@@ -462,6 +462,32 @@ class VerdictLogicTests(unittest.TestCase):
         """返回 None 而非全 0 指标——伪造会把「数据损坏」显示成「没跑」。"""
         self.assertIsNone(evals_report.safe_metrics(dict(self.GOOD, total_runs="abc")))
 
+    def test_safe_metrics_rejects_semantically_impossible_counts(self):
+        """R74：passed_runs > total_runs 或负值 → None（进「数据损坏」节）。
+
+        avg = passed/total、pass_k = avg**total 在 passed>total 时会算出 >1 的
+        「概率」——物理不可能，显示成「全过概率 225%」就是把损坏伪装成正常指标。
+        R16 的 try/except 只拦类型损坏，拦不住这种「类型合法但语义不可能」。
+        真实快照 6054 条记录里这两种均 0 出现，但手改快照/并发 bug 可能引入。
+        """
+        self.assertIsNone(evals_report.safe_metrics(dict(self.GOOD, passed_runs=3)),
+                          "passed>total 必须判损坏，不能让 avg 越过 1")
+        self.assertIsNone(evals_report.safe_metrics(dict(self.GOOD, passed_runs=-1)),
+                          "passed_runs 负值必须判损坏，不能让 avg 变负")
+        # 反向：边界值 passed==total（全过）不得被误拦
+        self.assertIsNotNone(evals_report.safe_metrics(dict(self.GOOD, passed_runs=2)),
+                             "passed==total 是全过，不得误判损坏")
+
+    def test_pass_k_stays_in_unit_interval(self):
+        """R74：正常输入的 avg/pass_k 必须 ∈[0,1]——锚定概率语义不被算坏。"""
+        for passed, total in ((0, 3), (1, 3), (2, 3), (3, 3)):
+            case = dict(self.GOOD, total_runs=total, passed_runs=passed)
+            m = evals_report.case_metrics(case)
+            self.assertGreaterEqual(m["avg"], 0.0)
+            self.assertLessEqual(m["avg"], 1.0)
+            self.assertGreaterEqual(m["pass_k"], 0.0)
+            self.assertLessEqual(m["pass_k"], 1.0)
+
     # ---- run_verdict：三态归一化（R17） ----
 
     def test_verdict_field_wins_when_present(self):
@@ -470,8 +496,23 @@ class VerdictLogicTests(unittest.TestCase):
                 self.assertEqual(evals_health.run_verdict({"verdict": verdict}),
                                  verdict)
 
-    def test_verdict_passthrough_for_unknown_strings(self):
-        self.assertEqual(evals_health.run_verdict({"verdict": "weird"}), "weird")
+    def test_verdict_out_of_domain_fails_closed(self):
+        """R75：越界 verdict 归一成 fail，不再原样透传。
+
+        本测试原先断言 `run_verdict({"verdict": "weird"}) == "weird"`（透传），
+        但那个透传没有任何受益方——run_verdict 的全部调用方都是 `== "fail"` /
+        `== "review"` 比较，返回值从不被直接显示。透传的后果是：一条 verdict
+        越界的轮次同时不进 failed_checks 也不进 review_checks，从报告层两个明细里
+        静默消失（R75 实测确认：failed_checks 0 条、review_checks 0 条）。
+        故改为与 run_evals.classify_results 的未知态口径一致——按失败算，别让漏判
+        静默变成放行。真实快照 6054 条记录里越界值 0 出现，本改动不改变任何现存
+        快照的判定，只堵住「将来加第四态忘了同步下游」与「手改坏快照」两条路。
+        """
+        for bad in ("weird", "maybe", "PASS", "Fail", "unknown"):
+            with self.subTest(verdict=bad):
+                self.assertEqual(evals_health.run_verdict({"verdict": bad}), "fail")
+                self.assertEqual(evals_report.run_verdict({"verdict": bad}), "fail",
+                                 "两层 run_verdict 必须同口径，不能一层归一一层透传")
 
     def test_missing_verdict_falls_back_to_passed(self):
         self.assertEqual(evals_health.run_verdict({"passed": True}), "pass")
@@ -1387,6 +1428,32 @@ class ReplyPhaseFailureTests(unittest.TestCase):
                 "checks": [{"type": "custom",
                             "value": "evals.checks:all_replies_start_with_valid_tag"}],
                 "setup": {"memories": []}}
+
+    def test_hard_delete_is_isolated_from_previous_case(self):
+        """R77：hard_delete 的 store.count()==0 断言不得被同轮前一个用例污染。
+
+        hard_delete 用进程级 store 单例，自己 upsert 一条再 forget，随后断言
+        store 全空。若 run_case 每轮开头的 seed_memories 不再 delete_all，前一个
+        用例 seed 的记忆就会残留，让 hard_delete 的「删除后还有 N 行」误红——那是
+        串味假失败，不是被测系统回归。本测试先跑一条 seed 了记忆的用例再跑
+        hard_delete，钉住「每轮状态独立、与执行顺序无关」。
+        """
+        seeder = {"id": "r77-seeder", "layer": "offline", "runs": 1,
+                  "turns": ["你好"],
+                  "checks": [{"type": "contains", "value": "x", "target": "prompt"}],
+                  "setup": {"memories": [{"kind": "fact", "subject": "user",
+                                          "key": "eval:r77-seed", "value": "残留记忆",
+                                          "source": "stated"}]}}
+        hard_delete = {"id": "r77-hard-delete", "layer": "offline", "runs": 1,
+                       "turns": ["你好"],
+                       "checks": [{"type": "custom",
+                                   "value": "evals.checks:hard_delete"}],
+                       "setup": {}}
+        asyncio.run(run_evals.run_case(seeder, live=False, llm=None))
+        out = asyncio.run(run_evals.run_case(hard_delete, live=False, llm=None))
+        self.assertTrue(out["passed"],
+                        "hard_delete 不得读到前一个用例 seed 的记忆（串味假失败）："
+                        + out["runs"][0]["checks"][0]["detail"])
 
     def test_live_timeout_is_recorded_as_fail_not_propagated(self):
         """live 网络超时 → run_case 记 failed_runs≥1，不抛异常穿透。"""

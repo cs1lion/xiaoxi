@@ -196,6 +196,105 @@ class FeedbackTests(StoreCase):
         self.assertEqual(json.loads(usage["reward_detail"]), [])
         self.assertNotIn(f"memory:{memory}", self.store.get_lesson(lesson["id"])["evidence_refs"])
 
+    def test_usage_recorded_through_mark_used_is_settled(self):
+        # 生产入口是 `mark_used`（装配注入时由 orchestrator/_mark_used 与 service 调用），
+        # 上面的 `usage()` 助手直接调 `record_usage`，绕过了它。这里改走 mark_used，
+        # 钉住"注入 → 记 usage → 下一轮 settle_pending 结算"这条闭环：若 mark_used 的
+        # session_id 透传或 record_usage 的合并逻辑回归，线上结算会断而既有测试全绿。
+        company = self.add("用户在甲公司工作", key="工作:公司")
+        self.store.add_message("s", "user", "我在甲公司工作")
+        self.store.mark_used([company], session_id="s")  # 生产形态：注入时记账
+        usage = self.store._query("SELECT memory_ids FROM memory_usage")[0]
+        self.assertEqual(json.loads(usage["memory_ids"]), [company],
+                         "mark_used 必须把注入的记忆记进 usage，否则下一轮无从结算")
+        self.store.add_message("s", "user", "对，你记得没错，我在甲公司工作")
+        outcome = feedback.settle_pending(self.store, session_id="s",
+                                          current_message_id=self.store.latest_user_message_id("s"))
+        self.assertEqual(outcome["settled"], 1, "经 mark_used 记的 usage 必须能被结算")
+        self.assertEqual(outcome["updates"][0]["reason"], "positive")
+        self.assertEqual(self.store.get(company).utility_n, 1)
+        self.assertAlmostEqual(self.store.get(company).utility, 0.65)
+
+    def test_compound_reply_is_not_attributed_to_any_memory(self):
+        # "甲公司说对了，加班可没这回事" carries BOTH signals. classify() resolves it
+        # to whichever it checks first (negative), so handing that one polarity to
+        # every overlapping memory would punish a claim the user just affirmed --
+        # the work memory here is correct, yet it used to be scored 0.0. A mixed
+        # signal is unusable: leave the memories alone rather than guess which half
+        # the user meant.
+        work = self.add("用户在甲公司工作", key="工作:公司")
+        overtime = self.add("用户讨厌甲公司的加班", key="工作:加班")
+        self.usage("s", "我在甲公司工作，也常加班", [work, overtime])
+        self.store.add_message("s", "user", "甲公司说对了，加班可没这回事")
+        outcome = feedback.settle_pending(self.store, session_id="s",
+                                          current_message_id=self.store.latest_user_message_id("s"))
+        # usage 行仍会按中性结算（这轮处理过了、不再重看），但**任何记忆都不得被打分**——
+        # detail 为空、utility 未变即是证明。
+        self.assertEqual(outcome["updates"][0]["reason"], "neutral", "混杂信号只能按中性结算")
+        self.assertEqual(outcome["updates"][0]["detail"], [], "混杂信号不得归因到任何记忆")
+        self.assertEqual(self.store.get(work).utility_n, 0, "被用户肯定的记忆不该被罚")
+        self.assertAlmostEqual(self.store.get(work).utility, 0.5)
+        self.assertEqual(self.store.get(overtime).utility_n, 0)
+
+    def test_single_polarity_reply_is_still_attributed(self):
+        # The guard must not be so wide that ordinary feedback stops working: a
+        # message with only one signal still attributes exactly as before.
+        company = self.add("用户在甲公司工作", key="工作:公司")
+        self.usage("s", "我在甲公司工作", [company])
+        self.store.add_message("s", "user", "对，我在甲公司工作")
+        outcome = feedback.settle_pending(self.store, session_id="s",
+                                          current_message_id=self.store.latest_user_message_id("s"))
+        self.assertEqual(outcome["settled"], 1)
+        self.assertEqual(outcome["updates"][0]["reason"], "positive")
+        self.assertEqual(self.store.get(company).utility_n, 1)
+
+    def test_compound_reply_with_leading_whitespace_is_still_not_attributed(self):
+        # classify() strips before matching (its _POSITIVE group is ^-anchored), so the
+        # ambiguity guard must search that same normalized text. add_message stores the
+        # text verbatim, so a reply arriving with leading whitespace really does reach
+        # attribute() un-stripped. This sentence is chosen because its ONLY positive
+        # signal is the leading "对" (there is no un-anchored alternative like 说对了 in
+        # it), so searching the raw text misses it while the stripped text does not --
+        # without that, the guard silently stops firing and the affirmed claim is
+        # punished along with the denied one.
+        work = self.add("用户在甲公司工作", key="工作:公司")
+        overtime = self.add("用户讨厌甲公司的加班", key="工作:加班")
+        self.usage("s", "我在甲公司工作，也常加班", [work, overtime])
+        self.store.add_message("s", "user", "  对，我在甲公司工作，加班可没这回事")
+        outcome = feedback.settle_pending(self.store, session_id="s",
+                                          current_message_id=self.store.latest_user_message_id("s"))
+        self.assertEqual(outcome["updates"][0]["reason"], "neutral",
+                         "前导空白不得让混杂信号绕过守卫")
+        self.assertEqual(outcome["updates"][0]["detail"], [])
+        self.assertEqual(self.store.get(work).utility_n, 0, "被用户肯定的记忆不该被罚")
+        self.assertAlmostEqual(self.store.get(work).utility, 0.5)
+        self.assertEqual(self.store.get(overtime).utility_n, 0)
+
+    def test_quote_only_overlap_does_not_attribute(self):
+        # evidence_quote is what the user said when the memory was written, not what
+        # the memory claims. Counting it in the attribution haystack let a reply that
+        # echoed the original wording punish a memory whose content was unrelated:
+        # measured before the fix, a "喜欢吃番茄炒蛋" memory quoted from "我在甲公司工作"
+        # scored 0.300 on "不对，我早就不在甲公司了" purely on the quote and was punished
+        # for a correction it had nothing to do with. Attribution must read the claim.
+        food = self.add("用户喜欢吃番茄炒蛋", key="饮食:偏好")
+        self.store._write("UPDATE memories SET evidence_quote=? WHERE id=?",
+                          ("我在甲公司工作", food))
+        company = self.add("用户在甲公司工作", key="工作:公司")
+        self.store._write("UPDATE memories SET evidence_quote=? WHERE id=?",
+                          ("我在甲公司工作", company))
+        self.usage("s", "我在甲公司工作", [food, company])
+        self.store.add_message("s", "user", "不对，我早就不在甲公司了")
+        outcome = feedback.settle_pending(self.store, session_id="s",
+                                          current_message_id=self.store.latest_user_message_id("s"))
+        scored = {entry["id"] for entry in outcome["updates"][0]["detail"]}
+        self.assertNotIn(food, scored,
+                         "只与原话重合、内容无关的记忆不得被归因")
+        self.assertEqual(self.store.get(food).utility_n, 0, "无关记忆不该被打分")
+        self.assertAlmostEqual(self.store.get(food).utility, 0.5)
+        self.assertIn(company, scored, "内容相关的记忆仍应被归因")
+        self.assertEqual(self.store.get(company).utility_n, 1)
+
 
 class LessonTests(StoreCase):
     def proposal(self, trigger="当用户在深夜说累时", action="先接住情绪，不急着给方案",

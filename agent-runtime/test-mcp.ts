@@ -3,10 +3,13 @@
 //
 //   node --experimental-strip-types test-mcp.ts
 
+import { existsSync, readFileSync } from "node:fs";
+import { join } from "node:path";
 import { BACKGROUND_CONTEXT } from "@earendil-works/chord/context";
 import { clearApprovalTools, isApprovalRequired } from "./src/approval.ts";
 import {
 	expandEnv,
+	mcpConfigPath,
 	parseMcpConfig,
 	toolsForServerAsync,
 } from "./src/mcp.ts";
@@ -97,6 +100,24 @@ process.env.DOCS_TOKEN = "test-token";
 check("展开环境变量", expandEnv("${DOCS_TOKEN}") === "test-token", expandEnv("${DOCS_TOKEN}"));
 if (saved === undefined) delete process.env.DOCS_TOKEN;
 else process.env.DOCS_TOKEN = saved;
+
+// M4：仓库真实 config/mcp.json 的解析断言。durable_mcp 门禁的 fake client
+// 不读这个文件，配置漂移（条目丢了、approval 被改成 none）只有这条断言看着。
+const repoConfig = parseMcpConfig(readFileSync(mcpConfigPath(), "utf-8"));
+const echo = repoConfig.mcpServers?.echo;
+check("仓库 config/mcp.json 登记了 echo server", echo?.command === "python",
+	JSON.stringify(repoConfig));
+check("echo 的 approval 显式为 mutating（写工具自动进确认链）",
+	echo?.approval === "mutating", JSON.stringify(echo));
+check("echo 的 cwd 显式为仓库根（相对 args 有处可解析）", echo?.cwd === ".",
+	JSON.stringify(echo));
+// args 是「echo 能不能连上」的唯一决定字段：把它改成 [] 时上面三条全绿，
+// 而 connectMcp 一个 server 都注册不了——M4 复审 MINOR-1 补的正是这条盲区。
+const echoScript = echo?.args?.[0];
+check("echo 的 args 指向真实脚本且文件存在",
+	echoScript === "scripts/mcp_servers/echo_server.py"
+	&& existsSync(join(import.meta.dirname, "..", echoScript)),
+	JSON.stringify(echo?.args));
 
 clearApprovalTools();
 console.log();

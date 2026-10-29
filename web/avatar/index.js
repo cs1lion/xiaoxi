@@ -41,7 +41,12 @@ const LAYERS = [
 /* 外部 .vrm 一键加载契约（A-5，交给 Role 3 的设置面板）：
  * 只接受 http / https / blob 与站内相对路径。跨域地址需要目标服务器开
  * CORS，否则 GLTFLoader 的抓取必然失败——那会走加载失败路径，当前形象
- * 保持不动，聊天和语音不受影响。 */
+ * 保持不动，聊天和语音不受影响。
+ *
+ * 注意：这一层刻意比设置面板的 normalizeModelUrl（web/external-model.js）
+ * 宽松——那边是唯一直面用户输入的闸门（只要 https:// 或站内 /static/），
+ * 这里放行 http 与跨域，安全性靠 CORS 抓取失败兜底而非地址过滤。两层
+ * 契约不同：勿以此处放行推断面板输入已校验，也别把这里的宽松当缺陷修掉。 */
 const VRM_URL_SCHEMES = new Set(["http:", "https:", "blob:"]);
 
 export function validateVrmUrl(url) {

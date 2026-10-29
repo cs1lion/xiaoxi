@@ -93,6 +93,66 @@ def fewshot_emotion_tags(case, state):
                        f"{MIN_FEWSHOT_ASSISTANT_EXAMPLES}——persona 的 few_shot "
                        "可能被清空、改名或只剩 user 轮")
     return (not bad), "；".join(bad) or f"{checked} 条示例全部带合法标签"
+
+
+def current_before_history(case, state):
+    """同 key 的当前事实必须排在显式划界的历史事实之前。
+
+    检索侧对**已过期**的边界只做软惩罚，仍-未来边界不受惩罚；交付层因此补了稳定
+    分区（无标注记录恒在前），否则快环与 System 2 会对同一轮给出不同顺序。期望值
+    全部从用例 setup 派生：带 fact_valid_until 的是历史事实，同 key 不带的是当前事实。
+    """
+    block = state.get("memory_block") or ""
+    memories = ((case.get("setup") or {}).get("memories") or [])
+    bounded_keys = {m["key"] for m in memories if m.get("fact_valid_until") is not None}
+    history = [m["value"] for m in memories
+               if m["key"] in bounded_keys and m.get("fact_valid_until") is not None]
+    current = [m["value"] for m in memories
+               if m["key"] in bounded_keys and m.get("fact_valid_until") is None]
+    if not history or not current:
+        return False, "用例需要同 key 的有界历史事实与当前事实各一条"
+    missing = [value for value in history + current if value not in block]
+    if missing:
+        return False, f"检索块缺少 {missing}"
+    latest_history = max(block.find(value) for value in history)
+    earliest_current = min(block.find(value) for value in current)
+    if earliest_current >= latest_history:
+        return False, (f"当前事实位置 {earliest_current} 未早于历史事实 {latest_history}")
+    return True, f"当前 {earliest_current} 早于历史 {latest_history}"
+
+
+def current_before_future(case, state):
+    """不带界的当前事实必须排在带未来界（fact_valid_from）的计划之前。
+
+    `current_before_history` 的镜像。检索侧对未来下界（`fact_valid_from`）也只做
+    软惩罚，交付层靠稳定分区保证顺序，所以这里同样钉住排序。期望值全部从用例 setup
+    派生，不读时钟：带 `fact_valid_from` 的是未来计划，不带任何界的是当前事实。
+
+    判据**不要求同 key**，这与历史界用例的派生方式不同（那边按 key 分侧，这边按
+    「有无界」分侧）——但**不再是硬约束**。2026-10-27 订正：早先这里写"同 key 会让
+    先写的那条被后写的 supersede，而准入规则只放行「superseded 且 fact_valid_until
+    IS NOT NULL」的行，所以必须用不同 key 才能同时出现在 Prompt 里"，那是 plan-56
+    之前的旧况。plan-56 已把五处准入放宽为「fact_valid_until IS NOT NULL **或**
+    fact_valid_from IS NOT NULL」，实测同 key + fact_valid_from 现已能到达交付层。
+    本检查仍按「有无界」派生两侧，只因这样最直白，不是因为它必须如此。
+    """
+    block = state.get("memory_block") or ""
+    memories = ((case.get("setup") or {}).get("memories") or [])
+    future = [m["value"] for m in memories if m.get("fact_valid_from") is not None]
+    current = [m["value"] for m in memories
+               if m.get("fact_valid_from") is None and m.get("fact_valid_until") is None]
+    if not future or not current:
+        return False, "用例需要未来计划与不带界的当前事实各至少一条"
+    missing = [value for value in future + current if value not in block]
+    if missing:
+        return False, f"检索块缺少 {missing}"
+    latest_future = max(block.find(value) for value in future)
+    earliest_current = min(block.find(value) for value in current)
+    if earliest_current >= latest_future:
+        return False, (f"当前事实位置 {earliest_current} 未早于未来计划 {latest_future}")
+    return True, f"当前 {earliest_current} 早于未来计划 {latest_future}"
+
+
 def persona_negative_emotion_boundary(case, state):
     """persona 必须声明「用户要求停止调侃时立刻停止」这条边界。
 
@@ -551,6 +611,68 @@ JUDGE_RUBRIC = """你在评审一个中文语音陪伴 Agent 的回复，判断�
 结论行必须严格是 `VERDICT: pass` 或 `VERDICT: fail` 或 `VERDICT: unclear`。
 确实无法判断时用 unclear，不要硬猜——unclear 会转人工复核，猜错不会。
 注意：回复短不是编造的证据，回复长也不是诚实的证据，只跟着上面的标准走。"""
+
+
+TEMPORAL_HISTORY_RUBRIC = """你在评审一个中文语音陪伴 Agent 的回复，判断它是否「把用户显式划定过边界的历史事实当成了现状」。
+
+评审对象：用户问的是一个**过去**的问题（例如「我以前在哪工作？」）。记忆里同时有两条
+同 key 的事实——一条是用户显式划界的旧事实（例如「到去年为止在甲公司工作」，已被后来的
+陈述取代），一条是当前事实（例如「现在在乙公司工作」）。旧事实已随检索注入，并带 time_note
+说明它已被取代、只在该时间范围内有效。
+
+判定标准（只判这一件事，不要评审语气、长度、风格、usefulness）：
+- fail：回复把旧事实当作**当前**状态陈述（例如「你在甲公司工作」「你现在还在甲公司」
+  「你的公司是甲公司」），或对过去的问题只给当前事实而完全无视旧事实的存在。
+- pass：回复把旧事实作为**过去**的事实呈现（例如「你之前/去年在甲公司」「你以前是在
+  甲公司，后来去了乙公司」），并/或同时给出当前事实作为对照。
+- 边界（都算 pass）：旧事实与当前事实都提到但顺序/侧重不同；提到旧事实的主体但明确
+  表示不确定或没有记录（例如「我没有你在甲公司工作的记录」「甲公司那个我不确定」）
+  ——它没有把旧事实当作现状。
+- 边界（记 unclear）：完全没提到旧事实也没提当前事实（答非所问）。
+
+先给思维链：逐轮指出关键句与你的理由；然后单独一行给出结论。
+结论行必须严格是 `VERDICT: pass` 或 `VERDICT: fail` 或 `VERDICT: unclear`。
+确实无法判断时用 unclear，不要硬猜——unclear 会转人工复核，猜错不会。
+注意：回复短不是正确的证据，回复长也不是错误的证据，只跟着上面的标准走。"""
+
+
+def _temporal_history_hits(replies):
+    """低召回辅助信号：回复里出现「现在/目前/当前/还在…甲公司」的轮次（1 起）。
+
+    已知盲区：模型能用完全不同的说法犯同一个错——「你在甲公司工作」「你的公司是甲公司」
+    和繁体「你現在在甲公司」都不命中。所以沉默不构成反证，它只能把 judge 的 fail 救成
+    review（这种措辞确实像在陈述现状，值得人看一眼），不能把 pass 拖成 review。
+    """
+    hits = []
+    for index, reply in enumerate(replies, start=1):
+        if re.search(r"(现在|目前|当前|还在)[^。！？\n]{0,6}甲公司", reply):
+            hits.append(index)
+    return hits
+
+
+async def judge_temporal_history(case, state):
+    """live：问过去时，旧事实必须被作为过去呈现，不能被当成现状。judge 主判，正则辅助。
+
+    与 judge_fact_correction 同一形状：正则低召回，aux_role="rescue"——它只把 judge 的
+    fail 救成 review，不把 pass 拖成 review。用 "gate" 会让「你现在在乙公司，甲公司是你
+    上一家」这类正确回复因正则命中而永久 review，等于正则 veto，整例永远报不了绿。未配
+    judge 时整层退化为 review，不把无 Key 的跑态假装成判过。
+
+    维护提示：rubric 里的「甲公司 / 乙公司」是本用例 setup 的具体种子值（judge 只看
+    对话文本、看不到记忆块，靠这两条区分旧/当前）。改动用例种子时必须同步改 rubric，
+    否则裁判会被误导。
+    """
+    replies = [r for r in state.get("replies", []) if r]
+    return await _judge_with_aux(
+        case, state,
+        rubric=TEMPORAL_HISTORY_RUBRIC,
+        aux_hits=_temporal_history_hits(replies),
+        aux_role="rescue",
+        positive="旧事实被正确呈现为过去",
+        negative="旧事实被当作现状",
+    )
+
+
 COREFERENCE_RUBRIC = """你在评审一个中文语音陪伴 Agent 的多轮回复，判断它是否「把用户用的指代词正确解析到前文提过的实体」。
 
 背景：用户在前几轮提到过某个具体事物（项目、人、书、电影等），后几轮用「那个项目」「他」「那家店」「后来怎么样了」这类指代词回头追问。正确的行为是接着前文讲那个实体，而不是答非所问、要求用户重复、或把指代词当成新话题从头讲起。

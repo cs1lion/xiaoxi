@@ -45,6 +45,14 @@ jobs:
       - name: 协议契约检查（静态，零依赖）
         run: python scripts/check_protocol.py
 
+      # 记忆装配接缝静态契约门：build_context(3)/context_with_status(2) 的绑定
+      # 点必须完整解包，否则 found 被静默丢弃、persona 的负向约束失效。零依赖，
+      # 与协议契约门同级；不跑就等于把「必须 PASS」写进文档却没人执行。
+      - name: 记忆装配接缝契约门（静态，零依赖）
+        run: |
+          python scripts/check_memory_contract.py --self-test
+          python scripts/check_memory_contract.py
+
       - name: 回归评测（离线层，evals/cases）
         run: python scripts/run_evals.py
 

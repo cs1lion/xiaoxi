@@ -112,8 +112,14 @@ def run_verdict(run: dict) -> str:
 
     与 evals_report.case_metrics 的 reviewed 反推同口径：review 只出现在
     T5（judge 三态）之后的新快照里，旧快照按 passed 反推不会误判成 review。
+
+    R75：越界值归一成 fail。原样返回时，一个非法 verdict（手改快照，或将来加了
+    第四态却忘了同步下游两处筛选）会同时不进 failed 也不进 reviewed——那条轮次
+    从健康度层的两个计数里静默消失。与 run_evals.classify_results 的未知态口径
+    一致：按失败算，别让漏判静默变成放行。两处 run_verdict 同修，避免口径分裂。
     """
-    return str(run.get("verdict") or ("pass" if run.get("passed") else "fail"))
+    verdict = str(run.get("verdict") or ("pass" if run.get("passed") else "fail"))
+    return verdict if verdict in ("pass", "fail", "review") else "fail"
 
 
 def case_verdict_counts(case: dict) -> tuple[int, int]:

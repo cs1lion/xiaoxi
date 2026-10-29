@@ -65,6 +65,10 @@ export interface AgentRuntime {
 	lookup(commissionId: string, attempt?: number): Promise<RunRef | undefined>;
 	/** Names of the tools a conversation actually offers; used by profile tests. */
 	toolsFor(conversationId: string): Promise<string[]>;
+	/** Names of the tools a run actually offers, by task id. `undefined` when the
+	 * kernel has no such task — a read-only route turns that into a 404 instead
+	 * of an empty catalog that reads as "no tools". */
+	toolsForTask(taskId: number): Promise<string[] | undefined>;
 	close(): Promise<void>;
 }
 
@@ -175,6 +179,13 @@ export async function openAgentRuntime(directory: string): Promise<AgentRuntime>
 	}
 	harness.resume();
 
+	const toolsForConversation = async (conversationId: string): Promise<string[]> => {
+		const conversation = await harness.conversation(conversationId as never, context);
+		if (conversation === undefined) return [];
+		const agent = await conversation.agent(context);
+		return agent.tools.map((tool) => tool.name);
+	};
+
 	return {
 		harness,
 		async createRun(request: RunRequest): Promise<RunRef> {
@@ -274,10 +285,14 @@ export async function openAgentRuntime(directory: string): Promise<AgentRuntime>
 			return { taskId: Number(found.taskId), conversationId: String(found.conversationId) };
 		},
 		async toolsFor(conversationId: string): Promise<string[]> {
-			const conversation = await harness.conversation(conversationId as never, context);
-			if (conversation === undefined) return [];
-			const agent = await conversation.agent(context);
-			return agent.tools.map((tool) => tool.name);
+			return toolsForConversation(conversationId);
+		},
+		async toolsForTask(taskId: number): Promise<string[] | undefined> {
+			// 反查 conversation 与 readRun 同源（harness.getTask）；内核里没有这个
+			// task 时回 undefined，让路由回 404 而不是空清单假装没工具。
+			const task = await harness.getTask(taskId, context);
+			if (task === undefined) return undefined;
+			return toolsForConversation(String(task.conversationId));
 		},
 		async close() {
 			await harness.close(context);

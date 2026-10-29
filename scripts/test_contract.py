@@ -571,6 +571,96 @@ def test_e_confidence():
               [{"memory_id": "m_1", "source_kind": "user_confirmed"}]) is None)
     check("冲突记忆·空列表返回 None", resolve_conflicting_memories([]) is None)
 
+    # ---- 边界与健壮性契约（上面只钉了快乐路径，这些是畸形输入的真实后果）----
+    # 置信度必须是数字：非副作用槽遇到垃圾值必须炸，不能让垃圾悄悄落进某一档。
+    for bad in ("0.9", [], {}, object()):
+        try:
+            policy.decide(bad, is_side_effect_slot=False)
+            check(f"置信度非数字 {type(bad).__name__} 抛异常", False, "未抛")
+        except ValueError:
+            check(f"置信度非数字 {type(bad).__name__} 抛异常", True)
+    # bool 是 int 的子类，单独排除；否则 True 会被当成 1.0 静默补全。
+    for flag in (True, False):
+        try:
+            policy.decide(flag, is_side_effect_slot=False)
+            check(f"bool confidence={flag} 抛异常", False, "未抛")
+        except ValueError:
+            check(f"bool confidence={flag} 抛异常", True)
+    # 0 是合法置信度（追问档），不是"没有置信度"。若 :79 的 `is None` 被改成
+    # `not confidence`，0 会掉进 None 支路返回 silent——静默补全零置信度槽位，
+    # 而既有的 c=0.10 追问档覆盖不到这个回归。
+    check("confidence=0 走追问档（不被当成 None）",
+          policy.decide(0, is_side_effect_slot=False) == "ask")
+    # 副作用槽短路在类型检查之前：垃圾 confidence 不报错，直接按"必须高亮"处理。
+    # 功能上无害（副作用槽根本不读置信度），但这是个隐晦的顺序依赖，钉住它。
+    check("副作用槽 + 垃圾 confidence 静默走 confirm（不抛）",
+          policy.decide("abc", is_side_effect_slot=True) == "confirm")
+    check("副作用槽 + confidence=None 仍走 confirm",
+          policy.decide(None, is_side_effect_slot=True) == "confirm")
+
+    # from_config 的兜底语义：类型错的阈值静默回落默认值，这是"写了但不生效"的
+    # 典型形态（配置里写 "0.9" 却按 0.85 执行），必须钉住当前行为。两个阈值默认值
+    # 不同（0.85 / 0.70），各测一个才能证明兜底逻辑对两者都对。
+    mistyped = SilentFillPolicy.from_config({"memory": {"silent_fill_min": "0.9"}})
+    check("from_config·silent_fill_min 类型错静默回落默认 0.85",
+          mistyped.silent_fill_min == 0.85)
+    mistyped_confirm = SilentFillPolicy.from_config({"memory": {"confirm_fill_min": "0.6"}})
+    check("from_config·confirm_fill_min 类型错静默回落默认 0.70",
+          mistyped_confirm.confirm_fill_min == 0.70)
+    # 与既有 silent_fill_min 越界用例同走 __post_init__，唯一增量是证明 pick()
+    # 不钳制越界值——越界照样传进去炸，而不是被悄悄夹到 [0,1]。
+    try:
+        SilentFillPolicy.from_config({"memory": {"silent_fill_min": 1.5}})
+        check("from_config·阈值越界不被 pick 钳制，照旧抛异常", False, "未抛")
+    except ValueError:
+        check("from_config·阈值越界不被 pick 钳制，照旧抛异常", True)
+    # 只有字面 false 能关掉强制高亮；0 / None 都关不掉，YAML 里写 0 会静默失效。
+    off = SilentFillPolicy.from_config({"memory": {"side_effect_slots_always_show": False}})
+    check("from_config·always_show=false 关掉强制高亮",
+          off.side_effect_slots_always_show is False)
+    # 关掉之后副作用槽不再走高亮支路，decide 退化成按置信度分档。这违反
+    # PIXEL_WORKSHOP_SPEC_V2.md:274「副作用槽位（目的地、收件人、被覆盖对象）
+    # 任意置信度都必须在契约卡显式展示并高亮」。这里钉住现行语义，并注明唯一
+    # 防线是 config/contract.yaml:12 手写的 true——没有任何断言在守它。
+    check("always_show=false 时副作用槽退化为按置信度分档（与规范冲突，仅钉现行行为）",
+          off.decide(0.99, is_side_effect_slot=True) == "silent")
+    check("always_show=false 时副作用槽不再高亮",
+          off.needs_highlight(0.99, is_side_effect_slot=True) is False)
+    check("对照：默认策略下副作用槽 0.99 仍走 confirm",
+          policy.decide(0.99, is_side_effect_slot=True) == "confirm")
+    for not_false in (0, None):
+        check(f"from_config·always_show={not_false!r} 关不掉（只有字面 false 有效）",
+              SilentFillPolicy.from_config(
+                  {"memory": {"side_effect_slots_always_show": not_false}}
+              ).side_effect_slots_always_show is True)
+
+    # 冲突消解的保守路径：时间戳不可用就整条作废，绝不挑一个来用。
+    check("冲突记忆·None 入参返回 None", resolve_conflicting_memories(None) is None)
+    check("冲突记忆·confirmed_at 是 bool 不可用",
+          resolve_conflicting_memories(
+              [{"memory_id": "m_1", "source_kind": "user_confirmed",
+                "confirmed_at": True}]) is None)
+    check("冲突记忆·confirmed_at 是字符串不可用",
+          resolve_conflicting_memories(
+              [{"memory_id": "m_1", "source_kind": "user_confirmed",
+                "confirmed_at": "90"}]) is None)
+    check("冲突记忆·kind 别名同样识别",
+          (resolve_conflicting_memories(
+              [{"memory_id": "m_1", "kind": "user_confirmed", "confirmed_at": 90.0}]
+          ) or {}).get("memory_id") == "m_1")
+    check("冲突记忆·非 dict 候选被跳过而不是炸",
+          (resolve_conflicting_memories(
+              ["oops", {"memory_id": "m_1", "source_kind": "user_confirmed",
+                        "confirmed_at": 5.0}]
+          ) or {}).get("memory_id") == "m_1")
+    check("冲突记忆·更新的非 confirmed 不敌更早的 confirmed",
+          (resolve_conflicting_memories([
+              {"memory_id": "new_but_inferred", "source_kind": "inferred",
+               "confirmed_at": 999.0},
+              {"memory_id": "old_but_confirmed", "source_kind": "user_confirmed",
+               "confirmed_at": 5.0},
+          ]) or {}).get("memory_id") == "old_but_confirmed")
+
 
 # ---------- F. lint L1–L7 ----------
 

@@ -1,6 +1,6 @@
 # TESTING — 黄金测试命令手册
 
-仓库里有上百个测试脚本，Agent 汇报"我做完了"之前，**必须把本节里属于自己角色的一行命令全部跑通**，并把结果附在汇报里。命令统一用项目虚拟环境（系统 `python` 与 numpy 2.x 不兼容，会直接 ImportError）：
+仓库里有上百个测试脚本，Agent 汇报"我做完了"之前，**必须把本节里属于自己角色的一行命令全部跑通**，并把结果附在汇报里。命令统一用项目虚拟环境（2026-10-27 实测订正：系统 anaconda `python` 的 numpy 2.5.1 与同环境 scipy ABI 不匹配，`test_core.py` 一 import 就 `ImportError: numpy.core.multiarray failed to import`；但并非所有脚本都崩——`check_protocol.py` 不碰 scipy，用裸 python 能跑过。所以别按"版本号不对"去换 numpy，用 `.venv` 才是正解）：
 
 ```bash
 .\.venv\Scripts\python.exe <script>
@@ -190,7 +190,7 @@ ALWAYS_REQUIRED。`memory_fastloop` 的判据是墙钟停顿（心跳 + 10ms 阈
 ```bash
 .\.venv\Scripts\python.exe scripts\test_executive_v3.py         # 督办台账 / 观测网关 / 自进化初审 / 台前意图 + ui_nav 领航载荷
 .\.venv\Scripts\python.exe scripts\test_agent_adapter_ext.py    # Worker 适配器可插拔（Mock 适配器跑通全程）
-.\.venv\Scripts\python.exe scripts\test_verify.py               # server/verify 三种确定性 check 正反例 + acceptance 桥接三态渲染（M2）
+# （该文件不存在，勿当作可跑命令——见下方说明）
 .\.venv\Scripts\python.exe scripts\test_stalled_running.py      # M5 缺口复现：重启收口机制通路 + 会话内僵单无人收（第二段钉现状，主体落地后照 docstring 口径翻转）
 .\.venv\Scripts\python.exe scripts\test_codex_worker_shim.py   # Codex shim 五种事件 + 真实 artifact ref（假 Codex，不联网）
 node web\executive-state.test.mjs                               # 心流防打扰纯逻辑（零 DOM）
@@ -198,6 +198,8 @@ node web\ui_nav.test.mjs                                         # 界面自动�
 node scripts\test-ui-nav-browser.mjs                             # 领航浏览器回归：抽屉自动开合 / 聚焦 / 子动作 / 侧栏·星图落点（需先启动本地服务；服务未起时自动 SKIP，不算失败）
 ```
 
+> **`scripts/test_verify.py` 不存在，勿当作可跑命令**（2026-10-26 核）：该文件从未存在于工作树，却出现在本清单、`docs/CONTRACT_RUNTIME_WIRING.md:125` 与 `docs/TOOL_OPERATION_EXPLORATION_20261024.md`（多处）。后果不是"少一条测试"，而是 `server/verify` 包**零行为测试覆盖**，且 `server/verify/check.py:30` 与 `verifier.py:30` 的 docstring 承诺"禁止开 socket、连库、subprocess，由 `scripts/test_verify.py` 的 IO 断言机械检查"——**这条 IO 禁令目前没有任何机械强制**，唯一的相邻保障是 `scripts/test_task_fsm.py:1650` 对 `server.verify` 的一条静态 import 限制断言（它不断言行为）。`scripts/` 下另有两个 `verify_*_corpus.py`，但它们是路由语料、与验收包无关。完整规格（三种 check 正反例 + reader 注入 + IO 静态断言 + evaluator 桥接）与验收标准见 `docs/TOOL_OPERATION_EXPLORATION_20261024.md`（该文档属并发会话在飞工作，本线不改）；该文件由谁建、何时建，待用户拍板后另行处理。
+>
 > **改动 `web/` 前端文件后**：必须杀掉旧服务进程再重启（`taskkill //F //PID <持 8000 端口的进程>`
 > 然后 `.\.venv\Scripts\python.exe scripts\run.py --port 8000`），否则 `StaticFiles` 缓存的目录
 > 列表会让新增的前端文件（如 `web/ui_nav.js`）持续 404，浏览器回归会假失败。
@@ -289,6 +291,7 @@ node --experimental-strip-types reference/24-child-tasks.ts   # 官方示例：f
 .\.venv\Scripts\python.exe scripts\test_memory_store_contract.py # 存储层契约
 .\.venv\Scripts\python.exe scripts\test_memory_evidence.py       # 证据链
 .\.venv\Scripts\python.exe scripts\test_memory_retrieval.py      # 检索
+.\.venv\Scripts\python.exe scripts\test_memory_temporal.py       # 事实有效时间保守解析（valid-time，见 MEMORY_RESEARCH_NEXT.md）
 .\.venv\Scripts\python.exe scripts\test_memory_self_evolution.py # 效用反馈 + 程序性经历（MemRL / EvolveR 机制，见 MEMORY_SELF_EVOLUTION.md）
 .\.venv\Scripts\python.exe scripts\test_memory_preference.py     # 偏好合同
 .\.venv\Scripts\python.exe scripts\test_agent_loop.py            # assistant/loop.py
@@ -361,6 +364,15 @@ node scripts\test-voice-browser.mjs                              # 语音轮次�
 .\.venv\Scripts\python.exe scripts\test_stream_delivery.py       # 流式交付（积木先于 done 下发）
 npm run test:blocks                                              # 积木纯函数：parseCmd 白名单 / 信封校验 / kind 与渲染器一一对应
 node web\aqi-flow.test.mjs                                       # 心流防打扰：打字期间挂起、报数、停手后原序补弹（零 DOM）
+node web\context-budget.test.mjs                                 # 上下文预算展示：formatContextBudget 各段分支与拼接顺序（零 DOM，22 例）
+node web\context-usage.test.mjs                                  # 本轮参考清单护栏：validId / validCount / appendContextUsage 前置条件（零 DOM，18 例）
+node web\memory-panel.test.mjs                                   # 记忆面板纯函数：停用标签、更新时间、原话引用、停用/启用形状（零 DOM，11 例）
+node web\test_glimmer_bubble.mjs                                 # 微光气泡状态机：show/expand/update/dismiss/poll 与回调缺省不抛（零 DOM，10 例）
+node web\events-v2.test.mjs                                      # 契约 v2 §25 前端消费层：模拟 WS 帧驱动信封归约与 UI 状态归约（不起服务，28 例）
+# explore.js（设计探索沙盒）经 2026-10-26 核实**故意不加单测**：它是纯数据(effects/presets)
+# + DOM 挂载，presets 引用的 effect id 若写错会**响亮失败**（apply() 里 presets[state.preset].title
+# 直接 KeyError、无效 data-fx-* 属性肉眼可见），不属 task-card/external-model 那类静默失效，
+# 故按"不为凑覆盖率造边际测试"的纪律留白。若将来给它加纯函数导出，再按 memory-panel 范式补测。
 node scripts\test-aqi-blocks-browser.mjs                         # 7 种积木 DOM / 五类 cmd / nav+drawer_ops / gaze / 上限 / XSS
 node scripts\test-ui-browser.mjs                                 # UI 契约（去文字框化：微光接手，无 bot 气泡）
 node scripts\test-voice-browser.mjs                              # 语音轮次零回归
@@ -450,6 +462,62 @@ DSH 在本机默认沙箱拒绝写工作目录；花名册/profile 必须显式�
 
 不允许"已知失败"式汇报。先判断是不是自己改出来的：`git stash` 自己的改动重跑对照（由 Role 0 操作），确认基线后修到全绿再汇报。
 
+## 已核实无缺口：模块级状态在提前退出时漏初始化（2026-10-26）
+
+`web/assistant.js` 曾连续三次暴露同一缺陷家族——模块级状态只在成功路径赋值，而提前 return 或 await 窗口期间为 undefined，消费方要么没守卫、要么守卫本身把失败变静默：
+
+1. `bootAssistant` 拉取 preferences 失败走提前 return，`actionArea` 未赋值 → 带 confirmation 的结果被 `if (!actionArea) return` 静默丢弃，有副作用的动作永远无法获批；
+2. 修完 1 后连带暴露 `refresh()` 在 `tasks/reminders/inbox` 还是 undefined 时抛 TypeError，被 `button()` 吞成 `errorArea` 文案——一次已成功的确认也显示成错误；
+3. preferences **仍在途**（不只是失败）时 gate 未建，同样静默丢弃。
+
+三处均已修复，并由 `web/assistant.test.mjs`（4 例，零 DOM）钉住：面板未启动不抛不渲染、在途窗口确认门已就绪、启动失败后确认门可达、点批准真调确认接口且不留错误文案。
+
+**横向扫描结论（同日，覆盖 `web/*.js` 顶层 + `web/` 子目录全部生产类 + 本人改过的 `server/` 文件）：该模式不广泛存在。**
+
+- `web/` 下只有 3 个文件有模块级状态容器：`assistant.js`（上述已修）、`companion.js`、`avatar_lab.js`。
+- `companion.js:15` 的 8 个状态全部在**第一个 await 之前同步赋值**，两个提前 return（`if (mount) return` 幂等守卫、`if (!mount) return` 查询失败）都在赋值之前，且每个消费方都有守卫（`refresh()` 的 `if (!mount)`、`renderSummary()` 的 `if (!summary)`、`associate()` 的 `if (notice)`）——这正是 `assistant.js` 当初缺失的那层保护，可作对照范式。
+- `interaction-preferences.js` 有 12 处 await 但 **0 处 return/throw**，模式不适用。
+- `avatar_lab.js:12` 的 `performanceProbe`/`performanceResult` 同样安全：5 处消费方全部可选链（`performanceProbe?.stop(...)`、`performanceProbe?.active`），`performanceResult` 有显式守卫（`if (!performanceResult) return`），并发启动被 `if (performanceProbe?.active) return` 挡掉，`finally` 里 `if (performanceProbe === probe)` 避免误清别人的探针；该文件两处 `return` 一处是提前退出、一处是**返回值**（`return [key, ...]`），都不在状态赋值路径上。
+- `web/app.js:1364-1368` 的 `assistant_result` 分发无丢弃分支：要么 resolve 待确认的 `pendingConfirmation`，要么直接调 `showAssistantResult`，端到端通路完好（`contextBudget?.note(...` 为可选链）。
+- `web/` 子目录另有 3 个生产类（`grep -rnE "^\s*class [A-Za-z_]+" web/ --include=*.js`，排除 `web/vendor/`、`web/archive/`、`test_*` 后全部命中），同样均非缺口：
+  - `web/avatar/drivers/idle.js:40 DelayLine` 构造器赋满 `buf`/`max`；`web/voice/capture-worklet.js:3 DuplexCaptureProcessor` 构造器赋满 `frameSize`/`microphone`/`reference`/`used`/`running`——无遗漏字段。
+  - `web/avatar/performance-probe.js:56 AvatarPerformanceProbe` 是唯一"字段多、构造器只给 4 个"的类（`start()` 一次性赋 22 个：`active/result/name/metadata/startedAt/started/durationMs/drainMs/rafIntervalsMs/avatarFrames/gpuFrames/pending/previousRaf/currentFrame/submissionIndex/restorers/rig/renderer/environment/gpu/gl/ext/_completion`），**但每个消费点都在 `active` 守卫之内**：`complete()` 有 `if (!this._completion) throw` 的显式守卫，`stop()` 首行 `if (!this.active) return this._completion || Promise.resolve(this.result)` 直接短路，走不到 `this.started`/`this.drainMs`/`this.gpu`；`_finish()`/`_deletePending()`/`_discardDisjoint()`/`_disableGpu()` 只可能由已在采样的 `drain()` 链抵达。这正是 `assistant.js` 缺失的那层保护——不是字段少，而是消费方**缺守卫**。
+- `server/` 侧用 AST 扫「实例属性在非 `__init__` 方法赋值且不在 `__init__` 赋默认值、却被别处读取」，本人文件仅 2 处候选，均为 `store.py` 中 `Memory.disabled` / `RankingRow.disabled` 在 `__post_init__` 内做 `bool()` 归一化——同方法内自赋值自读取、在任何外部消费方之前确定性完成，属良性字段默认值形态。
+
+**复现判据**（要再扫一遍时用，别靠印象）：`web/` 侧 `grep -nE "^let [a-zA-Z_, ]+;" web/*.js` 找状态容器，再对每个 `boot*` 函数核对「赋值是否都在首个 await 之前」与「消费方是否有守卫」；`server/` 侧用 AST 比对 `__init__` 与非 `__init__` 方法的 `self.X` Store/Read 集合差集。注意 `git status` 分不清本人与会话并发方的改动，扫 `server/` 必须用文件白名单。
+
+## 已核实无缺口：except 静默吞异常（2026-10-26）
+
+同一轮用 AST 扫了本人 15 个 `server/` 文件的全部 **108 个 except 处理器**（`ast.ExceptHandler`，判据是 body 是否仅为 `pass` 或仅含字符串 Expr）。结论：**8 处 `except-pass` 与 6 处"体仅字符串"全部是正确写法，无一处需要改。**
+
+先说两个**判据本身的坑**，否则数字会被误读：
+
+- 那 6 处"体仅字符串"是**我的扫描器误报**。脚本用 `body = [s for s in node.body if not isinstance(s, ast.Expr)]` 过滤，而 `await conn.finish(...)` 在 AST 里正是 `Expr`，于是被整条滤掉、显得"体只有字符串"。真实代码全都有实质动作（见下）。
+- 另一处误报来源：早前我用 `grep -cE "except Exception:\s*$"` 统计出 orchestrator 12 处 / app.py 22 处，那个模式匹配的是**行尾的 `except Exception:`**（即多行 except），不等于吞异常；而 `except[^\n]*` 这种写法在 POSIX ERE 里 `[^\n]` 是"排除反斜杠和字母 n"的字符类，`Exception` 里正好有 `n`，永远匹配不到。**这个结构只能用 AST 数。**
+
+逐处核实（判据：失败是否**既不可见又有后果**）：
+
+| 位置 | 形态 | 判定 |
+| --- | --- | --- |
+| `server/app.py:579` `_confirm_action` | `except Exception` → `conn.finish(turn, {type:"error", code:"assistant_confirmation_failed", message:"未能取得确认结果…", terminal:True})` | 正确：用户收到明确失败回合 |
+| `server/app.py:1018` `_run_turn` | `except Exception as exc` → `conn.finish(turn, {type:"error", message:str(exc), terminal:True})` | 正确：明确错误回合 |
+| `server/app.py:1066` `_transcribe_turn` | 同上，且经 `_transcribe_error_message()` 脱敏 | 正确：见 :1025-1031 注释，防供应商响应体外泄进字幕 |
+| `server/app.py:622` `_narrate_turn` | → `conn.finish(turn, {type:"error", message:"这条记忆暂时讲不出来。", terminal:True})` | 正确：明确错误回合 |
+| `server/assistant/context.py:182` `_memories` | → `result.update(status="unavailable", stated=[], inferred=[], uncertain=[])` | 正确：降级状态**显式写进结果**，下游走负向约束而非脑补 |
+| `server/memory/presentation.py:135` | `except (ValueError, OverflowError, OSError): pass` | 正确：`:131` 的 `type(as_of) in (int, float)` 与 `:133` 的 `math.isfinite()` 已双重收窄，且 `:137-139` 紧接着给 `time_note` 兜底文案 |
+| `server/dialogue/orchestrator.py:535` | `except Exception: pass` | 正确：注释声明"fast loop: never let a trace break a turn"，是**追踪落盘**（非功能路径），带 `# noqa: BLE001` 表明显式决策 |
+| `server/dialogue/orchestrator.py:681` `_turn_context` | `except KeyError: pass` | 正确：`thread` 保持未绑定，`:689` 的 `bool(thread)` 使 `companion_context_available` 如实为 False——失败**可见** |
+| `server/app.py:1555` `websocket_endpoint` | `except WebSocketDisconnect: pass` | 正确：`finally` 里 `detach_v2()` / `_connections.discard` / `conn.close()` 照常收尾 |
+| `server/app.py:1595` `proactive_socket` | `except (WebSocketDisconnect, json.JSONDecodeError): pass` | 正确：`finally` 里 `conn.close()` + `store.end_session()` 照常收尾 |
+| `server/app.py:1852/:1863` `shutdown` | `except CancelledError: pass` | 正确：关停期被取消是预期，不该报错 |
+| `server/app.py:1791` `_start_durable_if_enabled` | 内层 `except Exception: pass` | 正确：外层 `:1786-1790` 已 `print(f"[durable] 执行内核不可用：{exc}")` 明说，内层只是关停一个已经起不来的 supervisor；派单会转 BLOCKED 并说明不可用 |
+
+**可复现的判据**（替代上面那两个会骗人的正则）：用 AST 遍历 `ast.ExceptHandler`，检查 `node.body` 是否长度为 1 且为 `ast.Pass`；若要进一步判断"是否等效空操作"，必须把 `ast.Expr` **按语句类型细分**——`await X` / 赋值 / 函数调用都是 `Expr` 但有实质动作，只有 `ast.Constant`（字符串）才是真空操作。早先那版扫描器把整个 `Expr` 类滤掉，才产出 6 条误报。
+
+**真正值得改的形态长什么样**（本仓现存范本）：`server/dialogue/orchestrator.py` 的 `notice_error`——`except Exception` 不再 `pass`，而是 `self._last_meta["notice_error"] = str(exc)[:200]`，与既有 `extract_error` 同形，失败进入可观测处而不是消失。见到"吞掉"先问一句：**这个失败有没有一个用户或下游能看见的落点**；有，就别动。
+
+**复现判据**（要再扫一遍时用，别靠印象）：`web/` 侧 `grep -nE "^let [a-zA-Z_, ]+;" web/*.js` 找状态容器，再对每个 `boot*` 函数核对「赋值是否都在首个 await 之前」与「消费方是否有守卫」；`server/` 侧用 AST 比对 `__init__` 与非 `__init__` 方法的 `self.X` Store/Read 集合差集。注意 `git status` 分不清本人与会话并发方的改动，扫 `server/` 必须用文件白名单。
+
 ## 已核实无缺口：eval 用例配置一致性（2026-10-26）
 
 对 `evals/cases/` 全部 16 个用例（5 live + 11 offline）做过一轮配置一致性核查，结论：**框架本身已堵住主要静默失效入口，本轮只修了两处文档/配置漂移。**
@@ -467,3 +535,25 @@ DSH 在本机默认沙箱拒绝写工作目录；花名册/profile 必须显式�
 3. 只扫"带 custom 引用的文件"会漏掉无引用的用例——我曾因此以为 live 只有 3 条，与日志"跳过 5 条"对不上，实际是漏扫了 `accuracy-over-persona-live` 与 `hallu-empty-retrieval-offline`。
 
 **带 bug 的校验器比没有校验器更危险**：它会用"全部 OK"或"5 处违例"给出确定语气，而两者都是错的。每条结论落地前先用一个已知答案的样本反验校验器本身。
+
+## ⚠ 待用户决定：已跟踪的「可执行配置」引用了未跟踪文件（fresh clone 会崩）
+
+**这不是当前工作树的问题**——未跟踪的文件都在磁盘上，所以 `npm test` / CI / 覆盖度棘轮此刻全绿。问题是 **clone HEAD 之后**：已跟踪的配置会去调用一批不存在于 HEAD 的文件，于是 ENOENT。
+
+四处，均已实证（行号会漂移，以文件内容为准）：
+
+| 已跟踪的引用方 | 指向的未跟踪文件 | fresh clone 后的破坏 |
+| --- | --- | --- |
+| `.github/workflows/ci.yaml` 的 memory-contract 步骤 | `scripts/check_memory_contract.py` | 该 CI 步骤 ENOENT、非零退出，CI 红 |
+| `package.json` 的 `test` 脚本 | `web/assistant.test.mjs`、`web/companion.test.mjs`、`web/external-model.test.mjs`、`web/task-card.test.mjs` | `npm test` 在第一个缺失文件处 ENOENT，`&&` 链中断，后续套件全不跑 |
+| `scripts/gates_unregistered.txt` 的清单 | `scripts/test_memory_snapshot.py`、`scripts/test_memory_temporal.py` | 覆盖度棘轮不变式是「登记 + 清单 = 磁盘」，磁盘少 2 条即不成立，`test_gate_coverage.py` 红 |
+| `server/memory/manager.py` 的 import | `server/memory/temporal.py` | 若单独提交 manager.py，整条 `server.memory` 导入链 `ModuleNotFoundError`（此条 `docs/MEMORY_VALID_TIME.md` §10 已记） |
+
+**为什么会这样**：这些文件大多由本线迭代新建（`check_memory_contract.py`、四个 `.mjs` 测试、`temporal.py`/`snapshot.py` 及其测试、三个 valid-time eval 用例、`MEMORY_VALID_TIME.md`），而本线**不提交**，于是"新文件 + 改配置"同时留在工作树里，配置先于文件入库。
+
+**决策点（需用户拍板，勿自行 git add）**：这批未跟踪文件是否随本轮一起入库。若入，需保证原子性——尤其是 `manager.py` ↔ `temporal.py`、`package.json` ↔ 四个 `.mjs`、`ci.yaml` ↔ `check_memory_contract.py`、`gates_unregistered.txt` ↔ 两个 `test_memory_*.py`，四组都必须同一批提交，否则等于把地雷从工作树搬进 HEAD。
+
+**复现判据**（要再扫一遍时用，别信上面这份静态清单——它会随提交状态变化）：
+- 引用方向：`git ls-files --others --exclude-standard` 取未跟踪集合，再在**已跟踪**文件里搜这些路径。注意过滤器别写 `startswith(".git")`——那会连 `.github/` 一起漏掉（本线第一遍扫描就因这个漏报了 ci.yaml）。
+- import 方向：对每个未跟踪 `.py` 取模块名，在已跟踪 `.py` 里 AST 扫 `Import`/`ImportFrom`（`level == 0`）。
+- 判据是**可执行引用**（CI 步骤、`package.json` 脚本、门禁清单、import），文档里提到文件名不算——那只会让文档描述不存在的东西，不会让命令失败。

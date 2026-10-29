@@ -141,10 +141,20 @@ class ContextBuilder:
         if not enabled:
             return result  # Do not access manager.store/retriever/snapshot at all.
         try:
-            hits = self.manager.retriever.search(query, top_k=self.MAX_MEMORIES)
+            hits = self.manager.retriever.search(query, top_k=self.MAX_MEMORIES, now=now)
             for hit in hits[:self.MAX_MEMORIES]:
                 record = hit[0] if isinstance(hit, (tuple, list)) else hit
-                if _field(record, "status") != "active":
+                # A superseded row the user explicitly bounded is a record, not a
+                # stale value: admit it so the model can answer "where did I work
+                # before" -- and likewise a plan declared ahead of time, which the
+                # one-active-value-per-topic key strategy supersedes without the
+                # user withdrawing it. Either bound marks it; present_memory tags
+                # it with a time_note so it is never read as the current state.
+                status = _field(record, "status")
+                if status != "active" and not (
+                        status == "superseded"
+                        and (_field(record, "fact_valid_until") is not None
+                             or _field(record, "fact_valid_from") is not None)):
                     continue
                 source = _field(record, "source")
                 if source not in ("stated", "inferred", "uncertain"):
@@ -153,7 +163,8 @@ class ContextBuilder:
                 # Enforce the documented short inference lifetime at this boundary.
                 if source != "stated" and (updated is None or now - updated > 72 * 3600 or updated > now):
                     continue
-                shared = present_memory(record, sanitize=_text, max_value_chars=320)
+                shared = present_memory(record, sanitize=_text, max_value_chars=320,
+                                        allow_historical=True, allow_future=True, now=now)
                 if shared is None:
                     continue
                 result[source].append({
@@ -162,6 +173,13 @@ class ContextBuilder:
                     "confidence": _number(_field(record, "confidence")),
                     "requires_confirmation": source != "stated" or shared["evidence"]["state"] == "legacy",
                 })
+            # A retired historical record must never head an answer, whatever its
+            # bound: the expired penalty only demotes rows whose bound has already
+            # passed, so a still-future bound would otherwise sort first. Stable
+            # partition keeps untagged records ahead of tagged ones inside a tier
+            # (and leaves an all-untagged tier in its original order).
+            for source in ("stated", "inferred", "uncertain"):
+                result[source].sort(key=lambda record: "time_note" in record)
             if any(result[source] for source in ("stated", "inferred", "uncertain")):
                 result["status"] = "found"
         except Exception:

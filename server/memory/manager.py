@@ -4,12 +4,15 @@ import asyncio
 import math
 import json
 import re
+import time
 from typing import Any
 
 from ..config import memory_cfg
 from ..broadcast import publish_memory_update
-from .extractor import MAX_EVIDENCE_QUOTE_CHARS, MAX_KEY_CHARS, extract_memories, is_direct_user_evidence
+from .extractor import (MAX_EVIDENCE_QUOTE_CHARS, MAX_KEY_CHARS, extract_memories,
+                        is_direct_user_evidence, references_assistant_speech)
 from .retriever import MemoryRetriever
+from .temporal import temporal_bounds
 from .preference import normalize_preference, PreferenceValidationError
 from .store import KINDS, SOURCES, Memory, MemoryStore, store as default_store
 
@@ -146,7 +149,7 @@ class MemoryManager:
             if item is None or (item["source"] != "stated" and infer_budget <= 0):
                 continue
             memory = await asyncio.to_thread(self._persist, item, session_id=session_id,
-                                             expected_write_epoch=expected_write_epoch)
+                                             expected_write_epoch=expected_epoch)
             if memory is not None:
                 if item["source"] != "stated":
                     infer_budget -= 1
@@ -177,6 +180,14 @@ class MemoryManager:
         confidence = _score(raw.get("confidence", {"stated": .95, "inferred": .6, "uncertain": .35}[raw["source"]]))
         if importance is None or confidence is None:
             return None
+        source = raw["source"]
+        # FMR backstop: a turn that relays the assistant's own speech ("你说过X")
+        # is the user quoting the assistant, not affirming X. Downgrade such a
+        # stated candidate to uncertain so it is never surfaced as "你明确说过的"
+        # -- accuracy over recall; it still retrieves, just bounded by the 72h
+        # decay and the infer budget.
+        if source == "stated" and references_assistant_speech(message["text"]):
+            source = "uncertain"
         # Never forward model-controlled status, supersedes, session or decision.
         # Confidence is a ranking convention, not a measured truth probability.
         preference_fields = ("preference_target", "preference_level", "preference_scope")
@@ -189,20 +200,35 @@ class MemoryManager:
         try:
             preference = normalize_preference(
                 raw_preference,
-                quote, value, key.strip().lower(), raw["kind"], "user", raw["source"],
+                quote, value, key.strip().lower(), raw["kind"], "user", source,
                 message_text=message["text"],
             )
         except PreferenceValidationError:
             return None
         return {
-            "kind": raw["kind"], "subject": "user", "source": raw["source"],
+            "kind": raw["kind"], "subject": "user", "source": source,
             "key": key.strip().lower(), "value": " ".join(value.strip().split()),
             "importance": importance,
-            "confidence": {"stated": .95, "inferred": .6, "uncertain": .35}[raw["source"]],
+            "confidence": {"stated": .95, "inferred": .6, "uncertain": .35}[source],
             "operation": raw["operation"], "evidence_message_id": identifier,
             "evidence_quote": quote, "evidence_state": "linked",
             **(preference or {}),
         }
+
+    def _valid_time(self, value: str, evidence_message_id: int | None) -> dict[str, float | None]:
+        """Fact valid-time bounds from the value's explicit range markers.
+
+        Relative periods resolve against the source message's time (when the
+        user said it), not the wall clock, so a delayed extraction cannot shift
+        去年/上个月. No source message (manual write) falls back to now.
+        """
+        now = time.time()
+        if evidence_message_id:
+            message = self.store.get_message(evidence_message_id)
+            if message is not None and message.get("created_at") is not None:
+                now = float(message["created_at"])
+        fact_valid_from, fact_valid_until = temporal_bounds(value, now=now)
+        return {"fact_valid_from": fact_valid_from, "fact_valid_until": fact_valid_until}
 
     def _persist(self, item: dict[str, Any], *, session_id: str | None,
                  expected_write_epoch: int | None = None) -> Memory | None:
@@ -227,6 +253,11 @@ class MemoryManager:
                 )
                 if not explicit_update:
                     item["status"] = "conflict"
+        # Derive valid-time only when the caller supplied neither bound: merging a
+        # caller's single bound with a derived one could build a contradictory pair
+        # that store.upsert rejects.
+        if "fact_valid_from" not in item and "fact_valid_until" not in item:
+            item.update(self._valid_time(item["value"], item.get("evidence_message_id")))
         new_id = self.store.upsert(session_id=session_id, expected_write_epoch=expected_write_epoch, **item)
         memory = self.store.get(new_id) if new_id is not None else None
         if memory is not None:
@@ -270,14 +301,16 @@ class MemoryManager:
         if memory is None or not isinstance(value, str) or not value.strip() or source not in SOURCES:
             return None
         self.store.invalidate_pending()
+        corrected = " ".join(value.strip().split())
         new_id = self.store.upsert(
             kind=memory.kind, subject=memory.subject, key=memory.key,
-            value=" ".join(value.strip().split()), source=source,
+            value=corrected, source=source,
             importance=memory.importance,
             confidence={"stated": .95, "inferred": .6, "uncertain": .35}[source],
             session_id=memory.session_id, evidence_state="manual",
             identity_slot=memory.identity_slot,
             force_revision=True,
+            **self._valid_time(corrected, None),
         )
         updated = self.store.get(new_id) if new_id is not None else None
         if updated is not None:

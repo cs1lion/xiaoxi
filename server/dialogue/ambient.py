@@ -40,12 +40,35 @@ def ambient_cfg() -> dict[str, Any]:
     return merged
 
 
+def config_number(value: Any, default: float) -> float:
+    """Read one configured number, falling back when it is not a number.
+
+    ``backoff_threshold`` guards its own inputs; this covers the remaining
+    ambient config reads -- the three tier thresholds here plus the
+    orchestrator's cycle-reset, proactive and dedupe-window values -- so a typo
+    in pacing.yaml degrades to ``default`` instead of raising where the
+    scheduler cannot recover.
+
+    Booleans are rejected explicitly: PyYAML turns ``no``/``yes`` into
+    ``False``/``True``, and ``float(True)`` is 1.0 -- a silent 1-second threshold
+    rather than an error.
+    """
+    if isinstance(value, bool):
+        return default
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return default
+
+
 def select_tier(idle_seconds: Any, cfg: dict[str, Any] | None = None, *,
                 quiet_mode: bool = False) -> str | None:
-    """Map continuous idle time to a tier (protocol §16.2): 20/45/90 by default.
+    """Map continuous idle time to a tier (protocol §16.2).
 
-    Returns None when disabled or below the first threshold. Quiet mode keeps only
-    the silent micro_act tier.
+    Thresholds come from config (``ambient_cfg``, i.e. pacing.yaml ``ambient``);
+    the module defaults in ``AMBIENT_DEFAULTS`` are micro_act 20s, mumble 28s,
+    proactive 90s. Returns None when disabled, unparseable, or below the first
+    threshold. Quiet mode keeps only the silent micro_act tier.
     """
     cfg = cfg or ambient_cfg()
     if not cfg.get("enabled") or idle_seconds is None:
@@ -54,11 +77,11 @@ def select_tier(idle_seconds: Any, cfg: dict[str, Any] | None = None, *,
         idle = float(idle_seconds)
     except (TypeError, ValueError):
         return None
-    if idle >= float(cfg["proactive_seconds"]):
+    if idle >= config_number(cfg["proactive_seconds"], 90.0):
         tier = "proactive"
-    elif idle >= float(cfg["mumble_seconds"]):
+    elif idle >= config_number(cfg["mumble_seconds"], 28.0):
         tier = "mumble"
-    elif idle >= float(cfg["micro_act_seconds"]):
+    elif idle >= config_number(cfg["micro_act_seconds"], 20.0):
         tier = "micro_act"
     else:
         return None
@@ -162,4 +185,5 @@ def choose_content(*, discovery: Any = None, mood: Any = None, spark: Any = None
 
 
 __all__ = ["AMBIENT_DEFAULTS", "SUPERVISOR_ACTIONS", "TIERS", "ambient_cfg", "backoff_threshold",
-           "build_micro_act", "build_mumble", "choose_content", "new_event_id", "select_tier"]
+           "build_micro_act", "build_mumble", "choose_content", "config_number",
+           "new_event_id", "select_tier"]

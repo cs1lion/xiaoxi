@@ -226,6 +226,8 @@ export function createOpsState() {
     return true;
   }
 
+  // TOOL_EXECUTION 是追加流水：status 的终态取值 done/failed 是本仓约定
+  // （docs/PROTOCOL.md 只列字段名、未枚举取值域），这里不过滤、不分组，照单全收。
   function applyTool(frame) {
     const key = typeof frame.task_id === "string" ? frame.task_id : "";
     if (!state.tools.has(key)) state.tools.set(key, []);

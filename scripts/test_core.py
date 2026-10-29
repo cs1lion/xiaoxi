@@ -506,6 +506,59 @@ def test_contract_gaps_reach_the_packet_end_to_end() -> None:
         db.close()
 
 
+def test_persona_blocks() -> None:
+    print("[persona blocks]")
+    # These six blocks had no direct coverage. They read persona.yaml by direct
+    # subscripting, so a key renamed or dropped there raises here instead of
+    # silently shipping a prompt with a missing section. The shipped config is
+    # complete and config_hot deep-merges onto it, so a partial snapshot cannot
+    # occur in production; what this pins is the contract that keeps every
+    # reply's system prompt whole -- each block non-empty and stable.
+    from server.persona import (  # noqa: E402
+        _identity_block,
+        _knowledge_block,
+        _pacing_block,
+        _state_block,
+        _style_block,
+        _tendency_block,
+        emotion_hint,
+    )
+
+    blocks = {
+        "identity": _identity_block,
+        "state": _state_block,
+        "style": _style_block,
+        "tendency": _tendency_block,
+        "knowledge": _knowledge_block,
+        "pacing": _pacing_block,
+        "emotion_hint": emotion_hint,
+    }
+    for name, block in blocks.items():
+        text = block()
+        check(f"{name} 块非空", bool(text and text.strip()), repr(text)[:60])
+        check(f"{name} 块稳定（重复调用一致）", block() == text)
+    prompt = static_system_prompt()
+    for marker in ("你是", "绝对不要做的事", "稳定性格", "说话风格",
+                   "状态随情境变化", "你知道什么", "节奏规则",
+                   # 仅属于 _render_examples 的标记：examples 清空会让静态 prompt
+                   # 静默少掉整段示例（实测 3046 -> 2663 字）且不报错，上面的段标记
+                   # 抓不到它，故单独钉住。
+                   "正：", "反：", "边界："):
+        check(f"静态 prompt 含 {marker!r}", marker in prompt)
+    # demo_turns 是 build_messages 的缓存前缀（response_strategy 为空时），
+    # few_shot 缺字段会在这里 KeyError；结构断言同时钉住"成对且非空"。
+    turns = demo_turns()
+    check("demo_turns 非空", len(turns) >= 4, f"len={len(turns)}")
+    check(
+        "demo_turns 角色合法且内容非空",
+        all(t.get("role") in ("user", "assistant") and str(t.get("content", "")).strip()
+            for t in turns),
+        repr(turns[:2])[:80],
+    )
+    check("demo_turns 以 user/assistant 成对开头",
+          [t.get("role") for t in turns[:2]] == ["user", "assistant"])
+
+
 def main() -> int:
     for test in (
         test_sanitize,
@@ -519,6 +572,7 @@ def main() -> int:
         test_proactivity_gate,
         test_empty_reply_guard,
         test_circadian_and_mood_reach_the_prompt,
+        test_persona_blocks,
         test_internal_proxy_requires_token,
         test_cancel_records_reason,
         test_contract_layer_wired_into_dispatch,

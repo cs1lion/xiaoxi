@@ -71,6 +71,7 @@ QUERIES = [
     "用户养的猫叫什么名字",
     "用户习惯什么时段写代码",
     "文件夹编号0123的归档说明",
+    "用户从下个月起负责哪个项目的交付",
     QUERY_MISS,
 ]
 
@@ -96,6 +97,11 @@ def seed(store: MemoryStore) -> None:
     store.upsert(kind="fact", key="作息:写代码时段", value="用户可能习惯深夜写代码",
                  source="inferred", importance=0.6, session_id="seed",
                  evidence_state="manual")
+    # 带显式 valid-time 界的行：让 reader 的"内部自洽"断言覆盖 plan-56 放宽后的
+    # 准入路径（superseded 且带界），并发写还会把它同 key supersede 成新的带界行。
+    store.upsert(kind="fact", key="项目:交付窗口", value="用户从下个月起负责甲项目的交付",
+                 source="stated", importance=0.9, session_id="seed",
+                 evidence_state="manual", fact_valid_from=4102444800)
 
 
 def apply_cfg(retriever: MemoryRetriever) -> None:
@@ -122,7 +128,8 @@ def main() -> int:
     reader_rounds = {"n": 0}
 
     # 竞争前的 top-1（锚点行显著占优，并发写不该把它挤掉）。
-    top1_before = {q: retriever.build_context(q, mark_used=False)[1][:1]
+    # deliver_context 的 used_ids/found 是命名字段，下标拆元组那种丢法在这里不可能发生。
+    top1_before = {q: retriever.deliver_context(q, mark_used=False).used_ids[:1]
                    for q in QUERIES if q != QUERY_MISS}
 
     def reader() -> None:
@@ -154,6 +161,13 @@ def main() -> int:
                              value=f"无关填充{base}号第{i}次，与全部基线查询零重合",
                              source="stated", importance=0.3, session_id="conc",
                              evidence_state="manual")
+                # 同 key 反复写带 valid-time 界的行：每笔都把前一条 supersede 成
+                # 「superseded 且带界」，与 reader 的检索在准入上真实竞争。importance
+                # 与 seed 行持平，top-1 锚点断言才会真的被这条竞争考验。
+                store.upsert(kind="fact", key="项目:交付窗口",
+                             value=f"用户从下个月起负责甲项目的交付·并发写{base}号第{i}次",
+                             source="stated", importance=0.9, session_id="conc",
+                             evidence_state="manual", fact_valid_from=4102444800)
         except Exception as exc:  # noqa: BLE001
             errors.append(f"writer{base}: {type(exc).__name__}: {exc}")
 
@@ -184,14 +198,16 @@ def main() -> int:
     print("[竞争结束后：共享实例未被并发打坏]")
     drifted = []
     for q in QUERIES:
-        first = retriever.build_context(q, mark_used=False)
-        second = retriever.build_context(q, mark_used=False)
+        # 完整解包三元组：把整个元组绑给单个名字同样算丢 found（check_memory_contract
+        # 钉的就是这条），而这里要的恰恰是三位逐位相等。
+        first_block, first_ids, first_found = retriever.build_context(q, mark_used=False)
+        second_block, second_ids, second_found = retriever.build_context(q, mark_used=False)
         fresh = MemoryRetriever(store)
         apply_cfg(fresh)
-        fresh_result = fresh.build_context(q, mark_used=False)
-        if first != second:
+        fresh_block, fresh_ids, fresh_found = fresh.build_context(q, mark_used=False)
+        if (first_block, first_ids, first_found) != (second_block, second_ids, second_found):
             drifted.append(f"{q!r}: 连续两次调用不一致")
-        if first != fresh_result:
+        if (first_block, first_ids, first_found) != (fresh_block, fresh_ids, fresh_found):
             drifted.append(f"{q!r}: 共享实例与全新实例不等")
     check("收敛后共享实例稳定且与全新实例逐位相等", not drifted,
           "；".join(drifted[:2]) or "ok")

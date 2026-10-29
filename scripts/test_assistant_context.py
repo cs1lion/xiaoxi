@@ -25,8 +25,8 @@ class FakeRetriever:
         self.hits = list(hits)
         self.calls = []
 
-    def search(self, query, *, top_k):
-        self.calls.append((query, top_k))
+    def search(self, query, *, top_k, now=None):
+        self.calls.append((query, top_k, now))
         return self.hits[:top_k]
 
 

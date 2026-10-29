@@ -1,0 +1,66 @@
+id: valid-time-compound-delivery-offline
+title: 复合句式（同时含现状与未来）的 time_note 不得对整条记录断言非现状
+layer: offline
+origin: >-
+  plan-54 把未来界 time_note 的措辞从「该条自 X 起才生效，不是现在的状况」收窄为
+  「该条有…的时间范围：自 X UTC 起才生效；回答现在/目前类问题不要**把它当作已生效的事实**」，
+  动机正是本用例的 shape：用户真实会一口气说「我现在在乙公司工作，下个月起去丙公司工作」。
+  fact_valid_from 只覆盖「下个月起」那半句，旧措辞却对**整条记录**断言非现状，等于命令
+  模型忽略 value 里正确的现状信息——违反「性格与事实准确性冲突时，准确性优先」。
+
+  plan-69 已在 Python 单测（test_memory_presentation.py 的
+  test_compound_value_note_never_denies_the_present_tense_part）钉住该 shape 的 note；
+  本用例在**黄金门禁层**（走真实 seed→retrieve→deliver 路径）钉住同一件事，证明修复在
+  生产装配路径上生效，而不只在单测里对。
+
+  与 valid-time-future-delivery-offline 的分工：那条用**纯未来界** value 钉「起才生效 +
+  收窄措辞 + 当前事实居前」；本用例换**复合句式** value，专门钉「措辞不得回退成对整条记录
+  的全称现状断言」——因为只有复合句式能让这个错误产生实际危害（纯未来界记录被那样说
+  顶多是啰嗦，复合句式会让模型丢掉真实现状）。
+
+  构造约束（实测得出，勿改）：
+  - **显式界必须经 seed 的 fact_valid_from 传入**。run_evals.py 的 seed_memories 用
+    store.upsert 且透传 fact_valid_from/until，故 eval 层可显式划界。（注意 manager.remember
+    不透传界——其 item 是硬编码白名单，传了会被静默丢弃；这是另一条已记录的事实。）
+  - **查询不能含「现在」**。纯未来界表述与含「现在」的查询字符重合度不足（sim 0.0386
+    < 门 0.08）；复合句式实测 sim 0.2891 可过门，但保守起见仍用不含「现在」的查询。
+  - **用不同 key**（避免 supersede 复杂化；plan-56 放宽准入后同 key 亦可，见 future 用例
+    origin 的订正说明）。
+tags: [memory, valid-time, prompt, wording, hallucination]
+setup:
+  memories:
+    # A. 复合句式记录：value 同时含现状与未来，界只覆盖未来那半句
+    - {kind: fact, subject: user, key: "eval:vt-compound-plan",
+       value: "用户现在在乙公司工作，下个月起去丙公司工作", source: stated,
+       fact_valid_from: 4102444800}
+    # A'. 不带任何界的当前事实（另一个 key）
+    - {kind: fact, subject: user, key: "eval:vt-current-employer",
+       value: "用户现在在乙公司工作", source: stated}
+turns:
+  - 我在哪工作
+pass_rule: all
+checks:
+  # 复合句式记录确实到达最终 Prompt
+  - target: prompt
+    type: contains
+    value: 用户现在在乙公司工作，下个月起去丙公司工作
+  # 带显式「尚未生效」时间标注
+  - target: prompt
+    type: contains
+    value: time_note
+  - target: prompt
+    type: contains
+    value: 起才生效
+  # 措辞必须是收窄后的版本（只禁止"把它当作已生效的事实"）
+  - target: prompt
+    type: contains
+    value: 回答现在/目前类问题不要把它当作已生效的事实
+  # 措辞不得回退成对整条记录的全称现状断言（本用例的核心守卫）
+  - target: prompt
+    type: not_contains
+    value: 不是现在的状况
+  # 不得被描述成已退役的历史记录（两个分支互斥，措辞不能串）
+  - target: prompt
+    type: not_contains
+    value: 已被后来的陈述取代
+status: active

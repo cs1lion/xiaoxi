@@ -145,9 +145,17 @@ def safe_metrics(case: dict) -> dict | None:
     「没跑」，而两者处置相反——前者要人工修快照，后者只是等下一次运行。
     """
     try:
-        return case_metrics(case)
+        metrics = case_metrics(case)
     except Exception:
         return None
+    # R74：语义不可能也当损坏。类型合法但 passed_runs > total_runs（或负值）时，
+    # avg = passed/total 会算出 >1、pass_k = avg**total 更 >1——概率越过 1 是物理
+    # 不可能，显示成「全过概率 225%」就是把数据损坏伪装成正常指标（R16 同款哲学）。
+    # 真实快照 6054 条记录里 passed>total / 负值均 0 出现（run_case 不产出），
+    # 但手改快照或并发 bug 可能引入；这类不进通过率、进「数据损坏」节。
+    if not 0 <= metrics["passed_runs"] <= metrics["total_runs"]:
+        return None
+    return metrics
 
 
 def pct(x: float) -> str:
@@ -159,8 +167,14 @@ def run_verdict(run: dict) -> str:
 
     与 evals_health.run_verdict 同款同因：review 只出现在 T5（judge 三态）
     之后的新快照里，旧快照按 passed 反推不会误判成 review。
+
+    R75：越界值归一成 fail。原样返回时，一个非法 verdict（手改快照，或将来加了
+    第四态却忘了同步下游两处筛选）会同时不进 failed_checks 与 review_checks——
+    那条轮次从两个明细里静默消失，报告层于是既不说它失败也不说它说不清。
+    与 run_evals.classify_results 的未知态口径一致：按失败算，别让漏判静默变成放行。
     """
-    return str(run.get("verdict") or ("pass" if run.get("passed") else "fail"))
+    verdict = str(run.get("verdict") or ("pass" if run.get("passed") else "fail"))
+    return verdict if verdict in ("pass", "fail", "review") else "fail"
 
 
 def safe_id(cid: str) -> str:

@@ -1,0 +1,54 @@
+id: valid-time-history-delivery-offline
+title: 显式划界的历史事实进入最终 Prompt：带时间标注、排在当前事实之后、无界旧值不进场
+layer: offline
+origin: >-
+  valid-time 增量4/5 + 跨期体检。superseded 且带 fact_valid_until 的行是用户显式划定
+  边界的历史记录，必须到达模型上下文——否则 found=False 会让 persona 注入
+  「你没有任何相关记忆」，而同一轮又在交付该记忆。它还必须带 time_note、且不得排在
+  同 key 当前事实之前（已过期边界只软惩罚，未来边界不惩罚，故交付层需稳定分区）。
+  无界旧值被 supersede 只是过期旧值，不得进场。此用例在黄金门禁层（run_evals 离线层，
+  无需 key）钉住上述三条。
+tags: [memory, valid-time, prompt, ordering, hallucination]
+setup:
+  memories:
+    # A. 显式划界的历史事实：同 key 被后面的当前事实 supersede，但边界是用户划的
+    - {kind: fact, subject: user, key: "eval:vt-employer",
+       value: "用户到去年为止在甲公司工作", source: stated,
+       fact_valid_until: 1735603199}
+    # A'. 同 key 的当前事实
+    - {kind: fact, subject: user, key: "eval:vt-employer",
+       value: "用户现在在乙公司工作", source: stated}
+    # B. 对照组：无界旧值被 supersede —— 只是过期旧值，不是历史记录
+    - {kind: fact, subject: user, key: "eval:vt-city",
+       value: "用户以前住在北京", source: stated}
+    - {kind: fact, subject: user, key: "eval:vt-city",
+       value: "用户现在住在上海", source: stated}
+turns:
+  - 我以前在哪工作
+pass_rule: all
+checks:
+  # 历史事实确实到达 Prompt，且带显式时间标注
+  - target: prompt
+    type: contains
+    value: 用户到去年为止在甲公司工作
+  - target: prompt
+    type: contains
+    value: time_note
+  - target: prompt
+    type: contains
+    value: 已被后来的陈述取代
+  - target: prompt
+    type: contains
+    value: 回答现在/目前类问题不要采用
+  # 同 key 当前事实也在，且排在历史事实之前
+  - target: prompt
+    type: contains
+    value: 用户现在在乙公司工作
+  - target: prompt
+    type: custom
+    value: "evals.checks:current_before_history"
+  # 对照组：无界 superseded 旧值不得进场
+  - target: prompt
+    type: not_contains
+    value: 用户以前住在北京
+status: active

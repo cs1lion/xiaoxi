@@ -211,5 +211,203 @@ class ProjectionTests(unittest.TestCase):
             present_memory(record(), sanitize=None)
 
 
+class HistoricalProjectionTests(unittest.TestCase):
+    """allow_historical: opt-in only, so the exported shape never changes.
+
+    /api/memories, the starmap and the durable export all call present_memory
+    with the default, so a superseded row must stay omitted there. Only the
+    model-facing builder opts in, and then the record carries a time_note.
+    """
+
+    def project(self, **changes):
+        return present_memory(record(**changes), sanitize=sanitize)
+
+    def test_superseded_row_is_omitted_by_default(self):
+        # The default is the API/starmap/durable shape: a superseded row is out.
+        self.assertIsNone(self.project(status='superseded', fact_valid_until=1735689599))
+
+    def test_allow_historical_admits_bounded_superseded_with_time_note(self):
+        shared = present_memory(
+            record(status='superseded', fact_valid_until=1735689599),
+            sanitize=sanitize, allow_historical=True)
+        self.assertIsNotNone(shared)
+        self.assertEqual(shared['value'], '用户最近也喜欢喝红茶')
+        note = shared['time_note']
+        self.assertIn('2024-12-31', note)
+        self.assertIn('已被后来的陈述取代', note)
+        self.assertIn('回答现在/目前类问题不要采用', note)
+
+    def test_allow_historical_still_omits_unbounded_superseded(self):
+        # No explicit bound -> a plain stale value, never a historical record.
+        self.assertIsNone(present_memory(
+            record(status='superseded'), sanitize=sanitize, allow_historical=True))
+        self.assertIsNone(present_memory(
+            record(status='superseded', fact_valid_until=None),
+            sanitize=sanitize, allow_historical=True))
+
+    def test_allow_historical_leaves_active_records_unchanged(self):
+        default = self.project()
+        opted_in = present_memory(record(), sanitize=sanitize, allow_historical=True)
+        self.assertEqual(default, opted_in)
+        self.assertNotIn('time_note', default)
+
+    def test_historical_preference_note_matches_the_top_level_note(self):
+        # A superseded preference row must not keep a "may still hold" wording
+        # beside the authoritative "replaced" note.
+        shared = present_memory(
+            record(status='superseded', fact_valid_until=1735689599,
+                   preference_scope='long_term'),
+            sanitize=sanitize, allow_historical=True)
+        self.assertIn('preference', shared)
+        self.assertEqual(shared['preference']['time_note'], shared['time_note'])
+        self.assertNotIn('仍可能变化', shared['preference']['time_note'])
+
+    def test_time_note_wording_is_graded_by_source(self):
+        # A stated bound is the user's own; an assistant-relayed claim (which the
+        # FMR backstop downgrades to uncertain) must not be described as something
+        # "you explicitly set", even though the bound came from the recorded text.
+        stated = present_memory(
+            record(status='superseded', fact_valid_until=1735689599),
+            sanitize=sanitize, allow_historical=True)
+        self.assertIn('你明确划定', stated['time_note'])
+        relayed = present_memory(
+            record(status='superseded', fact_valid_until=1735689599, source='uncertain'),
+            sanitize=sanitize, allow_historical=True)
+        self.assertIn('记录中标注', relayed['time_note'])
+        self.assertNotIn('你明确划定', relayed['time_note'])
+        # Both still forbid using the row as the current state.
+        for note in (stated['time_note'], relayed['time_note']):
+            self.assertIn('回答现在/目前类问题不要采用', note)
+
+    def test_invalid_allow_historical_is_rejected_explicitly(self):
+        for bad in (1, 0, 'true', None, []):
+            with self.subTest(bad=bad), self.assertRaises(ValueError):
+                present_memory(record(), sanitize=sanitize, allow_historical=bad)
+
+
+class FutureProjectionTests(unittest.TestCase):
+    """allow_future: the mirror opt-in, so the exported shape never changes.
+
+    A future-bounded row is ACTIVE, so the default path (/api/memories, the
+    starmap, the durable export) presents it -- which is exactly why the note
+    must stay opt-in: turning it on unconditionally would change those shapes.
+    Only the model-facing builder opts in.
+    """
+
+    NOW = 1735689600  # 2025-01-01 UTC; the record() fixture's updated_at.
+
+    def project(self, **changes):
+        return present_memory(record(**changes), sanitize=sanitize,
+                              allow_future=True, now=self.NOW)
+
+    def test_future_bounded_active_row_carries_a_time_note(self):
+        shared = self.project(fact_valid_from=self.NOW + 86400)
+        self.assertIsNotNone(shared)
+        note = shared['time_note']
+        self.assertIn('2025-01-02', note)
+        self.assertIn('起才生效', note)
+        self.assertIn('回答现在/目前类问题不要把它当作已生效的事实', note)
+
+    def test_note_is_off_by_default_so_the_exported_shape_never_changes(self):
+        # The default path presents the same active row with no extra field.
+        default = present_memory(record(fact_valid_from=self.NOW + 86400),
+                                 sanitize=sanitize)
+        opted_in = self.project(fact_valid_from=self.NOW + 86400)
+        self.assertNotIn('time_note', default)
+        self.assertEqual(default, {k: v for k, v in opted_in.items() if k != 'time_note'})
+
+    def test_current_and_past_bounds_never_produce_a_note(self):
+        # Only a lower bound still ahead of `now` is a plan. NULL (the default),
+        # a past start, and a start exactly at now are all "already in force".
+        for bound in (None, self.NOW - 86400, self.NOW):
+            with self.subTest(bound=bound):
+                shared = self.project(fact_valid_from=bound)
+                self.assertIsNotNone(shared)
+                self.assertNotIn('time_note', shared)
+
+    def test_historical_and_future_notes_are_mutually_exclusive(self):
+        # `historical` requires superseded, `future` requires active, so a row can
+        # never be told it is both retired and not-yet-started.
+        shared = self.project(status='superseded', fact_valid_until=self.NOW - 86400,
+                              fact_valid_from=self.NOW - 172800)
+        self.assertIsNone(shared)  # superseded is out unless allow_historical
+        shared = present_memory(
+            record(status='superseded', fact_valid_until=self.NOW - 86400,
+                   fact_valid_from=self.NOW - 172800),
+            sanitize=sanitize, allow_historical=True, allow_future=True, now=self.NOW)
+        self.assertIn('已被后来的陈述取代', shared['time_note'])
+        self.assertNotIn('起才生效', shared['time_note'])
+
+    def test_superseded_row_with_a_future_lower_bound_keeps_only_the_retired_note(self):
+        # The shape that could actually fire both branches: superseded (so the
+        # retired note applies) AND a lower bound still ahead of `now`. The
+        # `elif` must keep the future note from overwriting the retired one, so
+        # the row is never described as a plan when the user already retired it.
+        shared = present_memory(
+            record(status='superseded', fact_valid_until=self.NOW + 86400,
+                   fact_valid_from=self.NOW + 3600),
+            sanitize=sanitize, allow_historical=True, allow_future=True, now=self.NOW)
+        self.assertIn('已被后来的陈述取代', shared['time_note'])
+        self.assertNotIn('起才生效', shared['time_note'])
+
+    def test_future_note_wording_is_graded_by_source(self):
+        stated = self.project(fact_valid_from=self.NOW + 86400)
+        self.assertIn('你明确划定', stated['time_note'])
+        relayed = self.project(fact_valid_from=self.NOW + 86400, source='uncertain')
+        self.assertIn('记录中标注', relayed['time_note'])
+        self.assertNotIn('你明确划定', relayed['time_note'])
+
+    def test_malformed_bound_is_ignored_rather_than_annotated(self):
+        # A non-numeric or non-finite bound must not be compared against `now`.
+        for bad in ('soon', True, float('inf'), float('nan')):
+            with self.subTest(bound=bad):
+                shared = self.project(fact_valid_from=bad)
+                self.assertIsNotNone(shared)
+                self.assertNotIn('time_note', shared)
+
+    def test_absurdly_large_bound_is_ignored_rather_than_raising(self):
+        # An int too large for float conversion makes math.isfinite itself raise
+        # OverflowError. The sibling preference-date path guards this; so must the
+        # future branch, or one absurd row breaks the whole projection.
+        shared = self.project(fact_valid_from=10 ** 1000)
+        self.assertIsNotNone(shared)
+        self.assertNotIn('time_note', shared)
+
+    def test_invalid_allow_future_is_rejected_explicitly(self):
+        for bad in (1, 0, 'true', None, []):
+            with self.subTest(bad=bad), self.assertRaises(ValueError):
+                present_memory(record(), sanitize=sanitize, allow_future=bad)
+
+    def test_allow_future_without_a_usable_now_is_rejected(self):
+        # Silently skipping the note would let a future plan read as current.
+        for bad in (None, 'now', True, float('inf')):
+            with self.subTest(now=bad), self.assertRaises(ValueError):
+                present_memory(record(fact_valid_from=self.NOW + 86400),
+                               sanitize=sanitize, allow_future=True, now=bad)
+
+    def test_allow_future_without_a_bound_needs_no_now(self):
+        # The default corpus (no valid-time) must stay untouched: no bound means
+        # no comparison, so a caller that opts in without a clock still works.
+        shared = present_memory(record(), sanitize=sanitize, allow_future=True)
+        self.assertIsNotNone(shared)
+        self.assertNotIn('time_note', shared)
+
+    def test_compound_value_note_never_denies_the_present_tense_part(self):
+        # plan-54 narrowed the wording precisely for this shape. A user really says
+        # "我现在在乙公司，下个月起去丙公司" in one breath; fact_valid_from bounds only
+        # the "下个月起" half. The old wording ("不是现在的状况") asserted the WHOLE
+        # record was non-current, which ordered the model to discard a true present
+        # fact. The note must scope its prohibition to the not-yet-in-effect part.
+        shared = present_memory(
+            record(value='用户现在在乙公司工作，下个月起去丙公司工作',
+                   fact_valid_from=self.NOW + 86400),
+            sanitize=sanitize, allow_future=True, now=self.NOW)
+        note = shared['time_note']
+        self.assertIn('起才生效', note)
+        self.assertIn('不要把它当作已生效的事实', note)
+        self.assertNotIn('不是现在的状况', note,
+                         '不得对整条记录断言非现状——那会让模型忽略 value 里真实的现状部分')
+
+
 if __name__ == '__main__':
     unittest.main(verbosity=2)

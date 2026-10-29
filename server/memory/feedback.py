@@ -33,6 +33,9 @@ FEEDBACK_DEFAULTS: dict[str, Any] = {
     "utility_alpha": 0.3,
     "utility_prior_strength": 3.0,
     "max_settle_age_hours": 12.0,
+    "sweep_enabled": False,
+    "sweep_batch": 200,
+    "sweep_interval_minutes": 30.0,
     "min_overlap": 0.12,
 }
 
@@ -95,8 +98,15 @@ def memory_overlap(memory: "Memory", text: str) -> float:
     Containment (shared / smaller set), not Jaccard: a short memory mentioned
     inside a long message is a stronger attribution signal than a long memory
     that merely shares a topic word.
+
+    ``evidence_quote`` is deliberately excluded. It is what the user said when
+    the memory was written, not what the memory claims, so counting it lets a
+    reply that echoes the original wording attribute to a memory whose content
+    is unrelated -- measured: a "喜欢吃番茄炒蛋" memory quoted from "我在甲公司工作"
+    passed the gate on "不对，我早就不在甲公司了" purely on the quote, and was
+    punished for a correction it had nothing to do with.
     """
-    haystack = f"{memory.key} {memory.value} {memory.evidence_quote or ''}"
+    haystack = f"{memory.key} {memory.value}"
     stored, said = _bigrams(haystack), _bigrams(text)
     if not stored or not said:
         return 0.0
@@ -118,8 +128,19 @@ def classify(text: str) -> int:
 def attribute(text: str, memories: list["Memory"], *, min_overlap: float = 0.12
               ) -> list[tuple[int, float]]:
     """Return [(memory_id, reward 1|0)] only for claims the user responded to."""
+    # classify() strips before matching (its _POSITIVE group is ^-anchored), so the
+    # ambiguity check below must search the same normalized text -- otherwise a
+    # reply with leading whitespace slips past the guard.
+    stripped = " ".join((text or "").split())
     polarity = classify(text)
     if polarity == 0 or not memories:
+        return []
+    # A compound reply ("甲公司说对了，加班可没这回事") carries both signals.
+    # classify() resolves it to whichever it checks first, so applying that one
+    # polarity to every overlapping memory would punish a claim the user just
+    # affirmed. Treat the mixed signal as unusable -- the same conservative rule
+    # the low-overlap branch below already applies.
+    if _POSITIVE.search(stripped) and _NEGATIVE.search(stripped):
         return []
     attributed = [memory for memory in memories
                   if memory_overlap(memory, text) >= min_overlap]
@@ -201,5 +222,45 @@ def settle_pending(store: "MemoryStore", *, session_id: str, current_message_id:
     return result
 
 
+def sweep_expired_usage(store: "MemoryStore", *, now: float | None = None,
+                        batch: int | None = None) -> dict[str, Any]:
+    """Bound the open ``memory_usage`` rows a stopped session never settles.
+
+    ``settle_pending`` runs only inside ``observe_turn`` and is session-scoped: a
+    session that stops producing user messages leaves its injected turn unsettled
+    forever. This sweeper is the backstop -- it settles aged-open rows across all
+    sessions as ``expired`` with no reward, exactly the terminal state
+    ``settle_pending`` uses for an over-window turn. It never touches Q (no
+    ``reinforce_memory``) and never perturbs ranking: ``settle_usage`` does bump
+    ``store.version``, but the retriever's text index is keyed on the searchable
+    content ``(id, key, value)``, and settling usage changes none of it, so no
+    rebuild is triggered.
+
+    Off the dialogue path; it never raises -- a failure lands in the returned
+    ``error`` field for the caller to log, never the user's to hear. Gated by
+    ``feedback.enabled``; the on/off switch (``sweep_enabled``) lives at the call
+    site so the mechanism stays directly testable.
+    """
+    cfg = feedback_cfg()
+    result: dict[str, Any] = {"enabled": bool(cfg["enabled"]), "swept": 0,
+                              "open_remaining": None, "error": None}
+    if not cfg["enabled"]:
+        return result
+    max_age = _number(cfg.get("max_settle_age_hours"), 12.0, 0.0, 24 * 365) * 3600
+    try:
+        stamp = time.time() if now is None else float(now)
+        limit = (int(_number(cfg.get("sweep_batch"), 200, 1, 100000))
+                 if batch is None else max(1, int(batch)))
+        rows = store.expired_pending_usage(stamp - max_age, limit)
+        # One transaction for the whole batch: per-row settle_usage fsyncs once
+        # per row, which froze the event loop ~2s per 200-row batch on Windows.
+        result["swept"] = store.settle_usage_bulk([u["id"] for u in rows],
+                                                  reason="expired", now=stamp)
+        result["open_remaining"] = store.count_open_usage()
+    except Exception as exc:  # background reaper: report, never raise
+        result["error"] = repr(exc)
+    return result
+
+
 __all__ = ["FEEDBACK_DEFAULTS", "attribute", "classify", "feedback_cfg", "memory_overlap",
-           "settle_pending"]
+           "settle_pending", "sweep_expired_usage"]

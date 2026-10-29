@@ -52,7 +52,7 @@
 
 - **三档置信度装配**：`inferred`/`uncertain` 有 72h 硬过期而 `stated` 保守永不过期（`retriever.py:138,158-161`），可按档在 SQL 里过滤——纯 markdown 人肉标签做不到。
 - **检索为空显式注入负向约束、禁止脑补共同经历**：`persona.py:224-230`（"编造共同经历是最严重的错误"），加上 `omitted_by_budget` 支路 `orchestrator.py:517-518` 的第二道约束（两者是不同家族）。
-- **记忆删除是 SQLite 物理硬删不留索引**：与 ai-memory"永不硬删"相反；目前 `_scrub_deleted_indexes`（`store.py:772-804`）只覆盖 `memory_usage.memory_ids`、`memory_usage.reward_detail`、`lessons.evidence_refs` 三处——正是 MEM-OPT-02 的靶点。
+- **记忆删除是 SQLite 物理硬删不留索引**：与 ai-memory"永不硬删"相反；目前 `_scrub_deleted_indexes`（`server/memory/store.py`，行号会漂移、以函数名为准）只覆盖 `memory_usage.memory_ids`、`memory_usage.reward_detail`、`lessons.evidence_refs` 三处——正是 MEM-OPT-02 的靶点。
 - **使用学习**：`memory_usage` 记注入与结算、Q 值/utility 链路（`retriever.py:162-168` 的 utility 只能对已过相关性门的候选重排，不能创造相关性）。
 - **lessons 程序性记忆**：active lessons 有 `retire_overflow` 的 `max_active` 上限压制（默认 24）。
 - **supersession**：upsert 链、`supersedes` 指向被删行置 NULL 断链。
@@ -112,7 +112,7 @@
 
 ### MEM-OPT-02 · 硬删除索引清扫扩展到全部 memory id 引用点 · P1 · 工作量 medium
 
-**问题（须先证伪）。** `_scrub_deleted_indexes`（`store.py:772-804`）目前只清 3 处。初稿指认的 `seeds.source_refs`、`reflections.source_refs`、`mood_state.source_refs`、`graph_edges` 与 `commission_context` 留存 memory id，被对抗评审逐条推翻：`commission_context.py` 是纯函数模块不落库；`graph_edges` 记忆节点用 `mem:` 前缀且 starmap 已按端点存在性过滤；四条生产路径的写入方取值域今天都不产 `memory:`。因此当前问题表述必须**降级为"契约预留但未兑现"的潜在面**——`PROTOCOL.md:222` 与 §18.2 唯一指定指向 memory 的字段是 `seeds.related_refs`，而它在生产中全程为 `[]`。**落地前必须先跑 SQL 交叉核对真实命中数；若命中为 0，本单只做注册表基建与 related_refs 靶点的契约兑现，优先级随之下调。**
+**问题（须先证伪）。** `_scrub_deleted_indexes`（`server/memory/store.py`，行号会漂移、以函数名为准）目前只清 3 处。初稿指认的 `seeds.source_refs`、`reflections.source_refs`、`mood_state.source_refs`、`graph_edges` 与 `commission_context` 留存 memory id，被对抗评审逐条推翻：`commission_context.py` 是纯函数模块不落库；`graph_edges` 记忆节点用 `mem:` 前缀且 starmap 已按端点存在性过滤；四条生产路径的写入方取值域今天都不产 `memory:`。因此当前问题表述必须**降级为"契约预留但未兑现"的潜在面**——`PROTOCOL.md:222` 与 §18.2 唯一指定指向 memory 的字段是 `seeds.related_refs`，而它在生产中全程为 `[]`。**落地前必须先跑 SQL 交叉核对真实命中数；若命中为 0，本单只做注册表基建与 related_refs 靶点的契约兑现，优先级随之下调。**
 
 **方案。**
 1. 先补证据：跑一条 SQL 把 memories 全部 id 与 `seeds.source_refs`/`seeds.related_refs`/`reflections.source_refs`/`mood_state.source_refs`/`graph_edges.source,target`/`lessons.evidence_refs` 交叉，贴出真实命中数。

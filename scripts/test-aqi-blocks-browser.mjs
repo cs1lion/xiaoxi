@@ -361,6 +361,26 @@ assert.match(
 await page.waitForFunction(() => document.getElementById("opsPending")?.hidden === true, null, { timeout: 4000 });
 pass("心流防打扰：胶囊只报数不催，队列清空后熄灯");
 
+// ---- ⑥ 前端渲染防御：经 mock WS 递原始积木（绕过服务端构造器），blocks.js
+//        的枚举回退必须自己兜住——与 scripts/test_aqi_blocks.py 里服务端
+//        alert_card level→warn、swimlane status→running 互为镜像。deck 已满，
+//        用独有文案定位自己递的卡，不数总数。 ----
+await emitTurn({ type: "aqi_blocks", turn_id: "t-fallback", layout: "stage_holo", nav: null, gaze: null,
+  blocks: [
+    { kind: "alert_card", title: "异常告警回退", level: "banana" },
+    { kind: "swimlane_strip", lanes: [{ agent_id: "fb1", agent_name: "小返", title: "状态回退", status: "banana" }] },
+  ],
+});
+const fbAlert = page.locator('#holoDeck .aqi-block[data-kind="alert_card"]').filter({ hasText: "异常告警回退" });
+await fbAlert.waitFor({ state: "visible" });
+assert.equal(await fbAlert.getAttribute("data-level"), "warn", "前端对非法 level 回退到 warn");
+assert.ok(await fbAlert.evaluate((el) => el.className.includes("is-warn")), "卡片类名同步 is-warn");
+const fbLane = page.locator("#holoDeck .aqi-lane").filter({ hasText: "小返" });
+await fbLane.waitFor({ state: "visible" });
+assert.equal(await fbLane.getAttribute("data-status"), "running", "前端对非法 status 回退到 running");
+assert.match(await fbLane.textContent(), /小返.*干活中/, "回退后状态文案取 running 的『干活中』");
+pass("前端渲染防御：非法 level/status 回退到安全默认");
+
 // ---- ⑤ 收尾：全程无 bot 文字气泡、无未捕获错误 ----
 assert.equal(await page.locator("#chat .msg.bot").count(), 0, "整场对话小溪没有输出过一个文字气泡");
 assert.deepEqual(errors, [], `全流程无未捕获页面错误: ${errors.join("; ")}`);

@@ -1,5 +1,28 @@
 // A real task object, backed by the existing versioned task and linked-reminder APIs.
 const STATUS = { open:'未开始', in_progress:'进行中', waiting:'等待中', done:'已完成', cancelled:'已取消' };
+const LINKED_REMINDER_STATUSES = ['scheduled', 'queued', 'notified'];
+
+/** 状态标签：未知 status 原样降级显示，不猜、不吞。 */
+export function taskStatusLabel(status) {
+  return STATUS[status] || status;
+}
+
+/** 这条任务的关联提醒：同 task_id 且仍在生命周期内。
+ *  done/cancelled 时服务端会取消尚未投递的关联提醒，所以这里只认这三个状态。 */
+export function linkedTaskReminders(reminders, taskId) {
+  return (reminders || []).filter(
+    reminder => reminder.task_id === taskId && LINKED_REMINDER_STATUSES.includes(reminder.status));
+}
+
+/** 保存失败的用户可读文案。服务端 store.update_task 版本不匹配抛的是
+ *  "task version conflict"（经 call()→HTTP 400→api() 的 Error.message），
+ *  所以这个英文子串是活契约，不是随手写的兜底。 */
+export function taskSaveError(message) {
+  const text = typeof message === 'string' ? message : String(message);
+  return text.includes('version conflict')
+    ? '任务已在其他窗口更新。请刷新后重试，当前输入仍保留。'
+    : `未保存：${text}`;
+}
 const element = (tag, text, className) => {
   const el = document.createElement(tag);
   if (text !== undefined) el.textContent = text;
@@ -10,7 +33,7 @@ export function renderTaskCard(task, { api, refresh, reminders = [] }) {
   const card = element('article', undefined, 'assistant-card task-progress-card');
   card.dataset.taskId = task.id;
   const heading = element('div', undefined, 'task-progress-heading');
-  heading.append(element('strong', task.title), element('span', STATUS[task.status] || task.status, 'task-status'));
+  heading.append(element('strong', task.title), element('span', taskStatusLabel(task.status), 'task-status'));
   const message = element('p', '', 'task-feedback'); message.setAttribute('role','status');
   const controls = element('div', undefined, 'assistant-row');
   let pending = false;
@@ -27,9 +50,7 @@ export function renderTaskCard(task, { api, refresh, reminders = [] }) {
         try { await refresh(); }
         catch { message.textContent = '已保存，但列表刷新失败，请稍后刷新。'; }
       } catch (error) {
-        message.textContent = error.message.includes('version conflict')
-          ? '任务已在其他窗口更新。请刷新后重试，当前输入仍保留。'
-          : `未保存：${error.message}`;
+        message.textContent = taskSaveError(error.message);
       } finally {
         pending = false; card.removeAttribute('aria-busy'); buttons.forEach(el => el.disabled = false);
       }
@@ -66,7 +87,7 @@ export function renderTaskCard(task, { api, refresh, reminders = [] }) {
     }));
     card.append(reminderDetails);
   } else controls.append(action('重新打开', () => update({ status:'open' })));
-  const linked = reminders.filter(reminder => reminder.task_id === task.id && ['scheduled','queued','notified'].includes(reminder.status));
+  const linked = linkedTaskReminders(reminders, task.id);
   if (linked.length) {
     const list = element('ul',undefined,'task-reminder-list');
     for (const reminder of linked) list.append(element('li', `${reminder.status === 'notified' ? '已投递' : '提醒'} · ${new Date(reminder.scheduled_at*1000).toLocaleString()} · ${reminder.content}`));

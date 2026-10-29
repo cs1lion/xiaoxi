@@ -179,6 +179,26 @@ agents:
     max_concurrent: 1
     eval_commands: [required_fields, artifacts_exist, token_budget, acceptance_met]
 
+  # M1（issue #60）第一个可派单的 MCP Worker：经 McpBridgeAdapter 桥接一个
+  # 本地 stdio MCP server，把「通过 MCP 操作外部工具」从 0 变 1。产物根目录
+  # 由 server 自决（AQI_MCP_ECHO_ROOT，默认 data/commissions）——mcp 适配器
+  # 不转发花名册 env。executable 显式写 venv 解释器：适配器走 PATH 解析，
+  # 写 "python" 会落到系统解释器，与 docs/TESTING.md 的 venv 口径不一致。
+  # 关键词与 dsh/claude/scout 零重叠；MCP/桥接类意图唯一命中（同分时选将
+  # 按花名册顺序，不保证任意意图唯一）。
+  - id: mcp_echo
+    name: MCP 回声工
+    adapter: mcp
+    executable: ".venv/Scripts/python.exe"
+    args: ["scripts/mcp_servers/echo_server.py"]
+    timeout: 60
+    summary: MCP 回声工：经 MCP 桥接的受控小任务执行体；成果落在独立工作目录
+    strengths: [MCP, 外部工具, 桥接, 调用]
+    weaknesses: [不联网, 不删除既有文件, 只做受控小任务]
+    cost_tier: cheap
+    max_concurrent: 1
+    eval_commands: [required_fields, artifacts_exist, token_budget, acceptance_met]
+
   # Codex 已接通（15722 的 /v1/responses 透传到 15721），但 Windows 上
   # workspace-write 沙箱起不来，只能 danger-full-access。按 Phase A 的 D-13，
   # 生产隔离没定之前不放进默认选将池；把 enabled 改成 true 即可启用。
@@ -242,6 +262,17 @@ durable:
   skills_dir: config/skills
   # MCP server 配置。默认空文件 = 不连任何 server；工具会按
   # mcp__<server>__<tool> 注册，有副作用的工具自动走确认链。
+  # M4（issue #63）起落了第一个 server：echo，即 M1 那个 stdio MCP server。
+  # cwd: "." 由 sidecar 解析成仓库根（mcp.ts 的 resolve(repoRoot(), cwd)），
+  # 相对 args 因此有处可落——没有它子进程找不到脚本（M4 复审对照实验证实），
+  # 这条是承重墙不是装饰；approval: mutating 是缺省值，显式写出让闸门可见。
+  # command 走 PATH 解析（本机落到 Anaconda 解释器）：echo_server 纯标准库，
+  # 两种解释器都跑得动；将来加依赖第三方包的 server 时记住这条口径——
+  # connectMcp 对连不上的 server 是「记日志+跳过」，症状是工具目录里缺项。
+  # 宿主侧目前只有库方法：durable 适配器的 .tools(commission_id)（两跳——
+  # lookup 拿 task_id 再 GET /v1/runs/{id}/tools；内核里没有这一单回 None，
+  # 不当空清单）。HTTP 出口（GET /internal/durable/runs/{id}/tools）属 API 面
+  # 扩展，留作后续 effort，见 docs/PROTOCOL_REQUEST_M5_M6.md D 组。
   mcp_config: config/mcp.json
   # 需要老板确认后才放行的工具（逗号分隔）。MCP 的写工具会自动加入；这里只列
   # 额外的内置工具。run_worker 会按模型给的命令行拉起本地执行体，默认拦住；

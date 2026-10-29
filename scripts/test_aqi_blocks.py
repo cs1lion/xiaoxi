@@ -202,6 +202,48 @@ class ComposeTests(unittest.TestCase):
         self.assertEqual(block["title"], "她的自记")
 
 
+class NumericValueHardeningTests(unittest.TestCase):
+    """NaN/±inf 与无上限字符串不得进积木。
+
+    json.dumps(float("nan")) 产出 "NaN"、json.dumps(float("inf")) 产出 "Infinity"，
+    都不是合法 JSON：前端 JSON.parse 会拒掉整条 aqi_blocks 消息（静默不渲染，后端无错）；
+    而 int(nan)/int(inf) 直接抛。metric/count 的真实运算（0/0、溢出）会产生它们，
+    所以 composer 在出口过滤，不信上游。
+    """
+
+    def test_metric_flame_drops_non_finite_values(self):
+        block = A.metric_flame([{"label": "延迟", "value": float("nan")},
+                                {"label": "速率", "value": float("inf")},
+                                {"label": "调用", "value": 42}])
+        self.assertEqual([m["value"] for m in block["metrics"]], [42])
+
+    def test_metric_flame_all_non_finite_yields_none(self):
+        self.assertIsNone(A.metric_flame([{"label": "x", "value": float("nan")}]))
+
+    def test_metric_flame_bounds_unbounded_string_value(self):
+        block = A.metric_flame([{"label": "备注", "value": "啊" * 9000}])
+        self.assertEqual(len(block["metrics"][0]["value"]), A._MAX_VALUE)
+
+    def test_memo_note_drops_non_finite_meta(self):
+        block = A.memo_note("手头清净", "没有待办",
+                            meta={"有效": 3, "坏数": float("nan"),
+                                  "爆炸": float("inf"), "布尔": True})
+        self.assertEqual(block["meta"], {"有效": 3})
+
+    def test_swimlane_non_finite_step_idx_becomes_zero(self):
+        # int(nan)/int(inf) 会抛；_int 对非有限值返回 0，不崩。
+        block = A.swimlane_strip([{"agent_id": "scribe", "step_idx": float("nan")}])
+        self.assertEqual(block["lanes"][0]["step_idx"], 0)
+
+    def test_huge_finite_int_does_not_overflow(self):
+        # math.isfinite(10**400) raises OverflowError; a finite int must pass through.
+        self.assertEqual(A._int(10**400), 10**400)
+        block = A.metric_flame([{"label": "大数", "value": 10**400}])
+        self.assertEqual(block["metrics"][0]["value"], 10**400)
+        lane = A.swimlane_strip([{"agent_id": "s", "step_idx": 10**400}])["lanes"][0]
+        self.assertEqual(lane["step_idx"], 10**400)
+
+
 class BlockKindContractTests(unittest.TestCase):
     """协议 §23.2 七种积木：构造器的字段约束、异常输入与真实数据铁律。"""
 
@@ -297,6 +339,66 @@ class BlockKindContractTests(unittest.TestCase):
         self.assertIsNone(A.parse_aqi_block('{"kind":"note_snippet"}'))   # 缺 text
         self.assertIsNone(A.parse_aqi_block('not json'))
         self.assertIsNone(A.parse_aqi_block('[]'))
+
+
+class ConstructorEdgeCaseTests(unittest.TestCase):
+    """构造器对越界枚举值/坏条目的保守回退——此前无钉子，防静默回归。"""
+
+    def test_alert_card_invalid_level_falls_back_to_warn(self):
+        self.assertEqual(A.alert_card("x", level="critical")["level"], "critical")
+        for bad in ("purple", "", None, 42):
+            self.assertEqual(A.alert_card("x", level=bad)["level"], "warn", repr(bad))
+
+    def test_swimlane_invalid_status_falls_back_to_running(self):
+        block = A.swimlane_strip([{"agent_id": "s", "status": "banana"},
+                                  {"agent_id": "t", "status": "blocked"}])
+        self.assertEqual(block["lanes"][0]["status"], "running")
+        self.assertEqual(block["lanes"][1]["status"], "blocked")
+
+    def test_spotlight_drops_artifact_without_ref(self):
+        block = A.spotlight_card("成果", artifacts=[{"kind": "稿"},
+                                                    {"kind": "稿", "ref": "note:1"}])
+        self.assertEqual(block["artifacts"], [{"kind": "稿", "ref": "note:1"}])
+        # 全无 ref → 干脆不出 artifacts 键，但卡本身（有 title）仍成立
+        self.assertNotIn("artifacts", A.spotlight_card("成果", artifacts=[{"kind": "稿"}]))
+
+    def test_invalid_tone_is_dropped_valid_kept(self):
+        self.assertNotIn("tone", A.note_snippet("正文", tone="purple"))
+        self.assertEqual(A.note_snippet("正文", tone="gold")["tone"], "gold")
+
+    def test_actions_dedup_cap_and_require_colon(self):
+        self.assertEqual(
+            A._clean_actions([{"label": "a", "cmd": "x:1"}, {"label": "a", "cmd": "x:1"}]),
+            [{"label": "a", "cmd": "x:1"}])                       # 去重
+        self.assertEqual(
+            A._clean_actions([{"label": "a", "cmd": "x:1"}, {"label": "b", "cmd": "nocolon"}]),
+            [{"label": "a", "cmd": "x:1"}])                       # 缺 ":" 丢弃
+        six = [{"label": f"l{i}", "cmd": f"c:{i}"} for i in range(6)]
+        self.assertEqual(len(A._clean_actions(six)), 4)            # 上限 4
+
+
+class GeneralFieldWhitelistTests(unittest.TestCase):
+    """**general 额外键（多来自模型标签）不得进积木——防任意键/裸 NaN 产出非法 JSON。"""
+
+    def test_unknown_extra_key_is_dropped(self):
+        block = A.note_snippet("正文", evil=123, nested={"x": 1})
+        self.assertNotIn("evil", block)
+        self.assertNotIn("nested", block)
+        self.assertEqual(block["text"], "正文")
+
+    def test_non_finite_extra_cannot_emit_invalid_json(self):
+        import json
+        block = A.note_snippet("正文", evil=float("nan"))
+        self.assertNotIn("evil", block)
+        self.assertNotIn("NaN", json.dumps(block))   # 绝不产出非法 JSON
+
+    def test_declared_and_common_fields_survive(self):
+        # 白名单内的专用字段 + 通用字段（id/tone）都不被误删
+        self.assertEqual(A.alert_card("t", level="critical")["level"], "critical")
+        self.assertEqual(A.alert_card("t", tone="red")["tone"], "red")
+        block = A.note_snippet("正文", id="note:1", title="题")
+        self.assertEqual(block["id"], "note:1")
+        self.assertEqual(block["title"], "题")
 
 
 class OrchestratorRouteBlockTests(unittest.TestCase):

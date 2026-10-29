@@ -10,6 +10,12 @@ setup:
     - {kind: fact, subject: user, key: "eval:tier-uncertain", value: 用户好像不喝加牛奶的咖啡, source: uncertain}
 turns:
   - 咖啡
+# R76 断言强度审计：三条 contains 强度不同，别当成等价守卫。
+# - 【手动保存的】来自 dynamic/memory 区，随本次检索到的 stated 记忆出现——真守卫。
+# - 【我的推测】【我不确定的】在静态 system prompt 的图例里也有，恒定存在、
+#   与本次是否检索到 inferred/uncertain 记忆无关——单独看抓不到「某档记忆没被
+#   装配」这种回归。
+# 真正钉住「顺序与措辞」的是 tier_assembly_order（下方 custom check）。
 pass_rule: all
 checks:
   - target: prompt

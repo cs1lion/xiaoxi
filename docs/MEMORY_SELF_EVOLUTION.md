@@ -103,6 +103,8 @@ Schema 版本从 3 升到 4；迁移只加列/加表，不猜旧语义。
 
 整个过程在异步抽取链路里，不进入语音快环。
 
+**开放行清扫器（`feedback.sweep_expired_usage`，默认关）。** `settle_pending` 只在 `observe_turn` 内、按 session 运行；一个不再产生新用户消息的会话，它注入过的轮次会永远停在 `settled_at IS NULL`，`memory_usage` 随之无界增长。清扫器是兜底：在 `_maybe_self_evolution` 开头（自进化循环之前，免受其 idle/daily 门饿死）把所有会话中超过 `max_settle_age_hours` 的开放行一次性按 `expired` 结算——**整批一个事务**（`store.settle_usage_bulk`；逐行 `settle_usage` 每行一次 fsync，实测 200 行会冻住事件循环约 2 秒，单事务约 12 毫秒），不碰 Q、不 invalidate 检索快照（`settle_usage` 只 bump `store.version`）。由 `feedback.enabled` 且 `feedback.sweep_enabled`（默认 false）双门控，`sweep_interval_minutes`（默认 30）节流，`sweep_batch`（默认 200）限单批行数。触发源是客户端心跳驱动的 `_proactive_check`，**无服务端定时器**：用户关掉浏览器后清扫也停，所以"开放行有界"在真实部署下没有硬保证，只是把无界增长变成"在线期间有界"。
+
 ### 3.3 检索
 
 `MemoryRetriever.search` 仍然先算原来的 `similarity + importance + recency`，先过 `min_similarity`/`min_score`，再乘 `utility_factor`。因此：
@@ -131,6 +133,7 @@ Schema 版本从 3 升到 4；迁移只加列/加表，不猜旧语义。
 retrieval:
   utility_weight: 0.30
   utility_prior_strength: 3.0
+  validity_expired_factor: 0.50   # 事实有效时间过期后的降权系数（见 MEMORY_RESEARCH_NEXT.md）
 
 feedback:
   enabled: true
@@ -138,6 +141,11 @@ feedback:
   utility_prior_strength: 3.0
   max_settle_age_hours: 12
   min_overlap: 0.12
+  # 开放行清扫器（默认关）：为"会话停止后永不结算"的 memory_usage 开放行兜底，
+  # 机制与边界见本文 §3.2
+  sweep_enabled: false
+  sweep_batch: 200
+  sweep_interval_minutes: 30
 
 lessons:
   enabled: true
@@ -174,7 +182,7 @@ lessons:
 1. **奖励稀疏**：明确说"你记得没错"的用户是少数。下一步可以把慢环评估器的结论作为批量奖励来源，但不应每轮加一次模型调用。
 2. **lesson 质量未过真实模型抽样**：机制层已钉死；语义质量仍需按 `EVOLUTION_QUALITY_EVAL.md` 的方法，在真实 LLM 下抽样复核（来源相关性、具体性、可执行性、无空洞）。
 3. **检索仍是词法**：本轮没有引入 embedding；等 utility 数据稳定后，再比较"词法 + 语义 + 图扩展"三组，而不是先换向量库。
-4. **时间有效性仍不完整**：`valid_from/valid_until` 与"去年在哪工作"类查询仍是 `MEMORY_RESEARCH_NEXT.md` 里的未完成项。
+4. **时间有效性已落地；live 仅部分验证（2026-10-26 订正）**：事实 `fact_valid_from`/`fact_valid_until` 已由 `server/memory/temporal.py` 保守解析显式范围标记写入，检索侧为**软惩罚**（过期降权不移除）而非硬排除——「我以前在哪工作」类历史查询仍须取到用户显式划定边界的事实。写入路径经 `manager._valid_time`（`_persist`/`correct`），相对期按消息时间解析。设计与命名理由见 [MEMORY_RESEARCH_NEXT.md](MEMORY_RESEARCH_NEXT.md) 顶部 2026-10-26 更新。**live 已验证（仅历史界，且是未来界实现之前的旧状态）**：`evals/cases/valid-time-history-live.yaml`（AGENTS.md 要求的「改 Prompt 装配逻辑后跑一次 live」）3/3 轮通过——模型确实把「到去年为止在甲公司工作」作为过去呈现、未误作现状；全量 live 层 12 passed / 0 failed / 0 review（同为旧状态）。此后为未来界补了对称降权、`allow_future` + `time_note`、注释措辞收窄、离线 eval 用例与同 key 准入放宽，都改变了进入上下文块的记录集合与 Prompt 文本，属「改 Prompt 装配逻辑」；其 live 复验被供应商/网络侧挡了四次、至今未通过。待复验清单与判据见 [MEMORY_VALID_TIME.md](MEMORY_VALID_TIME.md) §9。**覆盖率已量化**（`scripts/probe_temporal_coverage.py`，固定时钟 2026-06-15 UTC；该 probe 是只读诊断、不进门禁，`--json` 可导出完整结果）：显式范围标记的自然措辞 **应捕获 18/18（100%）**（2026-10-26 复跑实测；此前记的 17/18 已因补上区间第二界承继年份而过期），开放式/歧义/非时间「从到」/话语标记 **误捕获 0/20**——准确性红线守住。结论：解析器**校准得当**——宁可漏设不可错设，与「错设 valid_until 会致检索门误排除」的风险相称。`从X起`/`从X开始` 两种说法均已覆盖（后者是 probe 实测后补的口语变体）。
 5. **lessons 还没有管理界面**：目前只在内部注入，不进星图/记忆面板。若要暴露，需要 Role 0 在 `PROTOCOL.md` §13 增补节点类型并补前端渲染；不要把内部表直接塞进现有节点结构。
 6. **没有元演化**：记忆策略本身（阈值、权重、淘汰规则）还不由数据自动调整；那需要稳定的评测集，先不做。
 

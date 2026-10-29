@@ -19,6 +19,8 @@ from typing import Any, Callable
 import httpx
 from fastapi import APIRouter, HTTPException, Request
 
+from .dispatcher import UnknownAdapterError
+
 from .durable_leases import (
     ConfirmationError, LeaseError, LeaseStore, ProposalError, describe_confirmation,
     describe_proposal, dispatch_action_hash,
@@ -298,6 +300,42 @@ def create_durable_router(assistant, memory_manager,
         _require_token(request)
         rows = _worker_rows(assistant.executive)
         return {"items": rows, "note": "available 是并发容量，不是健康检查。",
+                "context_is_untrusted_data": True, "grants_authorization": False}
+
+    @router.get("/runs/{commission_id}")
+    def run_view(request: Request, commission_id: str):
+        """M6：问内核这一单的 run 视图（status/outcome/events）。只读排查面。
+
+        同步 def 是刻意的：lookup 是两次串行 loopback HTTP（各 10s 超时），塞进
+        async def 会把最恶 ~20s 压在语音快环共用的那个事件循环上（AGENTS.md
+        「快环内不得出现阻塞调用」）。同步 handler 让 Starlette 自动丢进线程池，
+        与 threads_api.py 的既有惯例一致；app.py 对 reconcile 的同一次调用也用
+        to_thread 包过。
+
+        内核里没有这一单时回 404 并明说，不回空列表假装没进展——「没有这一单」
+        和「没有进展」是两件事，排障时不能混。三态分明（M6 复审 m1 的彻底修法）：
+        absent 回 404 `run_not_found_in_kernel`；error 回 502 `kernel_unreachable`。
+        把「内核挂了」报成「没有这一单」会在排障时指错方向，所以分开。
+        """
+        _require_token(request)
+        try:
+            commission = assistant.executive.ledger.get(commission_id)
+        except KeyError:
+            raise HTTPException(404, "commission_not_found")
+        agent_id = str(commission.get("agent_id") or "")
+        try:
+            adapter = assistant.executive.dispatcher.adapter_for(agent_id)
+        except (KeyError, UnknownAdapterError):
+            raise HTTPException(404, "worker_has_no_executor")
+        if not callable(getattr(adapter, "lookup_run", None)):
+            raise HTTPException(400, "worker_is_not_durable")
+        state, view = adapter.lookup_run(commission_id,
+                                         int(commission.get("retry_count") or 0))
+        if state == "absent":
+            raise HTTPException(404, "run_not_found_in_kernel")
+        if state == "error":
+            raise HTTPException(502, "kernel_unreachable")
+        return {"commission_id": commission_id, **view,
                 "context_is_untrusted_data": True, "grants_authorization": False}
 
     # ---------- C2: dispatch / track / answer ----------

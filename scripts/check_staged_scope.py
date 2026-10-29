@@ -49,8 +49,9 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 
 
-def git(*args: str) -> str:
-    r = subprocess.run(["git", *args], cwd=ROOT, capture_output=True)
+def git(*args: str, root: Path | None = None) -> str:
+    cwd = root if root is not None else ROOT
+    r = subprocess.run(["git", *args], cwd=str(cwd), capture_output=True)
     if r.returncode != 0:
         sys.stderr.write(f"[check_staged_scope] git {' '.join(args)} 失败："
                          f"{r.stderr.decode('utf-8', 'replace').strip()}\n")
@@ -58,8 +59,8 @@ def git(*args: str) -> str:
     return r.stdout.decode("utf-8", "replace")
 
 
-def staged_paths() -> list[str]:
-    out = git("diff", "--cached", "--name-only", "--diff-filter=ACMR")
+def staged_paths(root: Path | None = None) -> list[str]:
+    out = git("diff", "--cached", "--name-only", "--diff-filter=ACMR", root=root)
     return [p for p in out.split("\n") if p.strip()]
 
 
@@ -76,9 +77,10 @@ def read_declared(argv: list[str]) -> list[str]:
     return [a for a in argv if a.strip()]
 
 
-def main(argv: list[str]) -> int:
+def main(argv: list[str], root: Path | None = None) -> int:
+    """跑一次检查。`root` 仅供测试注入临时仓库，生产调用不传（用 ROOT）。"""
     declared = set(read_declared(argv))
-    staged = staged_paths()
+    staged = staged_paths(root)
 
     if not staged:
         print("[check_staged_scope] 暂存区为空，无可提交内容。")

@@ -1,0 +1,38 @@
+id: valid-time-history-live
+title: 问过去时，用户显式划界的旧雇主必须被作为过去呈现，不能被当成现状
+layer: live
+origin: >-
+  AGENTS.md 规定「换模型或改 Prompt 装配逻辑时必须跑一次 live 评测」；valid-time 增量5
+  显著改了快环 Prompt 装配（历史事实现已带 time_note 注入模型上下文）。本用例是那次强制
+  live 验证的载体：同 key 播种一条用户显式划界的旧事实（已被取代）和一条当前事实，问一个
+  过去的问题，验证 Agent 召回旧事实且把它作为过去呈现——这正是 time_note 要防的失败模式
+  （把旧事实当现状）。检索侧已由 valid-time-history-delivery-offline 在黄金门禁层钉住
+  （无需 key）；本用例补上「模型是否真的遵循 time_note」这一环，需要 LLM_API_KEY。
+tags: [memory, valid-time, temporal, accuracy, live]
+setup:
+  memories:
+    # 旧事实：用户显式划定边界（到去年为止），会被后面的当前事实 supersede
+    - {kind: fact, subject: user, key: "eval:vt-live-employer",
+       value: "用户到去年为止在甲公司工作", source: stated,
+       fact_valid_until: 1735603199}
+    # 当前事实：同 key，取代旧事实
+    - {kind: fact, subject: user, key: "eval:vt-live-employer",
+       value: "用户现在在乙公司工作", source: stated}
+turns:
+  - 我以前在哪工作？
+runs: 3
+pass_rule: all
+checks:
+  # 主力（代码判定）：过去的问题必须召回旧事实。这是本特性存在的理由——
+  # 若 time_note 没进上下文，或 found=False 让 persona 注入了负向约束，
+  # 这条会直接红。
+  - target: reply
+    type: contains
+    value: 甲公司
+  # 辅助（高精度失败信号 + judge 主判）：旧事实不得被当作现状陈述。
+  # 正则只抓「现在/目前/当前/还在…甲公司」这类明确措辞，双向不一致记 review；
+  # judge 未配置时整层退化 review，不把无 Key 的跑态假装成判过。
+  - target: reply
+    type: custom
+    value: "evals.checks:judge_temporal_history"
+status: active

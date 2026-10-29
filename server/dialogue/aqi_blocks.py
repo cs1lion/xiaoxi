@@ -13,6 +13,7 @@
 from __future__ import annotations
 
 import json
+import math
 import re
 from typing import Any
 
@@ -40,6 +41,20 @@ _MAX_REF = 200
 _MAX_BLOCKS = 6
 _MAX_META_PAIRS = 6
 
+# 每种积木经 _block 注入的「专用字段」白名单。**general 里不在名单内的键一律丢弃
+# （模型标签可夹带任意键，含裸 NaN → 整条 aqi_blocks 变非法 JSON、前端静默不渲染，
+# 或超大值撑爆积木）。新增/修改构造器的专用字段时务必同步此处——漏加会被
+# test_aqi_blocks 的契约用例当场抓到（字段丢失）。
+_KIND_FIELDS: dict[str, frozenset[str]] = {
+    "choice_pills": frozenset({"question", "options"}),
+    "spotlight_card": frozenset({"title"}),
+    "alert_card": frozenset({"title", "level"}),
+    "swimlane_strip": frozenset({"lanes"}),
+    "metric_flame": frozenset({"metrics"}),
+    "note_snippet": frozenset({"text"}),
+    "memo_note": frozenset({"title", "body"}),
+}
+
 AQI_BLOCK_INSTRUCTION = (
     "输出格式补充：需要展示状态、选项、卡片数据时，在回复末尾附 "
     "<aqi-block>{\"kind\":\"...\"}</aqi-block> 标签，每个标签一个 JSON。\n"
@@ -59,8 +74,24 @@ def _text(value: Any, limit: int) -> str:
     return value.strip()[:limit]
 
 
-def _int(value: Any) -> int:
+def _finite_number(value: Any) -> bool:
+    """True only for a finite int/float (rejects bool, NaN, ±inf).
+
+    NaN/Infinity are not valid JSON: letting one into a block makes the frontend's
+    JSON.parse reject the *whole* aqi_blocks message -- a silent no-render with no
+    error on our side. Real metric/count math can produce them (0/0, overflow), so
+    the composer filters here instead of trusting upstream. ``_int`` also relies on
+    this: ``int(nan)`` / ``int(inf)`` raise.
+    """
     if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return False
+    if isinstance(value, int):
+        return True  # Python ints are always finite; math.isfinite(10**400) would OverflowError
+    return math.isfinite(value)
+
+
+def _int(value: Any) -> int:
+    if not _finite_number(value):
         return 0
     return max(0, int(value))
 
@@ -91,15 +122,17 @@ def _clean_meta(meta: Any) -> dict[str, Any]:
         label = _text(key, 40)
         if not label:
             continue
-        if isinstance(item, bool) or not isinstance(item, (int, float, str)):
-            continue
-        cleaned[label] = item if isinstance(item, (int, float)) else _text(item, 80)
+        if isinstance(item, str):
+            cleaned[label] = _text(item, 80)
+        elif _finite_number(item):
+            cleaned[label] = item
+        # else: bool / NaN / ±inf / other -- not a valid JSON value, drop it.
     return cleaned
 
 
 def _block(kind: str, **fields: Any) -> dict[str, Any]:
-    """组装一个积木：actions 与通用字段（id/subtitle/meta/tone）在这里统一
-    白名单校验后注入；构造器只负责自己的专用字段。"""
+    """组装一个积木：通用字段（id/subtitle/meta/tone/actions）与各 kind 的专用
+    字段在这里白名单校验后注入；专用字段之外的 **general 额外键一律丢弃。"""
     actions = _clean_actions(fields.pop("actions", None))
     block: dict[str, Any] = {"kind": kind}
     target_id = _text(fields.pop("id", None), 100)
@@ -114,6 +147,11 @@ def _block(kind: str, **fields: Any) -> dict[str, Any]:
     tone = _text(fields.pop("tone", None), 20)
     if tone in TONES:
         block["tone"] = tone
+    # 只保留本 kind 声明过的专用字段；**general 里的模型额外键（evil / 任意嵌套 /
+    # 裸 NaN 等）在此丢弃，不进积木、不产出非法 JSON。
+    allowed = _KIND_FIELDS.get(kind, frozenset())
+    for key in [k for k in fields if k not in allowed]:
+        del fields[key]
     block.update(fields)
     if actions:
         block["actions"] = actions
@@ -221,7 +259,11 @@ def metric_flame(metrics: Any, *, note: Any = "", actions: Any = None,
         value = item.get("value")
         if not label or value is None or isinstance(value, (bool, dict, list)):
             continue
-        if not isinstance(value, (int, float, str)):
+        if isinstance(value, str):
+            value = _text(value, _MAX_VALUE)   # bound unbounded string values
+            if not value:
+                continue
+        elif not _finite_number(value):        # reject NaN / ±inf / non-number
             continue
         cleaned.append({"label": label, "value": value})
     if not cleaned:

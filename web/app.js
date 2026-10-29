@@ -23,7 +23,7 @@ import { bootCompanion } from './companion.js';
 import { mountStarmap } from './starmap/index.js';
 import { mountExperience } from './experience.js';
 import { appendContextUsage } from './context-usage.js';
-import { memoryDisabledTag, memoryUpdatedNote, memoryEvidenceNote, memoryDisableControl } from './memory-panel.js';
+import { memoryDisabledTag, memoryUpdatedNote, memoryEvidenceNote, memoryDisableControl, memoryForgetControl, memoryForgetNote } from './memory-panel.js';
 import { mountModeStrip } from './mode-strip.js';
 import { mountWorkDrawer } from './drawer.js';
 import { mountExternalModel } from './external-model.js';
@@ -1557,13 +1557,26 @@ async function loadMemories() {
       };
       meta.appendChild(toggle);
     }
-    const del = document.createElement("button");
-    del.className = "ghost danger";
-    del.textContent = "忘掉";
-    del.onclick = async () => {
-      await mutateMemory(del, `/api/memories/${m.id}`, { method: "DELETE" }, "已忘掉这条记忆。");
-    };
-    meta.appendChild(del);
+    /* 忘掉只在 active 行提供：DELETE 删整条身份链（含当前生效行），在待核对
+     * 或历史行上点它会误删正在生效的记忆。非 active 行给一句解释。 */
+    const forgetControl = memoryForgetControl(m);
+    if (forgetControl) {
+      const del = document.createElement("button");
+      del.className = "ghost danger";
+      del.textContent = forgetControl.label;
+      del.setAttribute("aria-label", `${forgetControl.label}记忆：${m.value}`);
+      del.onclick = async () => {
+        await mutateMemory(del, `/api/memories/${m.id}`, { method: "DELETE" }, forgetControl.done);
+      };
+      meta.appendChild(del);
+    } else {
+      const note = memoryForgetNote(m);
+      if (note) {
+        const why = document.createElement("span");
+        why.textContent = note;
+        meta.appendChild(why);
+      }
+    }
     div.append(val, meta);
     if (m.evidence_state === "linked" && typeof m.evidence_quote === "string" && m.evidence_quote) {
       const evidence = document.createElement("details");

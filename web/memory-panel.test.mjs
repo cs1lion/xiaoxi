@@ -12,6 +12,8 @@ import {
   memoryUpdatedNote,
   memoryEvidenceNote,
   memoryDisableControl,
+  memoryForgetControl,
+  memoryForgetNote,
 } from "./memory-panel.js";
 
 const CREATED = Date.UTC(2026, 9, 1) / 1000;
@@ -72,4 +74,28 @@ test("停用操作：非 active 状态不提供开关——它们本来就不进
   assert.equal(memoryDisableControl({ status: "conflict", disabled: false }), null);
   assert.equal(memoryDisableControl({ status: "done", disabled: false }), null);
   assert.equal(memoryDisableControl(null), null);
+});
+
+test("忘掉操作：只有 active 行提供——DELETE 删整条身份链，含当前生效行", () => {
+  assert.deepEqual(memoryForgetControl({ status: "active", id: 7, value: "用户在乙公司工作" }), {
+    label: "忘掉",
+    done: "已忘掉这条记忆。",
+  });
+});
+
+test("忘掉操作：非 active 行不提供按钮——在待核对/历史行上点它会误删生效记忆", () => {
+  for (const status of ["superseded", "conflict", "done"]) {
+    assert.equal(memoryForgetControl({ status, id: 7 }), null, status);
+  }
+  assert.equal(memoryForgetControl({ id: 7 }), null, "缺 status 视为非 active");
+  assert.equal(memoryForgetControl(null), null);
+});
+
+test("忘掉说明：非 active 行给一句解释，别让按钮消失像 bug", () => {
+  for (const status of ["superseded", "conflict", "done"]) {
+    assert.ok(memoryForgetNote({ status }).length > 0, status);
+    assert.match(memoryForgetNote({ status }), /不影响当前生效的记忆/);
+  }
+  assert.equal(memoryForgetNote({ status: "active" }), "", "active 行不出解释");
+  assert.equal(memoryForgetNote(null), "");
 });

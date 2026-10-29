@@ -12,6 +12,7 @@ import os
 from pathlib import Path
 import sys
 import unittest
+from types import SimpleNamespace
 from unittest.mock import patch
 import dotenv
 
@@ -282,6 +283,161 @@ class StreamDeliveryTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(closed.is_set())
         self.assertEqual(self.saved, [("test", "user", "你好", "voice")])
         self.orch._spawn_extraction.assert_not_called()
+
+
+class NoticeCallbackErrorTests(unittest.IsolatedAsyncioTestCase):
+    """后台通知回调出错必须被记录，不能被静默吞掉。
+
+    `_spawn_extraction` 把抽取跑在后台，`drain()` 是它自带的确定性等待入口。
+    notice 阶段曾是裸 `except Exception: pass`——那正是 memory_notice 漏
+    `status` 能潜伏的原因：回调抛错被吞，通知从不发出，前端只看到"通知没来"
+    而不是一个任何人能看见的错误。
+    """
+
+    def _orch_with_memories(self):
+        orch = mod.Orchestrator()
+        old_enabled = mod.manager.enabled
+        mod.manager.enabled = True
+        self.addCleanup(setattr, mod.manager, "enabled", old_enabled)
+
+        async def fake_observe(**kwargs):
+            return [SimpleNamespace(id=1, kind="fact", value="用户在乙公司工作",
+                                    source="stated", status="active")]
+
+        patcher = patch.object(mod.manager, "observe_turn", new=fake_observe)
+        patcher.start()
+        self.addCleanup(patcher.stop)
+        return orch
+
+    def _spawn_with_boom(self, orch):
+        async def boom(memories):
+            raise RuntimeError("notice contract broken")
+
+        orch._spawn_extraction(session_id="s", user_text="u", assistant_text="a",
+                               recent_context="", on_memories=boom)
+
+    async def test_notice_callback_error_is_recorded(self):
+        orch = self._orch_with_memories()
+        self._spawn_with_boom(orch)
+        await orch.drain()
+        self.assertIn("notice_error", orch._last_meta)
+        self.assertIn("notice contract broken", orch._last_meta["notice_error"])
+
+    async def test_notice_error_does_not_kill_the_background_task(self):
+        # 循环必须活下来：drain() 正常返回，异常不逃逸到调用方。
+        orch = self._orch_with_memories()
+        self._spawn_with_boom(orch)
+        await orch.drain()  # 不抛异常即通过
+        self.assertIn("notice_error", orch._last_meta)
+
+    async def test_healthy_notice_records_no_error(self):
+        # 对照：回调正常时不留 notice_error，也别误记 extract_error。
+        orch = self._orch_with_memories()
+        seen = []
+
+        async def ok(memories):
+            seen.extend(memories)
+
+        orch._spawn_extraction(session_id="s", user_text="u", assistant_text="a",
+                               recent_context="", on_memories=ok)
+        await orch.drain()
+        self.assertEqual(len(seen), 1)
+        self.assertNotIn("notice_error", orch._last_meta)
+        self.assertNotIn("extract_error", orch._last_meta)
+
+
+class PacingConfigGuardTest(unittest.TestCase):
+    """A typo in pacing.yaml must degrade to the default, not crash.
+
+    ``ambient.config_number`` now backs the sibling sections the orchestrator
+    reads -- cooldown, proactivity and questions. The last runs on every reply,
+    so a malformed ``max_ratio`` there would silence her completely.
+    """
+
+    def _orch(self):
+        """A fresh Orchestrator with an isolated pacing dict.
+
+        pacing_cfg() returns a shared object, so mutating orch.pacing in place
+        would leak into every other Orchestrator in the process (the class
+        comment at orchestrator.py:380 says tests should replace self.pacing).
+        """
+        orch = mod.Orchestrator()
+        orch.pacing = copy.deepcopy(orch.pacing)
+        return orch
+
+    def test_pacing_number_guards_every_bad_shape(self):
+        self.assertEqual(mod._pacing_number(45, 90.0), 45.0)
+        self.assertEqual(mod._pacing_number("45", 90.0), 45.0)
+        self.assertEqual(mod._pacing_number(None, 90.0), 90.0)
+        self.assertEqual(mod._pacing_number("abc", 90.0), 90.0)
+        self.assertEqual(mod._pacing_number([90], 90.0), 90.0)
+        # 0 is a real "no cooldown" limit, not a typo: it must survive as 0.0.
+        # test_micro_delivery depends on min_interval_seconds=0 being honoured.
+        self.assertEqual(mod._pacing_number(0, 90.0), 0.0)
+        # PyYAML turns no/yes into False/True; float(True) is 1.0, not the default.
+        self.assertEqual(mod._pacing_number(True, 90.0), 90.0)
+        self.assertEqual(mod._pacing_number(False, 28.0), 28.0)
+
+    def test_question_ratio_survives_a_malformed_limit(self):
+        orch = self._orch()
+        orch.state["_recent_assistant"] = ["你好吗？", "在忙吗？", "累不累？"]
+        self.assertTrue(orch._question_ratio_exceeded())  # 3/3 >= 0.35
+        for bad in ("not-a-number", True, [0.5]):
+            with self.subTest(bad=bad):
+                orch.pacing["questions"]["max_ratio"] = bad
+                self.assertTrue(orch._question_ratio_exceeded())  # falls back to 0.35
+
+    def test_question_ratio_valid_limit_still_governs(self):
+        orch = self._orch()
+        orch.state["_recent_assistant"] = ["你好吗？", "在忙吗？", "累不累？"]
+        orch.pacing["questions"]["max_ratio"] = 1.1  # 3/3 = 1.0 < 1.1
+        self.assertFalse(orch._question_ratio_exceeded())
+
+    def test_length_target_survives_malformed_config(self):
+        orch = self._orch()
+        base = orch.pacing["length"]
+        self.assertEqual(orch._length_target("你好"), 100)
+        self.assertEqual(orch._length_target("详细说说"), 200)
+        for key, ask, fallback in (("short_max_chars", "你好", 100),
+                                   ("medium_max_chars", "详细说说", 200)):
+            for bad in ("abc", None, [200]):
+                with self.subTest(key=key, bad=bad):
+                    orch.pacing["length"] = {**base, key: bad}
+                    self.assertEqual(orch._length_target(ask), fallback)
+        # A typo'd default must not crash the dict lookup.
+        orch.pacing["length"] = {**base, "default": "shrt"}
+        self.assertEqual(orch._length_target("你好"), 200)
+
+    def test_length_target_zero_is_a_real_limit(self):
+        # 0 means "no budget", not "unset" -- it must survive, not fall back.
+        orch = self._orch()
+        orch.pacing["length"] = {**orch.pacing["length"], "short_max_chars": 0}
+        self.assertEqual(orch._length_target("你好"), 0)
+
+    def test_pacing_block_survives_malformed_length_and_questions(self):
+        # static_system_prompt is the prefix of every reply's system prompt, so a
+        # typo in any value it renders would silence her completely.
+        from server import persona
+        real_cfg = persona.pacing_cfg  # the function itself, so we can restore it
+        real = real_cfg()
+        length, questions, voice = real["length"], real["questions"], real["voice"]
+
+        def install(**over):
+            persona.pacing_cfg = lambda: {
+                "length": {**length, **{k: v for k, v in over.items() if k in length}},
+                "questions": {**questions, **{k: v for k, v in over.items() if k in questions}},
+                "voice": voice}
+
+        try:
+            for over in ({"default": "shrt"}, {"short_max_chars": "abc"},
+                         {"medium_max_chars": None}, {"hard_limit_chars": [400]},
+                         {"soft_limit_chars": True}, {"max_ratio": "0.35"},
+                         {"max_ratio": "not-a-number"}):
+                with self.subTest(over=over):
+                    install(**over)
+                    self.assertIn("节奏规则", persona._pacing_block())  # must not raise
+        finally:
+            persona.pacing_cfg = real_cfg
 
 
 if __name__ == "__main__":

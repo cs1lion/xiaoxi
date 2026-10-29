@@ -70,3 +70,40 @@ test("update on a hidden bubble is a no-op", () => {
   assert.equal(g.update("看不见"), false);
   assert.equal(g.status, "hidden");
 });
+
+test("show normalizes malformed event fields instead of passing them through", () => {
+  // source_refs 非数组、expires_at 非 number、event_id 缺省——都要降级成安全形状，
+  // 否则畸形 current 会被 expand/poll 当成真数据用（静默失效）。
+  const g = createGlimmer();
+  assert.equal(g.show({ text: "一句话", source_refs: "not-an-array", expires_at: "soon" }), true);
+  assert.equal(g.current.event_id, null);
+  assert.deepEqual(g.current.source_refs, []);
+  assert.equal(g.current.expires_at, null);
+  // 规范化后的 expires_at=null 让 poll 成为空操作，不会误判到期。
+  assert.equal(g.poll(Date.now() + 10 ** 9), false);
+  assert.equal(g.status, "visible");
+});
+
+test("expand is refused unless a bubble is actually visible", () => {
+  // hidden 时没有 current 可展开；expanded 是终态里的展示态，不能从 hidden 直达。
+  const hidden = createGlimmer();
+  assert.equal(hidden.expand(), null);
+  assert.equal(hidden.status, "hidden");
+  const g = createGlimmer();
+  g.show(mumble());
+  g.expand();
+  assert.equal(g.status, "expanded");
+  // 已展开后再 expand 不重复回调、状态不变。
+  assert.equal(g.expand(), null);
+  assert.equal(g.status, "expanded");
+});
+
+test("missing callbacks never throw", () => {
+  // app.js 之外（测试、未来的非 DOM 调用方）可能一个回调都不传。
+  const g = createGlimmer();
+  g.show(mumble());
+  assert.doesNotThrow(() => g.expand());
+  assert.doesNotThrow(() => g.update("再换一句", 1000));
+  assert.doesNotThrow(() => g.poll(10 ** 12));
+  assert.doesNotThrow(() => g.dismiss());
+});

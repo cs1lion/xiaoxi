@@ -1,7 +1,8 @@
 id: lesson-injection-offline
 origin: "memory-self-evolution-20261017"
 description: "程序性经历检索链路：记忆开启、lessons 配置打开时，匹配的 lesson 被检索器返回"
-target: prompt
+layer: offline
+status: active
 setup:
   memories:
     - kind: fact

@@ -77,13 +77,28 @@ MAX_EVIDENCE_QUOTE_CHARS = 1200
 MAX_EVIDENCE_MESSAGE_CHARS = 12000
 # Conservative exclusions, not an entailment classifier. An otherwise useful
 # self-report with quotes/third-party context may be omitted rather than guessed.
+# First-person denial ("我没说过/没提过") is excluded too: a turn that denies a
+# claim is not affirmative evidence for it, so nothing in it may become a stated
+# fact. Accuracy over recall -- a co-occurring affirmation can be re-extracted
+# once the user states it cleanly.
 _NON_SELF_REPORT = re.compile(
     r'["“”「」『』]|‘[^’]*’|(?<![A-Za-z0-9])\x27[^\x27\n]+\x27(?![A-Za-z0-9])|假设|假如|如果|要是|假装|虚构|扮演|台词'
     r'|(?:他|她|他们|她们)(?:说|喜欢|打算|计划|准备|是|在|的)'
     r'|(?:我|我的)(?:朋友|同事|同学|家人|老板|父母|爸爸|妈妈|哥哥|姐姐|弟弟|妹妹)'
+    r'|我(?:才)?没(?:有)?(?:这么|这样)?(?:说|讲)过|我(?:才)?没(?:有)?提过'
     r'|\b(?:if\s+i|suppose|imagine|pretend|role[-\s]?play'
     r'|(?:he|she|they)\s+(?:said|says|likes?|wants?|plans?|works?|is|are)'
     r'|my\s+(?:friend|colleague|coworker|mother|father|parents?|brother|sister))\b',
+    re.I,
+)
+
+# Direct assistant-address ("你" + a speech verb), used by the FMR backstop to
+# downgrade a stated fact the user only relayed from the assistant. The lookbehind
+# skips "<prep>你说" (跟/和/与/对/向/给) so a genuine "我跟/想对/给你说 X" self-report
+# -- where the assistant is the recipient, not the speaker -- is never flagged.
+_ASSISTANT_REF = re.compile(
+    r'(?<![跟和与对向给])你(?:才|刚才|刚刚|之前|原先|原来|还|又|先|到底|是不是|有没有|难道|不是|昨天|昨日|上次|上回|先前|早些|早前|日前|前几天|最近)?'
+    r'(?:说|讲|提|告)(?:过|到|起|诉)?',
     re.I,
 )
 
@@ -97,6 +112,21 @@ def is_direct_user_evidence(text: str) -> bool:
     conflict checks remain separate; passing this guard never proves entailment.
     """
     return isinstance(text, str) and bool(text.strip()) and not _NON_SELF_REPORT.search(text)
+
+
+def references_assistant_speech(text: str) -> bool:
+    """True when the turn relays the assistant's own speech, not a self-report.
+
+    FMR backstop for the ``你说过X`` residual the denial guard misses: the user is
+    quoting the assistant, not affirming X. A stated candidate sourced from such a
+    turn is downgraded to uncertain by the manager. Deliberately conservative -- a
+    narrow assistant-address pattern that skips ``<prep>你说`` (跟/和/与/对/向/给) and only
+    covers common time-qualifiers (昨天/上次/…), still missing rarer time-nouns and the
+    ``你对我说`` form rather than risk over-flagging genuine self-reports.
+    """
+    if not isinstance(text, str) or not text.strip():
+        return False
+    return bool(_ASSISTANT_REF.search(text))
 
 # 没有冒号的 key 会退化成一个不可复用的标签，这里给个按类型兜底的前缀
 KIND_PREFIX = {"fact": "偏好", "episode": "共同", "todo": "待办", "self_state": "自我"}

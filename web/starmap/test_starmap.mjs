@@ -307,3 +307,64 @@ test("REST 客户端：URL 参数、limit 上限、404 与异常", async () => {
   });
   await assert.rejects(() => broken.loadGraph(), /格式异常/);
 });
+
+test("REST 客户端：loadNode 成功路径、缺 ID 抛错、kinds 透传、limit 边界", async () => {
+  const seen = [];
+  const ok = (payload, status = 200) => ({ ok: status < 400, status, json: async () => payload });
+  const client = createStarmapClient({
+    fetchImpl: async (url) => { seen.push(url); return ok({ id: "mem:1", kind: "memory", body: "全文" }); },
+  });
+  // loadNode 200 成功：返回 { missing:false, node }，nodeId 经 encodeURIComponent 转义
+  const got = await client.loadNode("mem:1 特殊");
+  assert.deepEqual(got, { missing: false, node: { id: "mem:1", kind: "memory", body: "全文" } });
+  assert.ok(seen[0].startsWith("/api/memory/starmap/node/"), "loadNode 打节点详情端点");
+  assert.ok(seen[0].includes(encodeURIComponent("mem:1 特殊")), "nodeId 经 encodeURIComponent 转义");
+
+  // loadNode 空/非字符串 ID → 抛错且根本不发请求
+  seen.length = 0;
+  await assert.rejects(() => client.loadNode(""), /缺少节点 ID/);
+  await assert.rejects(() => client.loadNode(42), /缺少节点 ID/);
+  assert.deepEqual(seen, [], "缺 ID 时不发请求");
+
+  // loadGraph kinds 透传
+  seen.length = 0;
+  await client.loadGraph({ kinds: "memory,diary" });
+  assert.match(seen[0], /kinds=memory/, "kinds 参数透传到查询串");
+
+  // loadGraph limit 边界：0/坏值回落 LIST_LIMIT，负数钳到 1
+  seen.length = 0;
+  await client.loadGraph({ limit: 0 });
+  assert.ok(seen[0].includes(`limit=${LIST_LIMIT}`), "limit=0 回落上限");
+  seen.length = 0;
+  await client.loadGraph({ limit: -5 });
+  assert.ok(seen[0].includes("limit=1"), "负 limit 钳到 1");
+
+  // loadGraph days 非法值（0/负数/NaN）不塞查询参数
+  seen.length = 0;
+  await client.loadGraph({ days: 0 });
+  assert.ok(!seen[0].includes("days="), "days=0 不塞");
+});
+
+test("narrate：subscribe 收快照 / unsubscribe 停收 / reset 清定时器回 idle", () => {
+  const snaps = [];
+  const { machine } = makeNarration();
+  const unsub = machine.subscribe((s) => snaps.push(s.state));
+  machine.start("mem:1");   // -> pending
+  machine.onMessage({ type: "turn_started", turn_id: "client-test-1", source: "narration" });  // -> playing
+  assert.deepEqual(snaps, ["pending", "playing"], "每次状态变更都推快照给订阅者");
+  unsub();
+  machine.stop();           // -> idle，但已退订
+  assert.deepEqual(snaps, ["pending", "playing"], "unsubscribe 后不再收到快照");
+
+  // reset：pending 中复位，清掉 pending 超时定时器、回 idle、清空 note 并推快照
+  const clock = new FakeClock();
+  const snaps2 = [];
+  const second = makeNarration({ clock, pendingTimeoutMs: 15000 });
+  second.machine.subscribe((s) => snaps2.push(s.state));
+  second.machine.start("mem:2");
+  assert.equal(clock.tasks.size, 1, "pending 期间挂着超时定时器");
+  second.machine.reset();
+  assert.deepEqual(snaps2, ["pending", "idle"], "reset 回 idle 并推快照");
+  assert.equal(clock.tasks.size, 0, "reset 清掉了 pending 超时定时器");
+  assert.equal(second.machine.snapshot().note, "", "reset 清空 note");
+});

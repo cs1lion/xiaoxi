@@ -1,3 +1,10 @@
 {
-  "mcpServers": {}
+  "mcpServers": {
+    "echo": {
+      "command": "python",
+      "args": ["scripts/mcp_servers/echo_server.py"],
+      "cwd": ".",
+      "approval": "mutating"
+    }
+  }
 }

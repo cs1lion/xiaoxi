@@ -132,7 +132,7 @@ server/proactivity/delivery.py    通知收件箱与在线投递
 | delivery_attempts | id, notification_id, channel, status, attempted_at, acknowledged_at, error_code |
 | proactive_candidates | id, user_id, event_type, evidence_ids, scope, expires_at, decision, suppression_reason, notification_id |
 
-任务状态：proposed → open → in_progress / waiting → done；非终态可 cancelled。用户明确创建的任务可以直接 open；模型推测仅 proposed，不计为用户承诺。done 需要用户明确说明完成或工具结果证据；不能因提醒已投递而完成任务。
+任务状态：proposed → open → in_progress / waiting → done；非终态可 cancelled。（实现注记：`proposed` 目前不可达——`server/assistant/store.py` 的 `TASK_STATUSES` 恰为上述五个状态，`create_task` 的 INSERT 固定写入 `'open'`，`update_task` 拒绝集合外取值；且 `server/` 下无任何绕过 store 的 `UPDATE tasks`/`INSERT INTO tasks` 旁路，故三条路径均到不了该状态。将来若新增写库路径或把 `proposed` 加进 `TASK_STATUSES`，本条即失效，需同步修订；此处为设计意图的历史表述，勿据此查找一个不存在的状态。）用户明确创建的任务可以直接 open；模型推测仅 proposed，不计为用户承诺。done 需要用户明确说明完成或工具结果证据；不能因提醒已投递而完成任务。
 
 提醒状态：scheduled → queued → notified；scheduled/queued 可 cancelled 或 expired。notified 只表示客户端确认收到通知，不代表用户完成任务。延后创建新的调度版本，旧 occurrence 失效。
 

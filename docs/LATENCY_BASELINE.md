@@ -88,6 +88,10 @@ p90 仅 8.3ms，疑为周期性 GC 尖峰；作为已知尖峰记录，不影响
 装配段里，检索（50 条库）只占约 2ms**，大头是装配周边（context broker、limit_context
 反复测量、历史读写）——优化装配时应先看那里。
 
+## 记忆装配卸载的验收口径（MEM-OPT-01 · commit 1102e44）
+
+把记忆检索 / 昼夜心境 / mark_used 挪出事件循环后，**首字三指标不预期变化**：messages 不齐就开不了流，卸载只让事件循环在装配期间不被占（barge_in 取消路径与其它连接的音频不被冻），并不缩短首字。因此本项**不出新首字基线**，验收锚定行为测试 `scripts/test_memory_fastloop.py`：量"装配期间事件循环最长停顿"（同步 >20ms vs 异步 <10ms）与"卸载结果与同步逐字节一致"，并含一条经 `stream_respond` 真实入口的接线钉子（把 `_turn_context_async` 调用改回同步即使测试失败）。这与上面指标 A 的解读一致——36ms 装配段里检索只占约 2ms，大头是装配周边，卸载解决的是"占住循环"而非"缩短首字"。（并发 WIP 期间重跑，`[2]/[5]` 的 10ms 绝对阈值在 CPU/IO 被占满时可能偶红，属测量负载前提，非本项回归。）
+
 ## 卸载批次的首字延迟受控 A/B（2026-10-27 · 第十一至二十三批离环 sweep）
 
 **锚点：2026-10-27 本机回环，`scripts/bench_voice_loop.py --only a --samples-a 40`（corpus=50，port 8031，Mock LLM + 离线 WAV TTS 桩）。** 两组跑同日同时段、同 `.venv`、同机器；JSON 落 `tmp/bench-voice-loop-20261027-*`（TTL 内，引用连本锚点一起抄）。
@@ -116,7 +120,7 @@ p90 仅 8.3ms，疑为周期性 GC 尖峰；作为已知尖峰记录，不影响
 | store.count() | 读（覆盖索引） | 1000 行 0.34ms / 5000 行 2.16ms |
 | manager.snapshot(200)+count | 读（建 200 对象） | 19.39ms |
 | manager.context_with_status | 读（TF-IDF 装配） | 75.73ms |
-| manager.history_of | 读（无 key 索引，全表扫描） | .46ms@1000 行，O(表长) |
+| manager.history_of | 读（无 key 索引，全表扫描） | 0.46ms@1000 行，O(表长) |
 | store.recent_messages(100) | 读（命中 idx_msg_session） | 0.31ms |
 | executive.pending_reports | 读（BEGIN IMMEDIATE 无脏页） | 0.22ms |
 | executive.accept | **写提交** | worst 9.42ms |

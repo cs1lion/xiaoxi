@@ -37,6 +37,26 @@ class SelectTierTest(unittest.TestCase):
         self.assertIsNone(A.select_tier(None, self.CFG))
         self.assertIsNone(A.select_tier("x", self.CFG))
 
+    def test_malformed_thresholds_fall_back_instead_of_raising(self):
+        # backoff_threshold guards every numeric input; tier selection reads the
+        # same config, so a typo in pacing.yaml must degrade, not crash the
+        # scheduler. Falls back to the module defaults 20/28/90.
+        bad = {"enabled": True, "micro_act_seconds": "abc",
+               "mumble_seconds": None, "proactive_seconds": [90]}
+        self.assertEqual(A.select_tier(25, bad), "micro_act")
+        self.assertEqual(A.select_tier(30, bad), "mumble")
+        self.assertEqual(A.select_tier(95, bad), "proactive")
+        self.assertIsNone(A.select_tier(15, bad))
+
+    def test_boolean_threshold_does_not_become_one_second(self):
+        # PyYAML resolves no/yes to False/True, and float(True) is 1.0 -- which
+        # would make her start talking after 1s of silence instead of erroring.
+        self.assertEqual(A.select_tier(25, {"enabled": True, "micro_act_seconds": True,
+                                            "mumble_seconds": False, "proactive_seconds": True}),
+                         "micro_act")
+        self.assertEqual(A.config_number(True, 90.0), 90.0)
+        self.assertEqual(A.config_number(False, 28.0), 28.0)
+
 
 class EventShapeTest(unittest.TestCase):
     def test_micro_act_shape(self):

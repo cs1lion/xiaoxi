@@ -6,6 +6,11 @@ tags: [hallucination, memory, prompt]
 setup: {}
 turns:
   - 咱们上次一起去看的那场 livehouse，你觉得怎么样？
+# R76 断言强度审计：两条 contains 强度不同，别当成等价守卫。
+# - 「没有任何相关记忆」来自 dynamic/memory 区，随检索状态变化——检索为空时
+#   才注入，是真正钉住本用例标题的那条；负向约束若从装配里删掉，它红。
+# - 「编造共同经历是最严重的错误」在静态 system prompt 里也有，恒定存在、
+#   与检索状态无关——单独看它抓不到「空检索负向约束被删」这种回归，只是补强。
 pass_rule: all
 checks:
   - target: prompt

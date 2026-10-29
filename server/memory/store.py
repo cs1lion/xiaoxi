@@ -55,6 +55,8 @@ CREATE TABLE IF NOT EXISTS memories (
     preference_scope TEXT NOT NULL DEFAULT '',
     preference_as_of REAL,
     retired_by_message_id INTEGER,
+    fact_valid_from REAL,
+    fact_valid_until REAL,
     -- MemRL-style utility: Q in [0,1] and how many outcome signals produced it.
     -- Retrieval shrinks Q toward the neutral prior while n is small, so one
     -- lucky/unlucky turn can never dominate relevance.
@@ -311,6 +313,8 @@ class RankingRow:
     utility: float
     utility_n: int
     disabled: bool
+    fact_valid_from: float | None = None
+    fact_valid_until: float | None = None
 
     def __post_init__(self) -> None:
         # SQLite hands back 0/1; the ranking gate wants a real bool.
@@ -319,7 +323,8 @@ class RankingRow:
 
 # Column order must match RankingRow's field order (positional construction).
 RANKING_COLUMNS = ("id, key, value, kind, subject, source, status, importance, "
-                   "confidence, updated_at, utility, utility_n, disabled")
+                   "confidence, updated_at, utility, utility_n, disabled, "
+                   "fact_valid_from, fact_valid_until")
 
 
 @dataclass(slots=True)
@@ -350,6 +355,8 @@ class Memory:
     preference_scope: str = ""
     preference_as_of: float | None = None
     retired_by_message_id: int | None = None
+    fact_valid_from: float | None = None
+    fact_valid_until: float | None = None
     utility: float = 0.5
     utility_n: int = 0
     last_reward_at: float | None = None
@@ -360,7 +367,14 @@ class Memory:
         self.disabled = bool(self.disabled)
 
     def to_dict(self) -> dict[str, Any]:
-        return asdict(self)
+        # Fact valid-time stays internal: /api/memories and the memory export keep
+        # their field set, and valid_until belongs to the preference domain. See
+        # MEMORY_OPTIMIZATION_EXPLORATION MEM-OPT-04: exposing a new field here
+        # would need a [PROTOCOL_REQUEST], so the serialization side excludes it.
+        exported = asdict(self)
+        exported.pop("fact_valid_from", None)
+        exported.pop("fact_valid_until", None)
+        return exported
 
 
 class MemoryStore:
@@ -424,6 +438,15 @@ class MemoryStore:
                 if statement.strip():
                     db.execute(statement)
             columns = {row["name"] for row in db.execute("PRAGMA table_info(memories)")}
+            # Fact valid-time briefly shipped as valid_from/valid_until; those names
+            # belong to the preference domain (preference_claims.valid_until and the
+            # /api/interaction/preferences field), so rename the columns in place.
+            # A database written mid-development keeps its rows and gains the prefix.
+            for old, new in (("valid_from", "fact_valid_from"), ("valid_until", "fact_valid_until")):
+                if old in columns and new not in columns:
+                    db.execute(f"ALTER TABLE memories RENAME COLUMN {old} TO {new}")
+                    columns.discard(old)
+                    columns.add(new)
             additions = {
                 "evidence_message_id": "INTEGER",
                 "evidence_quote": "TEXT NOT NULL DEFAULT ''",
@@ -436,6 +459,8 @@ class MemoryStore:
                 "preference_scope": "TEXT NOT NULL DEFAULT ''",
                 "preference_as_of": "REAL",
                 "retired_by_message_id": "INTEGER",
+                "fact_valid_from": "REAL",
+                "fact_valid_until": "REAL",
                 "utility": "REAL NOT NULL DEFAULT 0.5",
                 "utility_n": "INTEGER NOT NULL DEFAULT 0",
                 "last_reward_at": "REAL",
@@ -508,6 +533,8 @@ class MemoryStore:
         preference_level: str = "",
         preference_scope: str = "",
         preference_as_of: float | None = None,
+        fact_valid_from: float | None = None,
+        fact_valid_until: float | None = None,
         force_revision: bool = False,
     ) -> int | None:
         if status not in STATUSES or source not in SOURCES:
@@ -531,6 +558,12 @@ class MemoryStore:
             raise ValueError("structured preferences require verified user evidence")
         if preference_as_of is not None and not structured:
             raise ValueError("preference time requires a structured preference")
+        for bound in (fact_valid_from, fact_valid_until):
+            if bound is not None and (type(bound) not in (int, float) or bound < 0):
+                raise ValueError("valid-time bounds must be nonnegative numbers or None")
+        if (fact_valid_from is not None and fact_valid_until is not None
+                and fact_valid_from > fact_valid_until):
+            raise ValueError("fact_valid_from must not exceed fact_valid_until")
         if type(force_revision) is not bool:
             raise ValueError("force_revision must be a boolean")
         now = time.time()
@@ -691,12 +724,14 @@ class MemoryStore:
                        (kind, subject, key, value, source, status, supersedes, importance,
                         confidence, session_id, created_at, updated_at, evidence_message_id,
                         evidence_quote, evidence_state, decision, last_observed_message_id,
-                        identity_slot, preference_target, preference_level, preference_scope, preference_as_of)
-                       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                        identity_slot, preference_target, preference_level, preference_scope, preference_as_of,
+                        fact_valid_from, fact_valid_until)
+                       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
                     (kind, subject, key, value, source, status, supersedes, importance, confidence,
                      session_id, now, now, evidence_message_id, evidence_quote, evidence_state, decision,
                      evidence_message_id if evidence_state == "linked" else None,
-                     identity_slot, preference_target, preference_level, preference_scope, preference_as_of),
+                     identity_slot, preference_target, preference_level, preference_scope, preference_as_of,
+                     fact_valid_from, fact_valid_until),
                 )
                 memory_id = int(cur.lastrowid)
         return memory_id
@@ -748,15 +783,19 @@ class MemoryStore:
         return [Memory(**dict(r)) for r in rows]
 
     def retrieval_candidates(self, *, include_done: bool = False) -> list[Memory]:
-        """Read one live eligible set; historical rows cannot consume its limit.
+        """Read one live eligible set for ranking.
 
         Unlike the paginated management list, retrieval has no implicit 5000-row
-        cut-off. The retriever indexes and ranks this same query-time snapshot.
+        cut-off. A superseded row the user explicitly bounded (``fact_valid_until
+        IS NOT NULL``) is included as a historical record; every other superseded
+        row stays out, so a plain replaced value never resurfaces.
         """
         statuses = ("active", "done") if include_done else ("active",)
         placeholders = ",".join("?" for _ in statuses)
         rows = self._query(
             f"SELECT * FROM memories WHERE status IN ({placeholders}) "
+            "OR (status = 'superseded' AND (fact_valid_until IS NOT NULL "
+            "OR fact_valid_from IS NOT NULL)) "
             "ORDER BY updated_at DESC, id DESC", statuses)
         return [Memory(**dict(row)) for row in rows]
 
@@ -782,6 +821,8 @@ class MemoryStore:
         placeholders = ",".join("?" for _ in statuses)
         rows = self._query(
             f"SELECT {RANKING_COLUMNS} FROM memories WHERE status IN ({placeholders}) "
+            "OR (status = 'superseded' AND (fact_valid_until IS NOT NULL "
+            "OR fact_valid_from IS NOT NULL)) "
             "ORDER BY updated_at DESC, id DESC", statuses)
         return [RankingRow(*row) for row in rows]
 
@@ -975,6 +1016,54 @@ class MemoryStore:
                  json.dumps(detail or [], ensure_ascii=False, separators=(",", ":")),
                  int(usage_id)))
         return cursor.rowcount > 0
+
+    def expired_pending_usage(self, before_ts: float, limit: int = 200) -> list[dict[str, Any]]:
+        """Open usage rows older than ``before_ts``, oldest first, across sessions.
+
+        Unlike pending_usage (session-scoped, needs a following message), this is
+        the sweeper's view: every session whose injected turn aged out without
+        ever being settled by a next user message.
+        """
+        rows = self._query(
+            """SELECT * FROM memory_usage WHERE settled_at IS NULL AND created_at < ?
+               ORDER BY created_at ASC LIMIT ?""",
+            (float(before_ts), max(1, int(limit))))
+        records = []
+        for row in rows:
+            record = dict(row)
+            record["memory_ids"] = _json_list(record.get("memory_ids"))
+            record["lesson_ids"] = _json_list(record.get("lesson_ids"))
+            records.append(record)
+        return records
+
+    def count_open_usage(self) -> int:
+        rows = self._query("SELECT COUNT(*) AS n FROM memory_usage WHERE settled_at IS NULL")
+        return int(rows[0]["n"])
+
+    def settle_usage_bulk(self, ids: list[int], *, reason: str,
+                          now: float | None = None) -> int:
+        """Settle many usage rows in ONE transaction (sweeper backstop).
+
+        Per-row ``settle_usage`` commits once per row (fsync each on the default
+        synchronous=FULL), so a backlog of hundreds froze the caller for seconds.
+        The sweeper only ever marks rows expired with no reward, so the whole
+        batch transitions atomically. Idempotent: already-settled rows are
+        skipped and not counted, so a concurrent ``settle_pending`` still wins.
+        Returns the number of rows actually transitioned.
+        """
+        id_list = [int(i) for i in (ids or []) if type(i) is int and int(i) > 0]
+        if not id_list:
+            return 0
+        stamp = time.time() if now is None else float(now)
+        placeholders = ",".join("?" * len(id_list))
+        with self._transaction(track_write=True) as db:
+            before = db.total_changes
+            db.execute(
+                f"""UPDATE memory_usage SET settled_at = ?, reward = NULL,
+                   reward_reason = ?, reward_detail = '[]'
+                   WHERE settled_at IS NULL AND id IN ({placeholders})""",
+                (stamp, str(reason or "")[:80], *id_list))
+            return db.total_changes - before
 
     def reinforce_memory(self, memory_id: int, *, reward: float, alpha: float,
                          now: float | None = None) -> float | None:

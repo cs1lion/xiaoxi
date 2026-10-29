@@ -50,3 +50,26 @@ export function memoryDisableControl(memory) {
         done: "已停用，检索不再使用这条记忆。",
       };
 }
+
+/* 「忘掉」操作。DELETE /api/memories/{id} 删的是这条事实的**完整身份链**
+ * ——所有历史版本加上当前生效行。所以只有 active 行能提供这个按钮：在一条
+ * 标注「待核对，不自动使用」的 conflict 行上点忘掉，用户想丢弃的是那条待核对
+ * 的新说法，实际被删的却是正在生效的记忆（实测整链 6 行全没）。历史
+ * （superseded）与已完成（done）行同理。要删整条事实另有显式入口
+ * POST /api/memories/forget-key，不靠这个按钮的默认行为。 */
+export function memoryForgetControl(memory) {
+  if (!memory || memory.status !== "active") return null;
+  return {
+    label: "忘掉",
+    done: "已忘掉这条记忆。",
+  };
+}
+
+/* 为什么非 active 行没有「忘掉」按钮：它们不进检索装配，删它们既无收益，
+ * 又会通过整链删除误伤当前生效的记忆。给一句话，别让按钮消失像 bug。
+ * 不提「忘掉整条事实」的入口——那个端点（POST /api/memories/forget-key）
+ * 没有 UI 按钮，而全局「清空」会删光全部记忆，不该在这里引导。 */
+export function memoryForgetNote(memory) {
+  if (!memory || memory.status === "active") return "";
+  return "这条不影响当前生效的记忆，也无需忘掉；要忘掉某条事实，请在它「当前」的那一行点忘掉。";
+}

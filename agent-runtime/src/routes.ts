@@ -7,6 +7,7 @@ export const SIDECAR_ROUTES = [
 	"/v1/runs",
 	"/v1/runs/{id}",
 	"/v1/runs/{id}/cancel",
+	"/v1/runs/{id}/tools",
 	"/v1/events",
 	"/v1/approvals",
 	"/v1/lookup",

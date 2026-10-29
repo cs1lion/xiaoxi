@@ -13,6 +13,16 @@ except Exception:  # pragma: no cover - defensive on exotic builds
 
 PROMPT_VERSION = "2026-02-companion-v1"
 
+# 检索为空时注入的负向约束。persona 是唯一注入点；文本被 test_core 的 prompt 用例
+# 与 hallu-empty-retrieval 离线评测钉死，改动需同步这两处。提取为命名常量，让
+# "检索为空"这一约束家族有单一真源（区别于 omitted_by_budget 支路的另一家族）。
+EMPTY_MEMORY_CONSTRAINT = (
+    "【关于这个问题，你没有任何相关记忆】\n"
+    "不要使用「我记得」「我们之前」「上次你说过」这类说法。"
+    "如果对方在问你们之间发生过什么，直接承认不记得。"
+    "编造共同经历是最严重的错误。"
+)
+
 
 def _bullets(items: list[str], indent: str = "- ") -> str:
     return "\n".join(f"{indent}{item.strip()}" for item in items if item and item.strip())
@@ -112,19 +122,25 @@ def _style_block() -> str:
 
 
 def _pacing_block() -> str:
+    # Local import matches orchestrator.ambient_event's style and keeps import
+    # order between persona and the dialogue package unconstrained.
+    from .dialogue.ambient import config_number
     pacing = pacing_cfg()
     length, questions, voice = pacing["length"], pacing["questions"], pacing["voice"]
+    default_length = length.get("default")
+    if default_length not in ("short", "medium", "long"):
+        default_length = "short"
     length_desc = {
-        "short": f"默认只回一两句（约 {length['short_max_chars']} 字以内）",
-        "medium": f"默认一小段（约 {length['medium_max_chars']} 字以内）",
-        "long": f"可以展开，但别超过 {length['hard_limit_chars']} 字",
-    }[length["default"]]
+        "short": f"默认只回一两句（约 {int(config_number(length.get('short_max_chars'), 100.0))} 字以内）",
+        "medium": f"默认一小段（约 {int(config_number(length.get('medium_max_chars'), 200.0))} 字以内）",
+        "long": f"可以展开，但别超过 {int(config_number(length.get('hard_limit_chars'), 400.0))} 字",
+    }[default_length]
     lines = [
         "节奏规则（比内容更重要）：",
         f"- 回复长度：{length_desc}",
-        f"- 整体不要超过 {length['soft_limit_chars']} 字，除非用户明确要详细解释",
-        f"- 提问：可以问，但最近几轮里带问号的句子占比不要超过 {int(questions['max_ratio'] * 100)}%",
-        "  以下情况不要提问：" + "；".join(questions["never_ask_when"]),
+        f"- 整体不要超过 {int(config_number(length.get('soft_limit_chars'), 260.0))} 字，除非用户明确要详细解释",
+        f"- 提问：可以问，但最近几轮里带问号的句子占比不要超过 {int(config_number(questions.get('max_ratio'), 0.35) * 100)}%",
+        "  以下情况不要提问：" + "；".join(questions.get("never_ask_when") or []),
         "- 允许认真、允许简短、允许只回一两个字、允许说“这个我不知道”",
         "- 不要每次都以问题结尾",
     ]
@@ -222,12 +238,7 @@ def dynamic_prompt(
             "如果对方在问而上面没有，直接说不记得。"
         )
     elif not memory_found:
-        sections.append(
-            "【关于这个问题，你没有任何相关记忆】\n"
-            "不要使用「我记得」「我们之前」「上次你说过」这类说法。"
-            "如果对方在问你们之间发生过什么，直接承认不记得。"
-            "编造共同经历是最严重的错误。"
-        )
+        sections.append(EMPTY_MEMORY_CONSTRAINT)
     if bias_block:
         sections.append(bias_block)
     if pushback:

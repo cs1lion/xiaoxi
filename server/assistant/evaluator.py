@@ -384,7 +384,19 @@ def _check_acceptance(artifact, packet, usage, thresholds):
         finding = _check_acceptance_rule(rule, artifact or {})
         if finding is not None:
             findings.append(finding)
+    findings.extend(_verify_bridge_findings(rules, artifact or {}))
     return findings
+
+
+def _verify_bridge_findings(rules, artifact):
+    """M2（issue #61）：acceptance 规则经 server/verify 独立判定一道。
+
+    加法而非替换：上面六条自有规则全部照跑，这里只追加。延迟 import 是因为
+    acceptance_verify 从本模块取 _acceptance_name/_finding，模块顶层互相
+    import 会成环，放函数里破环。
+    """
+    from .acceptance_verify import verify_findings
+    return verify_findings(rules, artifact)
 
 
 L1_CHECKS: dict[str, Callable[..., list[dict[str, Any]]]] = {

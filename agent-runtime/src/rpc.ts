@@ -113,6 +113,17 @@ export function createRpcServer(options: RpcOptions) {
 				return;
 			}
 
+			const toolsMatch = /^\/v1\/runs\/(\d+)\/tools$/.exec(path);
+			if (toolsMatch !== null && req.method === "GET") {
+				const tools = await runtime.toolsForTask(Number(toolsMatch[1]));
+				if (tools === undefined) {
+					json(res, 404, { error: "not_found" });
+					return;
+				}
+				json(res, 200, { tools });
+				return;
+			}
+
 			const cancelMatch = /^\/v1\/runs\/(\d+)\/cancel$/.exec(path);
 			if (cancelMatch !== null && req.method === "POST") {
 				json(res, 200, { result: await runtime.cancel(Number(cancelMatch[1])) });

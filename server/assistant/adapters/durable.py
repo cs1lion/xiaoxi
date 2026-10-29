@@ -25,6 +25,10 @@ from .registry import register_adapter
 
 DEFAULT_TIMEOUT = 600.0
 
+# 事件流断流重连上限：sidecar 的 SSE 只在 run 终态或内核丢单时主动 end，流中途
+# 断掉一律是线路问题。带上游标重连，次数用完才认输。
+MAX_STREAM_RECONNECTS = 3
+
 # 仓库根：花名册里的 executable/args 是相对它写的，而 sidecar 的子进程跑在
 # 沙箱工作目录里，所以要在这里就改成绝对路径。
 REPO_ROOT = Path(__file__).resolve().parents[3]
@@ -37,6 +41,7 @@ SIDECAR_ROUTES = (
     "/v1/runs",
     "/v1/runs/{id}",
     "/v1/runs/{id}/cancel",
+    "/v1/runs/{id}/tools",
     "/v1/events",
     "/v1/approvals",
     "/v1/lookup",
@@ -227,36 +232,68 @@ class DurableAdapter(BaseWorkerAdapter):
                     return
                 ref = created.json()
                 self._task_id = int(ref.get("task_id") or 0)
-                async with client.stream("GET", f"{endpoint}/v1/events",
-                                         params={"task_id": self._task_id},
-                                         headers=headers) as response:
-                    if response.status_code >= 400:
-                        yield make_event(ERROR, step_idx=0,
-                                         text=f"执行内核事件流 HTTP {response.status_code}")
-                        return
-                    async for line in response.aiter_lines():
+                # M6：SSE 游标。sidecar 的 events 是追加数组，since 就是「从第几条
+                # 开始发」；断流重连带上已消费条数，从断点续读而不是整卷重放。它数的
+                # 是流上的 data 行数，与 step_idx（映射进台账的步数）不是一回事——
+                # 没映射成功的事件也占游标。
+                consumed = 0
+                reconnects = 0
+                while True:
+                    try:
+                        async with client.stream(
+                                "GET", f"{endpoint}/v1/events",
+                                params={"task_id": self._task_id, "since": consumed},
+                                headers=headers) as response:
+                            if response.status_code >= 400:
+                                yield make_event(ERROR, step_idx=0,
+                                                 text=f"执行内核事件流 HTTP {response.status_code}")
+                                return
+                            async for line in response.aiter_lines():
+                                if self._cancelled:
+                                    return
+                                if not line.startswith("data:"):
+                                    continue
+                                payload = line[5:].strip()
+                                if not payload:
+                                    continue
+                                try:
+                                    event = json.loads(payload)
+                                except ValueError:
+                                    continue
+                                consumed += 1
+                                if os.environ.get("AQI_DURABLE_DEBUG"):
+                                    print(f"[durable] {json.dumps(event, ensure_ascii=False)[:400]}", file=sys.stderr)
+                                try:
+                                    mapped = self._map(event, step_idx)
+                                except Exception as exc:
+                                    # 映射崩了是畸形事件，不是线路问题：直接 error 收场。
+                                    # 不能重连——重连的 since 已越过这条，只会把它
+                                    # 静默跳过（M6 复审 m3）。
+                                    yield make_event(ERROR, step_idx=step_idx,
+                                                     text=f"事件映射失败：{type(exc).__name__}: {exc}"[:240])
+                                    return
+                                if mapped is None:
+                                    continue
+                                step_idx += 1
+                                yield mapped
+                                # artifact 不是"停止读取"：sidecar 会在交差之后补一条
+                                # token 用量，提前 return 会把这条用量丢掉。
+                                if mapped["type"] == ERROR:
+                                    return
+                        # 流正常结束：sidecar 只在 run 终态或内核丢单时 end，不用重连
+                        break
+                    except Exception as exc:
                         if self._cancelled:
                             return
-                        if not line.startswith("data:"):
-                            continue
-                        payload = line[5:].strip()
-                        if not payload:
-                            continue
-                        try:
-                            event = json.loads(payload)
-                        except ValueError:
-                            continue
-                        if os.environ.get("AQI_DURABLE_DEBUG"):
-                            print(f"[durable] {json.dumps(event, ensure_ascii=False)[:400]}", file=sys.stderr)
-                        mapped = self._map(event, step_idx)
-                        if mapped is None:
-                            continue
-                        step_idx += 1
-                        yield mapped
-                        # artifact 不是"停止读取"：sidecar 会在交差之后补一条
-                        # token 用量，提前 return 会把这条用量丢掉。
-                        if mapped["type"] == ERROR:
+                        reconnects += 1
+                        if reconnects > MAX_STREAM_RECONNECTS:
+                            yield make_event(ERROR, step_idx=step_idx,
+                                             text=(f"事件流中断，重连 {MAX_STREAM_RECONNECTS} 次仍失败："
+                                                   f"{type(exc).__name__}: {exc}")[:240])
                             return
+                        # 断流重连：since 游标已在请求上，从断点续读。先退避，
+                        # 不给挂起的 sidecar 雪上加霜（M6 复审 m4）。
+                        await asyncio.sleep(min(0.5 * (2 ** (reconnects - 1)), 4.0))
         except Exception as exc:
             yield make_event(ERROR, step_idx=step_idx,
                              text=f"{type(exc).__name__}: {exc}"[:240])
@@ -291,6 +328,72 @@ class DurableAdapter(BaseWorkerAdapter):
                 return view.json()
         except Exception:
             return None
+
+    def tools(self, commission_id: str, attempt: int = 0) -> list[str] | None:
+        """问内核这一单的 Worker 有哪些工具（M4，issue #63）。只读，不建单。
+
+        两跳与 lookup 同模式：先 /v1/lookup 拿 task_id，再 GET
+        /v1/runs/{task_id}/tools。返回 None 表示内核里没有这一单（或内核
+        不可达）——调用方要能分辨「没有这一单」和「没有工具」，None 不是
+        空清单。
+        """
+        import httpx
+
+        try:
+            with httpx.Client(timeout=10.0) as client:
+                response = client.get(
+                    f"{self._endpoint()}/v1/lookup", headers=self._headers(),
+                    params={"commission_id": str(commission_id), "attempt": int(attempt)})
+                if response.status_code >= 400:
+                    return None
+                found = response.json()
+                if not found.get("found"):
+                    return None
+                task_id = int(found.get("task_id") or 0)
+                if task_id <= 0:
+                    return None
+                view = client.get(f"{self._endpoint()}/v1/runs/{task_id}/tools",
+                                  headers=self._headers())
+                if view.status_code >= 400:
+                    return None
+                tools = view.json().get("tools")
+                return list(tools) if isinstance(tools, list) else []
+        except Exception:
+            return None
+
+    def lookup_run(self, commission_id: str,
+                   attempt: int = 0) -> tuple[str, dict[str, Any] | None]:
+        """三态问内核：("found", 视图) / ("absent", None) / ("error", None)。
+
+        `lookup` 的 None 契约分不清「内核里没有这一单」与「内核不可达」——排障时
+        会把「内核挂了」报成「没有这一单」，指错方向。新方法只给只读路由用；
+        `lookup` 的既有契约不动，`recover_interrupted` 的对账还靠着它
+        （M6 复审 m1 的彻底修法）。
+        """
+        import httpx
+
+        try:
+            with httpx.Client(timeout=10.0) as client:
+                response = client.get(
+                    f"{self._endpoint()}/v1/lookup", headers=self._headers(),
+                    params={"commission_id": str(commission_id), "attempt": int(attempt)})
+                if response.status_code >= 400:
+                    return "error", None
+                found = response.json()
+                if not found.get("found"):
+                    return "absent", None
+                task_id = int(found.get("task_id") or 0)
+                if task_id <= 0:
+                    return "absent", None
+                view = client.get(f"{self._endpoint()}/v1/runs/{task_id}",
+                                  headers=self._headers())
+                if view.status_code == 404:
+                    return "absent", None  # lookup 说在、视图 404：内核重置过
+                if view.status_code >= 400:
+                    return "error", None
+                return "found", view.json()
+        except Exception:
+            return "error", None
 
     async def cancel(self) -> None:
         """幂等，绝不抛异常。终端任务上的取消由 sidecar 自己变成空操作。"""

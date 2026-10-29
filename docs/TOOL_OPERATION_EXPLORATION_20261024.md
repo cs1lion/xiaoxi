@@ -5,6 +5,23 @@
 - 方法：ask-matt 式探索。ask-matt 的做法是听完状况描述后指出该走哪条路、为什么不是另一条、之后接什么。本次按同一形态组织：5 路现状盘点 → 4 路外部研究 → 路由器定优先级 → 3 个角度出方案 → 评审席合并 → 2 个对抗核查者（证据核查 + 红线可行性）→ 成文。核查标 refuted 的两处已按 correction 修正本文
 - 范围：只做研究与方案，不改任何代码。涉及 executive.py 与协议字段的部分按规矩停工等 Role 0
 
+## 落地台账（2026-10-26 迭代轮）
+
+当晚按 M1→M6 顺序开工，matt skills 流程（ask-matt 路由 → grilling → to-spec 发 issue → implement 驱动 tdd → code-review）驱动，每部分完工派子 agent 做两轴复审 + 对抗验证，findings 清零才进下一部分。截至 2026-10-26 深夜：
+
+| 项 | 状态 | 落地物 | 复审与验证 |
+|---|---|---|---|
+| M1 点亮 MCP Worker 通路 | 已落地 | issue #60；`scripts/mcp_servers/echo_server.py`、roster `mcp_echo` 条目、`scripts/test_mcp_adapter.py`、`mcp_adapter` 门禁 | S1/S2/P1/S3-S8/P2-P4 已修；S9 实测 0/60 不复现，按复审建议保留 |
+| M2 接通确定性 Verifier | 已落地 | issue #61；`server/assistant/acceptance_verify.py`、evaluator 加法挂载、`scripts/test_verify.py`、`verify` 门禁 | MAJOR-1（note ref 假 blocker）与 MINOR-2..6 已修 |
+| M3 tools/list + progress 终态 | 已落地 | issue #62；mcp.py 工具发现与 PROGRESS、dispatcher 终态广播、web 注释 | Minor-1（running 发布补 suppress）与终态语义覆盖缺口已修；Minor-2（issue 行号）已留痕 |
+| M4 config/mcp.json + 工具目录路由 | 已落地 | issue #63；`config/mcp.json` echo 条目、sidecar `/v1/runs/{id}/tools`、`runtime.toolsForTask`、durable `tools()` 两跳 | 复审闭环（第四度重派成功，八条对抗验证全 supported）：MINOR-1/3 已修（args 断言 + 路由层 404/200 回归）；MINOR-2 宿主 HTTP 出口留后续 effort（roster 注释已写明，见 PROTOCOL_REQUEST D 组）；MINOR-4 仅记录 |
+| M5 不越线子集 | 已落地 | `scripts/test_stalled_running.py` 两段式缺口复现、`stalled_running` 门禁 | 复审六条 minor 已修（含并发槽断言与翻转口径）；其间 import 漏配曾把门禁改红，已修复复跑 10/10 |
+| M5 主体（executive.py 收口扫描） | 未做（红线） | — | 停工等 Role 0 放行 |
+| M6 不越线子集 | 已落地 | durable since 游标 + 有界断流重连、`/internal/durable/runs/{commission_id}` 只读路由、INTERNAL_ROUTES 登记 | Major-1（run_view 同步阻塞，改同步 def 进线程池）与 m1-m7 已修；m1 的三态查询（`lookup_run`：found/absent/error，502 与 404 分开报）已 follow-up 落地 |
+| M6 主体（progress 落库与停滞检测） | 未做（红线） | — | 停工等 Role 0 放行 |
+
+门禁现状（2026-10-27 00:50 复跑）：本迭代相关的门禁全绿——protocol / core / evals / npm / adapter_ext / mcp_adapter / verify / stalled_running / executive_v3 / durable_adapter / durable_read_api / durable_mcp / durable_profiles 十三门 0 失败 0 跳过。唯一红灯 `gate_coverage` 归并发会话的在途开发，不属本迭代：其 `scripts/test_memory_retrieval_quality.py` 与 `scripts/test_memory_snapshot.py` 两个新测试文件均未登记进 `run_gates.GATES` 也未进 `gates_unregistered.txt`（00:22 复查时只有一个，00:50 变为两个）。00:22 前后 `executive_v3` 曾因其新增的 `test_sample_cache_keyed_on_mtime` 转红，00:50 复跑已绿（M4 复审亦独立判定为偶发 flake）。归属证据：本迭代对 durable.py / durable_api.py 的最后改动在 00:18，00:18 / 00:20 / 00:50 三轮 executive_v3 均绿。灯的修法归其所有者；本迭代不擅动他方文件。
+
 ## 一段话回答
 
 还能做的努力集中在四个空洞上，按「无红线优先、被门控的并行准备」排序：一、外部工具通路从 0 到 1——`adapter:mcp` 已注册并接进派单链（server/assistant/adapters/mcp.py:26、adapters/__init__.py:19、dispatcher.py:428），但花名册 8 个 worker 无一条 mcp 条目（HEAD `2b08798`，2026-10-24 读 config/agents_roster.yaml:53,63,77,95,120,141,169,188），补一个真实可跑的 mock stdio server 与 roster 条目即可端到端打通，这是其余一切的地基；二、验收兜底接通——server/verify 的三种确定性 check（server/verify/check.py:62-66）与慢环零接通，把其中两种桥接进 evaluator 的 findings，并补上被承诺却全仓不存在的 scripts/test_verify.py（server/verify/check.py:30、verifier.py:30）；三、跟踪可观测——MCP 适配器补 tools/list 与 PROGRESS 事件，dispatcher 三个出口补 TOOL_EXECUTION 终态，只使用 PROTOCOL.md:637 既有 payload 字段；四、收口与持久化——非 durable 单「初审打回后 running 且无人驱动」需要收口扫描，progress 需要落库或只读复盘面，这两项分别被 executive.py 红线与 [PROTOCOL_REQUEST] 协议门门控，未获批前只合入测试文件与 sidecar 内部只读路由。前两项无协议门、不碰红线，应立刻做；后两项的不越线部分可并行推进。

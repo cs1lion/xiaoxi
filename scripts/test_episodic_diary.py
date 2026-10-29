@@ -495,6 +495,38 @@ class StarmapTests(unittest.TestCase):
             with self.subTest(missing=missing):
                 self.assertIsNone(starmap.starmap_node(self.manager, missing))
 
+    def test_bounded_superseded_memory_node_detail_does_not_404(self):
+        # The graph is built from retrieval_candidates, which admits a superseded
+        # row the user explicitly bounded as a historical record. The detail route
+        # must accept the same set, or the graph advertises a node whose own route
+        # 404s and the UI reports a present memory as "已经不在了".
+        bounded = self.store.upsert(
+            kind="fact", subject="user", key="工作:公司", value="用户到去年为止在甲公司工作",
+            source="stated", session_id="s", fact_valid_until=1)
+        current = self.store.upsert(
+            kind="fact", subject="user", key="工作:公司", value="用户现在在乙公司工作",
+            source="stated", session_id="s")
+        node_ids = {node["id"] for node in self.graph()["nodes"]}
+        self.assertIn(f"mem:{bounded}", node_ids)
+        detail = starmap.starmap_node(self.manager, f"mem:{bounded}")
+        self.assertIsNotNone(detail)
+        self.assertEqual(detail["value"], "用户到去年为止在甲公司工作")
+        # The current fact's own detail still works, and the shape is unchanged.
+        self.assertEqual(starmap.starmap_node(self.manager, f"mem:{current}")["value"],
+                         "用户现在在乙公司工作")
+        self.assertNotIn("fact_valid_until", detail)
+
+    def test_unbounded_superseded_memory_stays_invisible(self):
+        replaced = self.store.upsert(
+            kind="fact", subject="user", key="居住:城市", value="用户住在北京",
+            source="stated", session_id="s")
+        self.store.upsert(
+            kind="fact", subject="user", key="居住:城市", value="用户住在上海",
+            source="stated", session_id="s")
+        node_ids = {node["id"] for node in self.graph()["nodes"]}
+        self.assertNotIn(f"mem:{replaced}", node_ids)
+        self.assertIsNone(starmap.starmap_node(self.manager, f"mem:{replaced}"))
+
 
 class SelfEvolutionTests(unittest.IsolatedAsyncioTestCase):
     def setUp(self):

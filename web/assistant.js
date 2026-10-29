@@ -96,7 +96,10 @@ export function showAssistantResult(result, { confirm } = {}) {
   panel.dispatchEvent(new CustomEvent('assistant-result', { bubbles: true, detail: { card } }));
 }
 async function refresh() {
-  if (busy.has('refresh')) return;
+  // 面板没启动完时（例如启动阶段 preferences 拉取失败走了提前 return）tasks/reminders/inbox
+  // 还是 undefined，此时没有任何列表可刷新。直接返回，否则会在 undefined 上抛 TypeError，
+  // 而调用方 button() 会把它吞成 errorArea 文案——让一次已成功的确认也显示成错误。
+  if (busy.has('refresh') || !tasks || !reminders || !inbox) return;
   busy.add('refresh');
   try {
     const [taskData, reminderData, notificationData] = await Promise.all([
@@ -149,6 +152,14 @@ export async function bootAssistant() {
   const mount = document.querySelector('#assistantMount') || document.querySelector('.side');
   if (!mount) throw new Error('找不到任务与提醒侧栏');
   mount.append(panel);
+  // 确认门必须在等 preferences 之前就建好：面板到这里已经对用户可见，而那次请求还要走
+  // 一个网络往返。若把行动确认区留到请求之后再建，"拉取慢"（不只是失败）时到达的
+  // confirmation 结果就会被 showAssistantResult 的 `if (!actionArea) return` 静默丢弃——
+  // 没有按钮也没有报错，有副作用的动作永远无法获批。
+  const gate = section('行动确认与结果');
+  actionArea = node('div', undefined, 'assistant-list');
+  gate.append(actionArea);
+  empty(actionArea, '需要你确认的行动与执行结果会显示在这里。');
   let prefs;
   try { prefs = await api('preferences/proactivity'); }
   catch (error) {
@@ -207,11 +218,11 @@ export async function bootAssistant() {
     if (!Number.isFinite(scheduled_at)) throw new Error('请选择具体时间');
     await api('reminders', 'POST', { content: content.value, scheduled_at, request_id: crypto.randomUUID() }); await refresh();
   }));
-  for (const [heading, assign] of [['行动确认与结果', value => actionArea = value], ['任务', value => tasks = value], ['提醒', value => reminders = value], ['通知收件箱', value => inbox = value]]) {
+  // gate（行动确认与结果）已在等 preferences 之前建好，这里只建其余三个列表区。
+  for (const [heading, assign] of [['任务', value => tasks = value], ['提醒', value => reminders = value], ['通知收件箱', value => inbox = value]]) {
     const group = section(heading);
     const area = node('div', undefined, 'assistant-list'); assign(area); group.append(area);
   }
-  empty(actionArea, '需要你确认的行动与执行结果会显示在这里。');
   try { await refresh(); }
   catch (error) { errorArea.textContent = error.message; }
   setInterval(() => {

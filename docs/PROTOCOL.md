@@ -62,8 +62,7 @@ asr?            只在语音输入时出现
 - `web/avatar/params.js` 的 `PARAM_GROUPS` ↔ `avatar.yaml` 的 `neutral`
   必须互为全集。少写 → 驱动写进去的值被当成偏移再减一次；
   多写 → 平滑循环里没有它，静默丢弃。
-- 形象层只**读** `voice_profile`，不写。所以后端怎么改音色参数
-  （pitch/rate/新增 instruction）都不影响形象层。
+- ~~形象层只**读** `voice_profile`，不写。~~（2026-10-27 订正：此耦合已不存在。`web/` 全仓含驼峰命名均无 `voice_profile`/`voiceProfile` 引用，后端也不经 WS/API 把音色参数下发前端——`server/speech/tts.py` 的 `voice_profile()` 只在服务端合成内部使用。前端 `face.js` 的 `headPitch`、`discourseGesture.js` 的 `pitchHistory` 是头像驱动自己的物理量，与 TTS 音色无关。故后端改 pitch/rate/instruction 确实不影响形象层，但原因是**两者已无数据通路**，不是"只读不写"。）
 
 ## 四、怎么守住
 

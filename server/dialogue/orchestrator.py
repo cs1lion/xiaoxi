@@ -28,6 +28,18 @@ _SAMPLE_DATA: dict[str, Any] | None = None
 _SAMPLE_DATA_KEY: tuple[str, int] | None = None
 
 
+def _pacing_number(value: Any, default: float) -> float:
+    """Read one pacing config number, degrading to default on a typo.
+
+    Delegates to ``ambient.config_number`` (which also rejects booleans: PyYAML
+    turns ``no``/``yes`` into ``False``/``True`` and ``float(True)`` is 1.0 --
+    a silent 1-second threshold). The import is function-local to match
+    ``ambient_event``'s existing style and keep import order unconstrained.
+    """
+    from . import ambient
+    return ambient.config_number(value, default)
+
+
 def _sample_lines(key: str) -> list[str]:
     """读 config/response_examples.json 的 stage_samples[key]，按 (path, mtime) 缓存。
 
@@ -749,10 +761,10 @@ class Orchestrator:
             return
         session = self.session_state(session_id)
 
-        for keyword in self.pacing["cooldown"]["on_refuse_keywords"]:
+        for keyword in (self.pacing["cooldown"].get("on_refuse_keywords") or []):
             if keyword in user_text:
-                self.state["proactive_suppressed_until"] = time.time() + float(
-                    self.pacing["cooldown"]["suppress_proactivity_seconds"]
+                self.state["proactive_suppressed_until"] = time.time() + _pacing_number(
+                    self.pacing["cooldown"].get("suppress_proactivity_seconds"), 86400.0
                 )
                 session["user_state_note"] = "用户刚表示不想聊，语气要收着，不要追问"
 
@@ -776,7 +788,7 @@ class Orchestrator:
         events: asyncio.Queue = asyncio.Queue()
         audio_jobs: asyncio.Queue = asyncio.Queue()
         sentinel = object()
-        hard = max(0, int(self.pacing["length"]["hard_limit_chars"]))
+        hard = max(0, int(_pacing_number(self.pacing["length"].get("hard_limit_chars"), 400.0)))
         policy = session.get("response_policy") or {}
         limit = hard if policy.get("length") == "detailed" else min(hard, self._length_target(user_text))
         suppress_questions = self._question_ratio_exceeded()
@@ -1179,10 +1191,10 @@ class Orchestrator:
             return TurnResult(text="", latency_ms=0)
         session = self.session_state(session_id)
 
-        for keyword in self.pacing["cooldown"]["on_refuse_keywords"]:
+        for keyword in (self.pacing["cooldown"].get("on_refuse_keywords") or []):
             if keyword in user_text:
-                self.state["proactive_suppressed_until"] = time.time() + float(
-                    self.pacing["cooldown"]["suppress_proactivity_seconds"]
+                self.state["proactive_suppressed_until"] = time.time() + _pacing_number(
+                    self.pacing["cooldown"].get("suppress_proactivity_seconds"), 86400.0
                 )
                 session["user_state_note"] = "用户刚表示不想聊，语气要收着，不要追问"
 
@@ -1276,8 +1288,12 @@ class Orchestrator:
             if on_memories and memories:
                 try:
                     await on_memories(memories)
-                except Exception:  # pragma: no cover
-                    pass
+                except Exception as exc:  # pragma: no cover - never kill the loop
+                    # Same shape as extract_error above: the loop must survive a
+                    # broken notice callback, but silence is how a contract break
+                    # (a missing field the panel needs) hides as "the notice never
+                    # arrived" instead of an error anyone can see.
+                    self._last_meta["notice_error"] = str(exc)[:200]
 
         task = asyncio.create_task(_run())
         self._extract_tasks.add(task)
@@ -1298,11 +1314,11 @@ class Orchestrator:
             return None
         if now < float(self.state["proactive_suppressed_until"]):
             return None
-        if now - float(self.state["last_proactive_at"]) < float(cfg["min_interval_seconds"]):
+        if now - float(self.state["last_proactive_at"]) < _pacing_number(cfg.get("min_interval_seconds"), 1800.0):
             return None
-        if idle_seconds < float(cfg["only_when_user_recently_idle_seconds"]):
+        if idle_seconds < _pacing_number(cfg.get("only_when_user_recently_idle_seconds"), 900.0):
             return None
-        if self.state["proactive_count_today"] >= int(cfg["max_per_day"]):
+        if self.state["proactive_count_today"] >= int(_pacing_number(cfg.get("max_per_day"), 3.0)):
             return None
 
         todos = manager.retriever.search(
@@ -1344,11 +1360,11 @@ class Orchestrator:
             return None
         if now < float(self.state["proactive_suppressed_until"]):
             return None
-        if now - float(self.state["last_proactive_at"]) < float(cfg["min_interval_seconds"]):
+        if now - float(self.state["last_proactive_at"]) < _pacing_number(cfg.get("min_interval_seconds"), 1800.0):
             return None
-        if idle_seconds < float(cfg["only_when_user_recently_idle_seconds"]):
+        if idle_seconds < _pacing_number(cfg.get("only_when_user_recently_idle_seconds"), 900.0):
             return None
-        if self.state["proactive_count_today"] >= int(cfg["max_per_day"]):
+        if self.state["proactive_count_today"] >= int(_pacing_number(cfg.get("max_per_day"), 3.0)):
             return None
         if not (memory_cfg().get("self_evolution") or {}).get("enabled", False):
             return None
@@ -1401,7 +1417,7 @@ class Orchestrator:
             return None
         # A fresh idle period starts whenever silence drops back near zero: the
         # opener cycle resets, so half a quiet minute always earns a first hello.
-        if idle_seconds <= float(cfg.get("cycle_reset_seconds") or 5):
+        if idle_seconds <= ambient.config_number(cfg.get("cycle_reset_seconds") or 5, 5.0):
             self.state["voice_cycle"] = 0
         cycle = int(self.state.get("voice_cycle") or 0)
         threshold = ambient.backoff_threshold(
@@ -1411,7 +1427,7 @@ class Orchestrator:
         tier_cfg["mumble_seconds"] = threshold
         # Tier 3 keeps its boundary but never undercuts the backed-off threshold,
         # so a long silence still respects the cooldown instead of nagging.
-        tier_cfg["proactive_seconds"] = max(float(cfg.get("proactive_seconds") or 90), threshold)
+        tier_cfg["proactive_seconds"] = max(ambient.config_number(cfg.get("proactive_seconds") or 90, 90.0), threshold)
         tier = ambient.select_tier(idle_seconds, tier_cfg, quiet_mode=bool(cfg.get("quiet_mode_default")))
         if tier is None:
             return None
@@ -1425,7 +1441,7 @@ class Orchestrator:
         order = {"micro_act": 1, "mumble": 2}
         last_tier = self.state.get("last_ambient_tier")
         last_at = float(self.state.get("last_ambient_at") or 0)
-        window = float(cfg.get("dedupe_window_seconds") or 300)
+        window = ambient.config_number(cfg.get("dedupe_window_seconds") or 300, 300.0)
         if last_tier in order and now - last_at < window and order[tier] <= order[last_tier]:
             return None
         if tier == "micro_act":
@@ -1746,7 +1762,7 @@ class Orchestrator:
         if emotion == "收敛":
             # 用户说过难受/不喜欢之后，收敛态不允许还挂着问句
             text = re.sub(r"[？?]+\s*$", "", text).strip()
-        hard = int(self.pacing["length"]["hard_limit_chars"])
+        hard = int(_pacing_number(self.pacing["length"].get("hard_limit_chars"), 400.0))
         target_max = self._length_target(user_text)
         if response_policy and response_policy.get('length') == 'detailed':
             target_max = hard
@@ -1760,13 +1776,14 @@ class Orchestrator:
 
     def _length_target(self, user_text: str) -> int:
         length = self.pacing["length"]
-        if any(k in user_text for k in ("详细", "为什么", "怎么做", "解释", "展开")):
-            return int(length["medium_max_chars"])
-        return int(length["short_max_chars"]) if length["default"] == "short" else int(length["medium_max_chars"])
+        detailed = any(k in user_text for k in ("详细", "为什么", "怎么做", "解释", "展开"))
+        short = length.get("default") == "short" and not detailed
+        key = "short_max_chars" if short else "medium_max_chars"
+        return int(_pacing_number(length.get(key), 100.0 if short else 200.0))
 
     def _question_ratio_exceeded(self) -> bool:
         cfg = self.pacing["questions"]
-        ratio_limit = float(cfg["max_ratio"])
+        ratio_limit = _pacing_number(cfg.get("max_ratio"), 0.35)
         window = self.state.get("_recent_assistant", [])
         if len(window) < 3:
             return False
@@ -1776,7 +1793,7 @@ class Orchestrator:
     def _maybe_update_state(self, session: dict[str, Any], assistant_text: str, user_text: str) -> None:
         recent = self.state.setdefault("_recent_assistant", [])
         recent.append(assistant_text)
-        del recent[:-int(self.pacing["questions"].get("window", 10))]
+        del recent[:-int(_pacing_number(self.pacing["questions"].get("window"), 10.0))]
         if any(k in user_text for k in ("难过", "累", "烦", "emo", "崩溃", "压力")):
             session["current_state"] = "收敛"
             session["user_state_note"] = "用户情绪低落：少调侃，简短一点，多听"

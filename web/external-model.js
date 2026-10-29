@@ -13,7 +13,11 @@ export function normalizeModelUrl(raw) {
     try { new URL(value); } catch { return { ok: false, reason: "地址无法解析，请检查后重试。" }; }
     return { ok: true, url: value };
   }
-  if (value.startsWith("/")) return { ok: true, url: value };
+  // 站内路径只认 /static/ 前缀：服务端 app.py:1621 把 /static 挂到 web/，模型
+  // 文件就在 web/models/ 下。不能用 startsWith("/")——那会放行 //host 与
+  // /\host，浏览器会把二者解析成外部主机，等于绕过上面的 https 限定；反斜杠
+  // 在 URL 里也会被规范化成正斜杠，一并拒掉。
+  if (value.startsWith("/static/") && !value.includes("\\")) return { ok: true, url: value };
   return { ok: false, reason: "只支持 https:// 链接或站内 /static/ 路径，未做任何加载。" };
 }
 

@@ -449,6 +449,9 @@ class Dispatcher:
         try:
             adapter = self.adapter_for(agent_id)
         except UnknownAdapterError as exc:
+            with contextlib.suppress(Exception):
+                self._publish_tool_terminal(commission_id, agent_id, artifact=None,
+                                            failure="adapter_unavailable", steps_seen=0)
             return {"commission": self.block(
                 commission_id, f"花名册上的 {agent_id or '这个 Agent'} 没有可用执行体：{exc}。换将，还是这单算了？"),
                 "verdict": None, "failure": "adapter_unavailable"}
@@ -457,6 +460,7 @@ class Dispatcher:
         artifact: dict[str, Any] | None = None
         failure: str | None = None
         failure_kind: str | None = None
+        max_step = 0  # M3：实测最大步数，终态广播的 steps_total 只认它，不编造
         # 这是第几次做这一单。适配器要用它区分"重投同一次"与"初审打回后重做"：
         # durable 的幂等键如果只有 commission_id，重做会拿回上一版已终态的任务，
         # 执行体根本不会被再拉起，旧成果被原样再交一次。只传给适配器，不写进
@@ -466,6 +470,10 @@ class Dispatcher:
         try:
             context = await adapter.prepare_context(commission_id, worker_packet)
         except Exception as exc:
+            with contextlib.suppress(Exception):
+                self._publish_tool_terminal(
+                    commission_id, agent_id, artifact=None,
+                    failure=f"prepare_failed:{type(exc).__name__}", steps_seen=0)
             return {"commission": self.block(
                 commission_id, f"执行体没起来：{type(exc).__name__}。要我再试一次吗？"),
                 "verdict": None, "failure": f"prepare_failed:{type(exc).__name__}"}
@@ -478,18 +486,23 @@ class Dispatcher:
                 step_idx = int(event.get("step_idx") or 0)
                 if kind == "progress":
                     self.commissions.record_step(commission_id, step_idx or 1)
+                    max_step = max(max_step, step_idx or 1)
                     # §25.2 TOOL_EXECUTION（至多一次）：一条进展就是一次真实工具
                     # 执行的可观测信号。tool 如实写执行者（agent_id），适配器事件
-                    # 没带的 steps_total / 状态名不编造。发布失败不冒泡（旁路）。
-                    publish_tool_execution(
-                        task_id=commission_id, tool=str(agent_id), status="running",
-                        steps_done=step_idx or 1,
-                        detail=str(event.get("text") or event.get("detail") or ""))
+                    # 没带的 steps_total / 状态名不编造。发布失败不冒泡（旁路）：
+                    # 广播挂掉不该被外层 except 吞成 failure，把这一单伪装成执行
+                    # 失败（M3 复审 Minor-1）。
+                    with contextlib.suppress(Exception):
+                        publish_tool_execution(
+                            task_id=commission_id, tool=str(agent_id), status="running",
+                            steps_done=step_idx or 1,
+                            detail=str(event.get("text") or event.get("detail") or ""))
                     signature = normalize_signature(event)
                     tripped = self._spinning(signatures, commission_id, signature,
                                              agent_id, max_identical)
                     if tripped:
                         await adapter.cancel()
+                        failure = "spinning"
                         return {"commission": self.block(
                             commission_id, "它开始在原地打转了，我先把闸拉了。换将，还是这单算了？"),
                             "verdict": None, "failure": "spinning"}
@@ -507,6 +520,11 @@ class Dispatcher:
         finally:
             with contextlib.suppress(Exception):
                 await adapter.cancel()
+            # M3（issue #62）：TOOL_EXECUTION 终态。放进 finally 覆盖 spin 熔断与
+            # 循环后所有出口；发布是旁路，失败不冒泡、不拦收工。
+            with contextlib.suppress(Exception):
+                self._publish_tool_terminal(commission_id, agent_id, artifact=artifact,
+                                            failure=failure, steps_seen=max_step)
         if artifact is None:
             reason = failure or "它跑完了但没交差"
             return {"commission": self.block(
@@ -522,6 +540,23 @@ class Dispatcher:
         usage, spinning = self.audit_inputs(commission_id)
         commission, verdict = self.submit(commission_id, artifact, usage=usage, spinning=spinning)
         return {"commission": commission, "verdict": verdict, "failure": failure}
+
+    def _publish_tool_terminal(self, commission_id: str, agent_id: str, *,
+                               artifact: dict[str, Any] | None, failure: str | None,
+                               steps_seen: int) -> None:
+        """§25.2 TOOL_EXECUTION 终态（M3，issue #62）：每一单工具执行有头有尾。
+
+        判据只有一条：交了差且没有又报错才是 done；没交差、交了又炸、spin 熔断
+        都是 failed。steps_total 只带实测步数——没发过 progress 的适配器不编造。
+        status 取值 done/failed 是本仓约定：PROTOCOL.md:637 只列字段名、没枚举
+        取值域；前端按追加流水消费不过滤，要按 status 过滤需前后端再对齐。
+        """
+        done = artifact is not None and not failure
+        publish_tool_execution(
+            task_id=commission_id, tool=str(agent_id),
+            status="done" if done else "failed",
+            steps_total=steps_seen if steps_seen > 0 else None,
+            detail="" if done else str(failure or "没有交付")[:200])
 
     def _spinning(self, signatures: list[str], commission_id: str, signature: str,
                   agent_id: str, max_identical: int) -> bool:

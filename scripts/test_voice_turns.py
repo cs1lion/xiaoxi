@@ -206,7 +206,7 @@ class VoiceTurnTests(unittest.IsolatedAsyncioTestCase):
         async def stream(**kwargs):
             self.stream_calls.append(kwargs)
             yield {"type": "thinking"}
-            await kwargs["on_memories"]([SimpleNamespace(id=1, kind="fact", value="fake", source="stated")])
+            await kwargs["on_memories"]([SimpleNamespace(id=1, kind="fact", value="fake", source="stated", status="active")])
             yield {"type": "emotion", "emotion": "base"}
             yield {"type": "text_delta", "delta": "hi"}
             yield {"type": "audio", "audio": b"fake", "index": 0, "text": "hi", "emotion": "base"}
@@ -290,6 +290,24 @@ class VoiceTurnTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(all(e["turn_id"] == "voice-1" for e in events))
         self.assertTrue({"recording", "asr", "thinking", "emotion", "text_delta", "audio", "done", "memory_notice"} <= {e["type"] for e in events})
 
+    async def test_memory_notice_items_carry_status(self):
+        # The panel branches on item.status to tell a saved fact from a pending
+        # conflict (PROTOCOL.md §11: a conflict must not be shown as applied).
+        # Omitting status made both branches dead code -- every item filtered
+        # out as status-less -- so pin it here.
+        self.ws.send("start", turn_id="notice-1")
+        self.ws.audio()
+        self.ws.send("audio_end", turn_id="notice-1")
+        await self.ws.wait("done", "notice-1")
+        notices = [e for e in self.ws.events if e["type"] == "memory_notice"]
+        self.assertTrue(notices, "本轮应产生 memory_notice")
+        for notice in notices:
+            items = notice.get("items") or []
+            for item in items:
+                self.assertIn("status", item, f"notice item 缺 status：{item!r}")
+                self.assertIn(item["status"], ("active", "superseded", "done", "conflict"),
+                              f"notice item status 非法：{item!r}")
+
     async def test_start_cancels_asr_and_drops_late_result(self):
         started, cancelled, release, returned = [asyncio.Event() for _ in range(4)]
         async def stubborn(data):
@@ -325,7 +343,7 @@ class VoiceTurnTests(unittest.IsolatedAsyncioTestCase):
                 await release.wait()
             except asyncio.CancelledError:
                 await release.wait()
-            await kwargs["on_memories"]([SimpleNamespace(id=2, kind="fact", value="late", source="stated")])
+            await kwargs["on_memories"]([SimpleNamespace(id=2, kind="fact", value="late", source="stated", status="active")])
             returned.set()
             yield {"type": "text_delta", "delta": "late"}
         self.env["orchestrator"].stream_respond = stubborn

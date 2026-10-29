@@ -262,8 +262,14 @@ function renderProposal(proposal) {
   updateProposalView(state, proposal);
   return true;
 }
+export function defersToAssistantGate(result) {
+  // 带确认门(confirmation)或回执(receipts)的助手结果归 showAssistantResult 渲染——
+  // 「确认执行/不执行」只在那里。这里必须让位，否则用户看不到确认按钮，
+  // 有副作用的动作就永远无法被批准。返 true 时 showCompanionResult 必须 return false。
+  return Boolean(result?.confirmation || result?.receipts?.length);
+}
 export function showCompanionResult(result) {
-  if (result?.confirmation || result?.receipts?.length) {
+  if (defersToAssistantGate(result)) {
     if (result.companion?.thread || result?.receipts?.length) changed(result.companion?.thread);
     return false;
   }

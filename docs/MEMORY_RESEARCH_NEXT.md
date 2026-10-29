@@ -2,6 +2,14 @@
 
 日期：2026-10-13。基于当前工作目录源码、一手资料和隔离离线探针。
 
+> 2026-10-26 核实（store 证据跨度/有效时间/scope，§1 源码定位 store.py 条）：§1 三项现已全部闭环。**消息证据跨度已落地**：`server/memory/store.py` memories 表有 `evidence_message_id`/`evidence_quote`/`evidence_state`(legacy/manual/linked)/`last_observed_message_id`/`retired_by_message_id`，lessons/diaries/drifts 分别带 `evidence_refs`/`source_message_ids`/`evidence_diary_ids`；`upsert` 强制「结构化偏好需 linked 已验证证据」，偏好侧经 `server/interaction/preferences.py` 的 `preference_evidence`/`preference_links` 关联证据。**scope 已落地**：memories 有 `preference_scope`(long_term/recent/current/unspecified)，`preference_claims` 有 `scope`(按 activity/session_id/topic 的 JSON)。**事实有效时间已落地**（`fact_valid_from`/`fact_valid_until`，显式范围标记保守解析 + 检索软惩罚 + 交付层 time_note，live 3/3 验证）——完整设计、解析规则、覆盖率实测与已排查的非缺陷见专档 [MEMORY_VALID_TIME.md](MEMORY_VALID_TIME.md)。
+
+> 2026-10-26 核实（broker 场景/topic 识别，§1 源码定位旧条目）：非缺口，是有意保守且被 `test_context_broker.py`（16 项）完备覆盖的设计。「少量关键词」已过时——`_TECHNICAL`（代码/报错/调试/编程/编译/命令行/异常堆栈 + 6 语言）+ `_SCRIPT_REQUEST`+`_FILE_OPERATION`，`_CREATIVE_SCRIPT` vs `_TECHNICAL_TARGET` 区分创意脚本 vs 技术调试，`_DECLINED_TECHNICAL`/`_REPORTED_CLAUSE` 剔除谢绝与转述/引用/他人说。「无可靠 topic 输入」为既定设计：`topic` 只取显式参数（`server/interaction/broker.py` 的 `scene()`，行号会漂移、以函数名为准），不从文本推断，`source='conservative_rule'`，docstring 明示"small current-request vocabulary, not general speech understanding"；漏判回落 chat 是低误报偏差。§1 该条为研究时历史基线，现已闭环。
+
+> 2026-10-26 核实（composer 偏好「举例」误伤，§1 源码定位旧条目）：已修复且被测试完备覆盖，无需改动。`server/dialogue/composer.py` 以 `_EXAMPLE_LABEL`/`_EXAMPLE_CONTENT` 区分「举例」两角色——bare「举例」是输出请求、不排除偏好，仅示例内容标记（比如/例如/举例：）截断其载荷；`_NON_CURRENT_SOURCE` 只留假设/假如/转述等真非当前源标记。`test_response_composer.py`（21 项，含「请详细解释并举例」→detailed、示例标签截断、非当前源拒绝）与 `test_preferences.py`（14 项）均通过。§1 该条为研究时历史基线，现已闭环。
+
+> 2026-10-26 更新（FTS5 中文召回可行性）：结论**暂不集成 FTS5**。现状检索是专为中文调优的字符 n-gram TF-IDF（`server/memory/retriever.py` `_ensure_index`，`ngram_range=(2,3)`，bigram 起步正是为避开 issue #30 的单字假命中），叠加相关性门与重要度/新近度/置信度/效用(MemRL) 重排；issue #31 已把检索卸载出快环（`server/dialogue/orchestrator.py` 的 `_turn_context_async` 里那次 `asyncio.to_thread(self._retrieve_and_mood, ...)`，行号会漂移、以函数名为准，内部经 `build_context`/`deliver_context` 到达 `retriever.search`）。环境实测 SQLite 3.45.3、FTS5 trigram 可用，故这是**选择**而非阻塞。不集成理由：(1) FTS5 trigram 与字符 n-gram 同属「字符 n-gram 桥接中文无分词」，检索机制上无本质召回增益；(2) FTS5 的优势（持久增量索引、免全量重建、BM25）只在**大规模**显著，小溪是单人小库（本地 3 条，现实数十~数千），#31 卸载后重建成本已不挡语音；(3) 集成需重解 issue #30 假命中调优并把 BM25 与现有 MemRL 评分重新整合，收益不成立。此结论与本文第三轮自身顺序一致（检索机制对比排在「写入/当前版本可靠」之后，且结论「不先更换向量库」）。复访时机：写入/当前版本层稳定、且库增到数万条致卸载后重建仍成瓶颈时，再在第三轮同一记忆集合上对比字符 TF-IDF / FTS5 trigram / 混合检索。
+
 > 2026-10-17 更新：本文里的"下一项具体工作"（证据链、独立事实保护、策略识别）已在前序轮次完成；本轮另按 MemRL / EvolveR / ACE / MemSkill 实现了**结果反馈驱动的效用记忆**与**程序性经历（lessons）**，设计与验证见 [MEMORY_SELF_EVOLUTION.md](MEMORY_SELF_EVOLUTION.md)。时间有效性、语义检索、图扩展仍是本文所列未完成项。
 
 执行更新：下文保留研究时的原始基线与设计。后续[消息证据链](MEMORY_EVIDENCE.md)与两项策略修复已令程序探针8项满足；[首轮真实抽取](MEMORY_EVAL.md)执行12次，暴露并存偏好问题。现有[有限偏好契约](MEMORY_PREFERENCES.md)已补并存、程度、原话时间和退役守卫，旧公开输出离线重放。人工语义评分和完整有效时间仍未完成，不能把历史缺口表当成当前所有行为。
@@ -43,7 +51,7 @@ history 原始日志和普通 memory 在同一 SQLite 库的不同表中；相�
 
 - [extractor.py](../server/memory/extractor.py)：`parse_extraction` 无原消息/证据输入；同批按主题删先前项。缺失 source 默认 stated，confidence 由标签直接映射。
 - [manager.py](../server/memory/manager.py)：`_persist` 对 fact/self_state 按主题覆盖；没有完整 ADD/NOOP/UPDATE/CONFLICT 决策与来源保护。
-- [store.py](../server/memory/store.py)：有 session、创建/更新时间和 supersedes；没有消息证据跨度、事实有效时间或 scope。写入消息不返回可供记忆引用的 ID。
+- [store.py](../server/memory/store.py)：有 session、创建/更新时间和 supersedes；没有消息证据跨度、事实有效时间或 scope。写入消息不返回可供记忆引用的 ID。（研究时基线；三项均已落地，见顶部 2026-10-26 核实更新）
 - [composer.py](../server/dialogue/composer.py)：`preferences` 将包含“举例”的整句排除，误伤当前明确要求。
 - [broker.py](../server/interaction/broker.py)：技术场景目前由少量关键词识别；普通编排没有可靠 topic 输入。
 

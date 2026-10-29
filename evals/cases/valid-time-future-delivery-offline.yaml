@@ -1,0 +1,78 @@
+id: valid-time-future-delivery-offline
+title: 显式划界的未来计划进入最终 Prompt：带时间标注、措辞不得对整条记录断言非现状
+layer: offline
+origin: >-
+  plan-52 给未来下界补了与过期上界对称的降权（fact_valid_from 仍领先于 now 时同样乘
+  validity_expired_factor），plan-53 再给交付层补了 allow_future + time_note。降权只改
+  排序：被降权的行仍可能被交付，而若它不带任何时间信号，模型会把未来计划当成现状。
+
+  本用例钉住三件事：(1) 未来计划确实到达最终 Prompt；(2) 带显式「起才生效」时间标注；
+  (3) 措辞**不得**回退成对整条记录的全称现状断言。
+
+  第 (3) 条的由来是一个真实缺陷：plan-53 最初的措辞是「该条自 X 起才生效，不是现在的
+  状况」。那是对整条记录的全称断言，而 fact_valid_from 只覆盖记录中「下个月起」那部分。
+  对同时含现状与未来的记录（用户真实句式「我现在在乙公司，下个月起去丙公司」），这条
+  注释会命令模型不要把现状当现状——等于让它忽略正确信息，违反「性格与事实准确性冲突
+  时，准确性优先」。已收窄为「该条有…的时间范围：自 X 起才生效；回答现在/目前类问题
+  不要**把它当作已生效的事实**」，只针对界所覆盖的部分。本用例因此加了一条
+  not_contains「不是现在的状况」钉住它。
+
+  两个构造约束（都是实测出来的，别改）：
+  - **本用例用不同 key**（2026-10-27 订正：早先这里写"必须不同 key"，那是 plan-56 之前
+    的旧况——当时准入只放行「superseded 且 fact_valid_until IS NOT NULL」，同 key 的未来界
+    记录被 supersede 后会因 until 为 NULL 被永久排除）。plan-56 已把五处准入放宽为
+    「fact_valid_until IS NOT NULL **或** fact_valid_from IS NOT NULL」，实测同 key +
+    fact_valid_from 现已能到达交付层，故同 key 亦可用。本用例保留不同 key 只是为了让
+    `current_before_future` 的判据简单按「有无界」派生，不再是硬约束。
+  - **查询不能含「现在」**。纯未来界表述与含「现在」的查询字符重合度不足：
+    「用户下个月起在丙公司工作」vs「我现在在哪工作」相似度仅 0.0386，低于
+    min_similarity 门槛（0.08），会被检索门挡在 Prompt 外（与 valid-time 逻辑无关，
+    纯字符重合度）。去掉「现在」后为 0.1015，可过门。
+    （2026-10-26 在本用例种子形态下实测；相似度受同库其他行的 idf 影响，
+    换语料会变，但"含现在的查询明显更低"这个方向稳定。）
+  - **importance 拉差**（future 1.0 / current 0.0）：让未来计划在 search()（含降权）里
+    仍排第一，此时唯有交付层的稳定分区把当前事实压回前面。否则当前事实本就因相似度
+    更高而居前，排序断言恒真、抓不到分区回退。
+tags: [memory, valid-time, prompt, ordering, hallucination]
+setup:
+  memories:
+    # A. 显式划界的未来计划（用不同 key，理由见 origin）
+    - {kind: fact, subject: user, key: "eval:vt-future-plan",
+       value: "用户下个月起在丙公司工作", source: stated,
+       importance: 1.0, fact_valid_from: 4102444800}
+    # A'. 不带任何界的当前事实（另一个 key）；importance 压低以制造排序压力
+    - {kind: fact, subject: user, key: "eval:vt-current-employer",
+       value: "用户现在在乙公司工作", source: stated, importance: 0.0}
+turns:
+  - 我在哪工作
+pass_rule: all
+checks:
+  # 未来计划确实到达 Prompt，且带显式「尚未生效」标注
+  - target: prompt
+    type: contains
+    value: 用户下个月起在丙公司工作
+  - target: prompt
+    type: contains
+    value: time_note
+  - target: prompt
+    type: contains
+    value: 起才生效
+  # 措辞不得回退成对整条记录的全称现状断言（真实缺陷的守卫）
+  - target: prompt
+    type: contains
+    value: 回答现在/目前类问题不要把它当作已生效的事实
+  - target: prompt
+    type: not_contains
+    value: 不是现在的状况
+  # 未来计划不得被描述成已退役的历史记录（两个分支互斥，措辞不能串）
+  - target: prompt
+    type: not_contains
+    value: 已被后来的陈述取代
+  # 当前事实也在，且排在未來计划之前（降权 + 稳定分区）
+  - target: prompt
+    type: contains
+    value: 用户现在在乙公司工作
+  - target: prompt
+    type: custom
+    value: "evals.checks:current_before_future"
+status: active

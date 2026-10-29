@@ -14,7 +14,7 @@ import contextlib
 import json
 from typing import Any, AsyncIterator
 
-from .base import (ARTIFACT, ERROR, LOG, TOKEN, AdapterError,
+from .base import (ARTIFACT, ERROR, LOG, PROGRESS, TOKEN, AdapterError,
                    BaseWorkerAdapter, artifact_event, make_event,
                    terminate_process_group)
 from .registry import register_adapter
@@ -77,11 +77,30 @@ class McpBridgeAdapter(BaseWorkerAdapter):
                 "clientInfo": {"name": "aqi-executive", "version": "3.0"},
             }, timeout)
             yield make_event(LOG, step_idx=0, text="MCP 握手完成")
+            # M3（issue #62）：tools/list 发现。花名册写死的工具不在清单里就明说，
+            # 不静默回落、不假装只有一个工具。
+            tool = str(context.get("tool") or "run_commission")
+            listing = await self._request("tools/list", {}, timeout)
+            available = [str(item.get("name")) for item in (listing.get("tools") or [])
+                         if isinstance(item, dict) and item.get("name")]
+            if tool not in available:
+                yield make_event(ERROR, step_idx=step_idx,
+                                 text=f"MCP server 没有工具 {tool!r}；可用：{available or '（空）'}")
+                return
+            # arguments 收整份密件：dispatcher 传的 worker_packet 带 attempt 与
+            # 验收摘要（dispatcher.py:473-474）。没有 packet 键的旧调用方回落四键。
+            packet = task_spec.get("packet")
+            if isinstance(packet, dict) and packet:
+                arguments = dict(packet)
+            else:
+                arguments = {key: context.get(key) for key in
+                             ("commission_id", "objective", "deliverable", "constraints")}
+            yield make_event(PROGRESS, step_idx=1,
+                             text=f"发现 {len(available)} 个工具，调用 {tool}")
             result = await self._request("tools/call", {
-                "name": str(context.get("tool") or "run_commission"),
-                "arguments": {key: context.get(key) for key in
-                              ("commission_id", "objective", "deliverable", "constraints")},
+                "name": tool, "arguments": arguments,
             }, timeout)
+            yield make_event(PROGRESS, step_idx=2, text=f"工具 {tool} 返回")
             artifact = self._extract_artifact(result)
             if artifact is None:
                 yield make_event(ERROR, step_idx=step_idx,

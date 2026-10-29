@@ -265,7 +265,17 @@ def starmap_node(manager: Any, node_id: Any) -> dict[str, Any] | None:
     prefix, _, identifier = node_id.partition(":")
     if prefix == "mem" and identifier.isdigit():
         memory = store.get(int(identifier))
-        if memory is None or memory.status not in ("active", "done"):
+        if memory is None:
+            return None
+        # The graph is built from retrieval_candidates, which admits a superseded
+        # row the user explicitly bounded -- either direction of bound -- as a
+        # record. This detail route must accept the same set, or the graph
+        # advertises a node whose own route 404s and the UI tells the user a
+        # present memory "已经不在了".
+        if memory.status not in ("active", "done") and not (
+                memory.status == "superseded"
+                and (memory.fact_valid_until is not None
+                     or memory.fact_valid_from is not None)):
             return None
         return memory.to_dict()
     if prefix == "diary":

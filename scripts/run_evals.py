@@ -98,10 +98,17 @@ def load_custom(ref: str):
 def seed_memories(case: dict) -> None:
     store.delete_all()
     for mem in (case.get("setup") or {}).get("memories") or []:
+        # Optional passthrough for the fact valid-time bounds. Every existing case
+        # omits them, so behaviour is unchanged; a case that seeds them can pin the
+        # historical-record delivery path (a superseded row the user explicitly
+        # bounded must still reach the model, tagged).
+        bounds = {name: float(mem[name]) for name in ("fact_valid_from", "fact_valid_until")
+                  if mem.get(name) is not None}
         store.upsert(kind=mem.get("kind", "fact"), subject=mem.get("subject", "user"),
                      key=mem["key"], value=mem["value"],
                      source=mem.get("source", "stated"),
-                     importance=float(mem.get("importance", 0.8)))
+                     importance=float(mem.get("importance", 0.8)),
+                     **bounds)
     for lesson in (case.get("setup") or {}).get("lessons") or []:
         store.add_lesson(trigger=lesson["trigger"], action=lesson["action"],
                          cues=lesson.get("cues"), scope=lesson.get("scope", "dialogue"),
