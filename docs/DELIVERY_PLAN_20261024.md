@@ -54,7 +54,10 @@
 - [x] 3.1 出分级清单（证据：使用路径、测试覆盖、耦合度；合并后的 uiux-audit / art-audit 两分支结论作为输入）。预判供否决：核心可见＝语音对话＋舞台＋记忆侧栏＋ops 抽屉；收二级＝interpret/practice/experience/writing/companion/music；演示专用＝avatar-lab、starmap、pixel-world 入口；待删＝card_preview、notepad_preview、design-preview。
 - [x] 3.2 用户一次性否决（2026-10-24 晚：「继续吧」＝零否决项，按草案定稿）。
 - [x] 3.3a P3a 分级落地（issue #37，master `56ce458`）：盘点发现主界面本就无多余直达入口；归档三件（card_preview 全家/notepad_preview 全家/design-preview 工作区）连同测试账目；task-card 集成测试改借归档页当宿主。
-- [~] 3.3b P3b 视觉统一（2026-10-24 晚启动；完成范围与验收证据未回填，2026-10-25 核。原记录勾选与「进行中」并存，自相矛盾，现按未完成记。）
+- [x] 3.3b P3b 视觉统一（**2026-10-29 核：按已完成记**。原 `[~]` 是 2026-10-25 因「完成范围与验收证据未回填」改记的；现补齐证据链后收口——提交内容未变，只是把当时缺的回填上。）
+      - 交付：`3616e10`（2026-10-24 14:51）经合并提交 `20e176c` 入 master；issue **#38 已 CLOSED**，关票评论记验收「npm test exit 0、check_protocol PASS、ui/companion/voice 三个浏览器套件 exit 0；零新增色值、palette 零改动」。
+      - 范围：`web/almanac.css` +95 / `web/app.js` / `web/style.css` / `web/workspace.css` / `web/writing.css`（五文件，+107 −6）。
+      - 当时未回填的实为 **stash@{0} 吸收评估**：唯一活口是星座连线 CSS 定位骨架（JS 在库、CSS 从未进库的在产缺陷，SVG 曾流内占 546×272 死空间），只取布局零色值；其余按四类理由丢弃（已被 master 演进取代 / 调色板红线新色值 / 越出 design-only 范围的行为变更 / 数值锚定旧布局），stash 本体已 drop（`86ab9fd`）。
 - 附加落地（2026-10-24 晚，排期呈报后用户「继续」）：F1 #35 检索假命中（ngram(2,3)）、F2 #36 clarify 意图门槛、F3 #32 破冰停用门、F4 #34 重连续会话（协议 §六新增 resume，Role 0 批准）全部收口；#31 索引重建择机未动。
 
 ## Phase 4 — 交付验收与打标
@@ -88,3 +91,8 @@
 - 8000 重启（2026-10-25，用户批准）：在线备 6 库（完整性 ok，快照 `data/backups/20261025T084403442211Z`）后重启。暴露并处置两个环境事实：常驻进程原用 anaconda3 python，其 NumPy 2.5.1 与编译版 scipy 冲突，重启即 `ImportError: numpy.core.multiarray failed to import`，改用 `docs/USAGE.md` 记载的 `.venv` 解释器；`.venv` 相对 `uv.lock` 缺语音栈，已按锁补齐（faster-whisper 1.2.1 / edge-tts 7.2.8 / ctranslate2 4.5.0）。验证：`/` 返世界页「莞尔的世界 · 神谕沙盒」、`/chat` 200、`/api/memories` 200、health 200；whisper 模型缓存（small/tiny）在位。入口反转（`05db039`）至此在运行态生效。
 - open issue 9 个（`gh issue list --state open`）：#45、#41、#31、#19、#15、#14、#12、#10、#9。其中 #12/#10/#14/#19 为「已修未关」，关闭与否待 Role 0 拍板；#15 正确地开着（24 色重建后占比数据需重测）。
 - 遗留待办：#31 索引重建（快环内同步，`server/memory/retriever.py:82-89`，内容变化后首次检索触发，非每轮）；评测报告层（`scripts/evals_report.py` 与 `docs/EVAL_MECHANISM_PLAN.md`）未入 git、无 issue。
+
+## 2026-10-29 回填（本轮为 10-25 未回填项补证据，只改文档，未动代码）
+
+- 3.3b 由 `[~]` 转 `[x]`：证据为提交 `3616e10` + issue #38 关闭记录（见上条），非补勾——10-25 记「未完成」的依据正是「完成范围与验收证据未回填」，两者现已回填。
+- 本文其余条目未动：它是 2026-10-24 快照，不承接 v1.0-daily 之后的进展；现行状态仍以 `git log` 与门禁命令输出为准（见文首 Status）。

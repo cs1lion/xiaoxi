@@ -1,7 +1,7 @@
 # 下一阶段施工计划与验收标准（NEXT_PHASE_PLAN）
 
 > 2026-10-19 · 基于第一轮基线核验（`docs/REPO_RECON.md` 等 6 份核验文档）。
-> **状态（2026-10-25 回填）**：S0 已批准执行、S1/S2 已完成（`docs/DECISION_TRAIL_20261019.md:117-122`）。本文 pixel-world 范围已于 2026-10-25 随迁仓作历史存档（`pixel-world/MIGRATED.md`，源提交 `05db039`）；§10 的 B-1~B-4 与 S5 属主产品侧仍有效，其中 S5 的阻塞条件（executive.py 未提交 durable 改动）已于 `a643cf7`（2026-10-21）收口，阻塞标注待更新。
+> **状态（2026-10-25 回填）**：S0 已批准执行、S1/S2 已完成（`docs/DECISION_TRAIL_20261019.md:117-122`）。本文 pixel-world 范围已于 2026-10-25 随迁仓作历史存档（`pixel-world/MIGRATED.md`，源提交 `05db039`）；§10 的 B-1~B-4 与 S5 属主产品侧仍有效，其中 S5 的阻塞条件（executive.py 未提交 durable 改动）已于 `a643cf7`（2026-10-21）收口（**2026-10-29 复核**：`git status --porcelain server/assistant/executive.py` 空输出，该文件已无未提交改动，阻塞条件确已解除，S5 现在只等 S4 通过这一条前置）。
 >
 > **⚠️ 部分过期快照（2026-10-25 回填标注）**：pixel-world 章节的验收数字（npm test 133/133、沙盒 104/104、台账 21/21）为 2026-10-19 口径，代码迁往独立仓后本仓不可复现；现状以 `git log` 与门禁命令输出为准。
 > 每个代码任务只有一个主负责人；验收一律以「可复现命令 + 可观察现象」为准，不以文档声称或群聊结论为准。
@@ -223,3 +223,17 @@ S3 视觉垂直切片（与 S2 并行，依赖 D5、D6）
 | B-2 | `scripts/test_voice_turns.py` / `test_experience_websocket.py` 在 HEAD 即因隔离装载缺 `_connections` 报 NameError（`app.py:1031`） | 架构 + Agent Integration 实跑确认 | P3 工程：红门禁不能当回归基线，会掩盖真实回归 | 单开一张卡修测试 harness（注入 `_connections=set()`），不动业务代码 |
 | B-3 | 无 Origin 请求放行（本地脚本友好）在 DNS rebinding 场景仍有残余风险 | 架构审查 | P3 安全 | 若要更严：加 Host allowlist（127.0.0.1/localhost），列为产品化阶段评估 |
 | B-4 | 台账 fixture 当前真实 8000 只有 done 状态，blocked/running 为派生值 | task-9 交付说明 | P3 证据 | 等真实台账出现 blocked/running 单时补录真实 fixture |
+
+### 10.1 2026-10-29 逐条复核（补证据，不改上表的历史记录）
+
+复核方式：只读代码 + 实跑门禁。上表是 2026-10-19 的记录，其中**行号与文件位置会漂移**，按仓库规矩不在此写死新行号，改给核对命令。
+
+- **B-2：已修，本条关闭。** `scripts/test_voice_turns.py` 的隔离装载器已注入 `_connections=set()`（提交 `5676800`），2026-10-29 实跑：`test_voice_turns.py` 32 例 OK、`test_experience_websocket.py` 20 例 OK，两条门禁（`run_gates.py` 的 `voice_turns` / `experience_websocket`）不再是红基线。
+- **B-1：仍未做，且范围比原记录更清楚。** `/ws` 已有同源校验（task-8 落地，在 `@app.websocket("/ws")` 的 handler 头部，拒绝发生在 `accept()` 之前 → 浏览器侧表现为 HTTP 403）；`Connection.bind_editor_insight` 另有自己的 netloc 比对。**缺校验的是** `/ws/proactive` 与 `/ws/interpret`、`/ws/interpret-stream` 三个入口——`server/speech/interpretation.py` 与 `server/speech/stream_interpretation.py` 内 `origin` 出现 0 次。核对命令：
+  ```powershell
+  Select-String -Path server\app.py -Pattern '@app\.websocket' -Context 0,18 | Select-String 'origin'
+  ```
+  跨源页仍可切 proactivity、触发 TTS/LLM，P2 判断不变。修法仍按原建议：把 netloc 比对抽成公共依赖统一覆盖所有 `/ws*`；属改 `server/**`，**需用户单独批准**。
+- **B-3：仍未做，判据成立。** 现实现「无 Origin 头即放行」正是为本地脚本留的口子，因此 DNS rebinding 残余风险确实还在；加 Host allowlist 同样属改 server，与 B-1 并成一张卡做更省。
+- **B-4：本轮无法证实或证伪。** 需要真实台账里出现过 blocked/running 单才有 fixture 可录；本轮只读，未查生产库。保持开着的原样。
+- **S5 的前置**：阻塞条件（executive.py 未提交 durable 改动）已于 `a643cf7`（2026-10-21）收口，文首标注已同步；S5 现在只等 S4 通过。

@@ -17,47 +17,47 @@
 ## F1 记忆内化与日记融合（Role 1）
 
 - [x] 开工前协议红线自检（结论：契约够用；spent 不注入/heat∈[0,1]/日记标注用 persona name 已写回协议）
-- [x~] 按天日记合成与程序化校验（diary 表 + 向后兼容迁移）
-- [x ] drift / spark 状态机与上限控制
-- [x ] `persona.py` 的 `bias_block()` 纯函数 + 单测
-- [x ] `diary_notice` 事件接线（`[PROTOCOL_REQUEST]` → Role 0）
-- [x ] `GET /api/memory/diary` 路由（router 工厂 + Role 0 合入 app.py）
-- [x ] 里程碑打标 `v0.6-phase2-diary`
+- [x] 按天日记合成与程序化校验（diary 表 + 向后兼容迁移）
+- [x] drift / spark 状态机与上限控制
+- [x] `persona.py` 的 `bias_block()` 纯函数 + 单测
+- [x] `diary_notice` 事件接线（`[PROTOCOL_REQUEST]` → Role 0）
+- [x] `GET /api/memory/diary` 路由（router 工厂 + Role 0 合入 app.py）
+- [x] 里程碑打标 `v0.6-phase2-diary`
 
 ## F2 Neuro 式长语音（Role 2）
 
 - [x] 开工前协议红线自检（结论：契约够用；app.js/index.js 透传送集成阶段）
-- [x~] orchestrator 微句切分 + `audio.chunk` 字段 + 可选 `speech_plan`
-- [x ] 预加载合成队列（并发有界、失败跳过、index/seq 单调）
-- [x ] 双工打断：`barge_in` 后取消合成、`interrupted` 后零迟到 audio
-- [x ] `tts.py` 长文本入口（旧签名保持兼容）
-- [x ] `timeline.js` 呼吸停顿与微表情（字段缺失时等价现状）
-- [x ] `config/pacing.yaml` speech 段（默认关闭新特性时等价现状）
-- [x ] 里程碑打标 `v0.6-phase2-speech-chunking`
+- [x] orchestrator 微句切分 + `audio.chunk` 字段 + 可选 `speech_plan`
+- [x] 预加载合成队列（并发有界、失败跳过、index/seq 单调）
+- [x] 双工打断：`barge_in` 后取消合成、`interrupted` 后零迟到 audio
+- [x] `tts.py` 长文本入口（旧签名保持兼容）
+- [x] `timeline.js` 呼吸停顿与微表情（字段缺失时等价现状）
+- [x] `config/pacing.yaml` speech 段（默认关闭新特性时等价现状）
+- [x] 里程碑打标 `v0.6-phase2-speech-chunking`
 
 ## F3 后台自进化（Role 1）
 
-- [x ] `assistant/loop.py` 自治模式（有界复盘 + trace）
-- [x ] `self_state` 持久化与注入路径（禁 subject="user"）
-- [x ] `self_evolution` 事件 + `source:"self_topic"` 主动开口接线
-- [x ] `config/memory.yaml` `self_evolution` 段（默认全关）
-- [x ] 里程碑打标 `v0.6-phase2-self-evolution`
+- [x] `assistant/loop.py` 自治模式（有界复盘 + trace）
+- [x] `self_state` 持久化与注入路径（禁 subject="user"）
+- [x] `self_evolution` 事件 + `source:"self_topic"` 主动开口接线
+- [x] `config/memory.yaml` `self_evolution` 段（默认全关）
+- [x] 里程碑打标 `v0.6-phase2-self-evolution`
 
 ## F4 星图记忆（Role 1 底层 + Role 3 前端）
 
-- [x ] Role 1：starmap 图谱查询 + `node/{id}` 详情 + 路由工厂
-- [x~] Role 3：星图数据桥接与渲染（漫游/检索/详情/narrate 状态机）
-- [x ] Role 3：主工作台视图接入 diff（`[PROTOCOL_REQUEST]` → Role 0 合入）
+- [x] Role 1：starmap 图谱查询 + `node/{id}` 详情 + 路由工厂
+- [x] Role 3：星图数据桥接与渲染（漫游/检索/详情/narrate 状态机）
+- [x] Role 3：主工作台视图接入 diff（`[PROTOCOL_REQUEST]` → Role 0 合入）
 - [x] Integration Check：Role 1 ↔ Role 3 请求/响应对齐（字段逐项核对 + live 冒烟通过）
-- [x ] 里程碑打标 `v0.6-phase2-starmap`
+- [x] 里程碑打标 `v0.6-phase2-starmap`
 
 ## 集成与封版（Role 0）
 
-- [x ] Integration Check：Role 1 ↔ Role 2（`bias_block` 调用点）
-- [x~] Integration Check：Role 2 ↔ Role 3（`audio.chunk` 字段透传：app.js:250 归 Role 0，index.js:317 已转交 Role 3 并入交付）
-- [x ] 汇总 `[PROTOCOL_REQUEST]`，统一接线 app.py / app.js / index.html
-- [x ] 接线后重跑全局门禁 + 受影响浏览器回归
-- [x ] 总封版打标 `v0.6-phase2`
+- [x] Integration Check：Role 1 ↔ Role 2（`bias_block` 调用点）
+- [x] Integration Check：Role 2 ↔ Role 3（`audio.chunk` 字段透传：app.js:250 归 Role 0，index.js:317 已转交 Role 3 并入交付）
+- [x] 汇总 `[PROTOCOL_REQUEST]`，统一接线 app.py / app.js / index.html
+- [x] 接线后重跑全局门禁 + 受影响浏览器回归
+- [x] 总封版打标 `v0.6-phase2`
 
 
 ## 验证记录（2026-10-14，Role 0）

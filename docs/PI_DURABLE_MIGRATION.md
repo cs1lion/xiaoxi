@@ -431,7 +431,7 @@ models.setProvider(provider);
   - 对账只覆盖"宿主重启、内核活着"这一种死法。内核自己死了，适配器连不上，那一单如实转 BLOCKED 请示；答一句后靠 attempt 递增真的重新拉起执行体（见下面"接管与重做"）。
 - [x] 归档/保留策略（`data/durable/*.sqlite` 纳入 `backup_local_databases.py`）
 - [x] 配置接线：`config/agents_roster.yaml` 新增 `durable:` 段（默认 `enabled: false`）
-- [ ] **三个 Worker 全量切换**：见下方 A/B 小节末尾的说明。花名册现有四个 `cli_subproc`，切过去是能力回退；当前 `durable.enabled: false`，`switch_agents: [scribe]` 只是"启用后先切文档类"的预备配置，不是已切换。
+- [ ] **三个 Worker 全量切换**：见下方 A/B 小节末尾的说明。花名册现有 `cli_subproc` 真执行体（数目见文末「2026-10-29 现状校正」，不在此写死），切过去是能力回退；当前 `durable.enabled: false`，`switch_agents: [scribe]` 只是"启用后先切文档类"的预备配置，不是已切换。
 
 **验收（A/B）**：同一批 10 个真实委托，同一模型，`cli_subproc` vs `durable`，按 L1 初审通过率、token、端到端耗时、人工盲评比较；`durable` 不得在通过率上显著落后。混沌测试见 §6。
 
@@ -451,7 +451,9 @@ models.setProvider(provider);
 - `write_file` 只认 `RunMeta.workspace` 一个目录，`../`、工作目录外的绝对路径、同名前缀的兄弟目录全部拒绝；基目录不存在时明说"这不是路径问题"，不让模型改路径重试。
 - `submit_artifact` 交差前把 file 型 ref 规范化并验真：模型把路径转义两遍产生的 `D:\\project\\...` 会被还原，没写过的文件直接拒收（不记一张指向空气的卡）。
 
-**仍未做**：三个 Worker 全量切换。花名册里现在有**四个** `cli_subproc`（claude / workbuddy / dsh / codex，比本文档写"三个"时多了一个），它们的真机 CLI 自带 Read/Bash/Grep，而 durable 的工具面窄得多。切过去是**能力回退**；当前 `durable.enabled: false`，`switch_agents: [scribe]` 只是启用后先切文档类的预备配置。等确认过那些 Worker 不需要真机工具再谈扩大。
+**仍未做**：三个 Worker 全量切换。花名册里此时有**四个** `cli_subproc`（claude / workbuddy / dsh / codex，比本文档写"三个"时多了一个），它们的真机 CLI 自带 Read/Bash/Grep，而 durable 的工具面窄得多。切过去是**能力回退**；当前 `durable.enabled: false`，`switch_agents: [scribe]` 只是启用后先切文档类的预备配置。等确认过那些 Worker 不需要真机工具再谈扩大。
+
+> **2026-10-29 现状校正（本段以上的「四个」是 2026-10-18 的当时事实，已过期）**：以 `config/agents_roster.yaml` 为准——`cli_subproc` 条目现为 claude / workbuddy / dsh / **sandbox** / codex 五个，其中 codex `enabled: false`（Windows 沙箱起不来，等生产隔离决策），所以**默认选将池里可用的仍是四个**，但成员换了：sandbox 顶替了不在池中的 codex。判据「切过去是能力回退」不变，数目不写在结论里。核对命令：`Select-String -Path config\agents_roster.yaml -Pattern 'adapter:\s*cli_subproc' -Context 3,0`。
 
 token 差 15 倍（5,193 vs 80,723）不能直接当收益：`durable` 干的活也严格更少（不跑校验脚本、不读仓库），而这个差主要来自两侧的工具面不同，不是引擎效率。
 

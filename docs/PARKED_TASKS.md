@@ -91,6 +91,10 @@
 - Manual credential/model keys remain unmanaged.
 
 ## C. Files touched this freeze (working tree, not yet committed)
+<!-- 2026-10-29 核：本小标题里的「not yet committed」已过期——下列文件在同日由 `a6620c5`
+（chore: freeze phase 1, archive reports, and setup AGENT_PLAYBOOK）全部入库。
+原文按「记录某一刻」保留不删；核对命令：
+`git show --stat a6620c5 -- config/avatar.yaml docs/EDITOR_QUALITY_IMPROVEMENT.md scripts/eval_editor_quality.py server/assistant/editor_insights.py` -->
 - config/avatar.yaml — added ParamEyeLLower/ParamEyeRLower to neutral + response (resolves check_protocol warning).
 - docs/EDITOR_QUALITY_IMPROVEMENT.md — added freeze-context notes.
 - scripts/eval_editor_quality.py, scripts/test_editor_insight_outputs.py — editor quality evaluator additions.
@@ -112,6 +116,9 @@
 
 ## F. Role 0 工程基建待办（回归评测集落地时登记，暂不做）
 - v0.7 打标后删除 `docs/AGENT_PLAYBOOK.md` 中「打磨轮临时授权」整段。
+  <!-- 2026-10-29 核：未到期。`git tag` 中无 v0.7*（最新为 `v0.6.1-polish-base`），授权段仍在生效期，
+  本条是「等打标触发」而非过期项。另注：`docs/PHASE3_PROMPTS.md:117` 写的打标名是 `v0.7-polish`，
+  与本条的 `v0.7` 措辞不一致，以 Role 0 实际打的 tag 为准。 -->
 - 评估在 CI 中按 diff 路径机械校验角色白名单（目前白名单只靠自觉）。
 
 ## G. 回归评测 live 实跑暴露的待办（2026-10-17，2026-10-20 复核）
