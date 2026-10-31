@@ -123,14 +123,20 @@ try {
  assert((await page.locator('#presenceCapsule .presence-label').innerText())==='静默旁观','Failed preference save rolls the capsule back');
  assert(await page.evaluate(()=>document.getElementById('memoryToggle').checked)===true,'Failed save rolls the memory bit back');
  await page.locator('#sidebarToggle').click();   // 后续记忆列表断言需要侧栏展开
- await page.route('**/api/memories',route=>route.fulfill({json:{count:1,items:[{id:'fixture',value:'测试记忆',kind:'fact',source:'stated',key:'<b>literal</b>'}]}}));
+ // status:'active' 是 0f87efa（valid-time）之后的硬要求：memoryForgetControl 对
+ // 非 active 行返回 null（防整链误删），fixture 不给 status 就没有「忘掉」按钮，
+ // :133 永远超时——ui_browser 门禁红的真身是 fixture 过期，不是环境问题。
+ await page.route('**/api/memories',route=>route.fulfill({json:{count:1,items:[{id:'fixture',value:'测试记忆',kind:'fact',source:'stated',status:'active',key:'<b>literal</b>'}]}}));
  await page.locator('#memRefresh').click();
  await page.getByRole('button',{name:'编辑记忆：测试记忆'}).waitFor();
  await page.getByRole('button',{name:'编辑记忆：测试记忆'}).focus();
  assert(await page.getByRole('button',{name:'编辑记忆：测试记忆'}).evaluate(el=>document.activeElement===el),'Memory edit uses keyboard-focusable button');
  assert(await page.locator('.mem .meta b').count()===0,'Memory metadata rendered as text, not HTML');
  await page.route('**/api/memories/fixture',route=>route.fulfill({status:503,json:{}}));
- await page.getByRole('button',{name:'忘掉',exact:true}).click();
+ // 无障碍名来自 app.js:1567 的 aria-label（`${label}记忆：${value}`），不是按钮
+ // 可见文字。0f87efa 同时引入了这条 aria-label 与「非 active 不渲染忘掉」的闸门，
+ // 门禁自那天起红在两处：fixture 缺 status，选择器名也过期。与 :131 的编辑记忆同一写法。
+ await page.getByRole('button',{name:'忘掉记忆：测试记忆'}).click();
  await page.waitForFunction(()=>document.querySelector('#memoryFeedback').textContent.includes('操作未完成'));
  assert(await page.locator('.mem').count()===1,'Failed deletion keeps memory visible');
  await page.route('**/api/memories',route=>route.fulfill({status:503,json:{}}));

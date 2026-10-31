@@ -167,14 +167,53 @@ _loop: asyncio.AbstractEventLoop | None = None
 _durable_supervisor = None
 
 
+async def _ws_handshake_allowed(ws: WebSocket) -> bool:
+    """WebSocket 握手同源校验，四个 WS 端点（/ws、/ws/proactive、两个 /ws/interpret*）
+    共用一份判据（B-1，2026-10-31 评审：判据此前只挂在 /ws 上）。
+
+    返回 False 表示已在本函数内发过关闭帧，调用方必须直接 return，不得再 accept。
+    规则（架构审查 P1 后定稿，语义与此前 /ws 内联版逐字节一致）：
+      - 只比 netloc，不比 scheme：TLS 终止在反代上时 scope 里是 ws/http、
+        浏览器 Origin 却是 https，比 scheme 会把合法同源页面误拒；
+      - 没有 Origin 头（本地脚本、直连测试、健康检查）或 Origin 为空串按白名单放行；
+      - 畸形 Origin（如 "http://["）按跨源拒绝处理，不能抛成 500；
+      - 拒绝发生在 accept 之前：uvicorn 把它落成 HTTP 403 握手失败，1008/reason
+        只留在 ASGI 关闭帧与服务端日志里，这是预期行为。
+    """
+    headers = getattr(ws, "headers", None) or {}
+    host = str(headers.get("host") or "").lower()
+    origin = headers.get("origin")
+    if origin:
+        from urllib.parse import urlsplit
+
+        try:
+            origin_netloc = urlsplit(origin).netloc.lower()
+        except ValueError:
+            origin_netloc = ""
+        if origin_netloc == "" or origin_netloc != host:
+            import logging
+
+            path = getattr(getattr(ws, "url", None), "path", "") or ""
+            logging.getLogger("server.app").warning(
+                "websocket origin rejected: origin=%r host=%r path=%r",
+                origin, headers.get("host"), path)
+            await ws.close(code=1008, reason="cross_origin_denied")
+            return False
+    return True
+
+
 @app.websocket('/ws/interpret')
 async def interpretation_socket(ws: WebSocket) -> None:
+    if not await _ws_handshake_allowed(ws):
+        return
     from .speech.interpretation import serve_interpretation
     await serve_interpretation(ws, recognizer, llm)
 
 
 @app.websocket('/ws/interpret-stream')
 async def stream_interpretation_socket(ws: WebSocket) -> None:
+    if not await _ws_handshake_allowed(ws):
+        return
     from .speech.step_stream import StepStream
     from .speech.stream_interpretation import serve_stream_interpretation
     def factory():
@@ -1141,7 +1180,13 @@ async def _proactive_check(conn: Connection, revision: int) -> None:
                     await asyncio.to_thread(spend_spark, store, spark_id)
             return
         # No voiced proactive this tick: surface an ambient tier (§16).
-        event = orchestrator.ambient_event(idle_seconds=time.time() - conn.last_spoke_at)
+        # 第二十批（#31 残留，2026-10-31 评审实证）：ambient_event 是同步函数，
+        # 内部最重一条路径（冷启动破冰）直跑 `retriever.search("")`——无界全库
+        # ranking 读 + TF-IDF 重建，原先压在循环线程上。与 executive_route
+        # 同一卸载形态（自足同步函数整体 to_thread）；await 空档里的轮次有效性
+        # 由下面的 revision 栅栏照管，语义不变。
+        event = await asyncio.to_thread(
+            orchestrator.ambient_event, idle_seconds=time.time() - conn.last_spoke_at)
         if event and not conn.closed and conn.revision == revision:
             if event.get("type") == "mumble" and event.get("voice"):
                 # Real mumble through the shared voice path (deliver_reply); the frontend
@@ -1301,30 +1346,9 @@ def _v2_reply(conn: Connection):
 
 @app.websocket("/ws")
 async def websocket_endpoint(ws: WebSocket) -> None:
-    # 同源校验：只挡浏览器页面，规则与 Connection.bind_editor_insight 的 netloc 比对一致。
-    # 只比 netloc（host:port），不比较 scheme：TLS 终止在反代上时 scope 里是 ws/http、
-    # 浏览器 Origin 却是 https，比 scheme 会把合法同源页面误拒。
-    # 没有 Origin 头（本地脚本、直连测试、健康检查）或 Origin 为空串时按白名单放行。
-    headers = getattr(ws, "headers", None) or {}
-    host = str(headers.get("host") or "").lower()
-    origin = headers.get("origin")
-    if origin:
-        from urllib.parse import urlsplit
-
-        try:
-            origin_netloc = urlsplit(origin).netloc.lower()
-        except ValueError:
-            # 畸形 Origin（如 "http://["）不是合法来源：按跨源拒绝，不能抛成 500。
-            origin_netloc = ""
-        if origin_netloc == "" or origin_netloc != host:
-            # 拒绝发生在 accept 之前：uvicorn 把它落成 HTTP 403 握手失败，浏览器看不到
-            # 1008/reason（它们只留在 ASGI 关闭帧与服务端日志里），这是预期行为。
-            import logging
-
-            logging.getLogger("server.app").warning(
-                "websocket origin rejected: origin=%r host=%r", origin, headers.get("host"))
-            await ws.close(code=1008, reason="cross_origin_denied")
-            return
+    # 同源校验：只挡浏览器页面，判据抽进 _ws_handshake_allowed（四个 WS 端点共用）。
+    if not await _ws_handshake_allowed(ws):
+        return
     await ws.accept()
     conn = Connection(ws)
     _connections.add(conn)
@@ -1564,6 +1588,10 @@ async def websocket_endpoint(ws: WebSocket) -> None:
 @app.websocket("/ws/proactive")
 async def proactive_socket(ws: WebSocket) -> None:
     """Browser-side presence hook: tells the server how long the user has been away."""
+    # B-1（2026-10-31 评审）：这条端点此前没有同源校验——浏览器跨源页面可以
+    # 直接握上手，靠 hello 里的 away_seconds 操纵 idle 判定、催小溪主动开口。
+    if not await _ws_handshake_allowed(ws):
+        return
     await ws.accept()
     conn = Connection(ws)
     await asyncio.to_thread(store.start_session, conn.session_id)

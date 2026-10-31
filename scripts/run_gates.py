@@ -957,6 +957,30 @@ GATES: dict[str, dict[str, object]] = {
         "cmd": [str(PY), "scripts/test_voice_offloop.py"],
         "skip_regex": r"^\s*SKIP",
     },
+    "proactive_offloop": {
+        # 第二十批（#31 残留，2026-10-31 评审实证）：voice_offloop 用替身驱动
+        # app 处理器，proactive_turn 是 AsyncMock、ambient_event 是 lambda——
+        # **替身测不到被 mock 掉的真实函数体**，而真身里躺着两处无界全库检索
+        # （proactive_turn 的 search+context_for、破冰路径的 search）。本门禁
+        # 反向驱动：打桩依赖（retriever/llm/store_message），跑真身，判据是
+        # 线程身份（同步版恒在循环线程，to_thread 版恒在 asyncio worker）。
+        # 同时钉许可位前置的短路顺序（allow_* 全关时零次检索）与破冰的
+        # app.py 调用形态（await to_thread(ambient_event)）。
+        # ALWAYS_REQUIRED：临时库 + 纯进程内，无服务无网络。
+        "cmd": [str(PY), "scripts/test_proactive_offloop.py"],
+        "skip_regex": r"^\s*SKIP",
+    },
+    "verify_package": {
+        # server/verify 的 IO 禁令此前**没有任何机械强制**：check.py:30 与
+        # verifier.py:30 都写「由 scripts/test_verify.py 的 IO 断言机械检查」，
+        # 但该文件从未存在于工作树（docs/TESTING.md:201，2026-10-26 核；git log
+        # --all 亦零命中）。2026-10-31 补齐：三种 check 正反例 + reader 注入 +
+        # IO 静态扫描（扫描器自己用违规样例自证，防「有洞的校验器报全 OK」），
+        # 外加 acceptance_verify 桥接的三态渲染契约（M2/issue #61 落地面零测试）。
+        # ALWAYS_REQUIRED：临时目录 + 假 reader，无服务无网络无真实库。
+        "cmd": [str(PY), "scripts/test_verify.py"],
+        "skip_regex": r"^\s*SKIP",
+    },
     "router_writes_offloop": {
         # 两个 REST 路由器的 6 个写端点（thread-proposals 与 note-proposals 的
         # revise/confirm/reject）的 service 写必须跑在工作线程。判据是线程
@@ -1016,7 +1040,7 @@ ALWAYS_REQUIRED = ("protocol", "core", "scheduler_health", "budget_scope", "back
                    "tmp_sweep", "run_gates_verdict", "check_probe", "check_staged_scope",
                    "memory_ranking", "memory_concurrency", "memory_retrieval",
                    "memory_api_offloop",
-                   "voice_offloop",
+                   "voice_offloop", "proactive_offloop",
                    "router_writes_offloop",
                    "broadcast_e2e",
                    "shared_retriever_concurrency",
@@ -1030,6 +1054,13 @@ ALWAYS_REQUIRED = ("protocol", "core", "scheduler_health", "budget_scope", "back
                    "durable_orchestrator_run", "durable_block_kind", "durable_c3_api",
                    "durable_clarification_cap", "durable_mcp", "durable_mcp_live",
                    "durable_authorization_ui", "world_bridge", "gateway_env")
+
+
+# unittest 原生 skip 的汇总行：`OK (skipped=N)`，且只认 N>0（`[1-9]\d*` 天然排除
+# `skipped=0`）。行首锚定 + re.M，与式① `^\s*SKIP` 同口径——只认结论行，不认正文里
+# 恰好出现的字样。允许 `OK (skipped=N, expected failures=M)` 并存形态（CPython 的
+# TextTestResult 把 skipped 排在括号内首位）。`FAILED (...)` 行首不是 OK，命不中本式。
+UNITTEST_SKIPPED_RE = re.compile(r"^\s*OK \(skipped=([1-9]\d*)", re.M)
 
 
 def run_gate(name: str, spec: dict) -> dict:
@@ -1059,7 +1090,17 @@ def run_gate(name: str, spec: dict) -> dict:
         code, output = 124, "TIMEOUT after 900s"
     except FileNotFoundError as exc:
         code, output = 127, f"command not found: {exc}"
-    skipped = bool(re.search(spec["skip_regex"], output, re.M))
+    # skip 探测走两条式，命中其一即 skipped=True（裁决式在 main()：exit!=0 一律
+    # FAIL，这里只是「这轮什么都没验」的线索，R51 红线不因本处放宽）：
+    #   式① spec["skip_regex"]（默认 `^\s*SKIP`）——仓库自定义脚本形态，照旧。
+    #   式② UNITTEST_SKIPPED_RE——unittest 装饰器 skip（@unittest.skipUnless /
+    #       skipIf）走的是原生汇总行 `OK (skipped=N)`，行首是 `OK` 不是 `SKIP`，
+    #       式① 永远命不中；2026-10-31 实测 procedural_memory_eval（Ran 24 tests、
+    #       skipped=20、exit 0）就被裁成 PASS。必须补上这条。
+    # 只认 N>0：`OK` 裸行与 `OK (skipped=0)` 都是「全跑全过」，判 SKIP 会把真跑过的
+    # 绿洗成假跳。多结论行时任一 N>0 即命中（re.search 扫全文）。
+    skipped = bool(re.search(spec["skip_regex"], output, re.M)
+                   or UNITTEST_SKIPPED_RE.search(output))
     return {"name": name, "exit": code, "skipped": skipped,
             "seconds": round(time.time() - started, 1), "output_tail": output[-1500:]}
 

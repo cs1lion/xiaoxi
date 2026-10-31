@@ -1,16 +1,21 @@
-"""`/ws` 握手同源校验的离线回归：python scripts/test_ws_origin.py
+"""WebSocket 握手同源校验的离线回归：python scripts/test_ws_origin.py
 
 沿用 test_voice_turns 的 AST 隔离装载（load_ws / FakeSocket）：执行的是
-server/app.py 里真实的 websocket_endpoint，只把外部依赖换成假实现，不 bootstrap 真 app。
+server/app.py 里真实的端点函数（判据 _ws_handshake_allowed + websocket_endpoint），
+只把外部依赖换成假实现，不 bootstrap 真 app。
 
 规则（架构审查 P1 后定稿）：只比 netloc，不比 scheme（TLS 终止反代下 scope 是 ws、
 Origin 是 https）；畸形 Origin 按拒绝处理、不能抛 500；无 Origin 或空串按白名单放行。
 
 覆盖：
-  - 跨源页面（Origin 的 netloc 与 Host 不同）：accept 之前 close(1008)，且写一条可读日志；
-  - 同源页面：放行；https Origin + TLS 终止反代（scope=ws）：放行；
-  - Origin 为 "null" 或畸形（如 "http://["）：拒绝；
-  - 无 Origin 头 / Origin 空串（本地脚本、直连测试）：白名单放行，不打断现有客户端。
+  - /ws 全量行为矩阵（跨源/同源/端口不符/null/畸形/无 Origin/TLS 反代）；
+  - B-1（2026-10-31 评审）：另外三条端点（/ws/proactive、/ws/interpret、
+    /ws/interpret-stream）共用同一判据——跨源在产生任何副作用之前 close(1008)；
+    proactive 的"副作用"用 store.start_session 被调计数钉住（改前它 accept 即调用，
+    跨源连接也会落进会话存储），interpret 两条的守卫在 serve_* 的懒导入之前，
+    隔离环境里以 ImportError 证明"放行后才走到函数体"。
+
+无 Origin 头 / Origin 空串（本地脚本、直连测试）一律白名单放行，不打断现有客户端。
 """
 from __future__ import annotations
 
@@ -32,12 +37,12 @@ class OriginSocket(FakeSocket):
     """在 FakeSocket 上补握手关心的东西：headers / url / accept 与 close 记录。"""
 
     def __init__(self, *, origin: str | None = None, host: str = "testserver",
-                 url_scheme: str = "ws") -> None:
+                 url_scheme: str = "ws", url_path: str = "/ws") -> None:
         super().__init__()
         self.headers: dict[str, str] = {"host": host}
         if origin is not None:
             self.headers["origin"] = origin
-        self.url = SimpleNamespace(scheme=url_scheme)
+        self.url = SimpleNamespace(scheme=url_scheme, path=url_path)
         self.accepted = False
         self.close_frames: list[tuple[int, str | None]] = []
 
@@ -131,6 +136,117 @@ class WebSocketOriginTests(unittest.IsolatedAsyncioTestCase):
     async def test_non_browser_client_without_origin_accepted(self) -> None:
         ws, task = self.endpoint(host="127.0.0.1:8000")
         await self.assert_accepted(ws, task)
+
+
+class SharedGuardEndpointTests(unittest.IsolatedAsyncioTestCase):
+    """B-1（2026-10-31 评审）：另外三条 WS 端点共用 _ws_handshake_allowed 的回归。
+
+    /ws/proactive 改前完全没有握手校验：跨源页面能直接握上手、accept 后就调
+    store.start_session（会话存储落库），再靠 hello/away_seconds 操纵 idle 判定。
+    两个 interpret 端点的 accept 在 serve_* 函数体内部，所以守卫必须挡在懒导入
+    之前——用"放行路径死在隔离环境的相对导入上、拒绝路径零 close 之外副作用"来钉。
+    """
+
+    async def asyncSetUp(self) -> None:
+        self.env = load_ws()
+        self.env["_connections"] = set()
+
+    def _store_spy(self):
+        calls: list = []
+
+        class S:
+            def start_session(self, session_id):
+                calls.append(session_id)
+
+            def end_session(self, session_id):
+                calls.append(("end", session_id))
+
+        return S(), calls
+
+    async def assert_cross_origin_refused(self, endpoint: str, path: str) -> None:
+        ws = OriginSocket(origin="http://evil.example", host="127.0.0.1:8000",
+                          url_path=path)
+        store, calls = self._store_spy()
+        self.env["store"] = store
+        task = asyncio.create_task(self.env[endpoint](ws))
+        with self.assertLogs("server.app", level="WARNING") as logs:
+            await asyncio.wait_for(task, 2)
+        self.assertFalse(ws.accepted, f"{path}：跨源连接必须在 accept 之前被拒")
+        self.assertEqual(ws.close_frames, [(1008, "cross_origin_denied")],
+                         f"{path}：必须恰好发一条 1008 关闭帧")
+        self.assertEqual(calls, [],
+                         f"{path}：拒绝必须发生在会话存储副作用之前")
+        self.assertIn("websocket origin rejected", logs.output[0])
+        self.assertIn(path, logs.output[0], "日志要带上被拒的端点路径，便于排查")
+
+    async def test_proactive_socket_cross_origin_refused(self) -> None:
+        await self.assert_cross_origin_refused("proactive_socket", "/ws/proactive")
+
+    async def test_interpret_socket_cross_origin_refused(self) -> None:
+        await self.assert_cross_origin_refused("interpretation_socket",
+                                               "/ws/interpret")
+
+    async def test_interpret_stream_socket_cross_origin_refused(self) -> None:
+        await self.assert_cross_origin_refused("stream_interpretation_socket",
+                                               "/ws/interpret-stream")
+
+    async def test_proactive_socket_no_origin_accepted_and_session_registered(self) -> None:
+        # 白名单不破：本地脚本（无 Origin）仍能握手，且放行后照常注册会话。
+        ws = OriginSocket(host="127.0.0.1:8000", url_path="/ws/proactive")
+        store, calls = self._store_spy()
+        self.env["store"] = store
+        task = asyncio.create_task(self.env["proactive_socket"](ws))
+        for _ in range(100):
+            if ws.accepted:
+                break
+            await asyncio.sleep(0)
+        self.assertTrue(ws.accepted, "无 Origin 的本地客户端应被接受")
+        ws.inbox.put_nowait({"type": "websocket.disconnect"})
+        await asyncio.wait_for(task, 2)
+        self.assertEqual(len(calls), 2, f"start/end 各一次：{calls!r}")
+        self.assertEqual(calls[1], ("end", calls[0]))
+
+
+class GuardPlacementTests(unittest.IsolatedAsyncioTestCase):
+    """守卫必须在 serve_* 之前：放行路径进函数体、拒绝路径不进。"""
+
+    async def asyncSetUp(self) -> None:
+        self.env = load_ws()
+        self.env["_connections"] = set()
+
+    async def run_to_body(self, endpoint: str) -> tuple[OriginSocket, BaseException | None]:
+        # 隔离装载没有包上下文，serve_* 的相对懒导入必失败（ImportError，或在
+        # globals 缺 __name__ 时 KeyError）——失败点本身即"守卫已跨过、函数体
+        # 在执行"的证据；守卫若误拒，任务会干净返回并带 1008 关闭帧。
+        ws = OriginSocket(origin="http://127.0.0.1:5173", host="127.0.0.1:5173",
+                          url_path="/ws/interpret")
+        task = asyncio.create_task(self.env[endpoint](ws))
+        err: BaseException | None = None
+        try:
+            await asyncio.wait_for(task, 2)
+        except (ImportError, KeyError) as exc:
+            err = exc
+        return ws, err
+
+    async def test_interpret_guard_admits_same_origin_before_lazy_import(self) -> None:
+        ws, err = await self.run_to_body("interpretation_socket")
+        self.assertIsInstance(err, (ImportError, KeyError),
+                              "同源放行必须走到 serve_interpretation 的导入")
+        self.assertEqual(ws.close_frames, [], "放行路径不得有任何关闭帧")
+
+    async def test_interpret_stream_guard_admits_same_origin(self) -> None:
+        ws, err = await self.run_to_body("stream_interpretation_socket")
+        self.assertIsInstance(err, (ImportError, KeyError))
+        self.assertEqual(ws.close_frames, [])
+
+    async def test_interpret_guard_refuses_cross_origin_before_lazy_import(self) -> None:
+        ws = OriginSocket(origin="http://evil.example", host="127.0.0.1:8000",
+                          url_path="/ws/interpret")
+        task = asyncio.create_task(self.env["interpretation_socket"](ws))
+        with self.assertLogs("server.app", level="WARNING"):
+            await asyncio.wait_for(task, 2)
+        # 拒在导入之前：serve_interpretation 从未被尝试装载。
+        self.assertEqual(ws.close_frames, [(1008, "cross_origin_denied")])
 
 
 # ---------------------------------------------------------------- live 探测（QA 复验用）

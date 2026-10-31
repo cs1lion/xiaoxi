@@ -108,6 +108,9 @@ def load_ws():
     # 不编译进来时该调用点在隔离环境里 NameError，被 _proactive_check 的 except 吞掉，
     # turn_started 永不到达——proactive 两条测试表现为超时而不是失败原因。
     names = {"VoiceTurn", "Connection", "_present_reply", "_confirm_action", "_run_turn", "_transcribe_turn", "_proactive_check", "websocket_endpoint", "proactive_socket", "_maybe_diary", "_maybe_self_evolution", "_narrate_turn", "_node_snippet", "_aqi_action", "_executive_delegate", "_executive_finish", "_touch_reply", "_send_proactive_blocks", "_transcribe_error_message"}
+    # B-1（2026-10-31 评审）：同源判据抽成 _ws_handshake_allowed，四个 WS 端点共用；
+    # 端点函数必须编译进来，test_ws_origin 才能对每条握手分别驱动真身。
+    names |= {"_ws_handshake_allowed", "interpretation_socket", "stream_interpretation_socket"}
     # REST 路由（第十五批离环门禁驱动用）：app.py 的 memory 路由与 health 都是
     # async def，不编译进来时隔离环境里无法直接调用验证 to_thread 卸载。
     names |= {"list_memories", "memories_context", "correct_memory", "delete_memory",

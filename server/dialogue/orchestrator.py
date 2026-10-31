@@ -1320,15 +1320,23 @@ class Orchestrator:
             return None
         if self.state["proactive_count_today"] >= int(_pacing_number(cfg.get("max_per_day"), 3.0)):
             return None
+        # 许可位先判再检索：flag 全关时连检索都不必起（原顺序是先查后判，
+        # 白付一次全库 ranking 读；语义不变——flag 关时本来就返回 None）。
+        if not any(cfg.get(flag, False) for flag in ("allow_remind_todo", "allow_continue_episode")):
+            return None
 
-        todos = manager.retriever.search(
-            "", kinds=("todo", "episode"), top_k=3, include_done=False
-        )
-        if not todos or not any(cfg.get(flag, False) for flag in ("allow_remind_todo", "allow_continue_episode")):
+        # 第二十批（#31 残留，2026-10-31 评审实证）：这两次读原先裸跑在事件
+        # 循环上——`search("")` 是无界全库 ranking 读 + TF-IDF 重建，
+        # `context_for` 同量级。主动开口的驱动点在 `conn.spawn` 的协程里，
+        # 与音频帧接收同一条循环线程，真 LLM 延迟 ~1-2s 的时代这两段是
+        # 打断感的来源。AGENTS.md「快环内不得出现阻塞调用」的口径下，
+        # 必须与 `_turn_context_async` 同形态走 `to_thread`。
+        todos, memory_block = await asyncio.to_thread(self._proactive_grounding)
+        if not todos:
             return None
 
         messages = build_messages(
-            memory_block=manager.context_for("待办 提醒"),
+            memory_block=memory_block,
             proactivity="现在是用户允许的主动发言时段。你可以自然地起个头，一句话，别追问。",
             emotion_instruction=EMOTION_INSTRUCTION,
             user_text="（用户暂时没说话，你可以主动说一句）",
@@ -1339,8 +1347,22 @@ class Orchestrator:
             return None
         self.state["last_proactive_at"] = now
         self.state["proactive_count_today"] += 1
-        store_message(session_id, "assistant", text, "proactive")
+        # store_message 是写事务（BEGIN IMMEDIATE + commit），第十六批的判据
+        # 在这里同样成立：mumble 分支的落库已卸，proactive 分支原先漏网。
+        await asyncio.to_thread(store_message, session_id, "assistant", text, "proactive")
         return TurnResult(text=text, emotion=detect_emotion(text), proactive=True)
+
+    def _proactive_grounding(self) -> tuple[list, str]:
+        """主动开口的两次检索读，整段跑在工作线程（见 `proactive_turn`）。
+
+        `context_for` 只在真有候选待办时才起第二次同量级检索——与改前的
+        短路顺序一致（`todos` 空则不发话，也从不组上下文）。
+        """
+        todos = manager.retriever.search(
+            "", kinds=("todo", "episode"), top_k=3, include_done=False
+        )
+        block = manager.context_for("待办 提醒") if todos else ""
+        return todos, block
 
     async def self_topic_turn(self, *, session_id: str, idle_seconds: float) -> TurnResult | None:
         """F3: open a topic from the character's own taste / worldview / sparks.
