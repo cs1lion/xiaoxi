@@ -115,6 +115,34 @@ class UtilityRetrievalTests(StoreCase):
         # never deleted or made invisible by its own history.
         self.assertGreater(hits[0][1], 0.0)
 
+    def test_learned_zero_utility_is_penalised(self):
+        # issue #64：`utility or 0.5` 把学到的 0.0 读成中性，于是用户明确
+        # 否掉的那条记忆排在和「从没被评价过」一模一样的位置上。
+        rejected = self.add("用户在甲公司工作", key="工作:公司")
+        self.store.reinforce_memory(rejected, reward=0.0, alpha=1.0)
+        stored = self.store.get(rejected)
+        self.assertEqual(stored.utility, 0.0)
+        self.assertEqual(stored.utility_n, 1)
+        factor = self.retriever()._utility_factor(stored)
+        # shrunk = (0*1 + 0.5*3) / 4 = 0.375 -> 1 - 0.3 + 0.3*2*0.375
+        self.assertAlmostEqual(factor, 0.925)
+        self.assertLess(factor, 1.0)
+
+    def test_utility_defaults_to_neutral_only_when_missing(self):
+        # 上面那条的另一半：字段真的缺失（或不是数值）才按中性 0.5 处理。
+        retriever = self.retriever()
+
+        class Row:
+            utility_n = 1
+
+        self.assertEqual(retriever._utility_factor(Row()), 1.0)
+        Row.utility = None
+        self.assertEqual(retriever._utility_factor(Row()), 1.0)
+        Row.utility = True
+        self.assertEqual(retriever._utility_factor(Row()), 1.0)
+        Row.utility = "坏值"
+        self.assertEqual(retriever._utility_factor(Row()), 1.0)
+
 
 class FeedbackTests(StoreCase):
     def test_explicit_confirmation_rewards_only_the_matching_memory(self):

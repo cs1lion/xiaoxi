@@ -128,7 +128,19 @@ class MemoryRetriever:
         observations = max(0, int(getattr(memory, "utility_n", 0) or 0))
         if observations <= 0:
             return 1.0
-        q = min(1.0, max(0.0, float(getattr(memory, "utility", 0.5) or 0.5)))
+        # 0.0 是 reinforce_memory 会真的写下的值（Q 夹在 [0,1]，alpha=1.0 时
+        # 一次否定就落到 0.0），所以不能拿 `or 0.5` 兜底 —— 那会把 0.0 当成
+        # 「没学到」读成中性，用户最明确否掉的那条记忆反而一点都不降权。
+        # 只有字段缺失或不含数值时才按中性处理（issue #64）。
+        raw = getattr(memory, "utility", None)
+        if raw is None or isinstance(raw, bool):
+            q = 0.5
+        else:
+            try:
+                q = float(raw)
+            except (TypeError, ValueError):
+                q = 0.5
+        q = min(1.0, max(0.0, q))
         shrunk = (q * observations + 0.5 * prior) / (observations + prior)
         return 1.0 - weight + weight * 2.0 * shrunk
 

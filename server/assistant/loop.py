@@ -1040,7 +1040,9 @@ class SelfEvolutionCycle:
                 continue
             if await asyncio.to_thread(self.store.add_edge, source=f"seed:{seed['id']}",
                                        target=item['ref'], kind='related_memory',
-                                       weight=float(seed.get('heat') or 0.5),
+                                       # heat=0.0 是 add_seed 允许的合法值（夹在 [0,1]），
+                                       # `or 0.5` 会把一颗冷透的种子写成半热的边（同 issue #64）。
+                                       weight=0.5 if seed.get('heat') is None else float(seed['heat']),
                                        reason=f"反思选材：{item['kind']}"):
                 edges_created += 1
         epiphany: list[dict[str, str]] = []
