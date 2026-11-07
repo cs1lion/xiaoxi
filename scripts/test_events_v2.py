@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""契约 v2 · §5 事件协议 v2 常量的自洽性测试。
+r"""契约 v2 · §5 事件协议 v2 常量的自洽性测试。
 
     .\.venv\Scripts\python.exe scripts\test_events_v2.py
 

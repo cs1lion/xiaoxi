@@ -93,6 +93,23 @@ def _broadcast():
     return _BROADCAST
 
 
+def _fake_parse_emotion(raw):
+    """隔离夹具的最小等价实现：解析 [情绪] 标签并返回剥掉标签的正文。
+
+    2026-11-06：生产固定台词路径改用 parse_emotion，而 load_ws 是 AST
+    隔离装载、不装配真 orchestrator。真实 parse_emotion 的行为覆盖在
+    scripts/test_core.py 与 evals.checks:offline_emotion_tags；这里只让
+    调用链不 NameError 且语义等价（有标签→解析，无标签→base + 原文）。
+    """
+    text = (raw or "").strip()
+    if text[:1] in ("[", "【"):
+        close = text.find("]") if text[:1] == "[" else text.find("】")
+        names = ("base", "调侃", "得意", "认真", "收敛", "轻微不服", "变小气")
+        if close > 0 and text[1:close] in names:
+            return text[1:close], text[close + 1:].strip()
+    return "base", text
+
+
 def load_ws():
     path = Path(__file__).resolve().parents[1] / "server" / "app.py"
     tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
@@ -157,6 +174,7 @@ def load_ws():
                # 打磨轮：_proactive_check 的有声 mumble 分支改用模块级导入，
                # 隔离环境注入内存假实现即可验证整条真声链路。
                detect_emotion=lambda text: "base",
+               parse_emotion=_fake_parse_emotion,
                store_message=lambda *args, **kwargs: None,
                commission_accept_line=lambda: "收工快乐。",
                assistant=SimpleNamespace(should_route=lambda _, session_id='': False, waiting_input=lambda _: None),

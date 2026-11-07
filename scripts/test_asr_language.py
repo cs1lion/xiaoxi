@@ -47,8 +47,15 @@ class ModelLoadTests(unittest.IsolatedAsyncioTestCase):
         return ns['Recognizer']()
 
     async def test_first_model_load_does_not_block_the_loop(self):
+        """判据是「40ms 加载窗口内心跳跑了多少次」，不是最长停顿多少毫秒。
+
+        2026-11-05：原判据 `max(gaps) < 10ms` 在 CI 等价全量（172 个脚本串行、
+        机器负载高）叠加 Windows 15.6ms 定时器精度时会偶发假红——单独跑绿、
+        连跑 5 次全红，与被测代码无关。改成行为计数：异步卸载时事件循环必须
+        在加载窗口内持续被调度，同步对照则几乎打不了点。测的仍是「加载有没有
+        冻住循环」，但不再依赖墙钟绝对值。
+        """
         import sys,time,types
-        import threading
         # _ensure 里那句 `from faster_whisper import WhisperModel` 要能瞬间
         # 完成：注入假模块。它现在跑在工作线程里、不阻塞循环，但真 import
         # 会让这个用例多花几秒。
@@ -65,32 +72,33 @@ class ModelLoadTests(unittest.IsolatedAsyncioTestCase):
             return FakeModel()
         r._load=slow_load
 
-        gaps=[];stop=asyncio.Event()
+        async_beats={"n":0};stop=asyncio.Event()
         async def heartbeat():
-            last=time.perf_counter()
             while not stop.is_set():
                 await asyncio.sleep(0)
-                now=time.perf_counter();gaps.append((now-last)*1000);last=now
+                async_beats["n"]+=1
         beat=asyncio.create_task(heartbeat())
         await asyncio.sleep(0)
         await r.transcribe(np.ones(16000,dtype=np.float32)*.1,16000)
         stop.set();await beat
-        worst=max(gaps) if gaps else 0.0
 
         self.assertEqual(loads["n"],1,"模型没加载，测试是空转")
-        self.assertLess(worst,10.0,f"循环最长停顿 {worst:.2f} ms，模型加载仍在阻塞事件循环")
+        self.assertGreaterEqual(async_beats["n"],10,
+            f"40ms 加载窗口内心跳只跑了 {async_beats['n']} 次，事件循环被冻住了")
 
-        # 对照：同样的 40ms 同步加载直接跑在循环上，心跳必须被卡住。
-        gaps.clear();stop2=asyncio.Event()
+        # 对照：同样的 40ms 同步加载直接跑在循环上，心跳几乎打不了点。
+        sync_beats={"n":0};stop2=asyncio.Event()
         async def heartbeat2():
-            last=time.perf_counter()
             while not stop2.is_set():
                 await asyncio.sleep(0)
-                now=time.perf_counter();gaps.append((now-last)*1000);last=now
+                sync_beats["n"]+=1
         beat2=asyncio.create_task(heartbeat2())
         await asyncio.sleep(0)
         slow_load()
         stop2.set();await beat2
-        self.assertGreater(max(gaps),20,"对照最长停顿不足 20 ms，测量器可能没生效")
+        self.assertLessEqual(sync_beats["n"],3,
+            f"对照心跳跑了 {sync_beats['n']} 次，测量器可能没生效")
+        self.assertGreater(async_beats["n"],sync_beats["n"]*5,
+            "异步卸载与同步对照必须拉得开，否则这个测量器没有判别力")
 
 if __name__=='__main__':unittest.main(verbosity=2)

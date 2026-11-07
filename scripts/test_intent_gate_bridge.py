@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""接线封装（server/contract/bridge.py）的单元测试。
+r"""接线封装（server/contract/bridge.py）的单元测试。
 
     .\.venv\Scripts\python.exe scripts\test_intent_gate_bridge.py
 

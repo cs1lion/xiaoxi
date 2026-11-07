@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""发射层（server/contract/emitter.py）的单元测试。
+r"""发射层（server/contract/emitter.py）的单元测试。
 
     .\.venv\Scripts\python.exe scripts\test_event_emitter.py
 

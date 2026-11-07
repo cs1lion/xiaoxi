@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""第 1 步解析器：真模型端到端验证（需要 STEPFUN key，无 key 时跳过）。
+r"""第 1 步解析器：真模型端到端验证（需要 STEPFUN key，无 key 时跳过）。
 
     # 无 key：只跑契约层（scripts/test_intent_parser_contract.py）
     .\.venv\Scripts\python.exe scripts\test_intent_parser_e2e.py

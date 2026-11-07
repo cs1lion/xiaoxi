@@ -138,6 +138,61 @@ def test_tts_split() -> None:
     profile = voice_profile("收敛")
     base = voice_profile("base")
     check("情绪映射到不同声学参数", (profile["rate"], profile["pitch"]) != (base["rate"], base["pitch"]))
+    # 2026-11-05：volume 此前只被 tts._edge 读取、配置里没写，七档全落默认。
+    from server.dialogue.orchestrator import EMOTIONS
+    profiles = {emotion: voice_profile(emotion) for emotion in EMOTIONS}
+    check("七档都带 volume 表演参数", all("volume" in p for p in profiles.values()))
+    check("七档声学三元组两两不同",
+          len({(p["rate"], p["pitch"], p["volume"]) for p in profiles.values()}) == len(profiles))
+    import logging
+    from unittest.mock import patch
+    with patch.object(logging.getLogger("server.speech.tts"), "warning") as warn:
+        check("未知情绪安全回落 base", voice_profile("__missing_emotion__") == base)
+        check("未知情绪回落有显式告警", warn.called)
+
+    # 2026-11-06 离线首次体验闭环：mock 池 / stage_samples 必须带合法标签，
+    # 且固定台词路径必须把标签解析出来并从播出文本里剥掉（否则 TTS 会读出
+    # "认真" 两个字，而七档声学参数一档都触发不了）。
+    import json
+    from server.config import persona_cfg
+    from server.dialogue.orchestrator import _EMOTION_TAG, parse_emotion
+    from server.llm import MOCK_QUESTION_REPLY, MOCK_REPLIES
+    valid = set((persona_cfg().get("tts_emotions") or {}).keys())
+    pool = list(MOCK_REPLIES) + [MOCK_QUESTION_REPLY]
+    check("mock 回复池每条都带合法标签",
+          all((m := _EMOTION_TAG.match(x)) and m.group(1) in valid for x in pool))
+    check("mock 标签能从播出文本剥掉",
+          all(not _EMOTION_TAG.match(parse_emotion(x)[1]) for x in pool))
+    data = json.loads((ROOT / "config" / "response_examples.json").read_text(encoding="utf-8"))
+    missing = [f"{g}:{i}" for g, lines in (data.get("stage_samples") or {}).items()
+               if not g.startswith("_") and isinstance(lines, list)
+               for i, line in enumerate(lines, 1)
+               if not ((m := _EMOTION_TAG.match(line)) and m.group(1) in valid)]
+    check("stage_samples 每组都带合法标签", not missing, str(missing[:3]))
+
+    # 2026-11-06 TTS LRU：淘汰后存活 key 的时间戳必须还在，命中/淘汰计数
+    # 可查，且不能出现「第 257 条后一次性全清」的断崖。
+    import asyncio
+    from server.speech.tts import TTSEngine
+    engine = TTSEngine()
+    engine.engine = "silent"   # 不联网、不调供应商，pure in-process
+    async def fill_cache():
+        for i in range(300):
+            await engine.synthesize_profile(f"第{i}句", {"voice": "v"})
+    asyncio.run(fill_cache())
+    metrics = engine.voice_metrics()
+    check("LRU 容量不超上限", metrics["entries"] <= 256, str(metrics))
+    check("淘汰数与写入量自洽", metrics["evict"] == 300 - metrics["entries"], str(metrics))
+    check("未命中计数可查", metrics["miss"] == 300, str(metrics))
+    newest = next(reversed(engine._cache))
+    engine._word_timings[newest] = [{"text": "x"}]
+    asyncio.run(engine.synthesize_profile("再一句", {"voice": "v"}))
+    check("淘汰不误删存活 key 的时间戳", newest in engine._word_timings)
+    hits_before = engine.voice_metrics()["hit"]
+    asyncio.run(engine.synthesize_profile("第299句", {"voice": "v"}))
+    check("重复文本命中缓存且计数递增",
+          engine.voice_metrics()["hit"] == hits_before + 1,
+          str(engine.voice_metrics()))
 
 
 def test_proactivity_gate() -> None:
@@ -155,6 +210,19 @@ def test_proactivity_gate() -> None:
     orch.state["proactive_suppressed_until"] = time.time() + 999
     result = asyncio.run(orch.proactive_turn(session_id=uuid.uuid4().hex[:8], idle_seconds=99999))
     check("冷静期内闭嘴", result is None)
+    # 2026-11-05：协议 §12/§16.2 声明的 require_authorization 此前没有任何布尔
+    # 读取点，实际门只有 default_enabled OR state。这里钉住修好后的判定：
+    # 即便有人把默认总门翻成 true，未授权也不许主动出声。
+    from server.dialogue.orchestrator import _proactivity_allowed
+    check("require_authorization 拦住 default_enabled 绕过授权",
+          _proactivity_allowed({"default_enabled": True, "require_authorization": True},
+                               {"proactivity_enabled": False}) is False)
+    check("显式关掉协议门后 default_enabled 才生效",
+          _proactivity_allowed({"default_enabled": True, "require_authorization": False},
+                               {"proactivity_enabled": False}) is True)
+    check("有授权握手时放行",
+          _proactivity_allowed({"default_enabled": False, "require_authorization": True},
+                               {"proactivity_enabled": True}) is True)
     store.delete_all()
 
 

@@ -137,6 +137,29 @@ class WebSocketOriginTests(unittest.IsolatedAsyncioTestCase):
         ws, task = self.endpoint(host="127.0.0.1:8000")
         await self.assert_accepted(ws, task)
 
+    # ---- B-3（2026-11-05）：无 Origin 不再是直通门，改按 Host 白名单 ----
+
+    async def test_no_origin_unlisted_host_rejected(self) -> None:
+        """DNS rebinding 残余路径：无 Origin + 非本机 Host 必须在 accept 前拒。"""
+        ws, task = self.endpoint(host="evil.example:8000")
+        with self.assertLogs("server.app", level="WARNING") as logs:
+            await asyncio.wait_for(task, 2)
+        self.assertFalse(ws.accepted, "未登记的 Host 不能在无 Origin 时直通")
+        self.assertTrue(ws.close_frames, "必须发关闭帧")
+        code, reason = ws.close_frames[-1]
+        self.assertEqual(code, 1008)
+        self.assertEqual(reason, "host_not_allowed")
+        self.assertIn("evil.example", logs.output[0], "日志要带上被拒的 Host")
+
+    async def test_no_origin_host_allowlist_opt_in(self) -> None:
+        """生产额外域名走 WS_ALLOWED_HOSTS 显式放行，不必改代码。"""
+        import os
+        from unittest.mock import patch
+
+        with patch.dict(os.environ, {"WS_ALLOWED_HOSTS": "evil.example, other.internal"}):
+            ws, task = self.endpoint(host="evil.example:8000")
+            await self.assert_accepted(ws, task)
+
 
 class SharedGuardEndpointTests(unittest.IsolatedAsyncioTestCase):
     """B-1（2026-10-31 评审）：另外三条 WS 端点共用 _ws_handshake_allowed 的回归。

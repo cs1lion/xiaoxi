@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""第 1 步解析器（server/contract/parser.py）的单元测试。
+r"""第 1 步解析器（server/contract/parser.py）的单元测试。
 
     .\.venv\Scripts\python.exe scripts\test_intent_parser.py
 

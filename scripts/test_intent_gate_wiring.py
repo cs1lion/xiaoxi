@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""第 9 步接线的不变量测试：三组语料的**分支落点**必须符合预期。
+r"""第 9 步接线的不变量测试：三组语料的**分支落点**必须符合预期。
 
     .\.venv\Scripts\python.exe scripts\test_intent_gate_wiring.py
 

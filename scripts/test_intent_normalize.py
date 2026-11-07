@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""意图归一化单测（B1，issue #42）。
+r"""意图归一化单测（B1，issue #42）。
 
     .\.venv\Scripts\python.exe scripts\test_intent_normalize.py
 """

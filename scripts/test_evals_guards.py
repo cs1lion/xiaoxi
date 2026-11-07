@@ -1370,9 +1370,14 @@ class SnapshotRobustnessTests(unittest.TestCase):
                 self.assertEqual(run_health(content), 0,
                                  f"畸形快照 {label} 不得让门禁伪造 exit 1")
         # 真 offline 失效 → exit 1（不被畸形掩盖）
-        real_fail = ('{"at":"20261027T120000Z","results":[{"id":"bad","layer":"offline",'
-                     '"total_runs":1,"passed_runs":0,"failed_runs":1,"passed":false,'
-                     '"runs":[{"verdict":"fail","passed":false}]}]}')
+        # 2026-11-05：at 原先硬编码 "20261027T120000Z"，而 evals_health 的近期
+        # 窗口是 RECENT_WINDOW_DAYS=7 天。9 天后这条「真 offline 失效」自然滑出
+        # 窗口，run_health 从 exit 1 变 0，本测试无故变红且与被测代码无关。
+        # 改成按运行时刻生成：断言的是「近期失效必须判红」，不是某个历史日期。
+        recent_at = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+        real_fail = (f'{{"at":"{recent_at}","results":[{{"id":"bad","layer":"offline",'
+                     f'"total_runs":1,"passed_runs":0,"failed_runs":1,"passed":false,'
+                     f'"runs":[{{"verdict":"fail","passed":false}}]}}]}}')
         self.assertEqual(run_health(real_fail), 1, "真 offline 失效必须 exit 1")
 
 

@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""意图分流语料基线：台前快环三层判定的特征化测试（characterization test）。
+r"""意图分流语料基线：台前快环三层判定的特征化测试（characterization test）。
 
     .\.venv\Scripts\python.exe scripts\verify_intent_routing_corpus.py
 

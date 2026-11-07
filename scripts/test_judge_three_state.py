@@ -207,6 +207,58 @@ class JudgeThreeStateTests(unittest.TestCase):
                          "改成 fail 就是让同源裁判单独把 live 门禁搞红")
         self.assertIn("正则未命中", detail)
 
+    def test_heterogeneous_judge_can_fail_without_regex_hit(self):
+        """2026-11-05 严格模式：异源裁判单独判 fail 时计入退出码。
+
+        同源（当前 .env：judge 与被测同为 api.stepfun.com）仍走上面那条 review
+        断言，不推翻 2026-10-25 的三态决定；这里只覆盖「把裁判换成异源」后
+        门禁强度真正提升的路径。
+        """
+        from unittest.mock import patch
+
+        self.replies = ["[base]记得呀，那家火锅味道确实不错，咱们还拍了照，"
+                        "你当时穿了件蓝外套。"]
+        self.assertEqual(checks._fabrication_regex_hits(self.replies), [],
+                         "这条回复必须真的不命中正则，否则测的不是想测的路径")
+        with patch.object(checks, "_judge_strict_mode", return_value=True):
+            ok, detail, verdict = self.run_judge(text="它在编造共同经历。\nVERDICT: fail")
+        self.assertFalse(ok)
+        self.assertEqual(verdict, "fail", "异源裁判的单独 fail 必须能判红")
+        self.assertIn("异源", detail)
+
+    def test_strict_mode_off_for_same_origin_settings(self):
+        """默认配置同源 → 严格模式必须关，否则老用例会悄悄变红。"""
+        from unittest.mock import patch
+
+        fake = SimpleNamespace(llm_base_url="https://api.stepfun.com/v1",
+                               llm_judge_base_url="https://api.stepfun.com/v1",
+                               llm_judge_api_key="k", llm_judge_model="m",
+                               llm_judge_provider="openai")
+        with patch("server.config.settings", fake):
+            self.assertFalse(checks._judge_strict_mode())
+
+    def test_strict_mode_ignores_local_http_stub(self):
+        """本地回环 stub 只是测试替身，不能被当成跨厂商裁判开严格模式。"""
+        from unittest.mock import patch
+
+        fake = SimpleNamespace(llm_base_url="https://api.stepfun.com/v1",
+                               llm_judge_base_url="http://127.0.0.1:8765/v1",
+                               llm_judge_api_key="stub-key", llm_judge_model="stub",
+                               llm_judge_provider="openai")
+        with patch("server.config.settings", fake):
+            self.assertFalse(checks._judge_strict_mode())
+
+    def test_strict_mode_on_for_different_vendor(self):
+        """换了厂商的裁判才真正解锁「judge 单独判红」。"""
+        from unittest.mock import patch
+
+        fake = SimpleNamespace(llm_base_url="https://api.stepfun.com/v1",
+                               llm_judge_base_url="https://api.other-vendor.com/v1",
+                               llm_judge_api_key="k", llm_judge_model="m",
+                               llm_judge_provider="openai")
+        with patch("server.config.settings", fake):
+            self.assertTrue(checks._judge_strict_mode())
+
     def test_fabrication_regex_catches_its_claimed_phrasings(self):
         """R49 正向锚定：_fabrication_regex_hits 必须真的抓到它声称的 5 类措辞。
 

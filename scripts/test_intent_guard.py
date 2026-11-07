@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""意图怀疑层与约束注入的单测（离线，无需 API Key）。
+r"""意图怀疑层与约束注入的单测（离线，无需 API Key）。
 
     .\.venv\Scripts\python.exe scripts\test_intent_guard.py
 

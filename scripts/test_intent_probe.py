@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""B2（issue #43）：意图预判接线——并行、超时、否决与静默路径（#12）。
+r"""B2（issue #43）：意图预判接线——并行、超时、否决与静默路径（#12）。
 
     .\.venv\Scripts\python.exe scripts\test_intent_probe.py
 """

@@ -83,9 +83,11 @@ def steps(report_only: bool) -> list[tuple[str, list[str]]]:
 def main(argv: list[str]) -> int:
     report_only = REPORT_ONLY_FLAG in argv
 
+    # 2026-11-05 分家口径：主仓 git 树不再含世界源码，CI 无目录按设计跳过；
+    # 本机保留副本时仍可验（见 docs/WORLD_SPLIT_20261105.md）。
     if not WORLD.is_dir():
-        print(f"FAIL pixel-world directory missing: {WORLD}")
-        return 1
+        print(f"SKIP pixel-world 目录不存在：{WORLD}（世界工程已分家，主仓 CI 按设计跳过）")
+        return 0
     if "--list" in argv:
         print(f"mode: {mode_label(report_only)}")
         for name, cmd in steps(report_only):

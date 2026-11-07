@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""契约层验证台：第 1 步解析器必须满足的「Draft 形状契约」。
+r"""契约层验证台：第 1 步解析器必须满足的「Draft 形状契约」。
 
     .\.venv\Scripts\python.exe scripts\test_intent_parser_contract.py
 
