@@ -2,7 +2,8 @@
 #
 # 范围刻意收窄（克制原则）：只跑"零外部依赖"层——
 #   1. scripts/check_protocol.py   协议契约静态校验（字段/路由/引用漂移）
-#   2. scripts/test_*.py           逐脚本运行；缺夹具/缺可选依赖的测试按设计优雅跳过（exit 0）
+#   2. scripts/test_*.py           由 scripts/ci_test_shard.py --workers 4 并发分片跑全集
+#                                   （先 --self-test 校验并集=全集；缺夹具的用例按设计优雅跳过）
 #   3. npm test                    Node 单测（无浏览器、无 GPU、不读模型文件）
 #
 # 明确不在 CI 跑的层（按 docs/TESTING.md 在本地执行）：
@@ -63,7 +64,9 @@ jobs:
           cache: 'npm'
 
       # Python 测试里有脚本会 shell out 到 Node：storage archive 的 hold-lock.ts、
-      # worker shim 回归、pixel_world gate。Node 与这些依赖必须在 Python 测试之前就位。
+      # worker shim 回归。Node 与这些依赖必须在 Python 测试之前就位；
+      # pixel_world gate 已随世界工程分家（2026-11-05），主仓无目录时按设计 SKIP，
+      # 不再需要这里为它准备 Node 依赖。
       - name: Install Node dependencies
         run: npm ci
 
@@ -71,24 +74,19 @@ jobs:
         working-directory: agent-runtime
         run: npm ci
 
-      - name: Install pixel-world dependencies
-        working-directory: pixel-world
-        run: npm ci
+      # 世界工程已分家（2026-11-05，见 docs/WORLD_SPLIT_20261105.md）：
+      # pixel-world/ 由独立仓 cs1lion/pixel-world-engine 负责，新 clone 无该目录，
+      # 其 Node 依赖安装与门禁不再属于主仓 CI。
 
-      - name: Python 测试（逐脚本运行，跳过计通过）
+      - name: Python 测试（并发分片，跳过计通过）
         run: |
-          # 失败的脚本名要出现在日志顶层。旧写法只把名字留在 ::group:: 里，
-          # 日志一长就翻不到——master 连红多次却说不清是哪个脚本红的。
-          failed=""
-          for f in scripts/test_*.py; do
-            echo "::group::$f"
-            if ! python "$f"; then failed="$failed $f"; fi
-            echo "::endgroup::"
-          done
-          if [ -n "$failed" ]; then
-            echo "::error::以下测试脚本失败：$failed"
-            exit 1
-          fi
+          # 2026-11-06：原串行 for 循环实测 13-16 分钟。不能换成
+          # run_gates.py --always（那一档只覆盖 ALWAYS_REQUIRED 子集，会砍掉大量回归），
+          # 也不按「慢脚本跳过」提速——那同样是覆盖下降。这里保持
+          # scripts/test_*.py 全集、只把串行改分片并发；先自检分片映射，
+          # 并集漏一个或重复一个都会当场红，再实跑全部脚本。
+          python scripts/ci_test_shard.py --workers 4 --self-test
+          python scripts/ci_test_shard.py --workers 4
 
       - name: Node 单测（无浏览器 / 无模型依赖）
         run: npm test

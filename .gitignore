@@ -33,8 +33,12 @@ data/
 *.png
 # 精选 README 资产是版本库的一部分；运行时截图仍由上面的 *.png 忽略
 !docs/assets/*.png
-# ADR 的四刻配方证据：一次性的原生 480×320 截图，是决策依据而非运行产物
-!pixel-world/proto/*.png
+# 世界工程已分家（2026-11-05，见 docs/WORLD_SPLIT_20261105.md）：整目录不再进版本库，
+# 本机副本仍留在磁盘作历史契约查证。
+pixel-world/
+# ADR 的四刻配方证据截图已随 pixel-world/ 目录归档，不再单独加白；整目录被忽略后
+# 反向规则本就失效，原 !pixel-world/proto/*.png 改为注释留存：
+# !pixel-world/proto/*.png
 # Review 的 md 是正本；HTML 渲染产物不入库
 docs/REVIEW_ROUND*.html
 config/avatar-eye-calibration*.json
@@ -53,8 +57,24 @@ __pycache__/
 # Generated evaluation outputs
 /eval/
 
-# 本地工具/临时产物：技能目录、worktree、取证与调试中间物，不进版本库
-.agents/
+# 本地工具/临时产物：技能目录、worktree、取证与调试中间物，不进版本库。
+# 只放行本机适配层修正，上游 bundle 其余文件仍忽略：先 .agents/*（只忽略直接子项，
+# negation 才可能生效；整目录 .agents/ 被忽略时任何 ! 规则都无效），再逐层放行。
+.agents/*
+# 逐层「忽略直接子项 → 放行目标目录/文件」，中间每一层目录都要显式 ! 放行：
+# 只写 `.agents/*` 再对深层文件加 ! 是无效的，因为 skills/、pstack/ 这些中间目录
+# 仍被排除，git 根本不会遍历进去（2026-11-05 实测 git add 报 `.agents/skills`
+# ignored）。最后一层再用 `目录/*` 排除 bundle 其余文件，保证只跟踪两份修正。
+!.agents/skills/
+.agents/skills/*
+!.agents/skills/pstack/
+.agents/skills/pstack/*
+!.agents/skills/pstack/DSH.md
+!.agents/skills/pstack/docs/
+.agents/skills/pstack/docs/*
+!.agents/skills/pstack/docs/harness/
+.agents/skills/pstack/docs/harness/*
+!.agents/skills/pstack/docs/harness/claude-code.md
 .claude/
 tmp/
 *.bak
