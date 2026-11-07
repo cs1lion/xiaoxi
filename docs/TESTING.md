@@ -71,6 +71,36 @@ ASR/TTS mock 掉，环境残缺它们看不见。此后新增的门禁把「解�
 （非 uv.lock）且新检出无 tmp/，所以 CI 不跑它们属合理；本地 `run_gates.py`
 全跑时二者在 ALWAYS_REQUIRED，跳过即失败。
 
+2026-11-06 又补三条流程门禁，同样进 `ALWAYS_REQUIRED`，都是纯逻辑、零服务零 Key：
+`process_trail`（决策 trail 每条必须有 `evidence` + `verification`，缺一即红）、
+`process_trail_probe`（用 `check_probe.probe_self_check` 对 trail 副本做真实破坏注入，
+证明校验器能红再信它说绿）、`risk_view`（爆炸半径分档 + `--risk` 只读、绝不跑门禁）。
+复跑：`.\.venv\Scripts\python.exe scripts\run_gates.py --only process_trail,process_trail_probe,risk_view`。
+注意 `check_probe` 本体早在 2026-10-27 就登记过了，`process_trail_probe` 是四判据的
+**应用**门，不是重复登记；口径见 `docs/HANDOFF_20261105.md` §十。
+
+2026-11-06 第五轮再补两条，同样进 `ALWAYS_REQUIRED`：`pacing_dead_keys`
+（`pacing.yaml` 既有 15 个零消费方键登记为基线保留不删，新增未登记死键即红；
+基线见 `scripts/pacing_dead_keys.txt`）、`fabrication_signal`（事实准确性护栏的
+纯函数判据 + AST 断言信号不上 `done` 帧 / `TurnResult` / `app.py`）。
+`scripts/test_fabrication_signal.py` 必须在 import 任何 server singleton **之前**
+设 `DB_PATH=:memory:`（issue #39，`test_core.py:15-18` 同款），否则从 `run_gates`
+子进程起来会被 `server/config.py:41` 判红。口径见 `docs/HANDOFF_20261105.md` §十一。
+
+2026-11-06 第七轮补 `memory_recall_paraphrase`（同样 ALWAYS_REQUIRED）：守的是
+`evals/memory_recall_{seed,paraphrase}.tsv` 这两份**纯合成**标注集与
+`scripts/measure_memory_recall_paraphrase.py` 测量器的有效性（判别力 / 确定性 /
+可归因 / 零隐私 / 不抬 `RECALL_FLOOR`），**不判召回率数字**。测量器非 `test_` 前缀、
+只报数不判红，定位对齐 `scripts/measure_intent_corpus.py:2-4`。两份 TSV 由 Windows
+写入带 BOM，读取必须用 `utf-8-sig`；种子与 `test_memory_retrieval_quality.py:CORPUS`
+逐条一致由门禁断言守住。口径见 `docs/HANDOFF_20261105.md` §十三。
+
+2026-11-07 第八轮补 `doc_drift`（同样 ALWAYS_REQUIRED）：旧入口 / 旧 CI 串行 /
+旧用例数不得复活，新口径必须在，并从本文解析 `` `函数名` `:行号` `` 用 AST
+比对 `server/app.py` 真实定义行、把用例数与 `evals/cases/*.yaml` 磁盘实况动态
+比对。同名 `web/delivery-notice.test.mjs` 已进 `npm test` 链。口径见
+`docs/HANDOFF_20261105.md` §十四。
+
 ### 记忆检索等价与快环行为门禁（#31，2026-10-26 起）
 
 ```bash
@@ -128,11 +158,11 @@ ALWAYS_REQUIRED。`memory_fastloop` 的判据是墙钟停顿（心跳 + 10ms 阈
 - **缺 [情绪] 标签为何算硬失败（2026-10-25 定级）**：保持硬失败，理由三条。① `AGENTS.md` 把「每轮 Assistant 示例都带合法 [情绪] 标签」列为不可违反的设计约束，它是显式不变量；② 该用例的存在意义就是抓格式漂移，降级为告警等于放任漂移；③ 「性格与事实准确性冲突时准确性优先」管的是**两者冲突时听谁**，不是"persona 可以不达标"——标签是 persona 的最低格式要求，与准确性从不冲突，拿它当降级理由属于误读该约束。检查本身已区分三种失败（空回复带 `finish_reason` / 无标签前缀 / 标签非法），排障可定位到具体轮次与模式。
  - **ASR 字错率（CER）的口径（2026-10-27 落档，R43）**：`evals/checks.py` 的 `char_error_rate(reference, hypothesis)` 是纯函数，只保证「给定参考与假设文本时算得对」——中文按字符不按词（中文无天然词边界，按词算要先分词、引入分词器差异），编辑距离 / 参考长度，上限不封顶。**ASR 的真实字错率至今没有评测，也不打算用合成音频假装测过**：那需要固定音频语料 + 真实 ASR 后端 + 固定测试环境，属 live-only，且 Mock 模式下的 ASR 被 mock 掉、离线量不到（2026-10-25 事故的形状正是「门禁全绿但语音栈整个缺失」）。接 live 时必须同时报**域与条件**（方言 / 口音 / 噪声 / 远场），否则数字不可比——依据见 `docs/EVAL_MECHANISM_RESEARCH.md` §2.9.3。离线契约测试见 `scripts/test_evals_guards.py` 的 `CharErrorRateTests`。
 - **xfail**：`status: xfail` 的用例照常运行并在汇报中列出，但不计入失败（必须写 `reason`）。
-- **offline 用例清单（条目数以 `evals/cases/` 目录实况为准，别信这里的数字）**：`fastloop-nonblocking-offline`（快环不阻塞，事件序断言）、`fewshot-emotion-tag-offline`（few-shot 示例带合法情绪标签）、`hallu-empty-retrieval-offline`（空检索必须注入负向约束）、`hard-delete-offline`（SQLite 物理硬删除含 `integrity_check`）、`lesson-injection-offline`（程序性 lesson 检索）、`tier-assembly-offline`（三档置信度装配顺序）、`barge-in-timeline-offline`（T4，2026-10-25 新增：`barge_in` 打断链必须发 `interrupted`→`playback_stopped`，且打断后旧轮迟到的 `audio`/`text_delta`/`done` 一帧不得逃逸；事件序断言不用墙钟，复用 `test_speech_performance_route.py` 的 in-process AST 提取 harness，纯离线零 Key、不起 uvicorn、不占 8000/8010、只读既有 WS 事件）、`valid-time-history-delivery-offline`（时效性历史投递）、`valid-time-future-delivery-offline`（时效性未来投递：未来界计划带 time_note、措辞不得对整条记录断言非现状）、`persona-negative-emotion-boundary-offline`（persona 必须声明「用户要求停止调侃时立刻停止」的边界；**这是配置层守卫、不是行为验证**——它只证明约束写在 persona 里，真实日志中「用户说别调侃了、Agent 仍继续调侃」的违反样本需 live 跑才能抓，配置层管不住。用例红即表示有人把这条状态从 persona 删掉或改坏了）、`persona-voice-style-offline`（persona 必须自述简短口语语音风格与去文字框化，且状态机取值仍合法——两条都是配置层守卫，不证明模型照做）。
+- **offline 用例清单（条目数以 `evals/cases/` 目录实况为准，别信这里的数字）**：`fastloop-nonblocking-offline`（快环不阻塞，事件序断言）、`fewshot-emotion-tag-offline`（few-shot 示例带合法情绪标签）、`hallu-empty-retrieval-offline`（空检索必须注入负向约束）、`hard-delete-offline`（SQLite 物理硬删除含 `integrity_check`）、`lesson-injection-offline`（程序性 lesson 检索）、`tier-assembly-offline`（三档置信度装配顺序）、`barge-in-timeline-offline`（T4，2026-10-25 新增：`barge_in` 打断链必须发 `interrupted`→`playback_stopped`，且打断后旧轮迟到的 `audio`/`text_delta`/`done` 一帧不得逃逸；事件序断言不用墙钟，复用 `test_speech_performance_route.py` 的 in-process AST 提取 harness，纯离线零 Key、不起 uvicorn、不占 8000/8010、只读既有 WS 事件）、`valid-time-history-delivery-offline`（时效性历史投递）、`valid-time-future-delivery-offline`（时效性未来投递：未来界计划带 time_note、措辞不得对整条记录断言非现状）、`persona-negative-emotion-boundary-offline`（persona 必须声明「用户要求停止调侃时立刻停止」的边界；**这是配置层守卫、不是行为验证**——它只证明约束写在 persona 里，真实日志中「用户说别调侃了、Agent 仍继续调侃」的违反样本需 live 跑才能抓，配置层管不住。用例红即表示有人把这条状态从 persona 删掉或改坏了）、`persona-voice-style-offline`（persona 必须自述简短口语语音风格与去文字框化，且状态机取值仍合法——两条都是配置层守卫，不证明模型照做）、`empathy-support-offline`（用户发泄 / 低落时「不追问、不评判、先接住」的 persona 规则必须装配进 prompt；配置层守卫，非行为验证）、`proactive-boundary-offline`（主动发言的授权门 / 冷静期 / 安静模式约束在配置装配中可见；配置层守卫，非行为验证）、`offline-emotion-tags-offline`（2026-11-06：mock 回复池、`examples`、`stage_samples` 每条都带合法 `[情绪]` 标签，且固定台词必须真的解析出标签并从播出文本剥掉；带条数下限棘轮防真空绿，纯离线零 Key）、`proactive-authorization-runtime-offline`（2026-11-07：补 `proactive-boundary-offline` 自承的「非行为验证」缺口——用 AST 抽 `orchestrator.py::_proactivity_allowed` 真实函数体离线执行，枚举 5 组 `(cfg, state)` 断言 `require_authorization` 在运行期确实挡住未授权主动发言，尤其「`default_enabled` 翻 true 也不能绕过授权」；零 Key、不 import server 包）。
 
-  数条数用 `grep -l "^layer: offline" evals/cases/*.yaml | wc -l`，别手写——这条清单的标题数字与条目数都会随新增用例漂移（HEAD 上是「2026-10-25 实况 7 条」且只列 7 个用例，而目录实际已有 11 条 offline），原因是每加一条用例只补了条目、忘了改标题。
+  数条数用 `grep -l "^layer: offline" evals/cases/*.yaml | wc -l`，别手写——这条清单的标题数字与条目数都会随新增用例漂移（HEAD 上是「2026-10-25 实况 7 条」且只列 7 个用例，而 2026-10-26 目录实况已有 11 条 offline；2026-11-05 又新增 2 条，一律以上面判据命令为准），原因是每加一条用例只补了条目、忘了改标题。
 
-- **judge 三态（T5，2026-10-25）**：live 层可挂异源 LLM 裁判（`evals.checks:judge_hallucination`，`check.type: custom`，函数返回三元组）。判定分三态 `pass` / `fail` / `review`：正则与裁判**一致才定论**；裁判未配置、调用失败、输出无法解析、自报 unclear、或与正则不一致，一律 `review`——既不计通过也不计失败，交人工复核，只有 `fail` 计入退出码。裁判槽位是 `llm_judge_provider / llm_judge_base_url / llm_judge_api_key / llm_judge_model`，**设计上必须与被测模型不同源**（同源自评有自我偏好偏差）；留空即不启用，该 check 整层退化成「全 review」，不会把无 Key 的跑态假装成判过。**当前偏离（用户 2026-10-25 决定）**：judge 用同一供应商的另一模型（`step-5-preview` 判 `step-3.7-flash`），槽位独立但并非不同源——后果是 judge 永不单独把用例判红（`evals/checks.py` 的 judge 段注释写明了这条及其原因），换模型或改判定逻辑时须连同那条注释一起复核。judge 永不进 CI（CI 无 Key）。去偏手段只用论文本身支持的（交换顺序两跑取一致、judge 先给思维链），归属见 `docs/EVAL_MECHANISM_RESEARCH.md` §2.5。离线契约测试见 `scripts/test_judge_three_state.py`，覆盖五类：三态判定路径、`run_case` 端到端（含裁判客户端构造路径回归）、真实 HTTP 往返、退出码分桶、`main_async --live` 端到端；后四类全部零凭据零外网，`RESULTS_DIR` 指向临时目录，不写 `evals/results/`。**条数以实跑输出为准**（`.\\.venv\\Scripts\\python.exe -B scripts\\test_judge_three_state.py`），本文不写死——它随用例增减变化，写死就会变成三个互相矛盾的旧数字。
+- **judge 三态（T5，2026-10-25）**：live 层可挂异源 LLM 裁判（`evals.checks:judge_hallucination`，`check.type: custom`，函数返回三元组）。判定分三态 `pass` / `fail` / `review`：正则与裁判**一致才定论**；裁判未配置、调用失败、输出无法解析、自报 unclear、或与正则不一致，一律 `review`——既不计通过也不计失败，交人工复核，只有 `fail` 计入退出码。裁判槽位是 `llm_judge_provider / llm_judge_base_url / llm_judge_api_key / llm_judge_model`，**设计上必须与被测模型不同源**（同源自评有自我偏好偏差）；留空即不启用，该 check 整层退化成「全 review」，不会把无 Key 的跑态假装成判过。**当前偏离（用户 2026-10-25 决定）**：judge 用同一供应商的另一模型（`step-5-preview` 判 `step-3.7-flash`），槽位独立但并非不同源——后果是 judge 永不单独把用例判红（`evals/checks.py` 的 judge 段注释写明了这条及其原因），换模型或改判定逻辑时须连同那条注释一起复核。**2026-11-05 口径补充**：上面「judge 永不单独判红」是 2026-10-25 用户明确决定的三态取舍（同源裁判假阳性会误红 paid live run），不是遗漏；本次新增「异源裁判严格模式」开关，只有 `LLM_JUDGE_PROVIDER` 与 `LLM_PROVIDER` 不同源时才允许 judge 单独判 fail 计入退出码，默认同源行为不变。judge 永不进 CI（CI 无 Key）。去偏手段只用论文本身支持的（交换顺序两跑取一致、judge 先给思维链），归属见 `docs/EVAL_MECHANISM_RESEARCH.md` §2.5。离线契约测试见 `scripts/test_judge_three_state.py`，覆盖五类：三态判定路径、`run_case` 端到端（含裁判客户端构造路径回归）、真实 HTTP 往返、退出码分桶、`main_async --live` 端到端；后四类全部零凭据零外网，`RESULTS_DIR` 指向临时目录，不写 `evals/results/`。**条数以实跑输出为准**（`.\\.venv\\Scripts\\python.exe -B scripts\\test_judge_three_state.py`），本文不写死——它随用例增减变化，写死就会变成三个互相矛盾的旧数字。
 
 ### 写动作崩溃矩阵（2026-10-20）
 
@@ -150,7 +180,7 @@ ALWAYS_REQUIRED。`memory_fastloop` 的判据是墙钟停顿（心跳 + 10ms 阈
 | `test_procedural_memory_eval.py` | 4 | 20 | `procedural_memory_eval_cases.json` + 配套 oracles |
 | `test_procedural_memory_induction.py` | 8 | 0 | 无——H4 已用 `scripts/pm_induction_fixture.py` 内联构造夹具（3 bundle × 2 recipe，形状由 `load_sources()` 与 `domain.prepare()` 的校验钉死），不再依赖磁盘文件；该文件曾被并行会话回退成整组 SkipTest，2026-10-26 已重新接上 |
 
-条数为 2026-10-26 本地实跑值，会随用例增减变化，**以运行输出为准**。补夹具后跳过会自动转真跑；引用这些层的历史结果时仍须标明"夹具缺失、未复跑"。**不要把 `run_gates` 全绿解释成这些评测也跑过**——它们不在 `run_gates.py` 里，只在 `ci.yaml` 的 `scripts/test_*.py` glob 中。
+条数为 2026-10-26 本地实跑值，会随用例增减变化，**以运行输出为准**。补夹具后跳过会自动转真跑；引用这些层的历史结果时仍须标明"夹具缺失、未复跑"。**不要把 `run_gates` 全绿解释成这些评测也跑过**——它们不在 `run_gates.py` 里，只在 `ci_test_shard.py --workers 4` 的并发分片全集里。
 
 **这些夹具为什么不能合成（2026-10-26 查证，防后人走错路）**：剩下的 34 条跳过**不要**靠造合成夹具消掉。分两类，两类都会变成假覆盖：
 
@@ -159,7 +189,7 @@ ALWAYS_REQUIRED。`memory_fastloop` 的判据是墙钟停顿（心跳 + 10ms 阈
 
 正解只有两条：拿到真实的域夹具，或像 H4 对 induction 那样**由代码自身校验反推出形状**（induction 能这么做，是因为 `load_sources()` 与 `domain.prepare()` 的约束足以唯一确定夹具形状；eval/boundaries/diagnostics 不满足这个条件）。所以补齐之前，跳过是诚实的。
 
-**2026-10-25 变更**：`scripts/test_memory_eval.py` 已改为内联合成夹具（`build_cases()` 内存构造 12 条，仍经真实 `load_cases` 逐条校验），不再 `SkipTest`；`ci.yaml` 的 `scripts/test_*.py` 循环会真跑它（本地实跑 19 条 OK）。它是其余程序性记忆测试内联化的样板——正解不是恢复被 `.gitignore:54` 忽略的 `eval/research/*.json`（本地恢复了 CI 仍空跑），而是让夹具随测试一起分发。
+**2026-10-25 变更**：`scripts/test_memory_eval.py` 已改为内联合成夹具（`build_cases()` 内存构造 12 条，仍经真实 `load_cases` 逐条校验），不再 `SkipTest`；`ci_test_shard.py --workers 4` 的并发分片会真跑它（本地实跑 19 条 OK）。它是其余程序性记忆测试内联化的样板——正解不是恢复被 `.gitignore:54` 忽略的 `eval/research/*.json`（本地恢复了 CI 仍空跑），而是让夹具随测试一起分发。
 - **新增用例**：每次出幻觉事故就加一条 YAML。字段见 `evals/cases/` 现例；`checks` 支持 `contains / not_contains / regex_any / not_regex / custom`，custom 判定函数写在 `evals/checks.py`，用例里以 `evals.checks:<函数名>` 引用。预置状态写 `setup.memories`，用户轮次写 `turns`，live 默认跑 `runs: 3` 次，通过线由 `pass_rule: all | min_rate:0.8` 控制。`origin` 必填（来源实验 / 事故 / commit）；缺 `origin` 或空串会在 `main_async` 起手处 fail-fast 并非零退出（`scripts/run_evals.py`）。
 - **候选漏斗**：`scripts/mine_eval_candidates.py` 以 `mode=ro` 只读 `data/memory.db`（不 import 任何 server 模块、不写活库），按四类确定性启发式（共指/省略追问、疑似幻觉面、事实挑战、负面情绪边界）提名评测候选，凭据与个人信息脱敏后落 `eval/research/case_candidates_*.json`（`.gitignore:54` 覆盖，**不进版本库**）；候选经人工筛选与改写后才手写进 `evals/cases/`，脚本本身不写受版本控制的目录。库不存在时打印说明并 exit 0（正常态）。
 
@@ -198,7 +228,7 @@ node web\ui_nav.test.mjs                                         # 界面自动�
 node scripts\test-ui-nav-browser.mjs                             # 领航浏览器回归：抽屉自动开合 / 聚焦 / 子动作 / 侧栏·星图落点（需先启动本地服务；服务未起时自动 SKIP，不算失败）
 ```
 
-> **`scripts/test_verify.py` 不存在，勿当作可跑命令**（2026-10-26 核）：该文件从未存在于工作树，却出现在本清单、`docs/CONTRACT_RUNTIME_WIRING.md:125` 与 `docs/TOOL_OPERATION_EXPLORATION_20261024.md`（多处）。后果不是"少一条测试"，而是 `server/verify` 包**零行为测试覆盖**，且 `server/verify/check.py:30` 与 `verifier.py:30` 的 docstring 承诺"禁止开 socket、连库、subprocess，由 `scripts/test_verify.py` 的 IO 断言机械检查"——**这条 IO 禁令目前没有任何机械强制**，唯一的相邻保障是 `scripts/test_task_fsm.py:1650` 对 `server.verify` 的一条静态 import 限制断言（它不断言行为）。`scripts/` 下另有两个 `verify_*_corpus.py`，但它们是路由语料、与验收包无关。完整规格（三种 check 正反例 + reader 注入 + IO 静态断言 + evaluator 桥接）与验收标准见 `docs/TOOL_OPERATION_EXPLORATION_20261024.md`（该文档属并发会话在飞工作，本线不改）；该文件由谁建、何时建，待用户拍板后另行处理。
+> **已关闭（2026-10-31 提交 `0eb3625`）**：`scripts/test_verify.py` 现已存在（545 行、8 个 test，含 `test_io_ban`），`server/verify` 包不再是「零行为测试覆盖」——`check.py:30` / `verifier.py:30` docstring 承诺的「禁止开 socket、连库、subprocess」IO 禁令由 `test_io_ban` 机械强制，连同三种 check 正反例、reader 注入、IO 静态断言与 evaluator 桥接一并有测试覆盖。此前「文件不存在 / 零覆盖 / IO 禁令无机械强制 / 待用户拍板」的记录（2026-10-26 核）已被该提交推翻，不再适用。完整规格仍见 `docs/TOOL_OPERATION_EXPLORATION_20261024.md`（该文档属并发会话在飞工作，本线不改）。
 >
 > **改动 `web/` 前端文件后**：必须杀掉旧服务进程再重启（`taskkill //F //PID <持 8000 端口的进程>`
 > 然后 `.\.venv\Scripts\python.exe scripts\run.py --port 8000`），否则 `StaticFiles` 缓存的目录
@@ -497,6 +527,14 @@ DSH 在本机默认沙箱拒绝写工作目录；花名册/profile 必须显式�
 
 逐处核实（判据：失败是否**既不可见又有后果**）：
 
+> **2026-11-07 口径**：下表行号是 2026-10-26 的取证快照，之后多轮重构已普遍漂移
+> （例如 `_confirm_action` 从 `:579` 到 `:623`、`shutdown` 从 `:1852/:1863` 到 `:1916`）。
+> **函数名与判定结论仍有效，行号请以 `grep -n 'async def <函数名>' server/app.py` 重锚**，
+> 不要把表里的数字当当前坐标。几个当前锚：`_confirm_action` `:623`、
+> `_run_turn` `:874`、`websocket_endpoint` `:1394`、
+> `_start_durable_if_enabled` `:1808`、`shutdown` `:1916`。
+> 快照原文保留，不逐个改写——改写反而会把历史取证现场抹掉。
+
 | 位置 | 形态 | 判定 |
 | --- | --- | --- |
 | `server/app.py:579` `_confirm_action` | `except Exception` → `conn.finish(turn, {type:"error", code:"assistant_confirmation_failed", message:"未能取得确认结果…", terminal:True})` | 正确：用户收到明确失败回合 |
@@ -520,13 +558,13 @@ DSH 在本机默认沙箱拒绝写工作目录；花名册/profile 必须显式�
 
 ## 已核实无缺口：eval 用例配置一致性（2026-10-26）
 
-对 `evals/cases/` 全部 16 个用例（5 live + 11 offline）做过一轮配置一致性核查，结论：**框架本身已堵住主要静默失效入口，本轮只修了两处文档/配置漂移。**
+对 `evals/cases/` 全部用例（2026-10-26 取证快照为 16 个：5 live + 11 offline；**2026-11-07 复核当前 23 个：7 live + 16 offline**；当前条数以判据命令 `grep -l "^layer: offline" evals/cases/*.yaml | wc -l` 为准，勿信本文写死的任何数字）做过一轮配置一致性核查，结论：**框架本身已堵住主要静默失效入口，本轮只修了两处文档/配置漂移。**
 
 `scripts/run_evals.py` 的加载器已硬校验六类危险配置，任一出现即 `return 1` 让门禁变红，不会静默放过：
 `runs` 不是正整数（0 或负值让 `passed_runs == runs_n` 变成 `0 == 0` 判 PASS）、`checks` 为空或形状损坏（空列表让 `all([])` 恒真、一条断言都不跑却判 PASS；非 list / 条目缺 type 会在 run_case 崩）、offline 用例用 `target: reply`（offline 路径 replies 恒为 `[]`，负向 check 永不命中）、`pass_rule: min_rate:` 阈值不在 (0,1]（阈值 0 会让 `passed_runs/max(1,n) >= 0` 恒真，断言全红仍判过）、`turns` 为空（一次对话都不发生）、seed 记忆良构不达标（`setup.memories` 条目非 dict、`key`/`value` 空或非字符串、`fact_valid_from/until` 非数值——空 value 令排序检查因 `"" in block` 恒真、`block.find("")==0` 而空转 PASS，缺 key/value 与非数值 fact_valid 令 seed_memories 崩整轮）。这六类的修法历史记在加载器注释里，排查时先读那里。
 
 **本轮修的两处**（都不改变行为，只是把"靠默认值兜底"变成显式）：
-- `evals/cases/lesson-injection-offline.yaml` 补 `layer: offline` 与 `status: active`，并删掉行首那行**无人读取的 case 级 `target: prompt`——`target` 是 check 级字段，代码只读 `check.get("target", "reply")`。该文件是 16 个用例中唯一缺 `layer`/`status` 的；此前靠默认值（无 layer → 落入 offline_cases；无 status → 非 xfail）恰好行为正确，但默认语义一旦变更就会静默换层。
+- `evals/cases/lesson-injection-offline.yaml` 补 `layer: offline` 与 `status: active`，并删掉行首那行**无人读取的 case 级 `target: prompt`——`target` 是 check 级字段，代码只读 `check.get("target", "reply")`。该文件是当时 16 个用例中唯一缺 `layer`/`status` 的；此前靠默认值（无 layer → 落入 offline_cases；无 status → 非 xfail）恰好行为正确，但默认语义一旦变更就会静默换层。
 - `docs/TESTING.md` 的 offline 用例清单标题原写"实况 8 条"，实际列 9 条、目录实为 11 条（数字与清单均过期）。已改为不写死数字 + 给出 `grep -l "^layer: offline" evals/cases/*.yaml | wc -l` 的判据。
 
 **排查这类问题时的判据（我本轮被自己的正则骗过三次，别再犯）**：
@@ -536,7 +574,9 @@ DSH 在本机默认沙箱拒绝写工作目录；花名册/profile 必须显式�
 
 **带 bug 的校验器比没有校验器更危险**：它会用"全部 OK"或"5 处违例"给出确定语气，而两者都是错的。每条结论落地前先用一个已知答案的样本反验校验器本身。
 
-## ⚠ 待用户决定：已跟踪的「可执行配置」引用了未跟踪文件（fresh clone 会崩）
+## 已关闭：已跟踪的「可执行配置」引用了未跟踪文件（fresh clone 会崩）
+
+**2026-11-05 回填（已关闭）**：实测这批文件现已全部 tracked——2026-10-29 提交 `0f87efa` 入库四处引用，2026-10-31 提交 `0eb3625` 补齐 `scripts/test_verify.py`、`5b03d38` 补齐 `scripts/echo_server.py`。fresh clone 不会再因这批引用 ENOENT。**下方表格与叙述是 2026-10-26 的取证快照，勿当当前状态**；它记录的是当时的破坏面与复现判据，复现判据命令仍有效（可用来复核「已跟踪文件是否仍引用了未跟踪文件」这条不变式），但表里「未跟踪 / fresh clone 会崩」的结论已被上述提交关闭。表格原文保留不改。
 
 **这不是当前工作树的问题**——未跟踪的文件都在磁盘上，所以 `npm test` / CI / 覆盖度棘轮此刻全绿。问题是 **clone HEAD 之后**：已跟踪的配置会去调用一批不存在于 HEAD 的文件，于是 ENOENT。
 

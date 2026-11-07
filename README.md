@@ -34,13 +34,13 @@
 
 **🏘️ 像素世界**
 
-![本仓 `/` 的实况（2026-10-28 截图）：小镇与下方状态行读同一份台账快照](docs/assets/world-live.png)
+![入口反转期间的历史实况（2026-10-28 截图，当时 `/` = 世界页）：小镇与下方状态行读同一份台账快照](docs/assets/world-live.png)
 
-- `/` 打开就是这座小镇，`/chat` 是旧聊天页；世界的构建产物不在时，`/` 回一张写着构建命令的说明页，而不是 5xx。
+- **2026-11-05 分家后 `/` 已改回语音陪伴页**，`/chat` 是同一页面的兼容别名；世界产物挂在 `/world`（有构建产物时才有），需要世界页直接从 `/world` 打开。回归：`scripts/test_pixel_world_hosting.py::check_voice_companion_is_the_front_door` 用 TestClient 真打生产路由。
 - 世界是**纯投影**：只读 REST + WS `commission_update` 增量，不写台账、不 accept/submit。渲染换掉不影响逻辑，逻辑换掉不影响渲染。
 - **不撒谎**是硬约束：没发生的事不写进日报，没有真实数据就不摆卡片，工具真失败时显示失败；台账快照取不全时状态行会明说「台账可能未取全」，不让「少了一条」看起来像「被撤单了」。
 - 视觉有预算：24 色世界 + 8 色 UI（`docs/ADR_PALETTE_24.md`），越界取色由 `pixel-world/scripts/audit-palette.mjs` 挡下（本地 strict、CI 另有 palette-strict 工作流）。
-- **2026-10-25 已分家**：渲染与模拟内核迁往独立仓 [pixel-world-engine](https://github.com/cs1lion/pixel-world-engine)（源提交 `05db039`）。本仓 `pixel-world/` 全量保留但不再演进，只作历史契约查证（`pixel-world/MIGRATED.md`）；要改世界请去新仓。两仓之间「世界读什么」的接缝契约仍是草案（`docs/ADR_DRAFT_WORLD_SEAM.md`，待拍板），所以本仓冻结产物仍按台账投影，而新仓已改读自己的事件日志。
+- **2026-10-25 已分家 / 2026-11-05 收口**：渲染与模拟内核迁往独立仓 [pixel-world-engine](https://github.com/cs1lion/pixel-world-engine)（源提交 `05db039`）。主仓 git 树自 2026-11-05 起不再跟踪 `pixel-world/` 源码，本机副本保留作历史契约查证（`pixel-world/MIGRATED.md`），dist 产物由独立仓 `cs1lion/pixel-world-engine` 提供；要改世界请去新仓。两仓之间「世界读什么」的接缝契约仍是草案（`docs/ADR_DRAFT_WORLD_SEAM.md`，待拍板），所以本机冻结产物仍按台账投影，而新仓已改读自己的事件日志。
 
 ## 🏗️ 系统架构
 
@@ -77,7 +77,7 @@
                        │
                        ▼  只读投影（不写台账，不 accept/submit）
 ┌───────────────────────────────────────────────────────────┐
-│ 像素世界 · `/`（构建产物挂在 `/world`）                   │
+│ 像素世界 · `/world`（有产物时条件挂载，非前门）        │
 │   REST 全量 + WS commission_update 增量                   │
 │   台账状态 → 她起身 / 进屋 / 开工 / 交付                  │
 └───────────────────────────────────────────────────────────┘
@@ -92,13 +92,13 @@ uv venv
 uv pip install -r requirements.txt
 Copy-Item .env.example .env                       # 可选：填 LLM_API_KEY 接入真实模型
 npm install --ignore-scripts                      # 前端单测依赖（跳过 Playwright 浏览器下载；只有浏览器门禁才需要浏览器）
-Push-Location pixel-world; npm install; npm run build:world; Pop-Location
+Push-Location pixel-world; npm install; npm run build:world; Pop-Location  # 仅本机有历史副本时可选，新 clone 不需要
 .\.venv\Scripts\python.exe scripts\run.py         # 打开 http://127.0.0.1:8000
 ```
 
-`pixel-world/dist` 被 `.gitignore` 排除，**新克隆里没有世界产物**——不跑 `npm run build:world`，`/` 只会显示一张写着这条命令的说明页。构建后再启动服务，产物才会挂到 `/world`。
+主仓 git 树自 2026-11-05 起不再跟踪 `pixel-world/` 源码，`pixel-world/dist` 也不再随主仓分发——dist 产物由独立仓 `cs1lion/pixel-world-engine` 提供，本机保留的历史副本只作历史契约查证。**新克隆里没有世界产物，但 `/` 照常是语音陪伴页**（分家后已把入口反转改回，见 `server/app.py`）；只有 `/world` 在无产物时不存在（404）。`npm run build:world` 仅本机有历史副本时可选、新 clone 不需要，构建后再启动服务产物才会挂到 `/world`。
 
-**没有 API Key 也能跑通多少**：LLM 自动进离线 Mock（`server/llm.py` 的 `offline`），文字对话、记忆读写、任务调度、前端交互照常。**但语音不会自动降级**——`TTS_ENGINE` / `ASR_ENGINE` 各自要自己的凭据，没有就是明确失败（`stepaudio` 无凭据 → TTS 轮次以 `reply_tts_failed` 收尾，ASR 直接抛错），不会假装播过。想在无凭据下体验完整轮次，把 `TTS_ENGINE` 设成 `silent`：文字与事件流照常，轮次里没有 audio 帧。
+**没有 API Key 也能跑通多少**：LLM 自动进离线 Mock（`server/llm.py` 的 `offline`），文字对话、记忆检索与前端交互照常；**记忆写入在 Mock 模式下不产生条目**——抽取器需要真实模型，离线按 `EXTRACT_SYSTEM` 的契约返回空 `memories` 并记一条 debug 日志，不造假记忆。离线回复池与固定台词自 2026-11-06 起都带合法 `[情绪]` 标签并经 `parse_emotion` 解析，七档声学参数在无凭据时也能被触发。**但语音不会自动降级**——`TTS_ENGINE` / `ASR_ENGINE` 各自要自己的凭据，没有就是明确失败（`stepaudio` 无凭据 → TTS 轮次以 `reply_tts_failed` 收尾，ASR 直接抛错），不会假装播过。想在无凭据下体验完整轮次，把 `TTS_ENGINE` 设成 `silent`：文字与事件流照常，轮次里没有 audio 帧。
 
 ```powershell
 .\.venv\Scripts\python.exe scripts\check_protocol.py   # 协议漂移 + REST 接缝
@@ -139,7 +139,7 @@ Mock 口径基线见 `docs/LATENCY_BASELINE.md`，锚点 HEAD `94b1abe`、2026-1
 
 - 级联管线的首字延迟地板以 `docs/LATENCY_BASELINE.md` 的口径为准；Mock 数字不能当真实用户延迟用。
 - 花名册里没写 `adapter`（或写成 `manual`）的 Worker 只组密件、不执行：督办会转成 BLOCKED 并明说「这个 Agent 还没接执行体」，宁可卡住也不伪造一次执行。要真干活，换成 `cli_subproc` / `http_api` / `mcp` / `durable`，不改 Python。
-- 混合检索是字符 n-gram TF-IDF + 重要性 / 时近性重排，在百至千条个人记忆规模下零外部向量库依赖；上万条长文档建议在检索层加稠密向量。索引重建目前同步发生在快环内，随库规模线性增长（跟踪中，见仓库 issue #31）。
+- 混合检索是字符 n-gram TF-IDF + 重要性 / 时近性重排，在百至千条个人记忆规模下零外部向量库依赖；上万条长文档建议在检索层加稠密向量。检索（含内容变化后的 TF-IDF 索引重建）自 2026-10-26 起逐条卸载到工作线程；2026-10-31 提交 `0eb3625` 把 `ambient_event` 与 `proactive_grounding` 两条残留的 `search("")` 路径也改为 `asyncio.to_thread`。issue #31 的索引拆分（增量索引）经 2026-10-27 实测不可行，仍按 `docs/ROADMAP.md` §3 择机。
 - 语音打断依赖浏览器 WebRTC AEC，扬声器大音量外放可能回声自激，建议戴耳机。
 
 **像素世界目前不做的**（本仓冻结态，2026-10-25 分家前口径；世界新动向以新仓 roadmap 为准）
