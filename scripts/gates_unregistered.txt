@@ -18,3 +18,4 @@ test_memory_retrieval_quality.py
 test_memory_snapshot.py
 test_memory_temporal.py
 test_pixel_world.py
+# 分家后由 pixel-world-engine 仓负责，主仓 CI 跳过（2026-11-05，见 docs/WORLD_SPLIT_20261105.md）

@@ -377,6 +377,46 @@ def build_review_queue(snapshots: list[dict]) -> dict:
     return queue
 
 
+def read_voice_benchmarks(root: Path | None = None, *, limit: int = 5) -> list[dict]:
+    """只读语音基准 result.json，取最近 limit 份运行时指标。
+
+    2026-11-06：报告层此前只有「评测通过率 + token 成本」，首音延迟与 ASR
+    耗时只散落在各自基准脚本的 result.json 里、没人汇总。这里只读、不写、
+    不删、不轮转，也不参与任何退出码；无数据时返回空列表，让调用方显式
+    打印 not_measured，不填 0、不填空。
+
+    2026-11-06 补：`tmp/` 于本日按 TTL 清扫（见 docs/HANDOFF_20261105.md
+    §十二），历史基准会随 tmp 一起被搬走。改为同时读 `docs/assets/benchmarks/`
+    下已归档入库的基线与 `tmp/` 下的新基准，按目录名去重（tmp 优先，同名
+    时新数据覆盖归档）。`root` 仍可注入临时目录供测试使用。
+    """
+    import json
+
+    repo = Path(__file__).resolve().parents[1]
+    base = root or (repo / "tmp")
+    candidates: dict[str, Path] = {}
+    for source in (repo / "docs" / "assets" / "benchmarks", base):
+        if source.is_dir():
+            for path in sorted(source.glob("bench-voice-loop-*/result.json")):
+                candidates[path.parent.name] = path
+    files = [candidates[name] for name in sorted(candidates)][-limit:]
+    out: list[dict] = []
+    for path in files:
+        try:
+            data = json.loads(path.read_text(encoding="utf-8"))
+            section = data.get("A_first_audio") or {}
+            first = section.get("first_audio_ms") or {}
+            asr = (section.get("spans_ms") or {}).get("asr") or {}
+            out.append({"at": str(data.get("date") or path.parent.name),
+                        "head": str(data.get("head") or "?"),
+                        "mode": str(data.get("mode") or ""),
+                        "first_audio_p50": first.get("p50"),
+                        "asr_p50": asr.get("p50")})
+        except (OSError, ValueError, TypeError):
+            continue
+    return out
+
+
 def render(snapshots: list[dict], broken: list[str], results_dir: Path) -> str:
     lines: list[str] = []
     lines.append("=== 评测报告（报告层，不计入门禁退出码） ===")
@@ -545,6 +585,21 @@ def render(snapshots: list[dict], broken: list[str], results_dir: Path) -> str:
                  "与生产记账（server/llm.py 的 last_usage、dispatcher 的 usage）"
                  "是两套，暂不合并，避免出现两个互不相等的成本数。")
 
+    lines.append("")
+    lines.append("--- 运行时语音基准（只读 tmp/ + docs/assets/benchmarks/ 归档基线，不判红） ---")
+    benches = read_voice_benchmarks()
+    if not benches:
+        lines.append("  not_measured：没有基准结果。跑 scripts/bench_voice_loop.py 后本节点亮；"
+                     "这里不填 0、不填空，也不参与任何退出码。")
+    else:
+        for item in benches:
+            fa = ("not_measured" if item["first_audio_p50"] is None
+                  else f"{item['first_audio_p50']}ms")
+            ar = "not_measured" if item["asr_p50"] is None else f"{item['asr_p50']}ms"
+            lines.append(f"  {item['at'][:19]}  head={item['head']}  "
+                         f"first_audio_p50={fa}  asr_p50={ar}")
+    lines.append("  口径：基准是离线 WAV 桩 + Mock LLM 的本机回环，只代表链路开销，"
+                 "不代表真实供应商延迟；与上面的 token 成本分列，不合并。")
     lines.append("")
     lines.append(f"--- 跨快照 review 队列（近 {REVIEW_QUEUE_WINDOW} 份快照，"
                  "需人工复核原始回复） ---")

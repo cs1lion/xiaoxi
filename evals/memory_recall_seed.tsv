@@ -1,0 +1,18 @@
+﻿# 记忆召回改述测量 · 种子记忆（2026-11-06）
+#
+# **全部为人工合成文本，不含任何真实用户对话**。严禁从 data/memory.db 的
+# messages.text / memories.evidence_quote 复制内容进来。
+# 与 scripts/test_memory_retrieval_quality.py:CORPUS 逐条一致——
+# docs/MEMORY_RESEARCH_NEXT.md:158 要求「使用同一记忆集合，不让不同抽取结果
+# 混进检索比较」，所以两份语料必须同源；scripts/test_memory_recall_paraphrase.py
+# 会断言两者一致，任一边漂移即红。
+#
+# 格式：key <TAB> value
+饮食:饮品偏好	用户长期喜欢喝绿茶，早上那杯最重要
+工作:日程	用户周五下午有一场产品岗面试
+娱乐:游戏	用户最近在玩文明六，喜欢慢节奏运营
+宠物:猫	用户养了一只叫豆豆的橘猫，三岁
+健康:过敏	用户对花生过敏，误食会起疹子
+居住:城市	用户住在杭州，搬过去两年了
+作息:起床	用户每天早上七点起床，周末也差不多
+学习:语言	用户正在自学日语，目标是 N3

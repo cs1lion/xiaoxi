@@ -1,0 +1,1067 @@
+{
+  "head": "8f824c0",
+  "date": "2026-10-31T11:34:34+08:00",
+  "port": 8031,
+  "python": "3.12.4",
+  "mode": "Mock LLM（无 Key offline）+ 离线 WAV TTS 桩（bench_entry，生产文件零改动）",
+  "machine_note": "单机本机回环；数字只代表链路开销，不代表真实供应商延迟",
+  "A_first_audio": {
+    "query": "还记得我的猫叫什么名字吗？",
+    "samples": 8,
+    "corpus": 50,
+    "spans_ms": {
+      "asr": {
+        "n": 8,
+        "min": 0.9,
+        "p50": 1.0,
+        "p90": 1.5,
+        "p95": 1.5,
+        "max": 1.5,
+        "mean": 1.07
+      },
+      "thinking": {
+        "n": 8,
+        "min": 35.3,
+        "p50": 37.4,
+        "p90": 116.5,
+        "p95": 116.5,
+        "max": 116.5,
+        "mean": 48.52
+      },
+      "text_delta": {
+        "n": 8,
+        "min": 93.1,
+        "p50": 94.3,
+        "p90": 175.7,
+        "p95": 175.7,
+        "max": 175.7,
+        "mean": 106.58
+      },
+      "speech_plan": {
+        "n": 8,
+        "min": 93.1,
+        "p50": 94.4,
+        "p90": 175.7,
+        "p95": 175.7,
+        "max": 175.7,
+        "mean": 106.6
+      },
+      "audio": {
+        "n": 8,
+        "min": 93.7,
+        "p50": 95.7,
+        "p90": 176.7,
+        "p95": 176.7,
+        "max": 176.7,
+        "mean": 107.44
+      },
+      "done": {
+        "n": 8,
+        "min": 133.4,
+        "p50": 136.0,
+        "p90": 215.1,
+        "p95": 215.1,
+        "max": 215.1,
+        "mean": 147.76
+      }
+    },
+    "first_audio_ms": {
+      "n": 8,
+      "min": 93.7,
+      "p50": 95.7,
+      "p90": 176.7,
+      "p95": 176.7,
+      "max": 176.7,
+      "mean": 107.44
+    },
+    "server_reported_done_latency_ms": {
+      "n": 8,
+      "min": 130,
+      "p50": 133,
+      "p90": 207,
+      "p95": 207,
+      "max": 207,
+      "mean": 143.75
+    },
+    "audio_chunks_per_turn": {
+      "n": 8,
+      "min": 1,
+      "p50": 1,
+      "p90": 1,
+      "p95": 1,
+      "max": 1,
+      "mean": 1.0
+    },
+    "audio_bytes_per_turn": {
+      "n": 8,
+      "min": 5804,
+      "p50": 5804,
+      "p90": 5804,
+      "p95": 5804,
+      "max": 5804,
+      "mean": 5804.0
+    },
+    "raw": [
+      {
+        "first": {
+          "turn_sent": 0.0,
+          "asr": 0.0011,
+          "AGENT_PRESENCE": 0.0013,
+          "thinking": 0.1165,
+          "emotion": 0.1756,
+          "text_delta": 0.1757,
+          "speech_plan": 0.1757,
+          "audio": 0.1767,
+          "aqi_blocks": 0.2059,
+          "done": 0.2151
+        },
+        "audio_chunks": 1,
+        "audio_bytes": 5804,
+        "done_latency_ms": 207
+      },
+      {
+        "first": {
+          "turn_sent": 0.0,
+          "AGENT_PRESENCE": 0.0005,
+          "asr": 0.0011,
+          "thinking": 0.0391,
+          "emotion": 0.0937,
+          "text_delta": 0.0943,
+          "speech_plan": 0.0944,
+          "audio": 0.0957,
+          "aqi_blocks": 0.1245,
+          "done": 0.136
+        },
+        "audio_chunks": 1,
+        "audio_bytes": 5804,
+        "done_latency_ms": 133
+      },
+      {
+        "first": {
+          "turn_sent": 0.0,
+          "AGENT_PRESENCE": 0.0004,
+          "asr": 0.0011,
+          "thinking": 0.0392,
+          "emotion": 0.093,
+          "text_delta": 0.0931,
+          "speech_plan": 0.0931,
+          "audio": 0.0937,
+          "aqi_blocks": 0.1236,
+          "done": 0.1346
+        },
+        "audio_chunks": 1,
+        "audio_bytes": 5804,
+        "done_latency_ms": 131
+      },
+      {
+        "first": {
+          "turn_sent": 0.0,
+          "AGENT_PRESENCE": 0.0004,
+          "asr": 0.0009,
+          "thinking": 0.0374,
+          "emotion": 0.0944,
+          "text_delta": 0.095,
+          "speech_plan": 0.0951,
+          "audio": 0.0957,
+          "aqi_blocks": 0.1244,
+          "done": 0.1343
+        },
+        "audio_chunks": 1,
+        "audio_bytes": 5804,
+        "done_latency_ms": 131
+      },
+      {
+        "first": {
+          "turn_sent": 0.0,
+          "AGENT_PRESENCE": 0.0006,
+          "asr": 0.0015,
+          "thinking": 0.0476,
+          "emotion": 0.1108,
+          "text_delta": 0.111,
+          "speech_plan": 0.111,
+          "audio": 0.1118,
+          "aqi_blocks": 0.1426,
+          "done": 0.1536
+        },
+        "audio_chunks": 1,
+        "audio_bytes": 5804,
+        "done_latency_ms": 149
+      },
+      {
+        "first": {
+          "turn_sent": 0.0,
+          "AGENT_PRESENCE": 0.0003,
+          "asr": 0.001,
+          "thinking": 0.0353,
+          "emotion": 0.093,
+          "text_delta": 0.0932,
+          "speech_plan": 0.0932,
+          "audio": 0.094,
+          "aqi_blocks": 0.124,
+          "done": 0.1334
+        },
+        "audio_chunks": 1,
+        "audio_bytes": 5804,
+        "done_latency_ms": 130
+      },
+      {
+        "first": {
+          "turn_sent": 0.0,
+          "AGENT_PRESENCE": 0.0003,
+          "asr": 0.001,
+          "thinking": 0.0374,
+          "emotion": 0.0941,
+          "text_delta": 0.0942,
+          "speech_plan": 0.0942,
+          "audio": 0.0948,
+          "aqi_blocks": 0.1255,
+          "done": 0.1371
+        },
+        "audio_chunks": 1,
+        "audio_bytes": 5804,
+        "done_latency_ms": 134
+      },
+      {
+        "first": {
+          "turn_sent": 0.0,
+          "AGENT_PRESENCE": 0.0004,
+          "asr": 0.0009,
+          "thinking": 0.0357,
+          "emotion": 0.0958,
+          "text_delta": 0.0961,
+          "speech_plan": 0.0961,
+          "audio": 0.0971,
+          "aqi_blocks": 0.1274,
+          "done": 0.138
+        },
+        "audio_chunks": 1,
+        "audio_bytes": 5804,
+        "done_latency_ms": 135
+      }
+    ]
+  },
+  "B_barge_in": {
+    "query": "还记得我的猫叫什么名字吗？",
+    "samples": 30,
+    "corpus": 50,
+    "tts_stub_delay_ms": 250,
+    "hit_rate": "30/30",
+    "barge_to_interrupted_ms": {
+      "n": 30,
+      "min": 0.36,
+      "p50": 0.51,
+      "p90": 0.64,
+      "p95": 0.66,
+      "max": 0.68,
+      "mean": 0.52
+    },
+    "barge_to_playback_stopped_ms": {
+      "n": 30,
+      "min": 0.5,
+      "p50": 0.79,
+      "p90": 0.89,
+      "p95": 0.98,
+      "max": 2.02,
+      "mean": 0.81
+    },
+    "misses_turn_completed_before_barge": 0,
+    "post_barge_audio_violations": 0,
+    "raw": [
+      {
+        "first": {
+          "turn_sent": 0.0,
+          "asr": 0.0007,
+          "AGENT_PRESENCE": 0.0009,
+          "thinking": 0.0687,
+          "emotion": 0.0981,
+          "text_delta": 0.0982,
+          "speech_plan": 0.0982,
+          "audio": 0.3469,
+          "barge_sent": 0.347,
+          "interrupted": 0.3475,
+          "playback_stopped": 0.3476
+        },
+        "audio_chunks": 1,
+        "audio_bytes": 5804,
+        "done_latency_ms": null,
+        "barge_to_interrupted_ms": 0.48,
+        "barge_to_playback_stopped_ms": 0.61,
+        "violations": [],
+        "done_after_barge": false
+      },
+      {
+        "first": {
+          "turn_sent": 0.0,
+          "asr": 0.0011,
+          "AGENT_PRESENCE": 0.0018,
+          "thinking": 0.0413,
+          "emotion": 0.0633,
+          "text_delta": 0.0635,
+          "speech_plan": 0.0635,
+          "audio": 0.3112,
+          "barge_sent": 0.3112,
+          "interrupted": 0.3117,
+          "playback_stopped": 0.312
+        },
+        "audio_chunks": 1,
+        "audio_bytes": 5804,
+        "done_latency_ms": null,
+        "barge_to_interrupted_ms": 0.51,
+        "barge_to_playback_stopped_ms": 0.79,
+        "violations": [],
+        "done_after_barge": false
+      },
+      {
+        "first": {
+          "turn_sent": 0.0,
+          "asr": 0.001,
+          "AGENT_PRESENCE": 0.0014,
+          "thinking": 0.0474,
+          "emotion": 0.077,
+          "text_delta": 0.0772,
+          "speech_plan": 0.0772,
+          "audio": 0.3227,
+          "barge_sent": 0.3227,
+          "interrupted": 0.3232,
+          "playback_stopped": 0.3236
+        },
+        "audio_chunks": 1,
+        "audio_bytes": 5804,
+        "done_latency_ms": null,
+        "barge_to_interrupted_ms": 0.52,
+        "barge_to_playback_stopped_ms": 0.85,
+        "violations": [],
+        "done_after_barge": false
+      },
+      {
+        "first": {
+          "turn_sent": 0.0,
+          "asr": 0.0009,
+          "AGENT_PRESENCE": 0.0014,
+          "thinking": 0.045,
+          "emotion": 0.0771,
+          "text_delta": 0.0773,
+          "speech_plan": 0.0773,
+          "audio": 0.3256,
+          "barge_sent": 0.3256,
+          "interrupted": 0.3262,
+          "playback_stopped": 0.3264
+        },
+        "audio_chunks": 1,
+        "audio_bytes": 5804,
+        "done_latency_ms": null,
+        "barge_to_interrupted_ms": 0.53,
+        "barge_to_playback_stopped_ms": 0.81,
+        "violations": [],
+        "done_after_barge": false
+      },
+      {
+        "first": {
+          "turn_sent": 0.0,
+          "asr": 0.0009,
+          "AGENT_PRESENCE": 0.0013,
+          "thinking": 0.0379,
+          "emotion": 0.0616,
+          "text_delta": 0.0617,
+          "speech_plan": 0.0617,
+          "audio": 0.3258,
+          "barge_sent": 0.3258,
+          "interrupted": 0.3263,
+          "playback_stopped": 0.3266
+        },
+        "audio_chunks": 1,
+        "audio_bytes": 5804,
+        "done_latency_ms": null,
+        "barge_to_interrupted_ms": 0.47,
+        "barge_to_playback_stopped_ms": 0.74,
+        "violations": [],
+        "done_after_barge": false
+      },
+      {
+        "first": {
+          "turn_sent": 0.0,
+          "asr": 0.0011,
+          "AGENT_PRESENCE": 0.0014,
+          "thinking": 0.0484,
+          "emotion": 0.0771,
+          "text_delta": 0.0773,
+          "speech_plan": 0.0773,
+          "audio": 0.3553,
+          "barge_sent": 0.3553,
+          "aqi_blocks": 0.3557,
+          "interrupted": 0.3559,
+          "playback_stopped": 0.356
+        },
+        "audio_chunks": 1,
+        "audio_bytes": 5804,
+        "done_latency_ms": null,
+        "barge_to_interrupted_ms": 0.58,
+        "barge_to_playback_stopped_ms": 0.69,
+        "violations": [],
+        "done_after_barge": false
+      },
+      {
+        "first": {
+          "turn_sent": 0.0,
+          "asr": 0.001,
+          "AGENT_PRESENCE": 0.0012,
+          "thinking": 0.0382,
+          "emotion": 0.0629,
+          "text_delta": 0.0631,
+          "speech_plan": 0.0632,
+          "audio": 0.3119,
+          "barge_sent": 0.3119,
+          "interrupted": 0.3126,
+          "playback_stopped": 0.3128
+        },
+        "audio_chunks": 1,
+        "audio_bytes": 5804,
+        "done_latency_ms": null,
+        "barge_to_interrupted_ms": 0.66,
+        "barge_to_playback_stopped_ms": 0.86,
+        "violations": [],
+        "done_after_barge": false
+      },
+      {
+        "first": {
+          "turn_sent": 0.0,
+          "asr": 0.0009,
+          "AGENT_PRESENCE": 0.0012,
+          "thinking": 0.0417,
+          "emotion": 0.0767,
+          "text_delta": 0.077,
+          "speech_plan": 0.077,
+          "audio": 0.3247,
+          "barge_sent": 0.3247,
+          "interrupted": 0.3252,
+          "playback_stopped": 0.3255
+        },
+        "audio_chunks": 1,
+        "audio_bytes": 5804,
+        "done_latency_ms": null,
+        "barge_to_interrupted_ms": 0.51,
+        "barge_to_playback_stopped_ms": 0.79,
+        "violations": [],
+        "done_after_barge": false
+      },
+      {
+        "first": {
+          "turn_sent": 0.0,
+          "asr": 0.0012,
+          "AGENT_PRESENCE": 0.0015,
+          "thinking": 0.0473,
+          "emotion": 0.0774,
+          "text_delta": 0.0777,
+          "speech_plan": 0.0778,
+          "aqi_blocks": 0.3546,
+          "audio": 0.3553,
+          "barge_sent": 0.3553,
+          "interrupted": 0.3558,
+          "playback_stopped": 0.356
+        },
+        "audio_chunks": 1,
+        "audio_bytes": 5804,
+        "done_latency_ms": null,
+        "barge_to_interrupted_ms": 0.5,
+        "barge_to_playback_stopped_ms": 0.69,
+        "violations": [],
+        "done_after_barge": false
+      },
+      {
+        "first": {
+          "turn_sent": 0.0,
+          "asr": 0.0009,
+          "AGENT_PRESENCE": 0.0013,
+          "thinking": 0.0396,
+          "emotion": 0.0625,
+          "text_delta": 0.0628,
+          "speech_plan": 0.0628,
+          "audio": 0.3119,
+          "barge_sent": 0.3119,
+          "interrupted": 0.3125,
+          "playback_stopped": 0.3128
+        },
+        "audio_chunks": 1,
+        "audio_bytes": 5804,
+        "done_latency_ms": null,
+        "barge_to_interrupted_ms": 0.59,
+        "barge_to_playback_stopped_ms": 0.89,
+        "violations": [],
+        "done_after_barge": false
+      },
+      {
+        "first": {
+          "turn_sent": 0.0,
+          "asr": 0.0011,
+          "AGENT_PRESENCE": 0.0015,
+          "thinking": 0.0374,
+          "emotion": 0.0625,
+          "text_delta": 0.0628,
+          "speech_plan": 0.0629,
+          "audio": 0.3105,
+          "barge_sent": 0.3105,
+          "interrupted": 0.3109,
+          "playback_stopped": 0.3112
+        },
+        "audio_chunks": 1,
+        "audio_bytes": 5804,
+        "done_latency_ms": null,
+        "barge_to_interrupted_ms": 0.42,
+        "barge_to_playback_stopped_ms": 0.73,
+        "violations": [],
+        "done_after_barge": false
+      },
+      {
+        "first": {
+          "turn_sent": 0.0,
+          "asr": 0.001,
+          "AGENT_PRESENCE": 0.0013,
+          "thinking": 0.035,
+          "emotion": 0.062,
+          "text_delta": 0.0624,
+          "speech_plan": 0.0624,
+          "audio": 0.3145,
+          "barge_sent": 0.3146,
+          "interrupted": 0.3149,
+          "playback_stopped": 0.3151
+        },
+        "audio_chunks": 1,
+        "audio_bytes": 5804,
+        "done_latency_ms": null,
+        "barge_to_interrupted_ms": 0.36,
+        "barge_to_playback_stopped_ms": 0.5,
+        "violations": [],
+        "done_after_barge": false
+      },
+      {
+        "first": {
+          "turn_sent": 0.0,
+          "asr": 0.001,
+          "AGENT_PRESENCE": 0.0013,
+          "thinking": 0.0476,
+          "emotion": 0.0484,
+          "text_delta": 0.0487,
+          "speech_plan": 0.0488,
+          "audio": 0.3282,
+          "barge_sent": 0.3282,
+          "interrupted": 0.3288,
+          "playback_stopped": 0.329
+        },
+        "audio_chunks": 1,
+        "audio_bytes": 5804,
+        "done_latency_ms": null,
+        "barge_to_interrupted_ms": 0.56,
+        "barge_to_playback_stopped_ms": 0.83,
+        "violations": [],
+        "done_after_barge": false
+      },
+      {
+        "first": {
+          "turn_sent": 0.0,
+          "asr": 0.0012,
+          "AGENT_PRESENCE": 0.0017,
+          "thinking": 0.0389,
+          "emotion": 0.0634,
+          "text_delta": 0.0635,
+          "speech_plan": 0.0635,
+          "audio": 0.3142,
+          "barge_sent": 0.3143,
+          "interrupted": 0.315,
+          "playback_stopped": 0.3153
+        },
+        "audio_chunks": 1,
+        "audio_bytes": 5804,
+        "done_latency_ms": null,
+        "barge_to_interrupted_ms": 0.68,
+        "barge_to_playback_stopped_ms": 0.98,
+        "violations": [],
+        "done_after_barge": false
+      },
+      {
+        "first": {
+          "turn_sent": 0.0,
+          "asr": 0.001,
+          "AGENT_PRESENCE": 0.0016,
+          "thinking": 0.0493,
+          "emotion": 0.0772,
+          "text_delta": 0.0774,
+          "speech_plan": 0.0774,
+          "audio": 0.3254,
+          "barge_sent": 0.3255,
+          "interrupted": 0.326,
+          "playback_stopped": 0.3263
+        },
+        "audio_chunks": 1,
+        "audio_bytes": 5804,
+        "done_latency_ms": null,
+        "barge_to_interrupted_ms": 0.52,
+        "barge_to_playback_stopped_ms": 0.79,
+        "violations": [],
+        "done_after_barge": false
+      },
+      {
+        "first": {
+          "turn_sent": 0.0,
+          "asr": 0.0011,
+          "AGENT_PRESENCE": 0.0015,
+          "thinking": 0.047,
+          "emotion": 0.0781,
+          "text_delta": 0.0782,
+          "speech_plan": 0.0782,
+          "audio": 0.3259,
+          "barge_sent": 0.3259,
+          "interrupted": 0.3265,
+          "playback_stopped": 0.3279
+        },
+        "audio_chunks": 1,
+        "audio_bytes": 5804,
+        "done_latency_ms": null,
+        "barge_to_interrupted_ms": 0.64,
+        "barge_to_playback_stopped_ms": 2.02,
+        "violations": [],
+        "done_after_barge": false
+      },
+      {
+        "first": {
+          "turn_sent": 0.0,
+          "asr": 0.0009,
+          "AGENT_PRESENCE": 0.0011,
+          "thinking": 0.0366,
+          "emotion": 0.0617,
+          "text_delta": 0.0618,
+          "speech_plan": 0.0619,
+          "audio": 0.3083,
+          "barge_sent": 0.3084,
+          "interrupted": 0.3089,
+          "playback_stopped": 0.3092
+        },
+        "audio_chunks": 1,
+        "audio_bytes": 5804,
+        "done_latency_ms": null,
+        "barge_to_interrupted_ms": 0.5,
+        "barge_to_playback_stopped_ms": 0.78,
+        "violations": [],
+        "done_after_barge": false
+      },
+      {
+        "first": {
+          "turn_sent": 0.0,
+          "asr": 0.0014,
+          "AGENT_PRESENCE": 0.0018,
+          "thinking": 0.0357,
+          "emotion": 0.0629,
+          "text_delta": 0.063,
+          "speech_plan": 0.063,
+          "audio": 0.3374,
+          "barge_sent": 0.3375,
+          "interrupted": 0.338,
+          "playback_stopped": 0.3383
+        },
+        "audio_chunks": 1,
+        "audio_bytes": 5804,
+        "done_latency_ms": null,
+        "barge_to_interrupted_ms": 0.49,
+        "barge_to_playback_stopped_ms": 0.81,
+        "violations": [],
+        "done_after_barge": false
+      },
+      {
+        "first": {
+          "turn_sent": 0.0,
+          "asr": 0.001,
+          "AGENT_PRESENCE": 0.0013,
+          "thinking": 0.0451,
+          "emotion": 0.0773,
+          "text_delta": 0.0774,
+          "speech_plan": 0.0774,
+          "audio": 0.3265,
+          "barge_sent": 0.3265,
+          "interrupted": 0.3271,
+          "playback_stopped": 0.3274
+        },
+        "audio_chunks": 1,
+        "audio_bytes": 5804,
+        "done_latency_ms": null,
+        "barge_to_interrupted_ms": 0.53,
+        "barge_to_playback_stopped_ms": 0.86,
+        "violations": [],
+        "done_after_barge": false
+      },
+      {
+        "first": {
+          "turn_sent": 0.0,
+          "asr": 0.001,
+          "AGENT_PRESENCE": 0.0013,
+          "thinking": 0.0482,
+          "emotion": 0.0767,
+          "text_delta": 0.0768,
+          "speech_plan": 0.0768,
+          "audio": 0.3215,
+          "barge_sent": 0.3216,
+          "interrupted": 0.3222,
+          "playback_stopped": 0.3224
+        },
+        "audio_chunks": 1,
+        "audio_bytes": 5804,
+        "done_latency_ms": null,
+        "barge_to_interrupted_ms": 0.66,
+        "barge_to_playback_stopped_ms": 0.83,
+        "violations": [],
+        "done_after_barge": false
+      },
+      {
+        "first": {
+          "turn_sent": 0.0,
+          "asr": 0.0011,
+          "AGENT_PRESENCE": 0.0015,
+          "thinking": 0.0404,
+          "emotion": 0.0625,
+          "text_delta": 0.063,
+          "speech_plan": 0.0631,
+          "audio": 0.3132,
+          "barge_sent": 0.3133,
+          "interrupted": 0.3138,
+          "playback_stopped": 0.3141
+        },
+        "audio_chunks": 1,
+        "audio_bytes": 5804,
+        "done_latency_ms": null,
+        "barge_to_interrupted_ms": 0.57,
+        "barge_to_playback_stopped_ms": 0.83,
+        "violations": [],
+        "done_after_barge": false
+      },
+      {
+        "first": {
+          "turn_sent": 0.0,
+          "asr": 0.0011,
+          "AGENT_PRESENCE": 0.0015,
+          "thinking": 0.0365,
+          "emotion": 0.0631,
+          "text_delta": 0.0633,
+          "speech_plan": 0.0634,
+          "audio": 0.3123,
+          "barge_sent": 0.3123,
+          "interrupted": 0.3128,
+          "playback_stopped": 0.3131
+        },
+        "audio_chunks": 1,
+        "audio_bytes": 5804,
+        "done_latency_ms": null,
+        "barge_to_interrupted_ms": 0.48,
+        "barge_to_playback_stopped_ms": 0.8,
+        "violations": [],
+        "done_after_barge": false
+      },
+      {
+        "first": {
+          "turn_sent": 0.0,
+          "asr": 0.001,
+          "AGENT_PRESENCE": 0.0015,
+          "thinking": 0.0454,
+          "emotion": 0.0787,
+          "text_delta": 0.0788,
+          "speech_plan": 0.0789,
+          "audio": 0.3268,
+          "barge_sent": 0.3269,
+          "interrupted": 0.3274,
+          "playback_stopped": 0.3277
+        },
+        "audio_chunks": 1,
+        "audio_bytes": 5804,
+        "done_latency_ms": null,
+        "barge_to_interrupted_ms": 0.5,
+        "barge_to_playback_stopped_ms": 0.75,
+        "violations": [],
+        "done_after_barge": false
+      },
+      {
+        "first": {
+          "turn_sent": 0.0,
+          "asr": 0.0011,
+          "AGENT_PRESENCE": 0.0015,
+          "thinking": 0.0473,
+          "emotion": 0.0776,
+          "text_delta": 0.0778,
+          "speech_plan": 0.0778,
+          "audio": 0.3257,
+          "barge_sent": 0.3258,
+          "interrupted": 0.3262,
+          "playback_stopped": 0.3264
+        },
+        "audio_chunks": 1,
+        "audio_bytes": 5804,
+        "done_latency_ms": null,
+        "barge_to_interrupted_ms": 0.42,
+        "barge_to_playback_stopped_ms": 0.64,
+        "violations": [],
+        "done_after_barge": false
+      },
+      {
+        "first": {
+          "turn_sent": 0.0,
+          "asr": 0.0016,
+          "AGENT_PRESENCE": 0.002,
+          "thinking": 0.0492,
+          "emotion": 0.0773,
+          "text_delta": 0.0774,
+          "speech_plan": 0.0774,
+          "audio": 0.3258,
+          "barge_sent": 0.3258,
+          "interrupted": 0.3263,
+          "playback_stopped": 0.3265
+        },
+        "audio_chunks": 1,
+        "audio_bytes": 5804,
+        "done_latency_ms": null,
+        "barge_to_interrupted_ms": 0.46,
+        "barge_to_playback_stopped_ms": 0.64,
+        "violations": [],
+        "done_after_barge": false
+      },
+      {
+        "first": {
+          "turn_sent": 0.0,
+          "asr": 0.0007,
+          "AGENT_PRESENCE": 0.0011,
+          "thinking": 0.0462,
+          "emotion": 0.0773,
+          "text_delta": 0.0774,
+          "speech_plan": 0.0774,
+          "audio": 0.3529,
+          "barge_sent": 0.3529,
+          "interrupted": 0.3535,
+          "playback_stopped": 0.3537
+        },
+        "audio_chunks": 1,
+        "audio_bytes": 5804,
+        "done_latency_ms": null,
+        "barge_to_interrupted_ms": 0.53,
+        "barge_to_playback_stopped_ms": 0.75,
+        "violations": [],
+        "done_after_barge": false
+      },
+      {
+        "first": {
+          "turn_sent": 0.0,
+          "asr": 0.0009,
+          "AGENT_PRESENCE": 0.0014,
+          "thinking": 0.0398,
+          "emotion": 0.0628,
+          "text_delta": 0.0631,
+          "speech_plan": 0.0631,
+          "audio": 0.3415,
+          "barge_sent": 0.3416,
+          "aqi_blocks": 0.342,
+          "interrupted": 0.3422,
+          "playback_stopped": 0.3425
+        },
+        "audio_chunks": 1,
+        "audio_bytes": 5804,
+        "done_latency_ms": null,
+        "barge_to_interrupted_ms": 0.64,
+        "barge_to_playback_stopped_ms": 0.9,
+        "violations": [],
+        "done_after_barge": false
+      },
+      {
+        "first": {
+          "turn_sent": 0.0,
+          "asr": 0.001,
+          "AGENT_PRESENCE": 0.0014,
+          "thinking": 0.0488,
+          "emotion": 0.0757,
+          "text_delta": 0.0759,
+          "speech_plan": 0.0759,
+          "audio": 0.3513,
+          "barge_sent": 0.3513,
+          "interrupted": 0.3517,
+          "playback_stopped": 0.352
+        },
+        "audio_chunks": 1,
+        "audio_bytes": 5804,
+        "done_latency_ms": null,
+        "barge_to_interrupted_ms": 0.4,
+        "barge_to_playback_stopped_ms": 0.71,
+        "violations": [],
+        "done_after_barge": false
+      },
+      {
+        "first": {
+          "turn_sent": 0.0,
+          "asr": 0.001,
+          "AGENT_PRESENCE": 0.0012,
+          "thinking": 0.0455,
+          "emotion": 0.0781,
+          "text_delta": 0.0783,
+          "speech_plan": 0.0783,
+          "audio": 0.3264,
+          "barge_sent": 0.3264,
+          "interrupted": 0.3269,
+          "playback_stopped": 0.3271
+        },
+        "audio_chunks": 1,
+        "audio_bytes": 5804,
+        "done_latency_ms": null,
+        "barge_to_interrupted_ms": 0.48,
+        "barge_to_playback_stopped_ms": 0.68,
+        "violations": [],
+        "done_after_barge": false
+      },
+      {
+        "first": {
+          "turn_sent": 0.0,
+          "asr": 0.001,
+          "AGENT_PRESENCE": 0.0012,
+          "thinking": 0.0444,
+          "emotion": 0.0772,
+          "text_delta": 0.0774,
+          "speech_plan": 0.0774,
+          "audio": 0.3268,
+          "barge_sent": 0.3268,
+          "interrupted": 0.3273,
+          "playback_stopped": 0.3276
+        },
+        "audio_chunks": 1,
+        "audio_bytes": 5804,
+        "done_latency_ms": null,
+        "barge_to_interrupted_ms": 0.51,
+        "barge_to_playback_stopped_ms": 0.81,
+        "violations": [],
+        "done_after_barge": false
+      }
+    ]
+  },
+  "C_memory_retrieval": {
+    "corpus_sizes": [
+      50,
+      300
+    ],
+    "buckets": {
+      "corpus_50": {
+        "cold_index_rebuild": {
+          "n": 8,
+          "min": 5.35,
+          "p50": 5.84,
+          "p90": 34.63,
+          "p95": 34.63,
+          "max": 34.63,
+          "mean": 9.55
+        },
+        "warm_cached": {
+          "n": 60,
+          "min": 0.69,
+          "p50": 1.33,
+          "p90": 1.74,
+          "p95": 1.95,
+          "max": 3.09,
+          "mean": 1.37
+        },
+        "per_tier": {
+          "stated": {
+            "n": 30,
+            "min": 1.03,
+            "p50": 1.35,
+            "p90": 1.67,
+            "p95": 1.77,
+            "max": 6.49,
+            "mean": 1.55,
+            "hit": "30/30"
+          },
+          "inferred": {
+            "n": 30,
+            "min": 0.63,
+            "p50": 1.27,
+            "p90": 1.76,
+            "p95": 1.87,
+            "max": 6.05,
+            "mean": 1.43,
+            "hit": "30/30"
+          },
+          "uncertain": {
+            "n": 30,
+            "min": 0.82,
+            "p50": 1.49,
+            "p90": 1.8,
+            "p95": 2.08,
+            "max": 6.82,
+            "mean": 1.63,
+            "hit": "30/30"
+          }
+        },
+        "no_hit_negative_path": {
+          "n": 30,
+          "min": 0.76,
+          "p50": 1.14,
+          "p90": 1.66,
+          "p95": 1.74,
+          "max": 1.75,
+          "mean": 1.21,
+          "found_flag_true": 0
+        }
+      },
+      "corpus_300": {
+        "cold_index_rebuild": {
+          "n": 8,
+          "min": 16.51,
+          "p50": 18.93,
+          "p90": 25.87,
+          "p95": 25.87,
+          "max": 25.87,
+          "mean": 20.39
+        },
+        "warm_cached": {
+          "n": 60,
+          "min": 1.8,
+          "p50": 3.28,
+          "p90": 4.45,
+          "p95": 4.75,
+          "max": 5.95,
+          "mean": 3.34
+        },
+        "per_tier": {
+          "stated": {
+            "n": 30,
+            "min": 2.43,
+            "p50": 3.23,
+            "p90": 4.23,
+            "p95": 4.79,
+            "max": 15.8,
+            "mean": 3.78,
+            "hit": "30/30"
+          },
+          "inferred": {
+            "n": 30,
+            "min": 2.42,
+            "p50": 3.38,
+            "p90": 4.28,
+            "p95": 4.75,
+            "max": 14.46,
+            "mean": 3.78,
+            "hit": "30/30"
+          },
+          "uncertain": {
+            "n": 30,
+            "min": 2.54,
+            "p50": 3.26,
+            "p90": 4.31,
+            "p95": 4.36,
+            "max": 14.11,
+            "mean": 3.74,
+            "hit": "30/30"
+          }
+        },
+        "no_hit_negative_path": {
+          "n": 30,
+          "min": 2.2,
+          "p50": 3.08,
+          "p90": 3.72,
+          "p95": 3.86,
+          "max": 4.07,
+          "mean": 3.09,
+          "found_flag_true": 0
+        }
+      }
+    }
+  }
+}

@@ -1,0 +1,28 @@
+# pacing.yaml 死键基线（2026-11-06 实测，HEAD 41734eb）
+#
+# 由 `scripts/test_pacing_dead_keys.py --print-dead` 生成。判据：该键在
+# server/ 与 web/ 的字符串字面量里零出现（AST Constant / JS 引号串）。
+# 这不是许可名单，是「当期水位」：新增的无消费方键若不在此清单里，门禁判红。
+#
+# 为什么不直接删：refuse_* / no_diagnostic_roleplay / persona_safety_priority
+# 是产品安全声明，tone_after_refuse / allow_topics 是语气与话题约定，删掉属
+# 产品决策而非死代码清理。thinking_ms 还被 docs/prompts/Role2_LowLatency_Voice_Stage.md:25,32
+# 称作「权威参数」——文档与代码不一致，保留键、标清现状，比静默删掉更诚实。
+#
+# 键被真正接上消费方后，门禁会打印 info（不判红），届时从本清单移除即可。
+# 新增键要么接消费方，要么在此登记并写明理由。
+allow
+allow_topics
+can_reopen_previous
+max_utterance_s
+min_utterance_ms
+no_diagnostic_roleplay
+persona_safety_priority
+play_queue_max
+refuse_medical_advice_detail
+refuse_self_harm_support
+refuse_sexual_minors
+reopen_max_per_session
+send_text_before_audio
+thinking_ms
+tone_after_refuse

@@ -9,6 +9,7 @@
     python scripts/run_gates.py                # 全部门禁，跳过即失败
     python scripts/run_gates.py --allow-skip   # 跳过只告警（兼容旧口径）
     python scripts/run_gates.py --only protocol,core,evals
+    python scripts/run_gates.py --risk   # 只读：按 diff 给爆炸半径分档
 """
 from __future__ import annotations
 
@@ -56,6 +57,12 @@ GATES: dict[str, dict[str, object]] = {
         "cmd": [str(PY), "scripts/check_protocol.py"],
         "skip_regex": r"^\s*SKIP",
     },
+    "poteto_loading": {
+        # 2026-11-06：poteto-mode 加载契约探针（离线、零 Key、零会话依赖）。
+        # 只验「路径都在 + 本机适配层已入库且已进 HEAD」，不冒充「会话已加载」。
+        "cmd": [str(PY), "scripts/test_poteto_loading.py"],
+        "skip_regex": r"^\s*SKIP",
+    },
     "core": {
         "cmd": [str(PY), "scripts/test_core.py"],
         "skip_regex": r"^\s*SKIP",
@@ -83,7 +90,54 @@ GATES: dict[str, dict[str, object]] = {
         # check_probe 自身回归：它的四条判据是三次真实事故逼出来的（等价改动、
         # 锚点撞多处、注入没生效、还原不干净），不许退化。纯进程内逻辑、临时
         # 目录造 CRLF 目标文件、零网络零 Key、确定性，ALWAYS_REQUIRED。
+        # 2026-11-06 补注：本 key 守的是四判据本体；「红灯才准写实现」的
+        # 应用层由紧随其后的 process_trail_probe 承担，不在这里重复登记。
         "cmd": [str(PY), "scripts/test_check_probe.py"],
+        "skip_regex": r"^\s*SKIP",
+    },
+    "process_trail": {
+        # 2026-11-06：决策 trail 强制「证据 + 验证方式」缺一即红。
+        # 只读、零 Key、零服务；--always 与 CI 分片都会真跑。
+        "cmd": [str(PY), "scripts/check_process_trail.py"],
+        "skip_regex": r"^\s*SKIP",
+    },
+    "process_trail_probe": {
+        # 红灯机器门：用 check_probe.probe_self_check 对 trail 副本做真实
+        # 破坏注入（删 verification / 等价改写），证明校验器能红再信它说绿。
+        # check_probe 本体是库模块、无 CLI，故以 test_ 包装器接入。
+        "cmd": [str(PY), "scripts/test_check_process_trail.py"],
+        "skip_regex": r"^\s*SKIP",
+    },
+    "risk_view": {
+        # 2026-11-06：爆炸半径分类与「--risk 只读、绝不跑门禁」的回归。
+        # 纯函数 + mock，零服务零 Key，ALWAYS_REQUIRED。
+        "cmd": [str(PY), "scripts/test_risk_view.py"],
+        "skip_regex": r"^\s*SKIP",
+    },
+    "pacing_dead_keys": {
+        # 2026-11-06：pacing.yaml 死键棘轮。既有 15 个零消费方键登记为基线
+        # 保留不删（多为安全声明），新增无消费方键即红。纯 AST、零服务零 Key，
+        # 自检 4 条内置，ALWAYS_REQUIRED。
+        "cmd": [str(PY), "scripts/test_pacing_dead_keys.py"],
+        "skip_regex": r"^\s*SKIP",
+    },
+    "fabrication_signal": {
+        # 2026-11-06：事实准确性护栏的纯函数判据 + 「不上 WS 帧/API 字段」
+        # 静态契约。零服务零 Key，ALWAYS_REQUIRED。
+        "cmd": [str(PY), "scripts/test_fabrication_signal.py"],
+        "skip_regex": r"^\s*SKIP",
+    },
+    "memory_recall_paraphrase": {
+        # 2026-11-06：记忆召回改述标注集的门禁。守的是「标注集与测量器有效」
+        # （判别力 / 确定性 / 可归因 / 零隐私 / 不抬 RECALL_FLOOR），不判召回率数字。
+        # 纯内存库、零服务零 Key，ALWAYS_REQUIRED。
+        "cmd": [str(PY), "scripts/test_memory_recall_paraphrase.py"],
+        "skip_regex": r"^\s*SKIP",
+    },
+    "doc_drift": {
+        # 2026-11-07：文档 vs 代码漂移门禁（旧入口/CI 串行/用例数/函数行号锚）。
+        # 纯 AST + 字符串，零服务零 Key，ALWAYS_REQUIRED。
+        "cmd": [str(PY), "scripts/test_doc_drift.py"],
         "skip_regex": r"^\s*SKIP",
     },
     "run_gates_verdict": {
@@ -1032,7 +1086,7 @@ GATES: dict[str, dict[str, object]] = {
 }
 
 # 这些门禁的本体是纯逻辑单测，不需要本地服务，永远必须真跑。
-ALWAYS_REQUIRED = ("protocol", "core", "scheduler_health", "budget_scope", "backup_restore", "operation_outbox", "outbox_crash", "mood_writer", "evals", "npm", "executive_v3", "adapter_ext",
+ALWAYS_REQUIRED = ("protocol", "core", "doc_drift", "process_trail", "process_trail_probe", "risk_view", "pacing_dead_keys", "fabrication_signal", "memory_recall_paraphrase", "poteto_loading", "scheduler_health", "budget_scope", "backup_restore", "operation_outbox", "outbox_crash", "mood_writer", "evals", "npm", "executive_v3", "adapter_ext",
                    "codex_shim", "claude_shim", "gateway", "task_planning", "cross_day",
                    "thread_conversation", "self_evolution", "agent_loop", "llm_client",
                    "self_evolution_send", "config_hot", "config_hot_consumers",
@@ -1105,6 +1159,102 @@ def run_gate(name: str, spec: dict) -> dict:
             "seconds": round(time.time() - started, 1), "output_tail": output[-1500:]}
 
 
+# ---------- 爆炸半径视图（只读，2026-11-06） ----------
+# 分档依据：docs/HANDOFF_20261105.md:76-78 的 Role 0 单作者锁与协议红线，
+# 以及 AGENTS.md:90-92 的 [PROTOCOL_REQUEST] 停工要求。优先级自上而下，
+# 命中即停——docs/PROTOCOL.md 不能因为落在 docs/ 下就被当成小角落。
+ROLE0_LOCKED = frozenset({
+    "docs/PROTOCOL.md", "AGENTS.md", "docs/AGENT_PLAYBOOK.md",
+    "docs/TASKS.md", "REVIEW.md",
+})
+STOP_EXACT = frozenset({"server/assistant/executive.py"})
+STOP_PREFIXES = ("server/contract/", "server/broadcast/")
+REVIEW_PREFIXES = ("server/", "config/", "web/", ".github/workflows/", "evals/")
+REVIEW_EXACT = frozenset({
+    "scripts/check_protocol.py", "scripts/check_memory_contract.py",
+    "scripts/run_gates.py", "scripts/ci_test_shard.py",
+    "package.json", "pyproject.toml", "requirements.txt",
+})
+
+LEVELS = ("stop", "review", "glance")
+LEVEL_INFO = {
+    "stop": ("必须停工", "触碰协议契约 / Role 0 单作者锁 / executive.py；"
+             "先发 [PROTOCOL_REQUEST] 等 Role 0 拍板，不许自行合入"),
+    "review": ("细看", "动到多个功能共用的底层；跑 --always 全档 + "
+              "ci_test_shard.py --workers 4 并发全量，逐项核对回归"),
+    "glance": ("扫一眼", "独立小角落；跑 --only 相关门禁 + 该模块定向测试即可"),
+}
+
+
+def classify(path: str) -> str:
+    """纯函数：仓库相对路径 -> 爆炸半径档位。不碰 git、不碰磁盘。"""
+    path = path.strip().replace(chr(92), "/")
+    # 只剥掉显式的 "./" 前缀。用 lstrip("./") 会把 ".github" 开头的点也吃掉，
+    # 于是 CI 配置被误归成「扫一眼」——2026-11-06 由 test_risk_view.py 的
+    # 红灯抓到（test_shared_layers_are_review）。
+    if path.startswith("./"):
+        path = path[2:]
+    if path in ROLE0_LOCKED or path in STOP_EXACT or path.startswith(STOP_PREFIXES):
+        return "stop"
+    if path in REVIEW_EXACT or path.startswith(REVIEW_PREFIXES):
+        return "review"
+    return "glance"
+
+
+def _git_lines(*args: str) -> list[str]:
+    try:
+        proc = subprocess.run(["git", *args], cwd=ROOT, capture_output=True,
+                              text=True, encoding="utf-8", errors="replace")
+    except OSError:
+        return []
+    if proc.returncode != 0:
+        return []
+    return [line.strip() for line in proc.stdout.splitlines() if line.strip()]
+
+
+def risk_view() -> int:
+    """只读打印三档爆炸半径；不跑任何门禁、不写文件、不改退出码语义。"""
+    changed: dict[str, list[str]] = {}
+    for source, args in (
+        ("unstaged", ("diff", "--name-only")),
+        ("staged", ("diff", "--cached", "--name-only")),
+        ("untracked", ("ls-files", "--others", "--exclude-standard")),
+    ):
+        for line in _git_lines(*args):
+            path = line.replace(chr(92), "/")
+            if path:
+                changed.setdefault(path, []).append(source)
+
+    print("=== 爆炸半径（只读视图，不跑门禁、不替 Role 0 拍板）===")
+    if not changed:
+        print("  工作区无改动。")
+        return 0
+
+    buckets: dict[str, list[str]] = {level: [] for level in LEVELS}
+    for path in sorted(changed):
+        buckets[classify(path)].append(path)
+
+    print(f"  改动路径合计 {len(changed)} 个（含暂存与未跟踪）")
+    for level in LEVELS:
+        paths = buckets[level]
+        label, advice = LEVEL_INFO[level]
+        print()
+        print(f"  [{level.upper():6}] {label}：{len(paths)} 个")
+        print(f"      判据/动作：{advice}")
+        for path in paths[:8]:
+            print(f"      - {path}  ({'+'.join(changed[path])})")
+        if len(paths) > 8:
+            print(f"      ... 还有 {len(paths) - 8} 个，按同一档处理")
+    print()
+    if buckets["stop"]:
+        print("  结论：本轮含必须停工项。请先取得 Role 0 批准，再谈验证。")
+    elif buckets["review"]:
+        print("  结论：含共用层改动，至少跑完 --always 与并发全量。")
+    else:
+        print("  结论：只有独立小角落，定向验证即可。")
+    return 0
+
+
 def main() -> int:
     # 输出一律 UTF-8，不管是被管道还是被重定向接走。Windows 下 stdout 不是
     # 控制台时默认走 locale（GBK），而门禁脚本自己吐中文——子进程按 UTF-8 写
@@ -1124,7 +1274,14 @@ def main() -> int:
     parser.add_argument("--always", action="store_true",
                         help="只跑 ALWAYS_REQUIRED 那一档（必须永不跳过的门禁）")
     parser.add_argument("--json", default="", help="把报告写到这个 JSON 文件")
+    parser.add_argument("--risk", action="store_true",
+                        help="只读：按 diff 打印爆炸半径三档（单独使用，不跑门禁）")
     args = parser.parse_args()
+
+    # --risk 是纯只读视图，必须在任何门禁执行之前返回；它不参与 wanted /
+    # rows / 退出码裁决，只是给人看的一张风险清单。
+    if args.risk:
+        return risk_view()
 
     wanted = [n.strip() for n in args.only.split(",") if n.strip()]
     if args.always:
