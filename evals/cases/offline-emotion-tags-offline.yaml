@@ -1,0 +1,13 @@
+id: offline-emotion-tags-offline
+title: 离线台词路径的 [情绪] 标签闭合
+layer: offline
+origin: "2026-11-06 离线首次体验闭环复核"
+tags: [emotion, offline, persona, mock]
+setup: {}
+turns:
+  - "在吗？"
+checks:
+  - target: prompt
+    type: custom
+    value: "evals.checks:offline_emotion_tags"
+status: active

@@ -95,6 +95,133 @@ def fewshot_emotion_tags(case, state):
     return (not bad), "；".join(bad) or f"{checked} 条示例全部带合法标签"
 
 
+def offline_emotion_tags(case, state):
+    """离线台词路径的 [情绪] 闭合：mock 池 + examples + stage_samples。
+
+    2026-11-06：fewshot_emotion_tags 只查 persona.yaml 的 few_shot，而
+    server/llm.py 的 mock 回复池、config/response_examples.json 的
+    stage_samples、以及 app.py 的固定台词交付此前全都不带 / 不解析标签，
+    离线恒 base（七档 TTS 参数一档都触发不了）。这里把三条路径一起钉住：
+    每条都带合法标签、固定台词必须真的解析出标签且从播出文本里剥掉，
+    并带条数下限棘轮，防「清空样本后 0 条被查也算全绿」。
+    """
+    import json
+    from pathlib import Path
+
+    from server.dialogue.orchestrator import _EMOTION_TAG, parse_emotion
+    from server.llm import MOCK_QUESTION_REPLY, MOCK_REPLIES
+
+    valid = _valid_emotions()
+    bad: list[str] = []
+    checked = 0
+
+    def check_line(label: str, line: str) -> None:
+        nonlocal checked
+        checked += 1
+        match = _EMOTION_TAG.match(line or "")
+        if not match:
+            bad.append(f"{label} 缺少 [情绪] 前缀")
+        elif match.group(1) not in valid:
+            bad.append(f"{label} 标签 {match.group(1)!r} 不在 tts_emotions 里")
+
+    for i, line in enumerate(MOCK_REPLIES, 1):
+        check_line(f"mock#{i}", line)
+    check_line("mock-question", MOCK_QUESTION_REPLY)
+
+    root = Path(__file__).resolve().parents[1]
+    data = json.loads((root / "config" / "response_examples.json").read_text(encoding="utf-8"))
+    for i, example in enumerate(data.get("examples", []), 1):
+        check_line(f"example#{i}", example.get("assistant", ""))
+    for group, lines in (data.get("stage_samples") or {}).items():
+        if group.startswith("_") or not isinstance(lines, list):
+            continue
+        for i, line in enumerate(lines, 1):
+            check_line(f"stage:{group}#{i}", line)
+            # 2026-11-06 内容合规：固定台词不得声称真实共同经历或「已完成
+            # 反思」。协议 §16 明确禁止冷启动破冰据此声称反思/准备了礼物；
+            # 此前 4 条 stage_samples 含「前阵子 / 上次那个 / 昨晚 / 我自己
+            # 去翻了」等措辞，已改成当下观察 + 明确承认是猜测。
+            if re.search(r"(前阵子|上次那个|我记得我们|我们之前一起|咱们之前|"
+                         r"你以前说过|昨晚|我自己去翻|整理记忆|半夜又偷偷)", line):
+                bad.append(f"stage:{group}#{i} 声称共同经历或已完成反思")
+
+    for label, line in (("mock", MOCK_REPLIES[2]),
+                        ("v3", data["stage_samples"]["commission_accept"][0])):
+        emotion, spoken = parse_emotion(line)
+        checked += 1
+        if _EMOTION_TAG.match(line) and emotion == "base":
+            bad.append(f"{label} 的显式标签没被解析出来")
+        if _EMOTION_TAG.match(spoken):
+            bad.append(f"{label} 的标签没从播出文本剥掉，会被 TTS 读出来")
+
+    # 下限按当前实际条数向下留余量：examples(12) + stage_samples 各组 +
+    # mock(5) + 两次解析。样本被清空 / 改名时立刻红，而不是真空绿。
+    if checked < 20:
+        return False, f"只检查到 {checked} 条，低于下限 20——样本可能被清空或改名"
+    return (not bad), "；".join(bad) or f"{checked} 条离线台词全部带合法标签且可解析"
+
+
+def proactive_authorization_gate(case, state):
+    """主动发言授权门的**运行期**行为验证（offline，零 Key）。
+
+    `evals/cases/proactive-boundary-offline.yaml` 自己在 title 与注释里承认
+    是「配置层守卫，非行为验证」——offline 层只看得到 prompt 装配，看不到
+    `require_authorization` 在运行时是否真的挡住未授权主动发言。而
+    `server/dialogue/orchestrator.py::_proactivity_allowed` 是模块级纯函数，
+    完全可以离线验证。
+
+    做法：用 AST 从 orchestrator.py 抽出**真实函数体**单独 exec，而不是复制
+    一份伪实现（复制品会随源码漂移，正是项目反复警告的「假测试」）。不
+    import server 包，因此不触发 DB 单例 / issue #39 的生产库哨兵。
+    """
+    import ast
+    from pathlib import Path
+
+    root = Path(__file__).resolve().parents[1]
+    src = (root / "server" / "dialogue" / "orchestrator.py").read_text(encoding="utf-8")
+    tree = ast.parse(src)
+    fn = next((node for node in tree.body
+               if isinstance(node, ast.FunctionDef) and node.name == "_proactivity_allowed"), None)
+    if fn is None:
+        return False, "orchestrator.py 里找不到 _proactivity_allowed，授权门可能被删了"
+
+    # 原模块带 `from __future__ import annotations`，注解不求值；单独 exec 时
+    # 必须补上同样的 future import，否则 dict[str, Any] 会因 Any 未定义而炸。
+    future = ast.ImportFrom(module="__future__",
+                            names=[ast.alias(name="annotations")], level=0)
+    module = ast.Module(body=[future, fn], type_ignores=[])
+    ast.fix_missing_locations(module)
+    namespace: dict = {}
+    try:
+        exec(compile(module, "<proactivity_gate>", "exec"), namespace)  # noqa: S102
+        gate = namespace["_proactivity_allowed"]
+    except Exception as exc:
+        return False, f"授权门函数无法离线执行：{type(exc).__name__}: {exc}"
+
+    # 协议 §12/§16.2：require_authorization=true 时，未经用户显式授权
+    # 不得主动出声——即使有人把 default_enabled 翻成 true 也不行。
+    cases = [
+        ({"require_authorization": True, "default_enabled": False},
+         {"proactivity_enabled": False}, False, "未授权 + 协议门开 → 闭嘴"),
+        ({"require_authorization": True, "default_enabled": True},
+         {"proactivity_enabled": False}, False,
+         "default_enabled 翻 true 也不能绕过授权（历史契约缺口）"),
+        ({"require_authorization": False, "default_enabled": True},
+         {"proactivity_enabled": False}, True, "显式关协议门 + 默认开 → 放行"),
+        ({"require_authorization": False, "default_enabled": False},
+         {"proactivity_enabled": False}, False, "协议门关 + 默认关 → 闭嘴"),
+        ({"require_authorization": True, "default_enabled": False},
+         {"proactivity_enabled": True}, True, "用户显式授权 → 放行"),
+    ]
+    bad = []
+    for cfg, runtime_state, want, label in cases:
+        got = bool(gate(cfg, runtime_state))
+        if got != want:
+            bad.append(f"{label}：期望 {want} 实际 {got}")
+    return (not bad), "；".join(bad) or (
+        f"{len(cases)} 组运行期授权门行为符合协议 §12/§16.2")
+
+
 def current_before_history(case, state):
     """同 key 的当前事实必须排在显式划界的历史事实之前。
 
@@ -576,8 +703,11 @@ async def barge_in_timeline(case, state):
 # **它现在实际能把住什么（2026-10-27 按实测写实，别高估）**：aux_role="gate" 是
 # 对称口径——judge 与正则**一致**才定论。所以退出码能红只有一种组合：
 # 「judge 判 fail 且正则也命中」。judge 单独判 fail 而正则没命中时记 review，
-# **永不进退出码**。实测：构造一条编造了共同经历但 5 条短语一条都不命中的回复，
+# **默认永不进退出码**。实测：构造一条编造了共同经历但 5 条短语一条都不命中的回复，
 # 配一个真说 fail 的裁判 → verdict=review、exit 0。
+# 2026-11-05 补的例外：配了**异源**裁判（见 _judge_strict_mode）时，同一组合升级
+# 为 fail、计入退出码；同源（当前 .env）时行为不变。这是把「裁判有效性」真正
+# 修好的路径，而不是推翻 2026-10-25 的三态决定。
 # 因此「换措辞的编造」这个维度，**门禁强度的实际上限就是那几条正则**；judge 的
 # 价值是把这类 case 从「静默漏过」变成「显式进 review 明细等人看」（R17 起
 # evals_report 有独立的 review 明细节），不是替它把关。
@@ -589,6 +719,8 @@ async def barge_in_timeline(case, state):
 #    （step-5-preview 判 step-3.7-flash），槽位独立但并非不同源。所以上面那句
 #    「judge 单独判红」不仅没实现，也不该盲目实现——同源裁判的假阳性会把 paid
 #    live run 为评测配置的原因搞红，而那正是三态设计要避免的。
+#    2026-11-05：判定条件改成「是否异源」而非「是否实现」——同源继续 review，
+#    把 llm_judge_base_url 指向不同厂商后才开严格模式（_judge_strict_mode）。
 # 2. 去偏手段只用论文本身支持的：交换候选顺序跑两遍、不一致记平局（位置偏差），
 #    要求 judge 先给思维链再作答。「rubric 惩罚冗长」属 Dubois et al.
 #    arXiv:2404.04475，「跨厂商裁判」是工程共识，都不记在 MT-Bench 名下。
@@ -747,6 +879,41 @@ def _judge_settings():
             str(getattr(settings, "llm_judge_provider", "") or "").strip())
 
 
+def _judge_strict_mode() -> bool:
+    """裁判与被测不同源时，允许 judge 单独判 fail 计入退出码。
+
+    2026-10-25 的三态取舍不变：同源裁判有自我偏好偏差，单独判 fail 只记
+    review 交人工，不让它把 paid live run 因评测配置搞红。用户 2026-11-05
+    要求补上「裁判真正有效」的路径，做法是给异源裁判开严格模式——只有
+    llm_judge_base_url 与 llm_base_url 的 netloc 不同，才认为「judge 单独
+    判 fail」足够可信、升级为 fail。
+
+    用 netloc 而非 provider 字符串比较：OpenAI 兼容网关常共用一个 provider
+    名但指向不同服务；反过来同一厂商的不同模型仍属同源，不该开严格模式。
+    当前 .env 里两者同为 api.stepfun.com（同源），因此默认行为逐字节不变，
+    scripts/test_judge_three_state.py 的 review 断言仍然成立。
+    """
+    from urllib.parse import urlsplit
+
+    from server.config import settings
+
+    base_url, api_key, model, _provider = _judge_settings()
+    if not (base_url and api_key and model):
+        return False
+
+    def host(url: str) -> str:
+        # 取 hostname 而不是 netloc：端口不该让同一个服务被判成两家厂商。
+        return (urlsplit(url).hostname or url).strip().lower()
+
+    subject_host = host(str(getattr(settings, "llm_base_url", "") or ""))
+    judge_host = host(base_url)
+    # 本地回环是离线测试的 HTTP stub，不是跨厂商裁判。若把它算成异源，
+    # scripts/test_judge_three_state.py 的真实回环用例会误开严格模式。
+    if judge_host in {"localhost", "127.0.0.1", "::1", "testserver"}:
+        return False
+    return bool(subject_host and judge_host and subject_host != judge_host)
+
+
 def _judge_client():
     """异源裁判客户端；未配置返回 None（调用方记 review，不假装判过）。"""
     base_url, api_key, model, provider = _judge_settings()
@@ -890,6 +1057,9 @@ async def _judge_with_aux(case, state, *, rubric, aux_hits, aux_role,
                        f"记 review 交人工"), "review"
     if aux_hits:
         return False, f"judge 与正则一致判定{negative}（正则命中第 {aux_hits} 轮）", "fail"
+    if _judge_strict_mode():
+        return False, (f"judge 判{negative}但正则未命中；裁判与被测异源，"
+                       f"按严格模式计入退出码"), "fail"
     return False, f"judge 判{negative}但正则未命中（不一致），记 review 交人工", "review"
 
 

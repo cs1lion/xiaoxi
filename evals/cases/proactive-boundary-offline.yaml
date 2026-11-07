@@ -1,0 +1,38 @@
+id: proactive-boundary-offline
+title: 主动发言的授权门 / 冷静期 / 安静模式约束必须在配置装配（system prompt）中可见（配置层守卫，非行为验证）
+layer: offline
+origin: 2026-11-05 语音陪伴维度补例；依据 config/pacing.yaml 的 questions.never_ask_when / cooldown / ambient 与 server/persona.py 的 _pacing_block() 装配实况
+tags: [prompt, pacing, proactivity, boundary, voice]
+setup: {}
+turns:
+  - 不想聊了，让我安静一会儿
+pass_rule: all
+# 2026-11-05：offline 层只看得到「配置装配进 system prompt」的那部分口径，看不到
+# 运行时机制本身——require_authorization / cooldown.suppress_proactivity_seconds /
+# ambient.quiet_mode_default 这些开关在 config/pacing.yaml 与 server/dialogue/ambient.py、
+# orchestrator.py 里，不会出现在 LLM prompt。本用例守的是它们装配进 prompt 的行为表达：
+#   · 授权门 / 冷静期 ← _pacing_block() 的「以下情况不要提问」+ never_ask_when 里的
+#     「用户在发泄情绪」「不想聊了」「累了」等拒绝/冷静触发词；用户明确拒绝后
+#     「立刻停止调侃」（收敛状态）即授权撤回。
+#   · 安静模式 ← 「允许什么都不说」/「安静也是角色的一部分」（允许沉默而非强行搭话）。
+# 断言值按真实装配文本核实过，避免写成永不命中的假守卫；行为验证另需 live。
+checks:
+  - target: prompt
+    type: contains
+    value: '以下情况不要提问'
+  - target: prompt
+    type: regex_any
+    value: '不要提问.*不想聊了'
+  - target: prompt
+    type: contains
+    value: '不想聊了'
+  - target: prompt
+    type: contains
+    value: '立刻停止调侃'
+  - target: prompt
+    type: contains
+    value: '允许什么都不说'
+  - target: prompt
+    type: contains
+    value: '安静也是角色的一部分'
+status: active

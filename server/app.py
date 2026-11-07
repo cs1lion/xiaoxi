@@ -175,7 +175,11 @@ async def _ws_handshake_allowed(ws: WebSocket) -> bool:
     规则（架构审查 P1 后定稿，语义与此前 /ws 内联版逐字节一致）：
       - 只比 netloc，不比 scheme：TLS 终止在反代上时 scope 里是 ws/http、
         浏览器 Origin 却是 https，比 scheme 会把合法同源页面误拒；
-      - 没有 Origin 头（本地脚本、直连测试、健康检查）或 Origin 为空串按白名单放行；
+      - 没有 Origin 头（本地脚本、直连测试、健康检查）或 Origin 为空串时按
+        Host 白名单放行：默认只认 localhost / 127.0.0.1 / ::1 / testserver
+        （离线回归夹具的固定 Host），其余域名需 WS_ALLOWED_HOSTS 显式列出。
+        B-3（2026-11-05）：此前无 Origin 一律放行，DNS rebinding 可让受害者
+        页面用任意 Host 直连本机 WS，绕过整条同源判据；
       - 畸形 Origin（如 "http://["）按跨源拒绝处理，不能抛成 500；
       - 拒绝发生在 accept 之前：uvicorn 把它落成 HTTP 403 握手失败，1008/reason
         只留在 ASGI 关闭帧与服务端日志里，这是预期行为。
@@ -198,6 +202,33 @@ async def _ws_handshake_allowed(ws: WebSocket) -> bool:
                 "websocket origin rejected: origin=%r host=%r path=%r",
                 origin, headers.get("host"), path)
             await ws.close(code=1008, reason="cross_origin_denied")
+            return False
+    else:
+        # B-3（2026-11-05）：无 Origin 时校验 Host，不给 DNS rebinding 留直通门。
+        # 判据内联在本函数体内（scripts/test_voice_turns.py 的 load_ws 是按名字
+        # 白名单做 AST 隔离装载的，新增模块级 helper 在离线回归里会 NameError）。
+        import os
+        from urllib.parse import urlsplit
+
+        if not host:
+            # 无 Host 头（HTTP/1.0、ASGI 离线夹具）不是浏览器请求；DNS
+            # rebinding 必经浏览器且必带 Host。保持改前的放行行为，不打断
+            # scripts/test_voice_turns.py 的隔离夹具（FakeSocket 无 headers）。
+            return True
+        try:
+            hostname = (urlsplit("//" + host).hostname or "").lower()
+        except ValueError:
+            hostname = ""
+        allowed = {"localhost", "127.0.0.1", "::1", "testserver"}
+        allowed.update(item.strip().lower() for item in
+                       os.getenv("WS_ALLOWED_HOSTS", "").split(",") if item.strip())
+        if hostname not in allowed:
+            import logging
+
+            logging.getLogger("server.app").warning(
+                "websocket host rejected (no Origin): host=%r path=%r",
+                headers.get("host"), getattr(getattr(ws, "url", None), "path", "") or "")
+            await ws.close(code=1008, reason="host_not_allowed")
             return False
     return True
 
@@ -654,7 +685,8 @@ async def _narrate_turn(conn: Connection, turn: VoiceTurn, node_id: str) -> None
                                      "message": "这条记忆暂时讲不出来。", "terminal": True})
             return
         await asyncio.to_thread(store_message, conn.session_id, "assistant", text, "narration")
-        await _present_reply(conn, turn, text, detect_emotion(text))
+        emotion, spoken = parse_emotion(text)
+        await _present_reply(conn, turn, spoken, emotion)
     except asyncio.CancelledError:
         await conn.finish(turn, {"type": "interrupted"})
         raise
@@ -820,7 +852,8 @@ async def _aqi_action(conn: Connection, cmd: str) -> None:
         line = commission_accept_line() if action == "accept" else spinning_intercept_line()
         if line:
             await conn.send_turn(turn, {"type": "thinking"})
-            await _present_reply(conn, turn, line, detect_emotion(line))
+            emotion, spoken = parse_emotion(line)
+            await _present_reply(conn, turn, spoken, emotion)
         else:
             await conn.finish(turn, {"type": "done", "text": "", "latency_ms": 0})
     except asyncio.CancelledError:
@@ -988,7 +1021,8 @@ async def _run_turn(conn: Connection, text: str, mode: str, turn: VoiceTurn | No
                     blocks, layout="stage_holo", nav=route.get("nav"),
                     gaze="holo_right", source="executive"))
             if route.get("text"):
-                await _present_reply(conn, turn, route["text"], parse_emotion(route["text"])[0])
+                emotion, spoken = parse_emotion(route["text"])
+                await _present_reply(conn, turn, spoken, emotion)
             else:
                 await conn.finish(turn, {"type": "done", "text": "", "latency_ms": 0})
             kind = route.get("kind")
@@ -1077,21 +1111,31 @@ def _transcribe_error_message(exc: Exception) -> str:
 
 async def _transcribe_turn(conn: Connection, turn: VoiceTurn, data: bytes) -> None:
     try:
+        import logging
+
         if not conn.current(turn):
             return
         if len(data) % 2:
             raise ValueError("PCM16 audio must contain complete samples")
         if data:
             wav = to_wav_bytes(np.frombuffer(data, dtype="<i2").astype(np.float32) / 32768.0, settings.audio_sample_rate)
+            # 2026-11-06：此前只下发 duration_ms（音频时长），识别本身花了多久
+            # 零采集。这里量的是 transcribe_wav 的墙钟耗时，与音频时长分列，
+            # 只走结构化日志（不新增 WS 事件/API 字段、不落盘、不阻塞）。
+            started = time.perf_counter()
             if (turn.editor_insight is None and
                     ((getattr(conn, 'practice', None) is not None and conn.practice.mode != 'off')
                     or (getattr(conn, 'experience', None) is not None and conn.experience.mode == 'expression'))):
                 transcript = await recognizer.transcribe_wav(wav, language='en')
             else:
                 transcript = await recognizer.transcribe_wav(wav)
+            asr_process_ms = int((time.perf_counter() - started) * 1000)
             if not conn.current(turn):
                 return
             text, duration = transcript.text.strip(), transcript.duration_ms
+            logging.getLogger("server.app").info(
+                "voice_turn_metric asr_process_ms=%d audio_ms=%d chars=%d",
+                asr_process_ms, duration, len(text))
         else:
             text, duration = "", 0
         await conn.send_turn(turn, {"type": "asr", "text": text, "duration_ms": duration})
@@ -1201,7 +1245,8 @@ async def _proactive_check(conn: Connection, revision: int) -> None:
                     text = event.get("text") or ""
                     await conn.send_turn(turn, {"type": "turn_started", "source": "mumble"})
                     await asyncio.to_thread(store_message, conn.session_id, "assistant", text, "mumble")
-                    await _present_reply(conn, turn, text, detect_emotion(text))
+                    emotion, spoken = parse_emotion(text)
+                    await _present_reply(conn, turn, spoken, emotion)
             else:
                 await conn.send(event)  # micro_act (silent) or non-voiced mumble bubble
     except asyncio.CancelledError:
@@ -1229,7 +1274,8 @@ async def _touch_reply(conn: Connection, revision: int, region: str) -> None:
             return
         await conn.send_turn(turn, {"type": "turn_started", "source": "touch"})
         await asyncio.to_thread(store_message, conn.session_id, "assistant", line, "touch")
-        await _present_reply(conn, turn, line, detect_emotion(line))
+        emotion, spoken = parse_emotion(line)
+        await _present_reply(conn, turn, spoken, emotion)
     except asyncio.CancelledError:
         raise
     except Exception:
@@ -1629,8 +1675,17 @@ async def proactive_socket(ws: WebSocket) -> None:
 
 @app.get("/")
 async def index() -> Any:
-    """主界面是像素世界。旧聊天页在 /chat，/world 仍是世界的静态挂载点。"""
-    return world_entry_response(ROOT)
+    """主界面是语音陪伴（2026-11-05 分家后）。
+
+    像素世界渲染内核已迁到独立仓，主仓 git 树不再跟踪 `pixel-world/`；
+    2026-10-24 的入口反转（`/` = 世界页，见 SPEC_PIXEL_FIRST_20261024）随之
+    失效——新 clone 没有 dist 时 `/` 会掉进「世界还没建好」说明页，语音陪伴
+    被挤到 /chat。`/world` 仍是有产物时的条件挂载点，世界页需要时直接从
+    /world 打开；`/chat` 保留为同一页面的兼容别名，旧链接不失效。
+
+    回归：scripts/test_pixel_world_hosting.py::check_voice_companion_is_the_front_door
+    """
+    return await chat()
 
 
 @app.get("/chat")

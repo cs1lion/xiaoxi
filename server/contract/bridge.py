@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""第 9 步接线封装：把解析器 + 闸门接进对话路径的**可测试形态**。
+r"""第 9 步接线封装：把解析器 + 闸门接进对话路径的**可测试形态**。
 
     .\.venv\Scripts\python.exe scripts\test_intent_gate_bridge.py
 

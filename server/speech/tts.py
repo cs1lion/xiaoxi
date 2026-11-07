@@ -3,10 +3,12 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import inspect
+import logging
 import math
 import re
 import struct
 import wave
+from collections import OrderedDict
 from dataclasses import dataclass
 from io import BytesIO
 from typing import Any, AsyncIterator
@@ -85,7 +87,20 @@ class SpeechChunk:
 
 
 def voice_profile(emotion: str) -> dict[str, Any]:
+    """情绪 → 声学参数。未知情绪显式告警后回落，不再静默变平。
+
+    2026-11-05：此前 `voices.get(...) or ...` 的回落链没有任何日志，一个拼错
+    的情绪标签会让整句话以 base 播出而毫无痕迹——陪伴场景里表现为「她突然
+    没情绪了」，只能靠听去排查。回落行为本身不变（不抛错、不阻断语音），
+    只补一条可查的告警。回归见 scripts/test_core.py::test_tts_split。
+    """
     voices = persona_cfg()["tts_emotions"]
+    if emotion not in voices:
+        import logging
+
+        logging.getLogger("server.speech.tts").warning(
+            "unknown emotion %r, falling back to %r", emotion,
+            getattr(settings, "tts_default_emotion", "base"))
     return voices.get(emotion) or voices.get(settings.tts_default_emotion) or voices["base"]
 
 
@@ -327,8 +342,13 @@ class TTSEngine:
 
     def __init__(self) -> None:
         self.engine = settings.tts_engine
-        self._cache: dict[str, bytes] = {}
-        self._word_timings: dict[str, list[dict[str, Any]]] = {}
+        # 2026-11-06：原先普通 dict + 「超过 256 条一次性 clear()」，第 257 条
+        # 起命中率断崖归零，连 _word_timings 一起被清空，已缓存音频拿不到
+        # 字级时间戳（唇形/字幕静默退化）。改成 LRU，只淘汰最旧条目，且只
+        # 淘汰它自己的 timings，存活 key 的时间戳一律保留。
+        self._cache: OrderedDict[str, bytes] = OrderedDict()
+        self._word_timings: OrderedDict[str, list[dict[str, Any]]] = OrderedDict()
+        self._metrics: dict[str, int] = {"hit": 0, "miss": 0, "evict": 0}
 
     def profile(self, emotion: str) -> dict[str, Any]:
         return voice_profile(emotion)
@@ -346,10 +366,14 @@ class TTSEngine:
             return b""
         key = self._cache_key(text, profile)
         if key in self._cache:
+            self._cache.move_to_end(key)
+            self._metrics["hit"] += 1
             return self._cache[key]
-        if len(self._cache) > 256:
-            self._cache.clear()
-            self._word_timings.clear()
+        self._metrics["miss"] += 1
+        while len(self._cache) >= 256:
+            oldest, _ = self._cache.popitem(last=False)
+            self._word_timings.pop(oldest, None)
+            self._metrics["evict"] += 1
         timings: list[dict[str, Any]] = []
         if self.engine == "edge_tts":
             audio = await self._edge(text, profile, word_timings=timings)
@@ -362,7 +386,19 @@ class TTSEngine:
         self._cache[key] = audio
         if timings:
             self._word_timings[key] = timings
+        total = self._metrics["hit"] + self._metrics["miss"]
+        if total % 100 == 0:
+            logging.getLogger("server.speech.tts").info(
+                "tts_cache hit=%d miss=%d evict=%d entries=%d hit_rate=%.3f",
+                self._metrics["hit"], self._metrics["miss"], self._metrics["evict"],
+                len(self._cache), self._metrics["hit"] / total)
         return audio
+
+    def voice_metrics(self) -> dict[str, Any]:
+        """只读指标快照：不落盘、不改 WS 帧，供诊断与报告层取用。"""
+        total = self._metrics["hit"] + self._metrics["miss"]
+        return {**self._metrics, "entries": len(self._cache),
+                "hit_rate": (self._metrics["hit"] / total) if total else 0.0}
 
     def _cache_key(self, text: str, profile: dict[str, Any]) -> str:
         # The wire format decides the bytes (trimming re-encodes to WAV), so it
@@ -472,10 +508,13 @@ class TTSEngine:
 
 
 class LocalTTSHook:
-    """Drop-in point for a GPU model (CosyVoice2 / IndexTTS2 / GPT-SoVITS).
+    """预留的本地 GPU 音色扩展点（CosyVoice2 / IndexTTS2 / GPT-SoVITS）。
 
-    Enable with TTS_ENGINE=local and implement synthesize() -- the rest of the
-    stack only ever asks for (text, emotion) -> mp3 bytes.
+    2026-11-05 更正：这个扩展点**尚未接线**。TTSEngine.synthesize_profile 的
+    engine 分支只有 edge_tts / stepaudio / silent，`TTS_ENGINE=local` 会落到
+    else 静默退回 edge_tts，永远不会实例化本类。要启用需同时实现 synthesize()
+    并在 tts.py 的分支里加 `local` case；在那之前不要按注释里的旧说法去配
+    TTS_ENGINE=local（不会报错，只会以为换了引擎其实没换）。
     """
 
     def __init__(self) -> None:  # pragma: no cover - extension point

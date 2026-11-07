@@ -1,0 +1,41 @@
+id: empathy-support-offline
+title: 用户发泄 / 低落时「不追问、不评判、先接住」的 persona 规则必须装配进 prompt（配置层守卫，非行为验证）
+layer: offline
+origin: 2026-11-05 语音陪伴维度补例；依据 config/persona.yaml 的 knowledge / states / examples 与 server/persona.py 的 static_system_prompt() 装配实况
+tags: [prompt, persona, empathy, companion, voice]
+setup: {}
+turns:
+  - 今天真的烦死了，全是破事凑一块儿
+pass_rule: all
+# 2026-11-05：配置层守卫，只证明规则已写进最终 Prompt（build_messages 的
+# static_system_prompt 装配结果），不证明模型真的照做——行为验证见同名 live 用例。
+# 断言值全部按 server/persona.py 渲染后的真实文本核实过，避免写成永不命中的假守卫：
+#   「先接住」← knowledge.日常生活 / 用户的情绪；「不追问」← examples.好奇.boundary
+#   与 pacing 的 never_ask_when；「不评判 / 不说教」← knowledge.用户的情绪.dislikes
+#   （共情模板 / 立刻转向解决方案）与「不急着分析原因」；「允许什么都不说」= 允许沉默。
+checks:
+  - target: prompt
+    type: contains
+    value: '先接住情绪再给建议，顺序不能反'
+  - target: prompt
+    type: contains
+    value: '用户难过时先承认再陪伴'
+  - target: prompt
+    type: contains
+    value: '不急着分析原因'
+  - target: prompt
+    type: contains
+    value: '允许什么都不说'
+  - target: prompt
+    type: contains
+    value: '用户在发泄或说累了的时候不要追问'
+  - target: prompt
+    type: contains
+    value: '共情模板'
+  - target: prompt
+    type: contains
+    value: '立刻转向解决方案'
+  - target: prompt
+    type: regex_any
+    value: '在用户发泄时安静下来|不在此时抖机灵'
+status: active

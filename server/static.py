@@ -33,10 +33,12 @@ def mount_pixel_world(app: FastAPI, root: Path) -> bool:
 def pixel_world_index(root: Path) -> Path | None:
     """The built world's entry document, or None when nothing was built.
 
-    `/` serves this same file so the world is the product's front door. The page
-    addresses its own assets with absolute `/world/...` URLs, so it only works
-    when `mount_pixel_world` succeeded — the two are decided by one condition,
-    which is why both ask this function instead of testing the path themselves.
+    2026-11-05 更正：分家后 `/` 不再 serve 这个文件（主界面已改回语音陪伴页），
+    `/world` 的挂载由 `mount_pixel_world` 自己按同一个 dist/index.html 判定。
+    本函数与 `world_entry_response` 现在只作为「世界产物载荷」的可复用 helper
+    保留（历史契约查证 + scripts/test_pixel_world_hosting.py 的离线覆盖），
+    不再是产品前门的判据。The page addresses its assets with absolute
+    `/world/...` URLs, so it only works when `mount_pixel_world` succeeded.
     """
     index = root / "pixel-world" / "dist" / "index.html"
     return index if index.is_file() else None
@@ -57,8 +59,11 @@ code{color:#e3a13c}a{color:#e3a13c}</style></head>
 
 
 def world_entry_response(root: Path) -> HTMLResponse:
-    """`/` 的载荷：世界页面本身，或一张说明为什么没有它的静态页。
+    """世界产物（或「还没建好」说明页）的载荷，供 `/world` 场景复用。
 
+    2026-11-05：不再由 `/` 调用——分家后产品前门是语音陪伴页。保留它是因为
+    说明页本身仍是有用的可读降级（将来给 `/world` 兜底时可直接复用），且
+    scripts/test_pixel_world_hosting.py 对它有真实行为覆盖。
     缺产物时仍回 200：页面能正常渲染，说明里给了构建命令和 /chat 的出路。
     回 5xx 会让浏览器与反向代理把它当成故障页，人反而看不到那句该跑的构建命令。
     """

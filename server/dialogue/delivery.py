@@ -69,6 +69,10 @@ async def deliver_reply(
     pending = None
     try:
         if text and tts is not None and getattr(tts, "engine", None) != "silent":
+            # 2026-11-05 更正：这一支在生产 TTSEngine 上不触发（它没有 offline
+            # 属性），但**不是死代码**——deliver_reply 接受任意 tts 对象，
+            # scripts/test_reply_delivery.py 把「provider 离线时不发起合成」
+            # 钉成契约。保留防御，别为了让生产路径看起来干净而删掉它。
             if getattr(tts, "offline", False):
                 raise ValueError("Audio provider is unavailable")
             iterator = tts.speak(text, emotion=voice_emotion or emotion).__aiter__()

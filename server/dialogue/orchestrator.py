@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
 import re
 import threading
 import time
@@ -26,6 +27,70 @@ _SAMPLE_LOCK = threading.Lock()
 
 _SAMPLE_DATA: dict[str, Any] | None = None
 _SAMPLE_DATA_KEY: tuple[str, int] | None = None
+
+
+def _proactivity_allowed(cfg: dict[str, Any], state: dict[str, Any]) -> bool:
+    """主动发言授权门：require_authorization 为真时必须有显式授权握手。
+
+    2026-11-05 修契约缺口：docs/PROTOCOL.md §12/§16.2 声明授权门是
+    `proactivity.require_authorization`，但此前代码里这个键**没有任何布尔读取点**，
+    实际生效的只有 `default_enabled OR state["proactivity_enabled"]`。后果是：只要
+    有人把 default_enabled 翻成 true，服务端就会在用户从未勾选授权时主动出声，
+    而协议明确禁止这件事。
+
+    现在 require_authorization=true（当前配置）时无条件要求
+    state["proactivity_enabled"]；只有显式关掉协议门，才回到 default_enabled
+    语义。当前配置下（default_enabled=false + require_authorization=true）
+    行为与改前逐字节一致，不翻默认值、不改协议、不新增字段。
+    回归见 scripts/test_core.py::test_proactivity_gate。
+    """
+    if bool(state.get("proactivity_enabled")):
+        return True
+    if bool(cfg.get("require_authorization", True)):
+        return False
+    return bool(cfg.get("default_enabled"))
+
+
+# 2026-11-06：事实准确性运行期护栏。与 evals/checks.py:901
+# `_fabrication_regex_hits` 的 5 个短语同源，另加 :144-145 `offline_emotion_tags`
+# 禁止的固定台词措辞中「声称共同经历」的 3 个。生产代码不 import evals（避免
+# 依赖倒置），scripts/test_fabrication_signal.py 会断言两边集合一致，防漂移。
+FABRICATION_PHRASES = (
+    "我记得我们", "我们之前一起", "上次我们", "咱们之前一起", "你以前说过",
+    "前阵子", "上次那个", "昨晚", "我自己去翻",
+)
+
+
+def fabrication_signal(text: str, memory_status: str) -> bool:
+    """纯函数：本轮检索未命中，回复却声称共同经历 → 记一条可观测信号。
+
+    **只用于诊断，不改回复、不阻断、不进 done 帧 / TurnResult。**
+    只有 `memory_status == "not_found"` 才判：`disabled` 与
+    `omitted_by_budget` 说明这一轮本来就没有检索能力，把「没查到」算成
+    编造会误报；`found` 则确实有记忆可依。
+    """
+    if memory_status != "not_found":
+        return False
+    body = text or ""
+    return any(phrase in body for phrase in FABRICATION_PHRASES)
+
+
+def note_fabrication_risk(last_meta: dict[str, Any], text: str,
+                          turn_context: dict[str, Any]) -> bool:
+    """把信号写进内部 meta（每轮先清旧值，避免流式路径残留），返回是否命中。
+
+    `_last_meta` 只被 `snapshot()["last_call"]` 与离线对比脚本读取，不上 WS
+    帧、不进 API 响应；因此这里加键不触碰「不得自造 WS 事件 / API 字段」红线。
+    """
+    last_meta.pop("fabrication_risk", None)
+    status = (((turn_context.get("data") or {}).get("long_term_memory") or {})
+              .get("status", "not_found"))
+    hit = fabrication_signal(text, status)
+    if hit:
+        last_meta["fabrication_risk"] = True
+        logging.getLogger("server.dialogue.orchestrator").warning(
+            "fabrication_risk: memory.status=%s 但回复命中编造短语", status)
+    return hit
 
 
 def _pacing_number(value: Any, default: float) -> float:
@@ -1144,11 +1209,16 @@ class Orchestrator:
             await asyncio.gather(*tasks, return_exceptions=True)
 
         text = holder["text"]
+        note_fabrication_risk(self._last_meta, text, turn_context)
         emotion = holder["emotion"] or "base"
         first_audio_at = holder["first_audio_at"]
         session["turn_count"] += 1
         self._maybe_update_state(session, text, user_text)
-        store_message(session_id, "assistant", text, "voice")
+        # 2026-11-05：与 :775-778 的 user 落库、0eb3625 已卸载的 proactive/mumble
+        # 分支同模式。store_message 是写事务（BEGIN IMMEDIATE + commit），留在
+        # 快环里会让「说完话到 done」多一次同步磁盘往返；卸载后异常仍在 await
+        # 处原样重抛，会话状态与 _spawn_extraction 的依赖顺序不变。
+        await asyncio.to_thread(store_message, session_id, "assistant", text, "voice")
 
         self._spawn_extraction(
             session_id=session_id,
@@ -1198,9 +1268,16 @@ class Orchestrator:
                 )
                 session["user_state_note"] = "用户刚表示不想聊，语气要收着，不要追问"
 
-        recent = store_recent(session_id, history_turns)
+        # 2026-11-06：与流式 :797-801 同模式，把两个同步 sqlite 调用卸载到
+        # 工作线程。capture_write_epoch() 是纯属性读，流式也有意保持同步，
+        # 且必须放在 gather 之后才能拿到本轮真实 epoch。两个返回值都有后续
+        # 依赖（recent -> _turn_context_async、user_message_id -> 抽取），
+        # 所以必须 await gather 取回，不能 fire-and-forget。
+        recent, user_message_id = await asyncio.gather(
+            asyncio.to_thread(store_recent, session_id, history_turns),
+            asyncio.to_thread(store_message, session_id, "user", user_text, mode),
+        )
         write_epoch = manager.capture_write_epoch()
-        user_message_id = store_message(session_id, "user", user_text, mode)
         turn_context = await self._turn_context_async(user_text, session_id, recent)
         messages = turn_context['messages']
         used_ids = turn_context['used_ids']
@@ -1230,7 +1307,8 @@ class Orchestrator:
             "usage": raw.get("usage", {}),
             "reasoning_chars": len(raw.get("reasoning") or ""),
         }
-        store_message(session_id, "assistant", text, mode)
+        note_fabrication_risk(self._last_meta, text, turn_context)
+        await asyncio.to_thread(store_message, session_id, "assistant", text, mode)
         self._spawn_extraction(
             session_id=session_id,
             user_text=user_text,
@@ -1310,7 +1388,7 @@ class Orchestrator:
         if not manager.enabled:
             return None
         now = time.time()
-        if not cfg.get("default_enabled") and not self.state["proactivity_enabled"]:
+        if not _proactivity_allowed(cfg, self.state):
             return None
         if now < float(self.state["proactive_suppressed_until"]):
             return None
@@ -1378,7 +1456,7 @@ class Orchestrator:
         if not manager.enabled:
             return None
         now = time.time()
-        if not cfg.get("default_enabled") and not self.state["proactivity_enabled"]:
+        if not _proactivity_allowed(cfg, self.state):
             return None
         if now < float(self.state["proactive_suppressed_until"]):
             return None
@@ -1433,7 +1511,7 @@ class Orchestrator:
             return None
         now = time.time() if now is None else now
         proactivity = self.pacing["proactivity"]
-        if not proactivity.get("default_enabled") and not self.state["proactivity_enabled"]:
+        if not _proactivity_allowed(proactivity, self.state):
             return None
         if now < float(self.state["proactive_suppressed_until"]):
             return None

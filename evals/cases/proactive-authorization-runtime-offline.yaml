@@ -1,0 +1,21 @@
+id: proactive-authorization-runtime-offline
+title: 主动发言授权门的运行期行为（真执行 _proactivity_allowed，非配置层守卫）
+layer: offline
+origin: "2026-11-07 补 proactive-boundary-offline.yaml 自承的「非行为验证」缺口；依据 server/dialogue/orchestrator.py::_proactivity_allowed 与 docs/PROTOCOL.md §12/§16.2"
+tags: [proactivity, authorization, runtime, offline, protocol]
+setup: {}
+turns:
+  - 不想聊了，让我安静一会儿
+pass_rule: all
+# 与 proactive-boundary-offline.yaml 分工：
+#   · 那条守「授权门/冷静期/安静模式的约束装配进 prompt」——配置层，行为表达。
+#   · 这条直接 AST 抽取 orchestrator.py 里真实的 _proactivity_allowed 函数体
+#     离线执行，枚举 5 组 (cfg, state) 断言运行期布尔行为。最关键的一组是
+#     default_enabled=true 且未授权时必须仍为 False——2026-11-05 修的正是这个
+#     「键存在但没有任何布尔读取点」的契约缺口（见 offline-emotion-tags 同类写法）。
+# 零 Key、零服务、不改 prompt、不改协议字段。
+checks:
+  - target: prompt
+    type: custom
+    value: "evals.checks:proactive_authorization_gate"
+status: active

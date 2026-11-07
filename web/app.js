@@ -18,6 +18,7 @@ import { mountVoiceBaseline } from './voice/baseline-ui.js';
 import { mountDialogueReview } from './avatar/dialogue-review-ui.js';
 import { mountEditorInsightVoice } from './voice/editor-insight.js';
 import { mountEditorDiscussion } from './voice/editor-discussion.js';
+import { deliveryNotes, voiceFirstNotice } from './delivery-notice.js';
 import { bootAssistant, showAssistantResult } from "./assistant.js";
 import { bootCompanion } from './companion.js';
 import { mountStarmap } from './starmap/index.js';
@@ -1321,7 +1322,14 @@ async function onWsMessage(event) {
     case "done":
       recordBaselineTurn('turn_done', msg.turn_id, { textStatus: msg.delivery?.text_status, audioStatus: msg.delivery?.audio_status });
       if (pendingConfirmation?.id === msg.turn_id) rejectConfirmation('未收到行动结果，请查看任务面板；不会自动重试操作。');
-      if (VOICE_FIRST) showSpokenLine(msg.text || pendingText);   // 完整口头句入住微光，说完自然淡出
+      if (VOICE_FIRST) {
+        showSpokenLine(msg.text || pendingText);   // 完整口头句入住微光，说完自然淡出
+        // 2026-11-07：VOICE_FIRST 下气泡注释整段不跑，#subtitle 是唯一状态出口。
+        // 台词在 glimmer 里，写 subtitle 不会覆盖它；后面 text_status=partial
+        // 且零文本的兜底更严重，会按原有顺序覆盖这条提示。
+        const notice = voiceFirstNotice(msg.delivery);
+        if (notice) subtitle.textContent = notice;
+      }
       if (!VOICE_FIRST && currentBubble && msg.text) {
         const timeDone = currentBubble.querySelector(":scope > .time");
         currentBubble.textContent = msg.text;
@@ -1329,10 +1337,9 @@ async function onWsMessage(event) {
         scheduleConstellation();
       }
       if (!VOICE_FIRST && msg.delivery && currentBubble) {
-        const notes = [];
-        if (msg.delivery.text_status === 'limit_reached') notes.push('本轮已达长度上限，可能尚未展开完整；可以让我继续。');
-        if (msg.delivery.text_status === 'partial') notes.push('生成中断，这里只保留了部分回答。');
-        if (['partial', 'failed'].includes(msg.delivery.audio_status)) notes.push('部分或全部语音合成失败，请阅读文字。');
+        // 2026-11-07：两套出口收敛到 web/delivery-notice.js 同一份规则，
+        // 避免改了气泡文案却忘了 VOICE_FIRST 字幕。
+        const notes = deliveryNotes(msg.delivery);
         if (notes.length) {
           const note = document.createElement('small');
           note.className = 'delivery-note';

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
 import random
 import re
 from typing import Any, AsyncIterator
@@ -9,6 +10,21 @@ from typing import Any, AsyncIterator
 import httpx
 
 from .config import settings
+
+
+# 离线 Mock 回复池（2026-11-06）：每条都必须带合法 [情绪] 标签。
+# 标签是 TTS 七档声学参数与 Avatar 表情的唯一输入；此前 4 句全无标签，
+# parse_emotion 只能回退 detect_emotion → 恒 base，离线体验里七档一档都
+# 触发不了（包括前一天刚补的 volume）。合法集合不在这里硬编码，由
+# evals.checks:offline_emotion_tags 用 config/persona.yaml 的 tts_emotions
+# 逐条校验，并带条数下限棘轮防真空绿。
+MOCK_REPLIES: tuple[str, ...] = (
+    "[base]嗯，这个我听着呢。",
+    "[base]继续说，我在。",
+    "[认真]这个我还真没什么头绪，你想到哪一步了？",
+    "[轻微不服]记下了。……不过我得说，你这计划听着挺美。",
+)
+MOCK_QUESTION_REPLY = "[认真]大概吧，我猜的，不一定准。"
 
 
 class LLMError(RuntimeError):
@@ -248,17 +264,22 @@ class LLM:
             if msg["role"] == "user":
                 last_user = msg["content"]
                 break
-        if "JSON" in messages[0]["content"] or "只输出 JSON" in messages[0]["content"]:
-            return json.dumps({"facts": [], "episodes": [], "todos": [], "self_states": []}, ensure_ascii=False)
-        pool = [
-            "嗯，这个我听着呢。",
-            "继续说，我在。",
-            "这个我还真没什么头绪，你想到哪一步了？",
-            "记下了。……不过我得说，你这计划听着挺美。",
-        ]
+        system = messages[0]["content"] if messages else ""
+        if '"memories"' in system:
+            # EXTRACT_SYSTEM 要求的输出结构是 {"memories": [...]}，而旧 mock
+            # 返回的是 facts/episodes/todos/self_states —— 键名从未对上，
+            # parse_extraction 一律读成空，trace 里连 error 都没有。
+            # 2026-11-06 对齐契约；离线仍不造假记忆（返回空），但留一条日志
+            # 让开发者知道「写入链路此刻是关闭的」而不是静默空转。
+            logging.getLogger("server.llm").debug(
+                "offline mock: memory extraction disabled, returning empty memories")
+            return json.dumps({"memories": []}, ensure_ascii=False)
+        if "JSON" in system or "只输出 JSON" in system:
+            # complete_json 的规划请求（server/assistant/service.py:806）期望 dict。
+            return json.dumps({"steps": []}, ensure_ascii=False)
         if "？" in last_user or "吗" in last_user:
-            return "大概吧，我猜的，不一定准。"
-        return random.choice(pool)
+            return MOCK_QUESTION_REPLY
+        return random.choice(MOCK_REPLIES)
 
 
 llm = LLM()

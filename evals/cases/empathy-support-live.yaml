@@ -1,0 +1,28 @@
+id: empathy-support-live
+title: 用户倾诉时先接住情绪、不说教、不连续追问（行为验证）
+layer: live
+origin: 2026-11-05 语音陪伴维度补例；配对 empathy-support-offline（那条只守配置，这条验模型行为）
+tags: [empathy, companion, voice, live]
+setup: {}
+turns:
+  - 今天真的烦死了，一堆破事全凑一块儿，我谁都不想理
+  - 有点没意思，说不上来为什么，就是提不起劲
+runs: 3
+pass_rule: all
+# 2026-11-05：这是行为验证，不是配置守卫——offline 那条只证明规则写进了 prompt，
+# 真实模型输出是否「先接住、不说教、不连续追问」要靠这条 live 用回复文本来抓。
+# 措辞按 config/persona.yaml 的 few_shot（[收敛] 嗯。先别分析 / 那就不说原因 /
+# 行。那我闭嘴在这儿）取期望，避免把「接住」写成永远命不中的空泛词。
+# 与生产一样用 target: reply 的拼接文本判定：regex_any 命中任一接住措辞；
+# not_regex 排除说教 /「你应该」/ 连续两个问号（连续追问）。
+checks:
+  - target: reply
+    type: regex_any
+    value: '先别分析|不说原因|闭嘴在这儿|我在这儿|在呢|陪你|听你说|慢慢说|不想说就不说|不急|先不|嗯'
+  - target: reply
+    type: not_regex
+    value: '你应该|你该|你得|建议你|不如|为什么不|想开点|看开点|振作|加油|别矫情|正能量|这有什么好'
+  - target: reply
+    type: not_regex
+    value: '？.*？'
+status: active

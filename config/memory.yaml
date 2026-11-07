@@ -150,7 +150,7 @@ feedback:
   sweep_batch: 200             # 单轮最多结算多少行（过期开放行按 created_at 从旧到新）
   sweep_interval_minutes: 30   # 两次清扫的最小间隔
 
-# ---------- 后台自进化（协议第十二节，默认全关） ----------
+# ---------- 后台自进化（协议第十二节；出厂 / 协议口径默认全关，当前打磨期 enabled: true，2026-10-31 口径） ----------
 # 关闭时自治循环不运行、不开口，行为与现在完全一致。开启后循环只在用户空闲
 # 且距上一轮复盘超过 idle_minutes 时运行；主动开口仍受 pacing.yaml 的
 # proactivity.require_authorization 门与拒绝关键词冷静期约束。
