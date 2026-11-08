@@ -12,6 +12,7 @@ import base64
 import json
 import importlib.util
 from pathlib import Path
+import sys
 import time
 from types import ModuleType, SimpleNamespace
 from unittest.mock import patch
@@ -125,6 +126,8 @@ def load_ws():
     # 不编译进来时该调用点在隔离环境里 NameError，被 _proactive_check 的 except 吞掉，
     # turn_started 永不到达——proactive 两条测试表现为超时而不是失败原因。
     names = {"VoiceTurn", "Connection", "_present_reply", "_confirm_action", "_run_turn", "_transcribe_turn", "_proactive_check", "websocket_endpoint", "proactive_socket", "_maybe_diary", "_maybe_self_evolution", "_narrate_turn", "_node_snippet", "_aqi_action", "_executive_delegate", "_executive_finish", "_touch_reply", "_send_proactive_blocks", "_transcribe_error_message"}
+    # S3-b：ASR 不可用降级分支（_asr_unavailable 判定 + _degrade_transcribe 交付）。
+    names |= {"_asr_unavailable", "_degrade_transcribe"}
     # B-1（2026-10-31 评审）：同源判据抽成 _ws_handshake_allowed，四个 WS 端点共用；
     # 端点函数必须编译进来，test_ws_origin 才能对每条握手分别驱动真身。
     names |= {"_ws_handshake_allowed", "interpretation_socket", "stream_interpretation_socket"}
@@ -149,7 +152,7 @@ def load_ws():
             if isinstance(node, (ast.AsyncFunctionDef, ast.FunctionDef)):
                 node.decorator_list = []
             nodes.append(node)
-        elif isinstance(node, ast.Assign) and any(isinstance(t, ast.Name) and t.id == "MAX_AUDIO_SECONDS" for t in node.targets):
+        elif isinstance(node, ast.Assign) and any(isinstance(t, ast.Name) and t.id in ("MAX_AUDIO_SECONDS", "_ASR_UNAVAILABLE_MARKERS") for t in node.targets):
             nodes.append(node)
     spec = importlib.util.spec_from_file_location('isolated_reply_delivery', path.parent / 'dialogue' / 'delivery.py')
     module = importlib.util.module_from_spec(spec)
@@ -159,6 +162,11 @@ def load_ws():
     blocks_spec = importlib.util.spec_from_file_location('isolated_aqi_blocks', path.parent / 'dialogue' / 'aqi_blocks.py')
     blocks_module = importlib.util.module_from_spec(blocks_spec)
     blocks_spec.loader.exec_module(blocks_module)
+    # 服务端 VAD（降级分支用真身，不在测试里复制一份算法）。
+    vad_spec = importlib.util.spec_from_file_location('isolated_vad', path.parent / 'speech' / 'vad.py')
+    vad_module = importlib.util.module_from_spec(vad_spec)
+    sys.modules[vad_spec.name] = vad_module   # dataclass 解析注解时要能按 __module__ 找到它
+    vad_spec.loader.exec_module(vad_module)
     env = dict(asyncio=asyncio, base64=base64, json=json, time=time, uuid=uuid,
                Any=Any, np=np, WebSocket=FakeSocket, WebSocketDisconnect=Disconnect,
                settings=SimpleNamespace(audio_sample_rate=16000, tts_default_emotion="base"),
@@ -193,6 +201,7 @@ def load_ws():
                _LAST_USAGE_SWEEP_AT=0.0,
                tts=SimpleNamespace(engine='silent'), deliver_reply=module.deliver_reply,
                aqi_blocks_message=blocks_module.aqi_blocks_message,
+               analyze_pcm=vad_module.analyze_pcm,
                note_snippet=blocks_module.note_snippet,
                compose_spinning_card=blocks_module.compose_spinning_card,
                compose_delivery_card=blocks_module.compose_delivery_card,
@@ -431,6 +440,19 @@ class VoiceTurnTests(unittest.IsolatedAsyncioTestCase):
         await self.ws.wait("asr", "empty")
         await self.ws.wait("done", "empty")
 
+    async def test_only_unreachable_asr_degrades(self):
+        """契约：只有「够不到识别后端」才降级，坏音频/真 bug 仍终结。"""
+        classify = self.env["_asr_unavailable"]
+        for exc in (ModuleNotFoundError("No module named 'faster_whisper'"),
+                    RuntimeError("asr 503: upstream unavailable"),
+                    ConnectionError("hf model download blocked"),
+                    TimeoutError("connection timed out")):
+            self.assertTrue(classify(exc), exc)
+        for exc in (RuntimeError("asr 400: invalid audio"),
+                    RuntimeError("fake failure"),
+                    ValueError("PCM16 audio must contain complete samples")):
+            self.assertFalse(classify(exc), exc)
+
     async def test_asr_failure_is_terminal_and_socket_recovers(self):
         async def fail(data):
             raise RuntimeError("fake failure")
@@ -442,6 +464,44 @@ class VoiceTurnTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(error["terminal"])
         self.ws.send("text", turn_id="next", text="hello")
         await self.ws.wait("done", "next")
+
+    async def test_asr_unavailable_with_speech_degrades_honestly(self):
+        """离线/无模型：保留连接与轮次，明确告知降级，绝不伪造 asr 文本。"""
+        calls = []
+        async def unavailable(data):
+            calls.append(data)
+            raise ModuleNotFoundError("No module named 'faster_whisper'")
+        self.env["recognizer"].transcribe_wav = unavailable
+        self.ws.send("start", turn_id="offline-speech")
+        t = np.arange(int(16000 * 0.3)) / 16000.0
+        self.ws.audio((0.3 * np.sin(2 * np.pi * 440 * t) * 32767).astype("<i2").tobytes())
+        self.ws.send("audio_end", turn_id="offline-speech")
+        error = await self.ws.wait("error", "offline-speech")
+        self.assertTrue(error["recoverable"])
+        self.assertFalse(error.get("terminal", False))
+        self.assertIn("语音识别暂时不可用", error["message"])
+        self.assertIn("检测到说话声", error["message"])
+        done = await self.ws.wait("done", "offline-speech")
+        self.assertEqual(done["text"], "")
+        self.assertEqual([e for e in self.ws.events if e["type"] == "asr"], [],
+                         "降级不得下发 asr（空文本也会被读成'正常识别过'）")
+        self.assertEqual(len(calls), 1)
+        self.ws.send("text", turn_id="next", text="hello")
+        await self.ws.wait("done", "next")
+
+    async def test_asr_unavailable_without_speech_says_no_voice(self):
+        """VAD 判静音时文案必须说「没检测到说话声」，而不是冒充识别结果。"""
+        async def unavailable(data):
+            raise ConnectionError("hf model download blocked")
+        self.env["recognizer"].transcribe_wav = unavailable
+        self.ws.send("start", turn_id="offline-silence")
+        self.ws.audio()
+        self.ws.send("audio_end", turn_id="offline-silence")
+        error = await self.ws.wait("error", "offline-silence")
+        self.assertTrue(error["recoverable"])
+        self.assertIn("没有检测到说话声", error["message"])
+        await self.ws.wait("done", "offline-silence")
+        self.assertEqual([e for e in self.ws.events if e["type"] == "asr"], [])
 
     async def test_malformed_pcm_is_terminal(self):
         self.ws.send("start", turn_id="odd")
