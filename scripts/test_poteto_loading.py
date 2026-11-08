@@ -47,6 +47,17 @@ def main() -> int:
     body = AGENTS / "pstack" / "poteto-mode" / "SKILL.md"
     dsh = AGENTS / "pstack" / "DSH.md"
 
+    # .agents/ 被 .gitignore 逐层排除（见 AGENTS.md「已知残缺」），fresh clone /
+    # CI checkout 里根本没有 poteto bundle。这时「文件不存在」是环境事实，不是
+    # 加载契约坏了，按 SKIP 处理（CI 的分片运行器只认 exit 0，跳过即通过）。
+    # 只在两个 bundle 目录都不存在时跳过；目录在、个别文件缺，仍按下面的断言判红，
+    # 不把「装坏了」伪装成「没安装」。
+    bundle_dirs = (AGENTS / "pstack" / "poteto-mode", AGENTS / "poteto-mode")
+    if not any(path.is_dir() for path in bundle_dirs):
+        print("SKIP: .agents bundle not present (fresh clone / CI checkout)")
+        print("\n=== 0 passed, 0 failed (skipped) ===")
+        return 0
+
     check("visible entry 存在", entry.is_file(), str(entry))
     check("入口指向的正文可解析", body.is_file(), str(body))
     check("DSH.md 本机适配层存在", dsh.is_file(), str(dsh))
