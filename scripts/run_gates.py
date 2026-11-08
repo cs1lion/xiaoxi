@@ -1083,6 +1083,44 @@ GATES: dict[str, dict[str, object]] = {
         "cmd": [str(PY), "scripts/evals_health.py"],
         "skip_regex": r"^\s*SKIP",
     },
+    # 2026-11-08 P0③：收编 CI 差集（scripts/gates_unregistered.txt）。
+    # 只收「本机离线能真跑出断言」的脚本；不进 ALWAYS_REQUIRED（不抬高 always 档）。
+    # test_eye_calibration_analysis 仍留在清单里：它缺 Pillow 必然 SKIP，
+    # 而项目口径是「跳过即失败」，带 SKIP 进门等于自开一个永不判红的洞。
+    "evals_guards": {
+        # evals 用例加载期守卫（R16/R68 等）自身回归：纯逻辑、零 Key、零服务。
+        "cmd": [str(PY), "scripts/test_evals_guards.py"],
+        "skip_regex": r"^\s*SKIP",
+    },
+    "intent_parser_e2e": {
+        # 意图解析端到端契约；无 STEPFUN key 时脚本自己跳过真模型段、
+        # 契约断言仍真跑（输出「没有 STEPFUN key」不是行首 SKIP，故计 PASS）。
+        # 覆盖范围只到契约，不包含模型分类准确率。
+        "cmd": [str(PY), "scripts/test_intent_parser_e2e.py"],
+        "skip_regex": r"^\s*SKIP",
+    },
+    "measure_intent_corpus": {
+        # measure_intent_corpus.main() 的空转 fail-closed 回归：真实语料缺失必须 exit 1。
+        # patch 掉分类器、喂罐头准确率，零网络零 Key。
+        "cmd": [str(PY), "scripts/test_measure_intent_corpus.py"],
+        "skip_regex": r"^\s*SKIP",
+    },
+    "memory_retrieval_quality": {
+        # 标注集上的召回/精确率与负向约束分支（issue #30 / F-1）。内存 SQLite，
+        # 硬断言在 SHOULD_MISS 假命中与名单棘轮上，数字属机制回归不对外陈述。
+        "cmd": [str(PY), "scripts/test_memory_retrieval_quality.py"],
+        "skip_regex": r"^\s*SKIP",
+    },
+    "memory_snapshot": {
+        # 记忆写时快照的不可变性/恢复语义；纯内存库，零 Key。
+        "cmd": [str(PY), "scripts/test_memory_snapshot.py"],
+        "skip_regex": r"^\s*SKIP",
+    },
+    "memory_temporal": {
+        # 有效时间（valid_from/valid_to）过滤与历史交付；纯内存库，零 Key。
+        "cmd": [str(PY), "scripts/test_memory_temporal.py"],
+        "skip_regex": r"^\s*SKIP",
+    },
 }
 
 # 这些门禁的本体是纯逻辑单测，不需要本地服务，永远必须真跑。

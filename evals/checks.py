@@ -161,6 +161,134 @@ def offline_emotion_tags(case, state):
     return (not bad), "；".join(bad) or f"{checked} 条离线台词全部带合法标签且可解析"
 
 
+def extraction_quality_offline(case, state):
+    """抽取**后处理**在合成标注集上的精确率 / 召回率（离线、零 Key）。
+
+    分工：`test_memory_extraction_contract.py` 守规则形状；这里量产品维度——
+    给一批「应该保留」与「应该丢掉」的候选，看 `parse_extraction` 最终留下
+    什么，并把 precision / recall 打出来。它测的是模型输出**之后**的判据，
+    不是模型抽取能力本身：真模型的抽取精确率/召回率要 live 语料，属未验证。
+    10 条候选是合成标注集，小样本、非生产基准，别把这里的比例外推。
+    """
+    from server.memory.extractor import parse_extraction
+
+    evidence = [
+        {"id": 1, "role": "user", "text": "我养了一只叫豆豆的橘猫，三岁"},
+        {"id": 2, "role": "user", "text": "我对花生过敏，误食会起疹子"},
+        {"id": 3, "role": "user", "text": "我周五下午有一场产品岗面试"},
+        {"id": 4, "role": "user", "text": "我昨天去看了《流浪地球》"},
+        {"id": 5, "role": "user", "text": "我每天早上七点起床，周末也差不多"},
+        {"id": 6, "role": "user", "text": "我长期喜欢喝绿茶，早上那杯最重要"},
+        {"id": 7, "role": "assistant", "text": "你好像更喜欢冰美式"},
+        {"id": 8, "role": "user", "text": "好的，你说得对"},
+        {"id": 9, "role": "user", "text": "我朋友说他养了两只猫"},
+    ]
+
+    def item(kind, key, value, source, importance, operation, mid, quote):
+        return {"kind": kind, "subject": "user", "key": key, "value": value,
+                "source": source, "importance": importance, "operation": operation,
+                "evidence": {"message_id": mid, "quote": quote}}
+
+    should_keep = [
+        item("fact", "兴趣:宠物猫", "养了一只叫豆豆的橘猫，三岁", "stated", 0.8, "add", 1, "叫豆豆的橘猫"),
+        item("fact", "健康:过敏源", "对花生过敏", "stated", 0.9, "add", 2, "对花生过敏"),
+        item("todo", "工作:面试", "周五下午有产品岗面试", "stated", 0.7, "add", 3, "周五下午有一场产品岗面试"),
+        item("episode", "影视:观影", "昨天去看了《流浪地球》", "stated", 0.6, "add", 4, "昨天去看了《流浪地球》"),
+        item("fact", "作息:起床", "每天早上七点起床", "stated", 0.6, "add", 5, "每天早上七点起床"),
+        item("fact", "饮食:偏好", "长期喜欢喝绿茶", "stated", 0.7, "add", 6, "早上那杯最重要"),
+    ]
+    should_drop = [
+        # 证据来自角色消息，不是用户原话
+        item("fact", "饮食:偏好", "更喜欢冰美式", "stated", 0.4, "add", 7, "更喜欢冰美式"),
+        # quote 不是该消息的逐字片段
+        item("fact", "兴趣:宠物猫", "豆豆是个男孩", "stated", 0.5, "add", 1, "豆豆是个男孩"),
+        # 寒暄 / 无信息
+        item("fact", "偏好:饮品", "好的", "stated", 0.5, "add", 8, "好的"),
+        # 自动抽取不允许角色自身状态
+        item("self_state", "情绪:开心", "用户夸了我", "stated", 0.6, "add", 1, "叫豆豆的橘猫"),
+        # inferred 低于该来源门槛
+        item("fact", "作息:睡眠", "可能睡得晚", "inferred", 0.4, "add", 5, "每天早上七点起床"),
+        # 与第 1 条同批重复
+        item("fact", "兴趣:宠物猫", "养了一只叫豆豆的橘猫，三岁", "stated", 0.8, "add", 1, "叫豆豆的橘猫"),
+        # 类型不认识
+        item("emotion", "情绪:平静", "用户很平静", "stated", 0.5, "add", 1, "叫豆豆的橘猫"),
+        # 第三人陈述不自动抽取
+        item("fact", "兴趣:宠物猫", "朋友养了两只猫", "stated", 0.5, "add", 9, "我朋友说他养了两只猫"),
+    ]
+    drops: list[dict] = []
+    kept = parse_extraction(should_keep + should_drop, drops=drops, evidence_messages=evidence)
+
+    wanted = {(c["kind"], c["value"]) for c in should_keep}
+    kept_pairs = {(c["kind"], c["value"]) for c in kept}
+    recall = len(wanted & kept_pairs) / len(wanted)
+    precision = (len(wanted & kept_pairs) / len(kept)) if kept else 1.0
+    bad = []
+    if precision < 1.0:
+        bad.append(f"precision {precision:.2f} < 1.0（混进了不该留的候选）")
+    if recall < 0.9:
+        bad.append(f"recall {recall:.2f} < 0.90（该留的候选被丢掉）")
+    if len(kept) != len(should_keep):
+        bad.append(f"实留 {len(kept)} 条，标注应留 {len(should_keep)} 条")
+    if any(c["evidence_state"] != "linked" for c in kept):
+        bad.append("留下的候选里有非 linked 证据")
+    reasons = " ".join(d["key"] for d in drops)
+    for needle in ("寒暄/无信息", "自动抽取不允许角色自身状态", "同批重复候选",
+                   "重要性", "缺少有效 user 原话证据", "引用/第三人", "类型不认识"):
+        if needle not in reasons:
+            bad.append(f"丢弃诊断缺少「{needle}」")
+
+    print("\n=== 抽取后处理质量（合成标注集，非生产基准）===")
+    print(f"候选 {len(should_keep) + len(should_drop)} 条；标注应留 {len(should_keep)} 条；"
+          f"实留 {len(kept)} 条；丢弃 {len(drops)} 条")
+    print(f"precision = {precision:.3f}；recall = {recall:.3f}")
+    return (not bad), "；".join(bad) or f"precision {precision:.2f} / recall {recall:.2f}"
+
+
+def tts_emotion_routing_offline(case, state):
+    """情绪标签 → `tts_emotions` 声学参数的路由闭合（离线、零 Key）。
+
+    量的是「七档情绪各有专属 voice/instruction/rate/pitch/volume，且
+    `voice_profile()` 取到的就是配置那一份」——即情绪不会静默掉回 base。
+    量不到的是**听感**：真实 TTS 情绪交付需要 provider 凭据、固定脚本文案
+    与人耳/评测集，属未验证，别把这条当「情绪听起来对」的证据。
+    """
+    from server.config import persona_cfg
+    from server.speech.tts import apply_voice_delivery, voice_profile
+
+    emotions = persona_cfg().get("tts_emotions") or {}
+    bad = []
+    if len(emotions) < 7:
+        bad.append(f"tts_emotions 只有 {len(emotions)} 档，低于 7")
+    instructions = []
+    signatures = []
+    for name, profile in emotions.items():
+        got = voice_profile(name)
+        if got != profile:
+            bad.append(f"{name} 取到的参数不是配置里的那一份（可能被回落覆盖）")
+        if not str(profile.get("instruction") or "").strip():
+            bad.append(f"{name} 缺 instruction")
+        if not str(profile.get("voice") or "").strip():
+            bad.append(f"{name} 缺 voice")
+        instructions.append(str(profile.get("instruction") or "").strip())
+        signatures.append(tuple(str(profile.get(k, "")) for k in ("rate", "pitch", "volume")))
+    if len(set(instructions)) != len(instructions):
+        bad.append("有情绪档共用同一条 instruction，情绪只剩音量差别")
+    if len(set(signatures)) != len(signatures):
+        bad.append("有情绪档的 rate/pitch/volume 组合完全相同")
+    # 全局语速/音高叠加层不得吞掉情绪参数或 instruction。
+    for name, profile in emotions.items():
+        layered = apply_voice_delivery(profile)
+        if not isinstance(layered, dict) or not layered.get("voice"):
+            bad.append(f"{name} 叠加 voice_delivery 后丢失 voice")
+        if layered.get("instruction") != profile.get("instruction"):
+            bad.append(f"{name} 叠加 voice_delivery 后 instruction 被改写")
+
+    print("\n=== TTS 情绪路由（离线；听感未验证）===")
+    print(f"情绪档 {len(emotions)} 个；instruction 去重 {len(set(instructions))} 条；"
+          f"rate/pitch/volume 组合去重 {len(set(signatures))} 组")
+    return (not bad), "；".join(bad) or f"{len(emotions)} 档情绪各自路由到专属参数"
+
+
 def proactive_authorization_gate(case, state):
     """主动发言授权门的**运行期**行为验证（offline，零 Key）。
 

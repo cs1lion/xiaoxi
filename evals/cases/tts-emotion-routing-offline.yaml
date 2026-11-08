@@ -1,0 +1,17 @@
+id: tts-emotion-routing-offline
+title: 情绪标签到 TTS 声学参数的路由闭合（离线；听感未验证）
+layer: offline
+origin: "2026-11-08 P0③：docs/TESTING.md 记录的「TTS 情绪」空白——离线可量的只有路由，听感需真实 provider"
+tags: [tts, emotion, offline]
+setup: {}
+turns:
+  - 随便聊聊
+pass_rule: all
+# 硬断言：七档情绪各有专属 voice/instruction/rate/pitch/volume，voice_profile()
+# 取到的就是配置那一份，voice_delivery 叠加层不吞参数。听感（像不像这个情绪）
+# 需要 TTS provider 凭据 + 固定脚本文案 + 人耳/评测集，属未验证。
+checks:
+  - target: prompt
+    type: custom
+    value: "evals.checks:tts_emotion_routing_offline"
+status: active
