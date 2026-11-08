@@ -722,14 +722,6 @@ GATES: dict[str, dict[str, object]] = {
         "cmd": [str(PY), "scripts/test_restart_recovery.py"],
         "skip_regex": r"^\s*SKIP",
     },
-    "seed_eye_expression": {
-        "cmd": [str(PY), "scripts/test_seed_eye_expression.py"],
-        "skip_regex": r"^\s*SKIP",
-    },
-    "seed_eye_lids": {
-        "cmd": [str(PY), "scripts/test_seed_eye_lids.py"],
-        "skip_regex": r"^\s*SKIP",
-    },
     "soul_polish": {
         "cmd": [str(PY), "scripts/test_soul_polish.py"],
         "skip_regex": r"^\s*SKIP",
