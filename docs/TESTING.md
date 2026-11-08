@@ -180,30 +180,33 @@ ALWAYS_REQUIRED。`memory_fastloop` 的判据是墙钟停顿（心跳 + 10ms 阈
 
 `scripts/probe_outbox_crash.py` 用两个子进程分别在“副作用后、回执前”和“回执已落盘、事项投影前”硬退出，再由父进程走真实 `AssistantService` 启动路径验收：前者转 `unknown` 并阻断 resume，后者只补投一次且不重复副作用。它不碰生产数据，已纳入 `run_gates`。
 
-### 退役/不在门禁内的评测夹具（2026-10-20；2026-10-25、2026-10-26 修订）
+### 程序性记忆评测夹具（2026-10-20；2026-10-25、2026-10-26、2026-11-08 修订）
 
-`scripts/` 下这批程序性记忆评测依赖曾随 `/eval` 清理被删、未入 git 的本地夹具，**不在 `run_gates.py` 里**。2026-10-25 已把「整组 `SkipTest`」改成「逐条 / 逐类 `skipUnless`」：自包含用例真跑，依赖夹具的用例按名跳过，跳过理由写在装饰器上——不再让整组在 CI 里假装通过。
+`scripts/` 下这批程序性记忆评测依赖的 `eval/research/*.json` 曾随 `/eval` 清理被删、未入 git。2026-10-25 已把「整组 `SkipTest`」改成「逐条 / 逐类 `skipUnless`」；2026-11-08 起，`source_projection` / `boundaries` / `diagnostics` 的夹具改由 `scripts/pm_eval_fixture.py` 与 `scripts/pm_boundary_fixture.py` 随测试离线重建，不再需要外部文件。**这 5 条（含 `snapshot`）都已登记在 `run_gates.py`**，不是 `scripts/gates_unregistered.txt` 里那两条（`test_eye_calibration_analysis.py` / `test_pixel_world.py`）。
 
 | 文件 | 真跑 | 按理由跳过 | 缺什么 |
 |---|---|---|---|
-| `test_procedural_memory_source_projection.py` | 9 | 1 | `eval/research/procedural_memory_eval_cases.json` |
-| `test_procedural_memory_boundaries.py` | 5 | 6 | `eval/research/procedural_memory_boundary_cases_v1.json` |
-| `test_procedural_memory_diagnostics.py` | 8 | 7 | `eval/research/procedural_memory_diagnostic_inputs_v1.json` |
-| `test_procedural_memory_eval.py` | 4 | 20 | `procedural_memory_eval_cases.json` + 配套 oracles |
-| `test_procedural_memory_induction.py` | 8 | 0 | 无——H4 已用 `scripts/pm_induction_fixture.py` 内联构造夹具（3 bundle × 2 recipe，形状由 `load_sources()` 与 `domain.prepare()` 的校验钉死），不再依赖磁盘文件；该文件曾被并行会话回退成整组 SkipTest，2026-10-26 已重新接上 |
+| `test_procedural_memory_eval_snapshot.py` | 22 | 0 | 无——2026-11-08 用目录 junction 构造等价 reparse point，不再依赖 symlink 权限 |
+| `test_procedural_memory_source_projection.py` | 10 | 0 | 无——共享 3 bundle × 2 recipe 合成夹具（`pm_eval_fixture.py`） |
+| `test_procedural_memory_boundaries.py` | 11 | 0 | 无——四条固定 id/role 由 `pm_boundary_fixture.py` 构造，`load_sources()` 与 `_check_recipe()` 双重校验 |
+| `test_procedural_memory_diagnostics.py` | 15 | 0 | 无——共享 cases + `pm_eval_fixture.build_diagnostic_inputs()`；哈希按 `fingerprint(messages)` 自洽，provenance 明写 synthetic replay |
+| `test_procedural_memory_eval.py` | 4 | 20 | `procedural_memory_eval_cases.json` + 配套 oracles（**仍不合成**，见下） |
+| `test_procedural_memory_induction.py` | 8 | 0 | 无——`pm_induction_fixture.py` 转发 `pm_eval_fixture.build_sources()`，统一 payload |
 
-条数为 2026-10-26 本地实跑值，会随用例增减变化，**以运行输出为准**。补夹具后跳过会自动转真跑；引用这些层的历史结果时仍须标明"夹具缺失、未复跑"。**不要把 `run_gates` 全绿解释成这些评测也跑过**——它们不在 `run_gates.py` 里，只在 `ci_test_shard.py --workers 4` 的并发分片全集里。
+条数为 2026-11-08 本地实跑值，会随用例增减变化，**以运行输出为准**。补夹具后跳过会自动转真跑；引用这些层的历史结果时仍须标明"夹具缺失、未复跑"。
 
-**这些夹具为什么不能合成（2026-10-26 查证，防后人走错路）**：剩下的 34 条跳过**不要**靠造合成夹具消掉。分两类，两类都会变成假覆盖：
+**夹具合成边界（2026-11-08 校准旧结论）**：
 
-- **eval 的 20 条**：`load_specs()` 要一份固定规格（3 sources / 6 targets / groups 恰为 `N,E,P,G` / 预算常量精确匹配），而 `gold_material()` 读的是 `source_oracle['human_card']`——**金标准**。合成它等于让评测拿我编造的答案自证，比诚实跳过更糟。
-- **boundaries 的 6 条与 diagnostics 的 7 条**：断言的是具名边界条件（如 `boundary-truncated`、`boundary-concurrent-ambiguous`、`boundary-missing-confirm`）。合成数据即便结构合法，也**不保证真的触发名字所示的那条边界**——测试会跑，但测的不是名字承诺的东西，同样是假覆盖。
+- **eval 的 20 条**：`load_specs()` 要一份固定规格（3 sources / 6 targets / groups 恰为 `N,E,P,G` / 预算常量精确匹配），而 `gold_material()` 读的是 `source_oracle['human_card']`——**金标准**。合成它等于让评测拿我编造的答案自证，比诚实跳过更糟。因此这 20 条继续诚实跳过，待真实夹具或单独授权。
+- **boundaries 的 6 条与 diagnostics 的 7 条，2026-11-08 已改为合成**，因为它们不涉及「金标准」：
+  - boundaries 的具名边界不是靠名字自证：`load_sources()` 钉死 id/role，`_check_recipe()` 在 `prepare()` 时逐项断言（截断/歧义/并发唯一/并发歧义/缺 confirm 能力）。合成夹具若没真触发，会 `source_recipe_materialization_failed` 直接红——**旧文档「不保证触发」的担心已被代码兜住**。
+  - diagnostics 的输入只校验 `original_input_sha256 == fingerprint(messages)` 等自洽条件，不校验历史出处；因此可以离线合成，但夹具里用 `provenance: synthetic_replay_not_a_historical_report` 与 `origin_report_path: synthetic-replay-not-a-real-report.json` 明示，不冒充真实历史报告。
+- **source_projection / induction**：形状由 `SourceCorpus.prepare()` 与投影压缩条件唯一约束，合成夹具即等价覆盖。
+- 仍然成立的原则：eval 的 gold 不合成；`.gitignore:58` 忽略的 `eval/research/*.json` 不作为分发手段（本地恢复了 CI 仍空跑），夹具随测试代码分发。
 
-正解只有两条：拿到真实的域夹具，或像 H4 对 induction 那样**由代码自身校验反推出形状**（induction 能这么做，是因为 `load_sources()` 与 `domain.prepare()` 的约束足以唯一确定夹具形状；eval/boundaries/diagnostics 不满足这个条件）。所以补齐之前，跳过是诚实的。
-
-**2026-10-25 变更**：`scripts/test_memory_eval.py` 已改为内联合成夹具（`build_cases()` 内存构造 12 条，仍经真实 `load_cases` 逐条校验），不再 `SkipTest`；`ci_test_shard.py --workers 4` 的并发分片会真跑它（本地实跑 19 条 OK）。它是其余程序性记忆测试内联化的样板——正解不是恢复被 `.gitignore:54` 忽略的 `eval/research/*.json`（本地恢复了 CI 仍空跑），而是让夹具随测试一起分发。
+**2026-10-25 变更**：`scripts/test_memory_eval.py` 已改为内联合成夹具（`build_cases()` 内存构造 12 条，仍经真实 `load_cases` 逐条校验），不再 `SkipTest`；`ci_test_shard.py --workers 4` 的并发分片会真跑它（本地实跑 19 条 OK）。它是其余程序性记忆测试内联化的样板——正解不是恢复被 `.gitignore:58` 忽略的 `eval/research/*.json`（本地恢复了 CI 仍空跑），而是让夹具随测试一起分发。
 - **新增用例**：每次出幻觉事故就加一条 YAML。字段见 `evals/cases/` 现例；`checks` 支持 `contains / not_contains / regex_any / not_regex / custom`，custom 判定函数写在 `evals/checks.py`，用例里以 `evals.checks:<函数名>` 引用。预置状态写 `setup.memories`，用户轮次写 `turns`，live 默认跑 `runs: 3` 次，通过线由 `pass_rule: all | min_rate:0.8` 控制。`origin` 必填（来源实验 / 事故 / commit）；缺 `origin` 或空串会在 `main_async` 起手处 fail-fast 并非零退出（`scripts/run_evals.py`）。
-- **候选漏斗**：`scripts/mine_eval_candidates.py` 以 `mode=ro` 只读 `data/memory.db`（不 import 任何 server 模块、不写活库），按四类确定性启发式（共指/省略追问、疑似幻觉面、事实挑战、负面情绪边界）提名评测候选，凭据与个人信息脱敏后落 `eval/research/case_candidates_*.json`（`.gitignore:54` 覆盖，**不进版本库**）；候选经人工筛选与改写后才手写进 `evals/cases/`，脚本本身不写受版本控制的目录。库不存在时打印说明并 exit 0（正常态）。
+- **候选漏斗**：`scripts/mine_eval_candidates.py` 以 `mode=ro` 只读 `data/memory.db`（不 import 任何 server 模块、不写活库），按四类确定性启发式（共指/省略追问、疑似幻觉面、事实挑战、负面情绪边界）提名评测候选，凭据与个人信息脱敏后落 `eval/research/case_candidates_*.json`（`.gitignore:58` 覆盖，**不进版本库**）；候选经人工筛选与改写后才手写进 `evals/cases/`，脚本本身不写受版本控制的目录。库不存在时打印说明并 exit 0（正常态）。
 
 ### 评测报告层（2026-10-25）
 

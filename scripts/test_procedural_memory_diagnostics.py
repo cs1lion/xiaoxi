@@ -16,6 +16,7 @@ from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import eval_procedural_memory_diagnostics as target
+import pm_eval_fixture
 
 
 def scalar_event(identifier, **fields):
@@ -49,10 +50,14 @@ def simple_catalog():
             'read': scalar_event('read', ok=True, note={'selected_version_is_current': False})}
 
 
-# 2026-10-25：整组 SkipTest 改成逐条 skipUnless。本文件只有部分用例需要真实域夹具
-# （见各方法的 skipUnless），其余用内联数据自建、照常真跑——整组跳过会让它们在 CI 里假绿。
+# 2026-10-25：整组 SkipTest 改成逐条 skipUnless。输入与共享 cases 都由
+# pm_eval_fixture 离线合成；子进程 --prepare-sources 需要磁盘固定路径，所以
+# 在计算可用性常量前落盘。
 DIAGNOSTIC_INPUTS = Path(__file__).resolve().parents[1] / 'eval/research/procedural_memory_diagnostic_inputs_v1.json'
-DIAGNOSTIC_INPUTS_AVAILABLE = DIAGNOSTIC_INPUTS.is_file()
+DIAGNOSTIC_INPUTS_AVAILABLE = (
+    pm_eval_fixture.ensure_cases(require_version=True)
+    and pm_eval_fixture.ensure_diagnostic_inputs()
+)
 
 
 class CitationContractTests(unittest.TestCase):
