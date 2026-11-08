@@ -1,6 +1,7 @@
 # 门禁在非理想环境下给出假结论 —— 修复证据（2026-11-09）
 
-分支 `fix/gates-honest-skips`，基线 `origin/master` = `ad3458e`。
+分支 `fix/gates-honest-skips`，基线 `origin/master` = `0bac4b9`（含 `live_acceptance_guard`，
+全量 215 条）。
 本目录是一次全量门禁的两组原始读数与盘点依据，不是结论截图。
 
 ## 1. 症状
@@ -33,7 +34,7 @@
 | `scripts/dev_env_check.py` | 与 `ad3458e` 新增的自检脚本对齐措辞：缺项现在是「run_gates 记 SKIP」，不再是「直接失败 / 直接红」；`web/vendor` 的「影响浏览器门禁」按实测收紧。 |
 | `docs/TESTING.md` | 本机产物表的「缺了影响」列同步为「记 SKIP + 补救命令」，与 `ARTIFACTS` 口径一致。 |
 
-### 依赖物按命令形状登记（避免 214 条手写清单漏项）
+### 依赖物按命令形状登记（避免 215 条手写清单漏项）
 
 - `cmd[0]` 是本仓 Python 解释器 → `venv`。`run_gates.py` 在 `.venv` 缺失时**静默**
   回退系统解释器，那正是「报 PASS 但跑的其实是另一个解释器」的来源。
@@ -46,11 +47,11 @@
   `ui_browser` / `drill_network` / `drill_badkey` / `drill_ws_reconnect` → `venv`
   （这几个 `.mjs` 自己起沙盘服务、Python 路径写死在脚本里）。
 
-## 3. 盘点：214 条门禁的依赖物（脚本生成，非手抄）
+## 3. 盘点：215 条门禁的依赖物（脚本生成，非手抄）
 
 | 依赖物 | 门禁数 | 门禁 | 改前行为 | 改后行为 |
 | --- | ---: | --- | --- | --- |
-| `.venv` | 186 | 全部 Python 门禁（`core`、`protocol`、`venv_lock`、`speech_performance_route`…） | 缺失时 `venv_lock` FAIL；其余静默回退系统解释器（可能 PASS = 假结论，也可能 ModuleNotFoundError = FAIL） | 全部 SKIP：`缺 .venv/Scripts/python.exe；补救：uv sync --frozen` |
+| `.venv` | 187 | 全部 Python 门禁（`core`、`protocol`、`venv_lock`、`speech_performance_route`、`live_acceptance_guard`…） | 缺失时 `venv_lock` FAIL；其余静默回退系统解释器（可能 PASS = 假结论，也可能 ModuleNotFoundError = FAIL） | 全部 SKIP：`缺 .venv/Scripts/python.exe；补救：uv sync --frozen` |
 | `agent-runtime/node_modules` | 17 | `durable_*`（`durable_takeover`、`durable_block_kind`、`durable_mcp`…） | `ERR_MODULE_NOT_FOUND` → FAIL | SKIP：`cd agent-runtime && npm ci` |
 | `node_modules` | 1 | `npm` | 缺 `three` / `@pixiv/three-vrm` 报错 → FAIL | SKIP：`npm ci` |
 | `node_modules` + Playwright Chromium | 5 | `ui_nav_browser`、`blocks_browser`、`companion_browser`、`experience_entry_browser`、`voice_browser` | 缺 `@playwright/test` → FAIL；缺浏览器 → 启动抛错 exit 1（实测 `MJS_EXIT=1`） | SKIP：`npm ci` / `npx playwright install chromium` |
@@ -66,7 +67,7 @@
 
 ## 4. 两组读数（同一命令、同一数据集）
 
-命令（在 `fix/gates-honest-skips` HEAD `0538f7f` + 本目录最后一条提交上跑）：
+命令（分支 `fix/gates-honest-skips`，跑在 `c0c0df1` 之上、本目录这次提交前的代码状态）：
 
 ```powershell
 $env:BASE_URL="http://127.0.0.1:8022/chat"   # 独立沙盘服务，不碰 8000/8010
@@ -75,8 +76,8 @@ $env:BASE_URL="http://127.0.0.1:8022/chat"   # 独立沙盘服务，不碰 8000/
 
 | 环境 | 跑过并断言 | 失败 | 跳过 |
 | --- | ---: | ---: | --- |
-| 干净环境：无 `pixel-world/dist`、无 `.agents` bundle | **211** | **0** | **3**：`poteto_loading`（bundle 不在）、`procedural_memory_eval`（1 例跳过）、`step8_e2e_browser`（缺 dist，SKIP 行含补救命令） |
-| 完整环境：`.agents` 全 bundle + `pixel-world` junction（dist 已构建）都就位 | **213** | **0** | **1**：`procedural_memory_eval` |
+| 干净环境：无 `pixel-world/dist`、无 `.agents` bundle | **212** | **0** | **3**：`poteto_loading`（bundle 不在）、`procedural_memory_eval`（1 例跳过）、`step8_e2e_browser`（缺 dist，SKIP 行含补救命令） |
+| 完整环境：`.agents` 全 bundle + `pixel-world` junction（dist 已构建）都就位 | **214** | **0** | **1**：`procedural_memory_eval` |
 
 原始 JSON / 日志：本目录 `gates-clean.json`、`gates-clean.log`、`gates-full.json`、`gates-full.log`。
 
@@ -92,14 +93,16 @@ $env:BASE_URL="http://127.0.0.1:8022/chat"   # 独立沙盘服务，不碰 8000/
 改前同口径（干净环境）会多两条红：`step8_e2e_browser`（`/world` FAIL）与
 `gate_tmp_leak`（把 step8 留下的沙盘当泄漏）。改后两条都不再出现。
 
-> 两组读数之间的一次失败尝试：干净环境第一次跑出 210/0/4，多出的跳过是
-> `ui_nav_browser`——我用 `Start-Process` 起的 8022 沙盘服务被回收了，门禁按设计
-> SKIP（连不上就当环境不满足，不判红）。重开服务后同一命令得 211/0/3。这次还顺带
-> 暴露了它的 SKIP 行写死「8000 未启动」，已改为打印 `PAGE_URL` 的实际 origin。
+> 两组读数之间的一次失败尝试（基线 `ad3458e`，当时 214 条）：干净环境第一次跑出
+> 210/0/4，多出的跳过是 `ui_nav_browser`——我用 `Start-Process` 起的 8022 沙盘服务
+> 被回收了，门禁按设计 SKIP（连不上就当环境不满足，不判红）。重开服务后同一命令得
+> 211/0/3。这次还顺带暴露了它的 SKIP 行写死「8000 未启动」，已改为打印 `PAGE_URL`
+> 的实际 origin。rebase 到 `0bac4b9` 后多了 `live_acceptance_guard`，同口径读数为
+> 212/0/3 与 214/0/1（见上表）。
 
-> 另一次中间读数（完整环境、但 `.agents` 只挂了半个 bundle）是 212/1/1，
-> 唯一红为 `poteto_loading: FAIL principle 叶子非空`。那不是回归：该门禁的设计
-> 就是「目录在、文件缺 → 判红，不把装坏了说成没安装」。补全 bundle 后 213/0/1。
+> 另一次中间读数（基线 `ad3458e`，完整环境、但 `.agents` 只挂了半个 bundle）是
+> 212/1/1，唯一红为 `poteto_loading: FAIL principle 叶子非空`。那不是回归：该门禁的
+> 设计就是「目录在、文件缺 → 判红，不把装坏了说成没安装」。补全 bundle 后 213/0/1。
 
 ## 5. 计时型断言盘点（现状）
 

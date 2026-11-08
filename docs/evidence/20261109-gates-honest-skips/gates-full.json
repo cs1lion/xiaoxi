@@ -11,7 +11,7 @@
       "name": "poteto_loading",
       "exit": 0,
       "skipped": false,
-      "seconds": 0.8,
+      "seconds": 1.0,
       "verdict": "PASS"
     },
     {
@@ -25,14 +25,14 @@
       "name": "gate_tmp_leak",
       "exit": 0,
       "skipped": false,
-      "seconds": 103.3,
+      "seconds": 122.4,
       "verdict": "PASS"
     },
     {
       "name": "check_staged_scope",
       "exit": 0,
       "skipped": false,
-      "seconds": 1.7,
+      "seconds": 2.7,
       "verdict": "PASS"
     },
     {
@@ -53,98 +53,98 @@
       "name": "process_trail_probe",
       "exit": 0,
       "skipped": false,
-      "seconds": 1.9,
+      "seconds": 2.2,
       "verdict": "PASS"
     },
     {
       "name": "risk_view",
       "exit": 0,
       "skipped": false,
-      "seconds": 1.0,
+      "seconds": 1.5,
       "verdict": "PASS"
     },
     {
       "name": "pacing_dead_keys",
       "exit": 0,
       "skipped": false,
-      "seconds": 25.2,
+      "seconds": 30.4,
       "verdict": "PASS"
     },
     {
       "name": "fabrication_signal",
       "exit": 0,
       "skipped": false,
-      "seconds": 1.7,
+      "seconds": 2.8,
       "verdict": "PASS"
     },
     {
       "name": "memory_recall_paraphrase",
       "exit": 0,
       "skipped": false,
-      "seconds": 1.8,
+      "seconds": 2.5,
       "verdict": "PASS"
     },
     {
       "name": "doc_drift",
       "exit": 0,
       "skipped": false,
-      "seconds": 0.2,
+      "seconds": 0.3,
       "verdict": "PASS"
     },
     {
       "name": "run_gates_verdict",
       "exit": 0,
       "skipped": false,
-      "seconds": 2.0,
+      "seconds": 3.0,
       "verdict": "PASS"
     },
     {
       "name": "gate_coverage",
       "exit": 0,
       "skipped": false,
-      "seconds": 0.2,
+      "seconds": 0.4,
       "verdict": "PASS"
     },
     {
       "name": "scheduler_health",
       "exit": 0,
       "skipped": false,
-      "seconds": 1.0,
+      "seconds": 2.2,
       "verdict": "PASS"
     },
     {
       "name": "budget_scope",
       "exit": 0,
       "skipped": false,
-      "seconds": 0.2,
+      "seconds": 0.3,
       "verdict": "PASS"
     },
     {
       "name": "backup_restore",
       "exit": 0,
       "skipped": false,
-      "seconds": 0.7,
+      "seconds": 0.9,
       "verdict": "PASS"
     },
     {
       "name": "operation_outbox",
       "exit": 0,
       "skipped": false,
-      "seconds": 1.2,
+      "seconds": 1.3,
       "verdict": "PASS"
     },
     {
       "name": "outbox_crash",
       "exit": 0,
       "skipped": false,
-      "seconds": 2.1,
+      "seconds": 2.5,
       "verdict": "PASS"
     },
     {
       "name": "mood_writer",
       "exit": 0,
       "skipped": false,
-      "seconds": 1.5,
+      "seconds": 1.6,
       "verdict": "PASS"
     },
     {
@@ -158,14 +158,14 @@
       "name": "evals",
       "exit": 0,
       "skipped": false,
-      "seconds": 2.3,
+      "seconds": 2.4,
       "verdict": "PASS"
     },
     {
       "name": "npm",
       "exit": 0,
       "skipped": false,
-      "seconds": 15.5,
+      "seconds": 17.5,
       "verdict": "PASS"
     },
     {
@@ -179,35 +179,35 @@
       "name": "adapter_ext",
       "exit": 0,
       "skipped": false,
-      "seconds": 2.6,
+      "seconds": 2.7,
       "verdict": "PASS"
     },
     {
       "name": "codex_shim",
       "exit": 0,
       "skipped": false,
-      "seconds": 1.0,
+      "seconds": 1.2,
       "verdict": "PASS"
     },
     {
       "name": "claude_shim",
       "exit": 0,
       "skipped": false,
-      "seconds": 1.1,
+      "seconds": 1.5,
       "verdict": "PASS"
     },
     {
       "name": "gateway",
       "exit": 0,
       "skipped": false,
-      "seconds": 0.7,
+      "seconds": 0.9,
       "verdict": "PASS"
     },
     {
       "name": "task_planning",
       "exit": 0,
       "skipped": false,
-      "seconds": 4.7,
+      "seconds": 5.0,
       "verdict": "PASS"
     },
     {
@@ -228,21 +228,21 @@
       "name": "contract_ledger_rules",
       "exit": 0,
       "skipped": false,
-      "seconds": 0.3,
+      "seconds": 0.4,
       "verdict": "PASS"
     },
     {
       "name": "v2_broadcast",
       "exit": 0,
       "skipped": false,
-      "seconds": 1.4,
+      "seconds": 1.6,
       "verdict": "PASS"
     },
     {
       "name": "cross_day",
       "exit": 0,
       "skipped": false,
-      "seconds": 8.7,
+      "seconds": 9.3,
       "verdict": "PASS"
     },
     {
@@ -256,7 +256,7 @@
       "name": "self_evolution",
       "exit": 0,
       "skipped": false,
-      "seconds": 3.1,
+      "seconds": 3.0,
       "verdict": "PASS"
     },
     {
@@ -270,7 +270,7 @@
       "name": "llm_client",
       "exit": 0,
       "skipped": false,
-      "seconds": 4.6,
+      "seconds": 4.7,
       "verdict": "PASS"
     },
     {
@@ -291,35 +291,35 @@
       "name": "config_hot_consumers",
       "exit": 0,
       "skipped": false,
-      "seconds": 2.0,
+      "seconds": 1.9,
       "verdict": "PASS"
     },
     {
       "name": "durable_adapter",
       "exit": 0,
       "skipped": false,
-      "seconds": 5.4,
+      "seconds": 5.5,
       "verdict": "PASS"
     },
     {
       "name": "durable_authorization_ui",
       "exit": 0,
       "skipped": false,
-      "seconds": 4.2,
+      "seconds": 4.4,
       "verdict": "PASS"
     },
     {
       "name": "world_bridge",
       "exit": 0,
       "skipped": false,
-      "seconds": 3.1,
+      "seconds": 2.9,
       "verdict": "PASS"
     },
     {
       "name": "durable_supervisor",
       "exit": 0,
       "skipped": false,
-      "seconds": 8.9,
+      "seconds": 9.2,
       "verdict": "PASS"
     },
     {
@@ -333,42 +333,42 @@
       "name": "durable_recovery",
       "exit": 0,
       "skipped": false,
-      "seconds": 2.9,
+      "seconds": 3.1,
       "verdict": "PASS"
     },
     {
       "name": "durable_revive",
       "exit": 0,
       "skipped": false,
-      "seconds": 12.9,
+      "seconds": 12.8,
       "verdict": "PASS"
     },
     {
       "name": "durable_app_wiring",
       "exit": 0,
       "skipped": false,
-      "seconds": 4.8,
+      "seconds": 4.4,
       "verdict": "PASS"
     },
     {
       "name": "durable_reconcile",
       "exit": 0,
       "skipped": false,
-      "seconds": 0.6,
+      "seconds": 0.7,
       "verdict": "PASS"
     },
     {
       "name": "durable_soak",
       "exit": 0,
       "skipped": false,
-      "seconds": 13.6,
+      "seconds": 12.8,
       "verdict": "PASS"
     },
     {
       "name": "durable_storage",
       "exit": 0,
       "skipped": false,
-      "seconds": 1.6,
+      "seconds": 1.4,
       "verdict": "PASS"
     },
     {
@@ -382,7 +382,7 @@
       "name": "durable_approval_chain",
       "exit": 0,
       "skipped": false,
-      "seconds": 1.4,
+      "seconds": 1.3,
       "verdict": "PASS"
     },
     {
@@ -417,14 +417,14 @@
       "name": "durable_list_files",
       "exit": 0,
       "skipped": false,
-      "seconds": 0.7,
+      "seconds": 0.6,
       "verdict": "PASS"
     },
     {
       "name": "durable_host_tools",
       "exit": 0,
       "skipped": false,
-      "seconds": 0.7,
+      "seconds": 0.8,
       "verdict": "PASS"
     },
     {
@@ -438,7 +438,7 @@
       "name": "durable_profiles",
       "exit": 0,
       "skipped": false,
-      "seconds": 1.1,
+      "seconds": 1.0,
       "verdict": "PASS"
     },
     {
@@ -494,7 +494,7 @@
       "name": "durable_mcp_live",
       "exit": 0,
       "skipped": false,
-      "seconds": 1.0,
+      "seconds": 0.9,
       "verdict": "PASS"
     },
     {
@@ -508,42 +508,42 @@
       "name": "evolution_quality_report",
       "exit": 0,
       "skipped": false,
-      "seconds": 1.5,
+      "seconds": 1.3,
       "verdict": "PASS"
     },
     {
       "name": "acceptance_dispatch",
       "exit": 0,
       "skipped": false,
-      "seconds": 3.9,
+      "seconds": 3.2,
       "verdict": "PASS"
     },
     {
       "name": "activity",
       "exit": 0,
       "skipped": false,
-      "seconds": 1.0,
+      "seconds": 0.8,
       "verdict": "PASS"
     },
     {
       "name": "activity_dialogue",
       "exit": 0,
       "skipped": false,
-      "seconds": 4.8,
+      "seconds": 4.4,
       "verdict": "PASS"
     },
     {
       "name": "activity_integration",
       "exit": 0,
       "skipped": false,
-      "seconds": 4.2,
+      "seconds": 3.6,
       "verdict": "PASS"
     },
     {
       "name": "activity_material_scope",
       "exit": 0,
       "skipped": false,
-      "seconds": 7.7,
+      "seconds": 6.4,
       "verdict": "PASS"
     },
     {
@@ -585,7 +585,7 @@
       "name": "assistant_api",
       "exit": 0,
       "skipped": false,
-      "seconds": 2.7,
+      "seconds": 2.5,
       "verdict": "PASS"
     },
     {
@@ -599,42 +599,42 @@
       "name": "assistant_continuation",
       "exit": 0,
       "skipped": false,
-      "seconds": 7.6,
+      "seconds": 6.9,
       "verdict": "PASS"
     },
     {
       "name": "assistant_store",
       "exit": 0,
       "skipped": false,
-      "seconds": 1.2,
+      "seconds": 1.0,
       "verdict": "PASS"
     },
     {
       "name": "assistant_websocket",
       "exit": 0,
       "skipped": false,
-      "seconds": 6.3,
+      "seconds": 6.0,
       "verdict": "PASS"
     },
     {
       "name": "cli_subproc_adapter",
       "exit": 0,
       "skipped": false,
-      "seconds": 6.1,
+      "seconds": 5.3,
       "verdict": "PASS"
     },
     {
       "name": "companion_integration",
       "exit": 0,
       "skipped": false,
-      "seconds": 3.2,
+      "seconds": 3.0,
       "verdict": "PASS"
     },
     {
       "name": "context_broker",
       "exit": 0,
       "skipped": false,
-      "seconds": 0.2,
+      "seconds": 0.3,
       "verdict": "PASS"
     },
     {
@@ -648,7 +648,7 @@
       "name": "context_budget_integration",
       "exit": 0,
       "skipped": false,
-      "seconds": 9.9,
+      "seconds": 9.4,
       "verdict": "PASS"
     },
     {
@@ -662,14 +662,14 @@
       "name": "durable_shadow",
       "exit": 0,
       "skipped": false,
-      "seconds": 1.6,
+      "seconds": 1.5,
       "verdict": "PASS"
     },
     {
       "name": "editor_discussion_websocket",
       "exit": 0,
       "skipped": false,
-      "seconds": 2.4,
+      "seconds": 2.3,
       "verdict": "PASS"
     },
     {
@@ -690,7 +690,7 @@
       "name": "editor_insights_api",
       "exit": 0,
       "skipped": false,
-      "seconds": 1.3,
+      "seconds": 1.1,
       "verdict": "PASS"
     },
     {
@@ -704,7 +704,7 @@
       "name": "episodic_diary",
       "exit": 0,
       "skipped": false,
-      "seconds": 3.2,
+      "seconds": 3.9,
       "verdict": "PASS"
     },
     {
@@ -725,21 +725,21 @@
       "name": "evolution_soak",
       "exit": 0,
       "skipped": false,
-      "seconds": 1.6,
+      "seconds": 1.8,
       "verdict": "PASS"
     },
     {
       "name": "experience",
       "exit": 0,
       "skipped": false,
-      "seconds": 0.9,
+      "seconds": 1.1,
       "verdict": "PASS"
     },
     {
       "name": "experience_websocket",
       "exit": 0,
       "skipped": false,
-      "seconds": 2.1,
+      "seconds": 2.2,
       "verdict": "PASS"
     },
     {
@@ -774,56 +774,56 @@
       "name": "interpretation",
       "exit": 0,
       "skipped": false,
-      "seconds": 0.8,
+      "seconds": 0.9,
       "verdict": "PASS"
     },
     {
       "name": "judge_three_state",
       "exit": 0,
       "skipped": false,
-      "seconds": 12.8,
+      "seconds": 9.9,
       "verdict": "PASS"
     },
     {
       "name": "memory_api",
       "exit": 0,
       "skipped": false,
-      "seconds": 8.1,
+      "seconds": 3.5,
       "verdict": "PASS"
     },
     {
       "name": "memory_eval",
       "exit": 0,
       "skipped": false,
-      "seconds": 14.9,
+      "seconds": 14.7,
       "verdict": "PASS"
     },
     {
       "name": "memory_evidence",
       "exit": 0,
       "skipped": false,
-      "seconds": 2.8,
+      "seconds": 3.2,
       "verdict": "PASS"
     },
     {
       "name": "memory_extraction_contract",
       "exit": 0,
       "skipped": false,
-      "seconds": 0.5,
+      "seconds": 0.6,
       "verdict": "PASS"
     },
     {
       "name": "memory_orchestrator",
       "exit": 0,
       "skipped": false,
-      "seconds": 2.3,
+      "seconds": 3.0,
       "verdict": "PASS"
     },
     {
       "name": "memory_preference",
       "exit": 0,
       "skipped": false,
-      "seconds": 5.5,
+      "seconds": 5.3,
       "verdict": "PASS"
     },
     {
@@ -837,14 +837,14 @@
       "name": "memory_presentation",
       "exit": 0,
       "skipped": false,
-      "seconds": 0.3,
+      "seconds": 0.4,
       "verdict": "PASS"
     },
     {
       "name": "memory_self_evolution",
       "exit": 0,
       "skipped": false,
-      "seconds": 1.9,
+      "seconds": 2.7,
       "verdict": "PASS"
     },
     {
@@ -858,7 +858,7 @@
       "name": "micro_delivery",
       "exit": 0,
       "skipped": false,
-      "seconds": 2.8,
+      "seconds": 3.1,
       "verdict": "PASS"
     },
     {
@@ -893,56 +893,56 @@
       "name": "note_edit_integration",
       "exit": 0,
       "skipped": false,
-      "seconds": 6.1,
+      "seconds": 5.8,
       "verdict": "PASS"
     },
     {
       "name": "note_edit_websocket",
       "exit": 0,
       "skipped": false,
-      "seconds": 2.2,
+      "seconds": 1.9,
       "verdict": "PASS"
     },
     {
       "name": "note_material_scope",
       "exit": 0,
       "skipped": false,
-      "seconds": 3.0,
+      "seconds": 2.8,
       "verdict": "PASS"
     },
     {
       "name": "note_proposals",
       "exit": 0,
       "skipped": false,
-      "seconds": 1.3,
+      "seconds": 1.2,
       "verdict": "PASS"
     },
     {
       "name": "note_proposals_api",
       "exit": 0,
       "skipped": false,
-      "seconds": 1.5,
+      "seconds": 1.3,
       "verdict": "PASS"
     },
     {
       "name": "note_versions",
       "exit": 0,
       "skipped": false,
-      "seconds": 2.1,
+      "seconds": 1.9,
       "verdict": "PASS"
     },
     {
       "name": "notes",
       "exit": 0,
       "skipped": false,
-      "seconds": 1.1,
+      "seconds": 1.0,
       "verdict": "PASS"
     },
     {
       "name": "practice",
       "exit": 0,
       "skipped": false,
-      "seconds": 0.5,
+      "seconds": 0.4,
       "verdict": "PASS"
     },
     {
@@ -963,63 +963,63 @@
       "name": "procedural_memory_eval_snapshot",
       "exit": 0,
       "skipped": false,
-      "seconds": 6.2,
+      "seconds": 5.9,
       "verdict": "PASS"
     },
     {
       "name": "procedural_memory_induction",
       "exit": 0,
       "skipped": false,
-      "seconds": 6.7,
+      "seconds": 6.0,
       "verdict": "PASS"
     },
     {
       "name": "proposals_integration",
       "exit": 0,
       "skipped": false,
-      "seconds": 3.3,
+      "seconds": 3.0,
       "verdict": "PASS"
     },
     {
       "name": "reading_trial_loop",
       "exit": 0,
       "skipped": false,
-      "seconds": 5.0,
+      "seconds": 4.9,
       "verdict": "PASS"
     },
     {
       "name": "reflect_cycle",
       "exit": 0,
       "skipped": false,
-      "seconds": 1.7,
+      "seconds": 1.6,
       "verdict": "PASS"
     },
     {
       "name": "reply_delivery",
       "exit": 0,
       "skipped": false,
-      "seconds": 0.6,
+      "seconds": 0.5,
       "verdict": "PASS"
     },
     {
       "name": "response_composer",
       "exit": 0,
       "skipped": false,
-      "seconds": 0.3,
+      "seconds": 0.2,
       "verdict": "PASS"
     },
     {
       "name": "response_integration",
       "exit": 0,
       "skipped": false,
-      "seconds": 2.3,
+      "seconds": 1.9,
       "verdict": "PASS"
     },
     {
       "name": "restart_recovery",
       "exit": 0,
       "skipped": false,
-      "seconds": 1.0,
+      "seconds": 1.1,
       "verdict": "PASS"
     },
     {
@@ -1033,14 +1033,14 @@
       "name": "speech_performance",
       "exit": 0,
       "skipped": false,
-      "seconds": 3.9,
+      "seconds": 4.3,
       "verdict": "PASS"
     },
     {
       "name": "speech_performance_route",
       "exit": 0,
       "skipped": false,
-      "seconds": 0.5,
+      "seconds": 0.6,
       "verdict": "PASS"
     },
     {
@@ -1054,98 +1054,98 @@
       "name": "step_stream",
       "exit": 0,
       "skipped": false,
-      "seconds": 0.4,
+      "seconds": 0.5,
       "verdict": "PASS"
     },
     {
       "name": "stream_delivery",
       "exit": 0,
       "skipped": false,
-      "seconds": 2.7,
+      "seconds": 2.9,
       "verdict": "PASS"
     },
     {
       "name": "stream_interpretation",
       "exit": 0,
       "skipped": false,
-      "seconds": 0.9,
+      "seconds": 1.0,
       "verdict": "PASS"
     },
     {
       "name": "thread_continuity",
       "exit": 0,
       "skipped": false,
-      "seconds": 4.9,
+      "seconds": 4.8,
       "verdict": "PASS"
     },
     {
       "name": "thread_history",
       "exit": 0,
       "skipped": false,
-      "seconds": 3.5,
+      "seconds": 3.1,
       "verdict": "PASS"
     },
     {
       "name": "thread_history_api",
       "exit": 0,
       "skipped": false,
-      "seconds": 1.4,
+      "seconds": 1.2,
       "verdict": "PASS"
     },
     {
       "name": "thread_materials",
       "exit": 0,
       "skipped": false,
-      "seconds": 1.5,
+      "seconds": 1.4,
       "verdict": "PASS"
     },
     {
       "name": "thread_materials_api",
       "exit": 0,
       "skipped": false,
-      "seconds": 6.7,
+      "seconds": 7.0,
       "verdict": "PASS"
     },
     {
       "name": "thread_proposals",
       "exit": 0,
       "skipped": false,
-      "seconds": 1.2,
+      "seconds": 1.3,
       "verdict": "PASS"
     },
     {
       "name": "thread_recall",
       "exit": 0,
       "skipped": false,
-      "seconds": 0.4,
+      "seconds": 0.3,
       "verdict": "PASS"
     },
     {
       "name": "threads",
       "exit": 0,
       "skipped": false,
-      "seconds": 5.2,
+      "seconds": 5.1,
       "verdict": "PASS"
     },
     {
       "name": "tts_trim_silence",
       "exit": 0,
       "skipped": false,
-      "seconds": 0.5,
+      "seconds": 0.4,
       "verdict": "PASS"
     },
     {
       "name": "voice_taste",
       "exit": 0,
       "skipped": false,
-      "seconds": 0.9,
+      "seconds": 0.7,
       "verdict": "PASS"
     },
     {
       "name": "voice_turns",
       "exit": 0,
       "skipped": false,
-      "seconds": 3.2,
+      "seconds": 2.9,
       "verdict": "PASS"
     },
     {
@@ -1159,21 +1159,21 @@
       "name": "ws_origin",
       "exit": 0,
       "skipped": false,
-      "seconds": 1.7,
+      "seconds": 1.6,
       "verdict": "PASS"
     },
     {
       "name": "procedural_memory_boundaries",
       "exit": 0,
       "skipped": false,
-      "seconds": 5.8,
+      "seconds": 5.5,
       "verdict": "PASS"
     },
     {
       "name": "procedural_memory_diagnostics",
       "exit": 0,
       "skipped": false,
-      "seconds": 4.3,
+      "seconds": 3.8,
       "verdict": "PASS"
     },
     {
@@ -1187,42 +1187,42 @@
       "name": "procedural_memory_source_projection",
       "exit": 0,
       "skipped": false,
-      "seconds": 0.8,
+      "seconds": 0.7,
       "verdict": "PASS"
     },
     {
       "name": "assistant_ui_contract",
       "exit": 0,
       "skipped": false,
-      "seconds": 1.0,
+      "seconds": 0.8,
       "verdict": "PASS"
     },
     {
       "name": "dsh_worker_shim",
       "exit": 0,
       "skipped": false,
-      "seconds": 7.4,
+      "seconds": 7.0,
       "verdict": "PASS"
     },
     {
       "name": "intent_gate_wiring",
       "exit": 0,
       "skipped": false,
-      "seconds": 2.5,
+      "seconds": 1.8,
       "verdict": "PASS"
     },
     {
       "name": "intent_guard",
       "exit": 0,
       "skipped": false,
-      "seconds": 2.4,
+      "seconds": 1.9,
       "verdict": "PASS"
     },
     {
       "name": "memory_retrieval_gate",
       "exit": 0,
       "skipped": false,
-      "seconds": 2.6,
+      "seconds": 1.9,
       "verdict": "PASS"
     },
     {
@@ -1243,105 +1243,105 @@
       "name": "workbuddy_worker_shim",
       "exit": 0,
       "skipped": false,
-      "seconds": 3.2,
+      "seconds": 2.8,
       "verdict": "PASS"
     },
     {
       "name": "ui_browser",
       "exit": 0,
       "skipped": false,
-      "seconds": 23.0,
+      "seconds": 22.9,
       "verdict": "PASS"
     },
     {
       "name": "ui_nav_browser",
       "exit": 0,
       "skipped": false,
-      "seconds": 15.7,
+      "seconds": 17.4,
       "verdict": "PASS"
     },
     {
       "name": "blocks_browser",
       "exit": 0,
       "skipped": false,
-      "seconds": 10.9,
+      "seconds": 11.2,
       "verdict": "PASS"
     },
     {
       "name": "companion_browser",
       "exit": 0,
       "skipped": false,
-      "seconds": 9.8,
+      "seconds": 13.4,
       "verdict": "PASS"
     },
     {
       "name": "experience_entry_browser",
       "exit": 0,
       "skipped": false,
-      "seconds": 9.5,
+      "seconds": 11.2,
       "verdict": "PASS"
     },
     {
       "name": "voice_browser",
       "exit": 0,
       "skipped": false,
-      "seconds": 34.7,
+      "seconds": 39.2,
       "verdict": "PASS"
     },
     {
       "name": "step8_e2e_browser",
       "exit": 0,
       "skipped": false,
-      "seconds": 9.7,
+      "seconds": 11.5,
       "verdict": "PASS"
     },
     {
       "name": "memory_manage",
       "exit": 0,
       "skipped": false,
-      "seconds": 4.4,
+      "seconds": 4.7,
       "verdict": "PASS"
     },
     {
       "name": "memory_ranking",
       "exit": 0,
       "skipped": false,
-      "seconds": 1.6,
+      "seconds": 2.0,
       "verdict": "PASS"
     },
     {
       "name": "memory_fastloop",
       "exit": 0,
       "skipped": false,
-      "seconds": 4.8,
+      "seconds": 5.0,
       "verdict": "PASS"
     },
     {
       "name": "drill_network",
       "exit": 0,
       "skipped": false,
-      "seconds": 12.2,
+      "seconds": 13.2,
       "verdict": "PASS"
     },
     {
       "name": "drill_badkey",
       "exit": 0,
       "skipped": false,
-      "seconds": 13.0,
+      "seconds": 14.0,
       "verdict": "PASS"
     },
     {
       "name": "drill_ws_reconnect",
       "exit": 0,
       "skipped": false,
-      "seconds": 12.3,
+      "seconds": 14.5,
       "verdict": "PASS"
     },
     {
       "name": "db_sentinel",
       "exit": 0,
       "skipped": false,
-      "seconds": 1.3,
+      "seconds": 1.5,
       "verdict": "PASS"
     },
     {
@@ -1355,7 +1355,7 @@
       "name": "intent_corpus",
       "exit": 0,
       "skipped": false,
-      "seconds": 2.0,
+      "seconds": 2.2,
       "verdict": "PASS"
     },
     {
@@ -1383,49 +1383,49 @@
       "name": "memory_concurrency",
       "exit": 0,
       "skipped": false,
-      "seconds": 2.8,
+      "seconds": 2.9,
       "verdict": "PASS"
     },
     {
       "name": "memory_api_offloop",
       "exit": 0,
       "skipped": false,
-      "seconds": 7.1,
+      "seconds": 8.3,
       "verdict": "PASS"
     },
     {
       "name": "memory_retrieval",
       "exit": 0,
       "skipped": false,
-      "seconds": 2.3,
+      "seconds": 2.5,
       "verdict": "PASS"
     },
     {
       "name": "voice_offloop",
       "exit": 0,
       "skipped": false,
-      "seconds": 1.1,
+      "seconds": 1.2,
       "verdict": "PASS"
     },
     {
       "name": "proactive_offloop",
       "exit": 0,
       "skipped": false,
-      "seconds": 1.7,
+      "seconds": 2.0,
       "verdict": "PASS"
     },
     {
       "name": "verify_package",
       "exit": 0,
       "skipped": false,
-      "seconds": 0.2,
+      "seconds": 0.3,
       "verdict": "PASS"
     },
     {
       "name": "router_writes_offloop",
       "exit": 0,
       "skipped": false,
-      "seconds": 0.6,
+      "seconds": 0.7,
       "verdict": "PASS"
     },
     {
@@ -1446,7 +1446,7 @@
       "name": "evals_report",
       "exit": 0,
       "skipped": false,
-      "seconds": 0.1,
+      "seconds": 0.2,
       "verdict": "PASS"
     },
     {
@@ -1460,7 +1460,7 @@
       "name": "evals_guards",
       "exit": 0,
       "skipped": false,
-      "seconds": 5.1,
+      "seconds": 5.4,
       "verdict": "PASS"
     },
     {
@@ -1474,21 +1474,21 @@
       "name": "measure_intent_corpus",
       "exit": 0,
       "skipped": false,
-      "seconds": 1.7,
+      "seconds": 1.9,
       "verdict": "PASS"
     },
     {
       "name": "memory_retrieval_quality",
       "exit": 0,
       "skipped": false,
-      "seconds": 1.6,
+      "seconds": 1.7,
       "verdict": "PASS"
     },
     {
       "name": "memory_snapshot",
       "exit": 0,
       "skipped": false,
-      "seconds": 0.4,
+      "seconds": 0.5,
       "verdict": "PASS"
     },
     {
@@ -1496,6 +1496,13 @@
       "exit": 0,
       "skipped": false,
       "seconds": 0.2,
+      "verdict": "PASS"
+    },
+    {
+      "name": "live_acceptance_guard",
+      "exit": 0,
+      "skipped": false,
+      "seconds": 15.2,
       "verdict": "PASS"
     }
   ],
