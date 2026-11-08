@@ -23,6 +23,11 @@ plan-118 用差分法实测全部门禁，确认除一次偶然采样外零泄�
 **跳过而非假红**：8000 未起时浏览器门禁会 SKIP 并退 0，那不是泄漏；跑不起来
 （退出码 127 / 命令不存在）也跳过。只在「门禁真的跑了且 tmp/ 净增」时判红。
 
+**缺依赖物不算泄漏**（2026-11-09）：`pixel-world/dist` 这类 gitignore 产物不在时，
+step8_e2e_browser 会自报 SKIP（退 0）且不建沙盘；这里也用 run_gates 的
+`missing_artifact` 提前判掉，直接记 skip、不跑、更不计进差分。此前它 FAIL 后
+按设计留沙盘，棘轮把「没构建」报成「泄漏」，干净机器全量必红。
+
 Run: .venv/Scripts/python.exe -B scripts/test_gate_tmp_leak.py
 """
 from __future__ import annotations
@@ -43,19 +48,20 @@ MAX_GATES = 10          # 抽样上限：跑太多会让本棘轮自己变慢
 PER_GATE_TIMEOUT = 120
 
 
-def _load_gates() -> dict:
+def _load_gates() -> tuple[dict, object]:
+    """复用 run_gates 的 GATES 与依赖物判定，避免两处口径漂移。"""
     spec = importlib.util.spec_from_file_location(
         "run_gates_for_leak_scan", ROOT / "scripts" / "run_gates.py")
     mod = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(mod)
-    return mod.GATES
+    return mod.GATES, mod.missing_artifact
 
 
 def _tmp_count() -> int:
     return len(list(TMP.iterdir()))
 
 
-def _pick_suspects(gates: dict) -> list[tuple[str, list[str]]]:
+def _pick_suspects(gates: dict) -> list[tuple[str, dict]]:
     """挑出最可能漏沙盘的门禁（cmd 或名字命中 sandbox 形态）。"""
     picked = []
     for name, spec in sorted(gates.items()):
@@ -64,12 +70,12 @@ def _pick_suspects(gates: dict) -> list[tuple[str, list[str]]]:
             continue
         joined = " ".join(cmd) + " " + name
         if SANDBOX_PATTERN.search(joined):
-            picked.append((name, cmd))
+            picked.append((name, spec))
     return picked[:MAX_GATES]
 
 
 def main() -> int:
-    gates = _load_gates()
+    gates, missing_artifact = _load_gates()
     suspects = _pick_suspects(gates)
     if not suspects:
         print("[gate_tmp_leak] 没选出抽样门禁，跳过（不是失败）")
@@ -79,7 +85,15 @@ def main() -> int:
     leaked: list[tuple[str, int]] = []
     skipped: list[str] = []
 
-    for name, cmd in suspects:
+    for name, spec in suspects:
+        # 依赖物缺失（如 pixel-world/dist 未构建）：整条门禁这轮不跑，也不计差分。
+        absent = missing_artifact(spec)
+        if absent is not None:
+            _, rel, hint = absent
+            skipped.append(f"{name}(缺 {rel})")
+            print(f"  skip {name}: 缺 {rel}，不建沙盘；补救：{hint}")
+            continue
+        cmd = [str(a) for a in (spec.get("cmd") or [])]
         before = _tmp_count()
         started = time.time()
         try:
@@ -94,10 +108,16 @@ def main() -> int:
             continue
         after = _tmp_count()
         delta = after - before
+        output = ((proc.stdout or b"") + (proc.stderr or b"")).decode("utf-8", "replace")
 
         # 127 = 命令不存在（node 未装等），跳过而非假红。
         if code == 127:
             skipped.append(f"{name}(退出码 127)")
+            continue
+        # 门禁自报 SKIP（退出码 0 + 行首 SKIP）：这轮没验，不把它的临时目录算成泄漏。
+        if code == 0 and re.search(r"^\s*SKIP", output, re.M):
+            skipped.append(f"{name}(自报 SKIP)")
+            print(f"  skip {name}: 自报 SKIP，不计泄漏")
             continue
         if delta > 0:
             leaked.append((name, delta))

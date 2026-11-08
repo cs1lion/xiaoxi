@@ -13,10 +13,23 @@
  */
 import { chromium } from '@playwright/test';
 import { spawn } from 'node:child_process';
-import { rmSync } from 'node:fs';
+import { existsSync, rmSync } from 'node:fs';
 import path from 'node:path';
 
 const root = path.resolve(import.meta.dirname, '..');
+/* pixel-world 已分家，dist/ 是被 .gitignore 排除的构建产物——干净检出里必然没有。
+ * 缺它时 /world 静态挂载点不存在（server/static.py 的 mount_pixel_world 直接跳过），
+ * 于是旧版本只会在最后一段报 `/world 挂载` FAIL，还因为「失败留沙盘」把 tmp/ 留脏，
+ * 连带 gate_tmp_leak 变红。这不是代码坏了，是没构建：显式 SKIP 并说清怎么补。 */
+const WORLD_DIST = path.join(root, 'pixel-world', 'dist', 'index.html');
+if (!existsSync(WORLD_DIST)) {
+  console.log(`SKIP: 缺构建产物 ${path.relative(root, WORLD_DIST).replaceAll('\\', '/')}`);
+  console.log('      这是 gitignore 产物，干净检出 / 新机器上不会有；本门禁的最后一段');
+  console.log('      （/world 挂载 + window.Oracle 就绪）无法验证，故整条跳过而不是判红。');
+  console.log('      补法：cd pixel-world && npm ci && npm run build:world');
+  process.exit(0);
+}
+
 const PORT = Number(process.env.E2E_PORT || 8021);
 const BASE = `http://127.0.0.1:${PORT}`;
 /* 工作台抽屉在聊天页上；`/` 从 2026-10-24 起是像素世界。

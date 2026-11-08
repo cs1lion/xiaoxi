@@ -206,5 +206,65 @@ class RunGatesUnittestSkipTests(unittest.TestCase):
         self.assertEqual(code, 0)
 
 
+class RunGatesArtifactRequirementTests(unittest.TestCase):
+    """不在 git 里的依赖物缺失时必须 SKIP + 说清缺什么，而不是 FAIL（2026-11-09）。
+
+    干净检出里 .venv / node_modules / agent-runtime/node_modules / pixel-world/dist
+    都可能不在。此前缺它们时门禁要么直接 FAIL（ModuleNotFoundError、/world 404），
+    要么静默跑在回退解释器上还报 PASS——「环境没装」被说成「代码坏了」，
+    干净机器跑全量必红。判据：缺依赖物 → exit 0 + 行首 SKIP + 打印缺失路径与
+    补救命令；依赖物在 → 照常跑门禁命令。
+    """
+
+    def _run_spec(self, spec, allow_skip=False):
+        with patch.dict(RG.GATES, {"g": spec}), \
+                patch.object(sys, "argv", ["run_gates", "--only", "g"]
+                             + (["--allow-skip"] if allow_skip else [])):
+            buffer = io.StringIO()
+            with redirect_stdout(buffer):
+                code = RG.main()
+        return code, buffer.getvalue()
+
+    def test_missing_artifact_skips_with_reason_instead_of_failing(self):
+        """依赖物缺失：命令一次都不许执行，verdict=SKIP，理由含路径与补救。"""
+        spec = {"cmd": [str(RG.PY), "-c", "raise SystemExit(9)"],
+                "skip_regex": r"^\s*SKIP", "requires": ["__test_absent__"]}
+        with patch.dict(RG.ARTIFACTS, {"__test_absent__":
+                                       ("tmp/__absent_artifact__/x", "make it")}):
+            code, out = self._run_spec(spec, allow_skip=True)
+        self.assertIn("[SKIP]", out)
+        self.assertIn("__absent_artifact__", out, "必须打印缺的是哪个路径")
+        self.assertIn("make it", out, "必须打印补救命令")
+        self.assertEqual(code, 0, "缺依赖物是环境事实，--allow-skip 下总码应为 0")
+        self.assertNotIn("[FAIL]", out)
+
+    def test_missing_artifact_still_fails_without_allow_skip(self):
+        """跳过即失败的旧口径不变：缺依赖物仍是 SKIP，未 --allow-skip 时总码 1。"""
+        spec = {"cmd": [str(RG.PY), "-c", "raise SystemExit(9)"],
+                "skip_regex": r"^\s*SKIP", "requires": ["__test_absent__"]}
+        with patch.dict(RG.ARTIFACTS, {"__test_absent__":
+                                       ("tmp/__absent_artifact__/x", "make it")}):
+            code, out = self._run_spec(spec)
+        self.assertIn("[SKIP]", out)
+        self.assertEqual(code, 1)
+
+    def test_present_artifact_does_not_change_verdict(self):
+        """依赖物在时机制不许误伤：命令照跑，非零退出仍 FAIL。"""
+        spec = {"cmd": [str(RG.PY), "-c", "raise SystemExit(3)"],
+                "skip_regex": r"^\s*SKIP", "requires": ["__test_present__"]}
+        with patch.dict(RG.ARTIFACTS, {"__test_present__": ("uv.lock", "n/a")}):
+            code, out = self._run_spec(spec, allow_skip=True)
+        self.assertIn("[FAIL]", out)
+        self.assertEqual(code, 1)
+
+    def test_artifact_dependent_gates_declare_their_requirement(self):
+        """关键依赖必须被登记，不许靠人记得手动加。"""
+        self.assertIn("pixel_world_dist", RG.GATES["step8_e2e_browser"]["requires"])
+        self.assertIn("venv", RG.GATES["core"]["requires"])
+        self.assertIn("agent_runtime_node_modules",
+                      RG.GATES["durable_takeover"]["requires"])
+        self.assertIn("node_modules", RG.GATES["ui_browser"]["requires"])
+
+
 if __name__ == "__main__":
     unittest.main()

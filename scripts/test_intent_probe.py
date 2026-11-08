@@ -68,11 +68,23 @@ async def test_answer_shapes() -> None:
 
 async def test_timeout_does_not_block() -> None:
     print("[超时保护：慢模型不能拖住语音轮]")
-    llm = FakeLLM("1", delay=5.0)
-    started = time.monotonic()
-    raw = await bridge.classify_intent("帮我查下文档", llm, timeout_s=0.2)
-    elapsed = time.monotonic() - started
-    check("超时后按时返回（不等到模型答完）", elapsed < 1.0, f"{elapsed:.2f}s")
+    answered = {"done": False}
+
+    class SlowLLM:
+        offline = False
+
+        async def complete(self, messages, **kwargs):
+            await asyncio.sleep(5.0)
+            answered["done"] = True
+            return "1"
+
+    # 判据是「5s 的模型调用有没有走完」，不是「耗时 < 1.0s」：后者是墙钟阈值，
+    # 高负载下会把「确实按时返回」误报成超时（2026-11-09 同类事故）。外层的
+    # wait_for(3.0) 只是防挂死的安全网（0.2s 对 5s，两侧余量都极大），不是测量。
+    raw = await asyncio.wait_for(
+        bridge.classify_intent("帮我查下文档", SlowLLM(), timeout_s=0.2), 3.0)
+    check("超时后真的没等模型答完（5s 的 sleep 被取消）",
+          answered["done"] is False, repr(answered))
     check("超时返回空串（调用方退回正则）", raw == "", repr(raw))
     check("超时后果是 None 而不是 False（不能当成不是一单）",
           bridge.classification_verdict(raw) is None)
@@ -93,18 +105,35 @@ async def test_exception_is_swallowed() -> None:
 
 async def test_parallel_actually_parallel() -> None:
     print("[并行：预判与别的工作同时跑，不是串行]")
-    llm = FakeLLM("1", delay=0.3)
+    windows: list[tuple[str, float, float]] = []
+
+    async def timed(kind: str, delay: float) -> None:
+        opened = time.monotonic()
+        await asyncio.sleep(delay)
+        windows.append((kind, opened, time.monotonic()))
+
+    class WindowedLLM(FakeLLM):
+        async def complete(self, messages, **kwargs):
+            self.calls += 1
+            await timed("probe", self.delay)
+            return self.answer
+
+    llm = WindowedLLM("1", delay=0.3)
 
     async def other_work():
-        await asyncio.sleep(0.3)
+        await timed("other", 0.3)
         return "done"
 
-    started = time.monotonic()
     probe = asyncio.create_task(bridge.classify_intent("帮我整理", llm))
     other = await other_work()
     raw = await probe
-    elapsed = time.monotonic() - started
-    check("总耗时 ≈ 单项而非两项之和", elapsed < 0.5, f"{elapsed:.2f}s（串行会是 0.6s）")
+    # 判据是「两段工作的时间窗口有没有重叠」，不是「总耗时 < 0.5s」：后者只有
+    # 0.3s 对 0.5s 的余量，高负载下会把「确实并行」误报成串行（2026-11-09 同类事故）。
+    # 串行时两窗口首尾相接、重叠为 0；并行时重叠 ≈ 0.3s。
+    probe_window = next(w for w in windows if w[0] == "probe")
+    other_window = next(w for w in windows if w[0] == "other")
+    overlap = min(probe_window[2], other_window[2]) - max(probe_window[1], other_window[1])
+    check("两段工作的时间窗口真的重叠（不是串行）", overlap > 0, f"重叠 {overlap:.3f}s")
     check("两件事都完成", other == "done" and raw.strip() == "1")
 
 
