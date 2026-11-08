@@ -156,7 +156,10 @@
 - **Role 0**：是否把 `memory_usage` 审计行本身纳入删除（现行取舍是保留行只摘索引，改了会丢失"那一轮为什么注入过"的解释力）。
 - **Role 0**：PROTOCOL.md §14.1/§14.2/§18.2 的 `memory:` 命名空间保留还是收窄——收窄命名空间是比扩大清扫更根本的改法。
 - **Role 0**：MEM-OPT-04 的 `/api/memories` 响应结构未在 PROTOCOL.md 登记，加字段是否算新增对外字段需口径确认；任何外露先 `[PROTOCOL_REQUEST]`。
-- **Role 0（如坚持升版）**：MEM-OPT-04 schema v4→v5 与迁移回滚策略；仓库惯例是加列不升 SCHEMA_VERSION。
+- **Role 0（如坚持升版）**：MEM-OPT-04 schema v4→v5 与迁移回滚策略；~~仓库惯例是加列不升 SCHEMA_VERSION~~
+  **（2026-11-09 更正：该惯例已废止——`memories` 行形状变化必须升版，否则旧进程会以
+  `unexpected keyword argument` 500 而不是版本不匹配失败。判据见 `server/memory/store.py`
+  的 `SCHEMA_VERSION` 注释与 `docs/evidence/20261109-memory-schema-guard/`。）**
 - **MEM-OPT-01 测量缺口**：lessons_for/difflib 每轮耗时无实测；"库锁冻结全局事件循环"是推理非实测；跨线程安全只有代码走查无并发回归；验收数字必须是带 HEAD+日期锚的新基线。
 - **MEM-OPT-01 工程风险**：ASR 已占用默认线程池（`asyncio.to_thread`，2026-10-27 由 anyio 切换，commit `cb5646d`），并发多轮装配可能排队在其后。
 - **MEM-OPT-03 校验器风险**：静态门必须 ast 而非正则，且须对现有 12+ 调用点实测全绿再纳入黄金命令，否则第一天假红。

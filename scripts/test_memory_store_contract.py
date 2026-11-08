@@ -113,7 +113,7 @@ class MemoryStoreContracts(unittest.TestCase):
                 shutil.copyfile(original, copied)
                 migrated = MemoryStore(str(copied))
                 try:
-                    self.assertEqual(migrated._query("PRAGMA user_version")[0][0], 4)
+                    self.assertEqual(migrated._query("PRAGMA user_version")[0][0], 5)
                     rows = migrated.list_memories(status=None, limit=20)
                     self.assertEqual({memory.id for memory in rows}, {9, 17})
                     current = migrated.get(17)
@@ -163,14 +163,57 @@ class MemoryStoreContracts(unittest.TestCase):
     def test_future_schema_is_rejected_without_reset(self):
         with tempfile.TemporaryDirectory() as folder:
             path = Path(folder) / "future.db"
-            legacy_database(path, 5)
+            legacy_database(path, 6)
             with self.assertRaisesRegex(RuntimeError, "newer"):
                 MemoryStore(str(path))
             with closing(sqlite3.connect(path)) as db, db:
-                self.assertEqual(db.execute("PRAGMA user_version").fetchone()[0], 5)
+                self.assertEqual(db.execute("PRAGMA user_version").fetchone()[0], 6)
                 self.assertEqual(db.execute("SELECT value FROM memories WHERE id=17").fetchone()[0],
                                  "在甲公司工作")
                 self.assertNotIn("evidence_state", {row[1] for row in db.execute("PRAGMA table_info(memories)")})
+
+    def test_unknown_columns_are_rejected_even_when_version_is_not_newer(self):
+        """0f87efa 的形态：加了列却没升版本，只比 user_version 会漏掉。
+
+        旧代码在这里会走到 Memory(**row) 的 TypeError；正确行为是启动时就报
+        可读的「库比代码新」，并且不改写库。
+        """
+        with tempfile.TemporaryDirectory() as folder:
+            path = Path(folder) / "newer-same-version.db"
+            MemoryStore(str(path)).close()
+            with closing(sqlite3.connect(path)) as db, db:
+                db.execute("ALTER TABLE memories ADD COLUMN fact_valid_from_future REAL")
+            store = None
+            try:
+                with self.assertRaises(RuntimeError) as raised:
+                    store = MemoryStore(str(path))
+            finally:
+                if store is not None:
+                    store.close()
+            message = str(raised.exception)
+            self.assertIn("fact_valid_from_future", message)
+            self.assertIn("newer than this code", message)
+            with closing(sqlite3.connect(path)) as db:
+                self.assertEqual(db.execute("PRAGMA user_version").fetchone()[0], MODULE.SCHEMA_VERSION)
+                self.assertIn("fact_valid_from_future",
+                              {row[1] for row in db.execute("PRAGMA table_info(memories)")})
+
+    def test_running_store_reports_unknown_columns_instead_of_typeerror(self):
+        """库在进程运行期间被更新的代码升级时，首次读取也要给人话。"""
+        with tempfile.TemporaryDirectory() as folder:
+            path = str(Path(folder) / "live.db")
+            store = MemoryStore(path)
+            try:
+                store.upsert(kind="fact", key="fact:live", value="运行中写入")
+                with closing(sqlite3.connect(path)) as db, db:
+                    db.execute("ALTER TABLE memories ADD COLUMN later_field TEXT")
+                with self.assertRaises(RuntimeError) as raised:
+                    store.list_memories(status=None)
+                message = str(raised.exception)
+                self.assertIn("later_field", message)
+                self.assertIn("newer than this code", message)
+            finally:
+                store.close()
 
     def test_v2_copy_migrates_without_guessing_old_preference_labels(self):
         with tempfile.TemporaryDirectory() as folder:
@@ -199,7 +242,7 @@ class MemoryStoreContracts(unittest.TestCase):
                 self.assertEqual((after['identity_slot'], after['preference_target'], after['preference_level'],
                                   after['preference_scope'], after['preference_as_of']), ('','','','',None))
                 self.assertEqual(migrated.write_state(), (3,43))
-                self.assertEqual(migrated._query('PRAGMA user_version')[0][0], 4)
+                self.assertEqual(migrated._query('PRAGMA user_version')[0][0], 5)
             finally:
                 migrated.close()
 
@@ -222,7 +265,7 @@ class MemoryStoreContracts(unittest.TestCase):
                                  (43, "在甲公司工作", "linked", "add", None))
                 older = reopened.add_message("old-session", "user", "新记录")
                 self.assertGreater(older, 43)
-                self.assertEqual(reopened._query("PRAGMA user_version")[0][0], 4)
+                self.assertEqual(reopened._query("PRAGMA user_version")[0][0], 5)
             finally:
                 reopened.close()
 

@@ -7,7 +7,7 @@ import threading
 import time
 import uuid
 from contextlib import contextmanager
-from dataclasses import dataclass, asdict
+from dataclasses import dataclass, asdict, fields
 from pathlib import Path
 from typing import Any, Iterable
 
@@ -24,8 +24,13 @@ KINDS = ("fact", "episode", "todo", "self_state")
 SOURCES = ("stated", "inferred", "uncertain")
 STATUSES = ("active", "superseded", "done", "conflict")
 LESSON_STATUSES = ("active", "retired")
-SCHEMA_VERSION = 4  # Additive tables below keep this: older files gain empty
-# tables on open, so the "newer schema" guard still means a real future schema.
+# Bump this for any change to the `memories` row shape, including an additive
+# column: readers build Memory(**row) from SELECT *, so an unknown column is a
+# hard incompatibility, not a harmless extra. Additive *tables* do not need a
+# bump -- old code never selects them. fact_valid_from / fact_valid_until once
+# shipped without a bump, which is why an older process returned "unexpected
+# keyword argument" 500s instead of a version error.
+SCHEMA_VERSION = 5
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS memories (
@@ -377,6 +382,32 @@ class Memory:
         return exported
 
 
+_MEMORY_FIELDS = frozenset(field.name for field in fields(Memory))
+# Fact valid-time briefly shipped as valid_from/valid_until; those names belong
+# to the preference domain now, so mid-development files are renamed in place.
+_MEMORY_RENAMES = (("valid_from", "fact_valid_from"), ("valid_until", "fact_valid_until"))
+
+
+def _newer_schema_message(columns: Iterable[str], *, database_version: int | None = None) -> str:
+    version = "" if database_version is None else f" (user_version v{database_version})"
+    return (f"memory database schema{version} has columns this code does not know: "
+            f"{', '.join(sorted(columns))}; it is newer than this code "
+            f"(v{SCHEMA_VERSION}). Upgrade the code or restore an older database copy.")
+
+
+def _memory_from_row(row: sqlite3.Row) -> Memory:
+    """Build a Memory, reporting schema skew instead of an opaque **kwargs error.
+
+    A store that was opened before another process upgraded the shared database
+    only notices at read time; this is the first access that must stay readable.
+    """
+    data = dict(row)
+    unknown = data.keys() - _MEMORY_FIELDS
+    if unknown:
+        raise RuntimeError(_newer_schema_message(unknown))
+    return Memory(**data)
+
+
 class MemoryStore:
     def __init__(self, db_path: str | None = None) -> None:
         self.db_path = db_path or settings.db_path
@@ -428,6 +459,13 @@ class MemoryStore:
             existing = int(db.execute("PRAGMA user_version").fetchone()[0])
             if existing > SCHEMA_VERSION:
                 raise RuntimeError(f"memory database schema v{existing} is newer than supported v{SCHEMA_VERSION}")
+            # user_version alone is not enough: a column can land without a bump
+            # (the fact_valid_* incident). Unknown columns mean the file was last
+            # written by newer code, so refuse before ALTERing anything.
+            present = {row["name"] for row in db.execute("PRAGMA table_info(memories)")}
+            unknown = present - _MEMORY_FIELDS - {old for old, _ in _MEMORY_RENAMES}
+            if unknown:
+                raise RuntimeError(_newer_schema_message(unknown, database_version=existing))
             # executescript commits an open transaction; execute each statement instead.
             # Strip whole-line SQL comments first: a semicolon inside prose (we hit
             # "outcome signal; utility ...") would otherwise become a statement
@@ -442,7 +480,7 @@ class MemoryStore:
             # belong to the preference domain (preference_claims.valid_until and the
             # /api/interaction/preferences field), so rename the columns in place.
             # A database written mid-development keeps its rows and gains the prefix.
-            for old, new in (("valid_from", "fact_valid_from"), ("valid_until", "fact_valid_until")):
+            for old, new in _MEMORY_RENAMES:
                 if old in columns and new not in columns:
                     db.execute(f"ALTER TABLE memories RENAME COLUMN {old} TO {new}")
                     columns.discard(old)
@@ -741,12 +779,12 @@ class MemoryStore:
 
     def get(self, memory_id: int) -> Memory | None:
         rows = self._query("SELECT * FROM memories WHERE id = ?", (memory_id,))
-        return Memory(**dict(rows[0])) if rows else None
+        return _memory_from_row(rows[0]) if rows else None
 
     def active_for(self, kind: str, subject: str, key: str, identity_slot: str = "") -> Memory | None:
         rows = self._query("SELECT * FROM memories WHERE kind = ? AND subject = ? AND key = ? AND identity_slot = ? AND status = 'active'",
                            (kind, subject, key.strip().lower(), identity_slot))
-        return Memory(**dict(rows[0])) if rows else None
+        return _memory_from_row(rows[0]) if rows else None
 
     def count_inferences(self, session_id: str) -> int:
         return int(self._query("SELECT COUNT(*) FROM memories WHERE session_id = ? AND source IN ('inferred', 'uncertain')",
@@ -774,13 +812,13 @@ class MemoryStore:
             params.append(subject)
         sql += " ORDER BY updated_at DESC LIMIT ?"
         params.append(limit)
-        return [Memory(**dict(r)) for r in self._query(sql, params)]
+        return [_memory_from_row(r) for r in self._query(sql, params)]
 
     def history_for_key(self, key: str, limit: int = 10) -> list[Memory]:
         rows = self._query(
             "SELECT * FROM memories WHERE key = ? ORDER BY created_at DESC LIMIT ?", (key, limit)
         )
-        return [Memory(**dict(r)) for r in rows]
+        return [_memory_from_row(r) for r in rows]
 
     def retrieval_candidates(self, *, include_done: bool = False) -> list[Memory]:
         """Read one live eligible set for ranking.
@@ -797,7 +835,7 @@ class MemoryStore:
             "OR (status = 'superseded' AND (fact_valid_until IS NOT NULL "
             "OR fact_valid_from IS NOT NULL)) "
             "ORDER BY updated_at DESC, id DESC", statuses)
-        return [Memory(**dict(row)) for row in rows]
+        return [_memory_from_row(row) for row in rows]
 
     def retrieval_ranking_rows(self, *, include_done: bool = False) -> list[RankingRow]:
         """The same candidate set, in the cheap shape ranking actually needs.
@@ -833,7 +871,7 @@ class MemoryStore:
             return {}
         marks = ",".join("?" for _ in wanted)
         rows = self._query(f"SELECT * FROM memories WHERE id IN ({marks})", wanted)
-        return {row["id"]: Memory(**dict(row)) for row in rows}
+        return {row["id"]: _memory_from_row(row) for row in rows}
 
     def delete(self, memory_id: int) -> bool:
         """Hard delete: the row itself, plus the uniqueness slot it occupied."""
@@ -1090,7 +1128,7 @@ class MemoryStore:
             return []
         placeholders = ",".join("?" for _ in wanted)
         rows = self._query(f"SELECT * FROM memories WHERE id IN ({placeholders})", wanted)
-        return [Memory(**dict(row)) for row in rows]
+        return [_memory_from_row(row) for row in rows]
 
     # ---------- procedural lessons ----------
     def add_lesson(self, *, trigger: str, action: str, cues: list[str] | None = None,
