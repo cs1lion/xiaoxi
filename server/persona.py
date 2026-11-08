@@ -126,7 +126,7 @@ def _pacing_block() -> str:
     # order between persona and the dialogue package unconstrained.
     from .dialogue.ambient import config_number
     pacing = pacing_cfg()
-    length, questions, voice = pacing["length"], pacing["questions"], pacing["voice"]
+    length, questions = pacing["length"], pacing["questions"]
     default_length = length.get("default")
     if default_length not in ("short", "medium", "long"):
         default_length = "short"
@@ -143,9 +143,9 @@ def _pacing_block() -> str:
         "  以下情况不要提问：" + "；".join(questions.get("never_ask_when") or []),
         "- 允许认真、允许简短、允许只回一两个字、允许说“这个我不知道”",
         "- 不要每次都以问题结尾",
+        # 打断是前端无条件行为，不是配置开关：始终告诉模型她可以被用户开口打断。
+        "- 你说的话是可打断的，用户开口时立刻停下来听",
     ]
-    if voice.get("barge_in"):
-        lines.append("- 你说的话是可打断的，用户开口时立刻停下来听")
     return "\n".join(lines)
 
 

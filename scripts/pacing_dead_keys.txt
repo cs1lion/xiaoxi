@@ -1,28 +1,15 @@
-# pacing.yaml 死键基线（2026-11-06 实测，HEAD 41734eb）
+# pacing.yaml 死键基线
 #
 # 由 `scripts/test_pacing_dead_keys.py --print-dead` 生成。判据：该键在
 # server/ 与 web/ 的字符串字面量里零出现（AST Constant / JS 引号串）。
 # 这不是许可名单，是「当期水位」：新增的无消费方键若不在此清单里，门禁判红。
 #
-# 为什么不直接删：refuse_* / no_diagnostic_roleplay / persona_safety_priority
-# 是产品安全声明，tone_after_refuse / allow_topics 是语气与话题约定，删掉属
-# 产品决策而非死代码清理。thinking_ms 还被 docs/prompts/Role2_LowLatency_Voice_Stage.md:25,32
-# 称作「权威参数」——文档与代码不一致，保留键、标清现状，比静默删掉更诚实。
+# 2026-11-06（HEAD 41734eb）基线曾登记 15 个键并「保留不删」，理由是它们多为
+# 产品安全声明与语气约定。2026-11-09 改口径：配置里只留会生效的参数——旧 15 个
+# 再加审计新发现的 4 个（auto_longer_when、allow_continue_episode、barge_in、
+# ambient.require_authorization）已删除；安全底线改由 server/persona.py 的
+# SAFETY_BLOCK 硬编码。ambient.respect_typing 因 PROTOCOL §16 已声明该义务而保留，
+# 已在 config/pacing.yaml 就地标注「尚未接线」。
 #
-# 键被真正接上消费方后，门禁会打印 info（不判红），届时从本清单移除即可。
-# 新增键要么接消费方，要么在此登记并写明理由。
-allow
-allow_topics
-can_reopen_previous
-max_utterance_s
-min_utterance_ms
-no_diagnostic_roleplay
-persona_safety_priority
-play_queue_max
-refuse_medical_advice_detail
-refuse_self_harm_support
-refuse_sexual_minors
-reopen_max_per_session
-send_text_before_audio
-thinking_ms
-tone_after_refuse
+# 当前基线故意为空：pacing.yaml 里没有零读取方的键。新增键请先接消费方；
+# 确实要保留就必须在此登记并写明理由。键被接上后本清单对应行应删除。
