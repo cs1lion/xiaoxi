@@ -67,9 +67,53 @@ export function memoryForgetControl(memory) {
 
 /* 为什么非 active 行没有「忘掉」按钮：它们不进检索装配，删它们既无收益，
  * 又会通过整链删除误伤当前生效的记忆。给一句话，别让按钮消失像 bug。
- * 不提「忘掉整条事实」的入口——那个端点（POST /api/memories/forget-key）
- * 没有 UI 按钮，而全局「清空」会删光全部记忆，不该在这里引导。 */
+ * 真要整条删掉时用 POST /api/memories/forget-key（memoryForgetKeyControl），
+ * 它在确认文案里写明「含当前生效的一行」。全局「清空」不该在这里引导。 */
 export function memoryForgetNote(memory) {
   if (!memory || memory.status === "active") return "";
-  return "这条不影响当前生效的记忆，也无需忘掉；要忘掉某条事实，请在它「当前」的那一行点忘掉。";
+  return "这条不影响当前生效的记忆，无需单独删除；要删整条事实用「忘掉整条事实」。";
+}
+
+/* 物理硬删除的确认文案：DELETE /api/memories/{id} 删完整身份链，不可恢复。
+ * UI 必须先把这句话摆出来，用户再点一次「确认删除」。 */
+export const DELETE_IRREVERSIBLE = "删除后不可恢复。";
+
+export function memoryForgetConfirm(memory) {
+  const value = typeof memory?.value === "string" && memory.value.trim()
+    ? memory.value.trim()
+    : "这条记忆";
+  return `删除「${value}」的全部版本？${DELETE_IRREVERSIBLE}`;
+}
+
+/* 「忘掉整条事实」入口：POST /api/memories/forget-key，按 key 删掉所有版本。
+ * active 行已有「忘掉」（同样是整链删除），不再重复给第二个删除按钮；
+ * 历史/待核对行没有「忘掉」，这个入口正好补上，且确认文案会警告会连带
+ * 删掉当前生效的一行。 */
+export function memoryForgetKeyControl(memory) {
+  if (!memory || memory.status === "active") return null;
+  const key = typeof memory.key === "string" ? memory.key.trim() : "";
+  if (!key) return null;
+  return {
+    label: "忘掉整条事实",
+    key,
+    done: "这条事实的全部版本已删除，且不可恢复。",
+  };
+}
+
+export function memoryForgetKeyConfirm(memory) {
+  const key = typeof memory?.key === "string" && memory.key.trim()
+    ? memory.key.trim()
+    : "这条事实";
+  return `删除「${key}」的所有版本（含当前生效的一行）？${DELETE_IRREVERSIBLE}`;
+}
+
+/* 历史时间线（GET /api/memories/history?key=）：只保留渲染需要的字段，
+ * 缺日期就不编日期。 */
+export function memoryHistoryRows(items) {
+  if (!Array.isArray(items)) return [];
+  return items.map((memory) => ({
+    status: typeof memory?.status === "string" ? memory.status : "",
+    value: typeof memory?.value === "string" ? memory.value : "",
+    created: isoDate(memory?.created_at),
+  }));
 }

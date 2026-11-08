@@ -256,6 +256,15 @@
       <div id="opsPending" class="ops-pending" hidden></div>
       <!-- C4：派单确认、工具放行、模型验收建议都收在这里；没有就整块隐藏。 -->
       <section id="opsAuthorizations" class="ops-auth" aria-label="等老板拍板" hidden></section>
+      <h4 class="ops-heading">诊断记录</h4>
+      <p class="ops-note">只读入口：本次会话的原始消息，以及服务端加载的评测场景。不会执行场景、不会改动记忆。</p>
+      <div class="row ops-diag-actions">
+        <button id="opsTranscriptLoad" type="button">载入本次会话记录</button>
+        <button id="opsScenariosLoad" type="button">载入评测场景</button>
+      </div>
+      <p class="hint" id="opsDiagStatus" role="status" aria-live="polite"></p>
+      <div id="opsTranscript" class="ops-list" aria-label="本次会话记录" hidden></div>
+      <div id="opsScenarios" class="ops-list" aria-label="评测场景" hidden></div>
       <h4 class="ops-heading">督办清单</h4>
       <div id="opsCommissions" class="ops-list"></div>
       <h4 class="ops-heading">Agent 战况与 API 观测</h4>

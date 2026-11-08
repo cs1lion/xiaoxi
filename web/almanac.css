@@ -93,6 +93,15 @@ button{cursor:pointer}
 .mem blockquote{margin:4px 0 0;padding-left:10px;border-left:2px solid var(--gold);
   font:12px/1.75 var(--serif);color:var(--ink-2)}
 .mem details p{margin:4px 0 0;font:9.5px var(--mono);color:var(--faint)}
+/* 硬删除二次确认：确认条占满一行，文案先说清不可恢复 */
+.mem .meta .confirm{display:flex;flex-wrap:wrap;align-items:center;gap:4px 8px;
+  flex-basis:100%;margin-top:4px;padding:6px 8px;border-left:2px solid var(--verm);
+  background:rgba(255,251,240,.7);font:10px/1.6 var(--mono);color:var(--verm)}
+.mem .meta .confirm button{min-height:0;padding:2px 6px;font:10.5px var(--sans)}
+.mem .meta .confirm button.danger{color:var(--verm);border:1px solid var(--verm)}
+/* 按 key 对齐的历史版本链；与「显示历史」的整表行不同 */
+.mem-history-row{display:flex;flex-wrap:wrap;gap:4px 8px;align-items:baseline;
+  padding:4px 0;border-top:1px dotted var(--rule-soft);font:10px/1.7 var(--mono);color:var(--muted)}
 .tag{padding:1px 5px;border-radius:1px;background:none;border:1px solid var(--rule-soft);color:var(--muted)}
 .tag.inferred{color:var(--gold-text)}.tag.uncertain{color:var(--verm)}
 .hint{color:var(--muted);font-size:11px;line-height:1.75;margin:7px 0 0}
@@ -491,6 +500,12 @@ summary{cursor:pointer;min-height:30px;font-size:13px;font-weight:600}
 .ops-rubric-evidence{margin:5px 0 0;font:10px var(--mono);color:var(--faint);white-space:pre-wrap}
 .ops-auth{display:grid;gap:9px;margin:0 0 14px}
 .ops-auth .ops-heading{margin:0 0 2px}
+/* 诊断记录：会话 transcript / 评测场景的只读列表 */
+.ops-diag-actions{margin:0 0 8px}
+.ops-diag-row{display:flex;flex-wrap:wrap;gap:6px 9px;align-items:baseline;padding:6px 0;
+  border-bottom:1px dotted var(--rule-soft);font:11px/1.65 var(--sans);color:var(--ink-2);
+  overflow-wrap:anywhere}
+.ops-diag-row .tag{flex:none}
 .ops-auth-card{border:1px solid var(--verm);border-radius:1px;padding:11px 12px;
   background:var(--paper-3)}
 .ops-auth-card[data-kind="approval"]{border-color:var(--verm-deep)}
