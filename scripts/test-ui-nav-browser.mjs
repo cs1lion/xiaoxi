@@ -111,8 +111,11 @@ try {
     await page.goto(PAGE_URL, { timeout: 15000, waitUntil: 'domcontentloaded' });
   } catch (err) {
     if (!OFFLINE && /ERR_CONNECTION_REFUSED|ECONNREFUSED/.test(String(err?.message || err))) {
-      console.log('SKIP: 本地服务 127.0.0.1:8000 未启动（ERR_CONNECTION_REFUSED）。');
-      console.log('      先跑 `\\..venv\\Scripts\\python.exe scripts\\run.py --port 8000` 再运行本脚本。');
+      /* 报 PAGE_URL 的来源，不写死 8000：设了 BASE_URL 却连不上时，说「8000 未启动」
+       * 会把人引到错的地方（2026-11-09 实测：BASE_URL=8022 的服务掉了，日志却怪 8000）。 */
+      console.log(`SKIP: 本地服务 ${new URL(PAGE_URL).origin} 未启动（ERR_CONNECTION_REFUSED）。`);
+      console.log('      先跑 `\\.venv\\Scripts\\python.exe scripts\\run.py --port 8000`，'
+        + '或用 BASE_URL 指向已有服务再运行本脚本。');
       await browser.close();
       process.exit(0);
     }
