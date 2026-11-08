@@ -135,6 +135,17 @@ retrieval:
   # 默认 0.5：事实有效时间越界时折半，排在同题当前事实之后但不消失。
   # 同时管两个方向：上界已过（到去年为止…）与下界未到（从下个月起…）。
   validity_expired_factor: 0.50
+  # ---------- 同义桥接（救援路径，2026-11-08 接入） ----------
+  # 首轮检索零命中且查询非空时，才用词表把查询补上一次共享表层形式再检一次。
+  # 已经命中的查询排序与注入条数完全不变；基础 min_similarity 硬门与 min_score
+  # 两次检索里都原样生效。词表格式 `触发词<TAB>扩展词,扩展词`，见
+  # config/memory_synonyms.tsv。默认 enabled + 空词表 = 与接入前行为完全一致；
+  # 填词后生效，enabled: false 可整体关闭。词表是人工维护的概念表，不是通用
+  # 同义词库，覆盖范围仅限写过的概念；省略/错字/词义推理不在覆盖范围。读数与
+  # 边界见 docs/MEMORY_RECALL_HYBRID_20261108.md §4.3、§5.3。
+  synonym_bridge:
+    enabled: true
+    lexicon_path: config/memory_synonyms.tsv
 
 # ---------- 结果反馈：用下一轮用户反应校准记忆有用度 ----------
 feedback:

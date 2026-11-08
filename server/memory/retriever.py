@@ -5,6 +5,7 @@ import math
 import threading
 import time
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any, Sequence
 
 from ..assistant.context import _text as sanitize_context_text
@@ -14,6 +15,36 @@ from sklearn.feature_extraction.text import TfidfVectorizer
 from ..config import memory_cfg
 from .presentation import present_memory
 from .store import Memory, MemoryStore, RankingRow, store as default_store
+
+# 同义桥词表的默认位置与格式。词表是**配置资源**，不是代码常量：真正生效的
+# 路径由 `retrieval.synonym_bridge.lexicon_path` 决定，这里只是缺省值。
+# 格式：`触发词<TAB>扩展词1,扩展词2`；空文件/缺文件 = 不桥接，等价于改前行为。
+BRIDGE_DEFAULT_PATH = "config/memory_synonyms.tsv"
+REPO_ROOT = Path(__file__).resolve().parents[2]
+
+
+def parse_bridge_lexicon(text: str) -> dict[str, tuple[str, ...]]:
+    """解析同义桥词表。格式错误一律 ValueError，不做「跳过坏行」的猜测。
+
+    运行期由 ``MemoryRetriever._bridge_lexicon`` 兜底为「不桥接」，所以这里的
+    严格性只影响配置维护者，不会把一条坏行变成线上检索故障。
+    """
+    lexicon: dict[str, tuple[str, ...]] = {}
+    for number, raw in enumerate(text.splitlines(), 1):
+        line = raw.strip()
+        if not line or line.startswith("#"):
+            continue
+        parts = line.split("\t")
+        if len(parts) != 2:
+            raise ValueError(f"第 {number} 行应为「触发词<TAB>扩展词,扩展词」：{line[:60]}")
+        trigger = parts[0].strip()
+        terms = tuple(term.strip() for term in parts[1].split(",") if term.strip())
+        if not trigger or not terms:
+            raise ValueError(f"第 {number} 行触发词或扩展词为空：{line[:60]}")
+        if trigger in lexicon:
+            raise ValueError(f"第 {number} 行触发词重复：{trigger}")
+        lexicon[trigger] = terms
+    return lexicon
 
 
 @dataclass(frozen=True)
@@ -51,6 +82,9 @@ class MemoryRetriever:
         self._ids: list[int] = []
         self._matrix = None
         self._vectorizer: TfidfVectorizer | None = None
+        # 词表按 (路径, mtime_ns, 大小) 缓存；改文件即失效，不必重启。
+        self._bridge_cache: tuple[tuple[str, int, int],
+                                  dict[str, tuple[str, ...]]] | None = None
 
     @property
     def cfg(self) -> dict[str, Any]:
@@ -144,6 +178,51 @@ class MemoryRetriever:
         shrunk = (q * observations + 0.5 * prior) / (observations + prior)
         return 1.0 - weight + weight * 2.0 * shrunk
 
+    def _bridge_lexicon(self, cfg: dict[str, Any]) -> dict[str, tuple[str, ...]]:
+        """同义桥词表。关闭、缺文件或格式错误一律退回空表（=改前行为）。
+
+        运行期不因配置问题打断检索：语音快环不能因为一个写错的 TSV 整轮失去
+        记忆。格式校验仍由 ``parse_bridge_lexicon`` 严格完成，维护者写错时会在
+        测试/维护侧暴露；这里的选择是「坏配置 → 不桥接」，不是「坏配置 → 报错」。
+        """
+        section = cfg.get("synonym_bridge")
+        if not isinstance(section, dict) or not section.get("enabled"):
+            return {}
+        raw_path = str(section.get("lexicon_path") or BRIDGE_DEFAULT_PATH)
+        path = Path(raw_path)
+        if not path.is_absolute():
+            path = REPO_ROOT / path
+        try:
+            stat = path.stat()
+        except OSError:
+            return {}
+        stamp = (str(path), stat.st_mtime_ns, stat.st_size)
+        with self._index_lock:
+            if self._bridge_cache is not None and self._bridge_cache[0] == stamp:
+                return self._bridge_cache[1]
+        try:
+            lexicon = parse_bridge_lexicon(path.read_text(encoding="utf-8-sig"))
+        except (OSError, ValueError):
+            lexicon = {}
+        with self._index_lock:
+            self._bridge_cache = (stamp, lexicon)
+        return lexicon
+
+    def _bridge_expansion(self, query: str,
+                          lexicon: dict[str, tuple[str, ...]]) -> str:
+        """查询侧扩展：触发词出现时，追加该概念的扩展词。
+
+        只补共享表面形式，不新增打分项；扩展词已在查询里的不重复追加。
+        """
+        terms: list[str] = []
+        for trigger, expansions in lexicon.items():
+            if trigger not in query:
+                continue
+            for term in expansions:
+                if term not in query and term not in terms:
+                    terms.append(term)
+        return " ".join(terms)
+
     def search(
         self,
         query: str,
@@ -161,10 +240,39 @@ class MemoryRetriever:
         # instant: two separate wall-clock reads let a row be demoted as expired
         # while its delivered note still calls it current (or the reverse).
         now = time.time() if now is None else now
-        # Rank on the cheap projection, then materialise records only for the
-        # survivors. This is an equivalence transform, not an approximation:
-        # every gate below reads only RankingRow fields, so the surviving set
-        # and their scores are identical to ranking full Memory objects.
+        hits = self._search_once(query, cfg=cfg, top_k=top_k, kinds=kinds,
+                                 subject=subject, include_done=include_done, now=now)
+        # 同义桥接是**救援路径**：只在首轮零命中、查询非空时才补一次。这样已经
+        # 工作的查询，排序与注入条数完全不变；词表里没有触发词时直接返回空，
+        # 「本来没有相关记忆」的负向约束照旧生效。基础 min_similarity 硬门在
+        # 两次检索里都原样生效——桥接只改查询的文字，不改门、不改打分。
+        if hits or not query or top_k <= 0:
+            return hits
+        expansion = self._bridge_expansion(query, self._bridge_lexicon(cfg))
+        if not expansion:
+            return hits
+        return self._search_once(f"{query} {expansion}", cfg=cfg, top_k=top_k,
+                                 kinds=kinds, subject=subject,
+                                 include_done=include_done, now=now)
+
+    def _search_once(
+        self,
+        query: str,
+        *,
+        cfg: dict[str, Any],
+        top_k: int,
+        kinds: tuple[str, ...] | None,
+        subject: str | None,
+        include_done: bool,
+        now: float,
+    ) -> list[tuple[Memory, float]]:
+        """单次排序。``search`` 会调用它两次：原查询，以及桥接后的救援查询。
+
+        Rank on the cheap projection, then materialise records only for the
+        survivors. This is an equivalence transform, not an approximation:
+        every gate below reads only RankingRow fields, so the surviving set
+        and their scores are identical to ranking full Memory objects.
+        """
         candidates = self.store.retrieval_ranking_rows(include_done=include_done)
         sims = self._similarity(query, candidates)
         min_similarity = float(cfg.get("min_similarity", 0.08))
