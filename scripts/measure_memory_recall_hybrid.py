@@ -13,10 +13,13 @@
   `触发词<TAB>扩展词` 格式）。只在首轮零命中时补一次，基础硬门不变。
 - ``gate_off``（诊断臂，不是产品提案）：``min_similarity=0``，其余不变，用来区分
   「卡在门」还是「卡在排序」。**不得写回生产配置**。
+- 可选 ``--lexicon PATH``：把现有生产词表直接作为 ``lexicon`` 臂（替代
+  ``bridge_rescue``），用于对同一 32 用例做「现词表 / 新词表」前后对照。
+  此时不生成临时词表；传入的文件就是被测对象，脚本只读不改。
 
 四条硬约束：
-1. **不写真实库**：种子落在 ``MemoryStore(':memory:')``；唯一的写盘是临时目录里的
-   测量词表（用完即删），不产生可提交产物。
+1. **不写真实库**：种子落在 ``MemoryStore(':memory:')``；默认三臂唯一的写盘是临时目录里的
+   测量词表（用完即删），不产生可提交产物；``--lexicon`` 模式完全不写盘。
 2. **不含真实用户对话**：种子/用例/词表全部人工合成。
 3. **不抬高 RECALL_FLOOR**：scripts/test_memory_retrieval_quality.py 保持 0.75；
    本脚本不定义地板线、不判红。
@@ -29,6 +32,7 @@ Run: .venv/Scripts/python.exe -B scripts/measure_memory_recall_hybrid.py
 """
 from __future__ import annotations
 
+import argparse
 import os
 import sys
 import tempfile
@@ -63,6 +67,18 @@ ARMS = (
     ("bridge_rescue", 0.08, True, False),
     ("gate_off", 0.0, False, True),
 )
+
+# --lexicon 模式：第三臂直接读生产词表，臂名固定为 lexicon。
+LEXICON_ARMS = (
+    ("baseline", 0.08, False, False),
+    ("lexicon", 0.08, True, False),
+    ("gate_off", 0.0, False, True),
+)
+
+
+def arms_for(lexicon: Path | None) -> tuple:
+    """有 --lexicon 时用三臂对照，否则保持原实验三臂。"""
+    return LEXICON_ARMS if lexicon is not None else ARMS
 
 
 def load_bridge(seeds: dict[str, str], path: Path = BRIDGE) -> dict[str, list[str]]:
@@ -189,10 +205,23 @@ def run_arm(seeds: dict[str, str], cases: list[list[str]],
 
 
 def measure(seed_path: Path = SEED, cases_path: Path = CASES,
-            bridge_path: Path = BRIDGE) -> dict:
-    """跑完三臂，返回 {arm: 明细}。纯测量：不写报告、不判红。"""
+            bridge_path: Path = BRIDGE, lexicon: Path | None = None) -> dict:
+    """跑完三臂，返回 {arm: 明细}。纯测量：不写报告、不判红。
+
+    ``lexicon`` 非空时，第三臂直接使用该生产词表（不再合成临时表）；
+    词表格式由生产解析器严格校验，坏行当场报错。
+    """
     seeds = dict((parts[0], parts[1]) for _n, parts in base.read_tsv(seed_path, 2))
     cases = [parts for _n, parts in base.read_tsv(cases_path, 4)]
+    if lexicon is not None:
+        lexicon = Path(lexicon)
+        bridge = parse_bridge_lexicon(lexicon.read_text(encoding="utf-8-sig"))
+        return {
+            name: run_arm(seeds, cases, bridge,
+                          min_similarity=min_similarity, use_bridge=use_bridge,
+                          lexicon_path=lexicon if use_bridge else None)
+            for name, min_similarity, use_bridge, _diag in LEXICON_ARMS
+        }
     bridge = load_bridge(seeds, bridge_path)
     with tempfile.TemporaryDirectory(prefix="recall-bridge-") as folder:
         lexicon_path = materialize_lexicon(seeds, bridge, folder)
@@ -217,21 +246,36 @@ def _print_misses(arm: str, result: dict) -> None:
 
 
 def main() -> int:
-    tracks = measure()
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument(
+        "--lexicon", type=Path, default=None,
+        help="生产同义桥词表路径；给出时第三臂名改为 lexicon，且不生成临时词表")
+    args = parser.parse_args()
+    tracks = measure(lexicon=args.lexicon)
+    arms = arms_for(args.lexicon)
 
     print("=== 记忆召回对照实验（同一记忆集合；纯合成语料，非生产基准）===")
-    print(f"种子 {len(base.read_tsv(SEED, 2))} 条 / 用例 "
-          f"{len(base.read_tsv(CASES, 4))} 条 / 概念桥 "
-          f"{len(load_bridge(dict((p[0], p[1]) for _n, p in base.read_tsv(SEED, 2))))} key")
-    print("gate：min_similarity 按臂取值（baseline/bridge_rescue=0.08，"
-          "gate_off=0）；min_score=0（与 0.750 (n=32) 基线同口径）\n")
+    if args.lexicon is not None:
+        lexicon_count = len(parse_bridge_lexicon(
+            Path(args.lexicon).read_text(encoding="utf-8-sig")))
+        print(f"种子 {len(base.read_tsv(SEED, 2))} 条 / 用例 "
+              f"{len(base.read_tsv(CASES, 4))} 条 / 生产词表 {lexicon_count} 条")
+        print(f"词表：{args.lexicon}（只读，不改文件）")
+        print("gate：min_similarity（baseline/lexicon=0.08，gate_off=0）；"
+              "min_score=0（与 0.750 (n=32) 基线同口径）\n")
+    else:
+        print(f"种子 {len(base.read_tsv(SEED, 2))} 条 / 用例 "
+              f"{len(base.read_tsv(CASES, 4))} 条 / 概念桥 "
+              f"{len(load_bridge(dict((p[0], p[1]) for _n, p in base.read_tsv(SEED, 2))))} key")
+        print("gate：min_similarity 按臂取值（baseline/bridge_rescue=0.08，"
+              "gate_off=0）；min_score=0（与 0.750 (n=32) 基线同口径）\n")
 
-    print(f"{'band':<12}" + "".join(f"{arm:>28}" for arm, *_ in ARMS))
+    print(f"{'band':<12}" + "".join(f"{arm:>28}" for arm, *_ in arms))
     print(f"{'':<12}" + "".join(f"{'hit/n  recall  top1  avg#':>28}"
-                                for _arm, *_ in ARMS))
+                                for _arm, *_ in arms))
     for band in BANDS:
         line = f"{band:<12}"
-        for arm, *_ in ARMS:
+        for arm, *_ in arms:
             item = tracks[arm]["bands"][band]
             line += (f"{item['hit']:>3}/{item['n']:<3}"
                      f"{item['recall']:>7.3f}"
@@ -243,24 +287,28 @@ def main() -> int:
         f"{tracks[arm]['totals']['recall']:>7.3f}"
         f"{tracks[arm]['totals']['top1_hit']:>6}"
         f"{tracks[arm]['totals']['avg_retrieved']:>7.3f}        "
-        for arm, *_ in ARMS))
+        for arm, *_ in arms))
 
     print("\n--- 控制组：语料中没有对应主题的 6 条查询（应保持 found=False）---")
-    for arm, *_ in ARMS:
+    for arm, *_ in arms:
         control = tracks[arm]["control"]
         injected = sum(row["found"] for row in control)
         avg = round(sum(row["retrieved"] for row in control) / len(control), 3)
         print(f"{arm:<14} 误命中 {injected}/{len(control)} 条查询，平均注入 {avg} 条")
 
     print("\n--- 救援触发与漏检归因 ---")
-    for arm, *_ in ARMS:
+    for arm, *_ in arms:
         totals = tracks[arm]["totals"]
         print(f"  {arm}：救援触发 {totals['rescued']} 条；漏检 {totals['miss']} 条，"
               f"其中与 key+value 零共享 2-gram {totals['zero_shared_miss']} 条")
         _print_misses(arm, tracks[arm])
 
-    print("\n口径：合成标注集 + 合成概念桥，不得对外陈述检索质量；"
-          "RECALL_FLOOR、config/memory.yaml、config/memory_synonyms.tsv 均未改动。")
+    if args.lexicon is not None:
+        print("\n口径：合成标注集；生产词表只读用于测量，文件内容即被测对象；"
+              "RECALL_FLOOR、config/memory.yaml 未改动。")
+    else:
+        print("\n口径：合成标注集 + 合成概念桥，不得对外陈述检索质量；"
+              "RECALL_FLOOR、config/memory.yaml、config/memory_synonyms.tsv 均未改动。")
     return 0
 
 
