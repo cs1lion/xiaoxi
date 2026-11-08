@@ -102,3 +102,33 @@
 机械核对输出：`literal_calls_hit` 三项均为 `(True, True)`（既在 `frontend_api_calls()` 里，也能匹配到注册路由）；`template_call_substituted True`。没有拼错路径或漏参数。
 
 一处仍与 master 一致的事实：`GET /api/eval/scenarios` 读 `ROOT/eval/scenarios.json`，仓库里没有该文件，因此该入口当前显示空状态；这不是本次接线引入的问题。
+
+## 六、合并预演发现的门禁修复（2026-11-09）
+
+### 6.1 `scripts/test-voice-browser.mjs`
+
+新 DOM 每行多了一个 `details.mem-history`（「查看这条事实的历史版本」），原来按 `details` / `summary` 的笼统断言不再成立：
+
+- 证据展开改为 `locator('summary', { hasText: '查看原话' })`，避开 history 的 summary，消除 strict mode 冲突。
+- 「无原话」断言改为 `details:not(.mem-history)` 计数为 0，并额外断言 `details.mem-history` 为 1；区分「没有证据」和「没有任何 details」。
+- 修正偏好 PATCH 后的同一类断言（`:487`，合并方清单里没列到，实测也会红）。
+- 「忘掉」改成两段：第一次点击后先断言 **该 id 的 DELETE 请求数为 0** 且 `.mem` 行仍在，再点「确认删除」等结果。这样「第一次点击不发删除请求」有了可跑出 pass/fail 的自动化覆盖，而不只是文案断言。
+
+### 6.2 `scripts/test-ui-browser.mjs` 改打独立沙盘
+
+- 默认起 `127.0.0.1:8022`（`UI_PORT` 可覆盖），显式拒绝 8000/8010；不改 `run_gates.py` 的调用命令，不影响其它门禁（各浏览器门禁本来各占一个端口，8022 此前未被占用）。
+- `DB_PATH=<worktree>/tmp/ui-browser-<stamp>/memory.db`、`TEST_SENTINEL=1`，不碰用户的 `data/` 与正在运行的服务；`finally` 里关浏览器、`taskkill /T` 收服务、删临时目录。
+- 解释器优先本 worktree 的 `.venv`，没有则回退主工作树的 venv（与现有 drill 脚本一致）。
+- 新增来源断言：直接 `fetch /static/app.js` 与 `/static/memory-panel.js`，要求分别含 `confirmBeforeDelete` 与「删除后不可恢复」。如果谁再把它指回旧端口，这条会立刻红。
+- 该门禁里原有的「忘掉」点击也补成两段，并断言第一下后记忆仍在。
+
+### 6.3 读数（2026-11-09，分支 `feat/ui-entry-wiring-20261108`）
+
+| 命令 | 读数 |
+| --- | --- |
+| `node web/memory-panel.test.mjs` | 15 passed, 0 failed |
+| `npm test` | 479 passed, 0 failed（EXIT=0） |
+| `node scripts/test-voice-browser.mjs` | EXIT=0，含新增「第一次点击不发 DELETE」断言 |
+| `node scripts/test-ui-browser.mjs` | EXIT=0；沙盘 `http://127.0.0.1:8022`，`DB_PATH=tmp/ui-browser-<stamp>/memory.db`，来源断言通过 |
+
+`ui_browser` 现在验的是本 worktree 的代码：服务由脚本自己 `python -m uvicorn server.app:app --port 8022` 拉起，静态文件来自 `web/`，并额外断言 `app.js`/`memory-panel.js` 含本轮新增代码。8000/8010 与主工作树全程未动。

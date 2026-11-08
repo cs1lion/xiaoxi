@@ -1,13 +1,65 @@
 import { chromium } from '@playwright/test';
 import { mkdir, writeFile } from 'node:fs/promises';
-const browser = await chromium.launch({headless:true});
+import { spawn } from 'node:child_process';
+import { existsSync, rmSync } from 'node:fs';
+import path from 'node:path';
+
+/* 自起独立沙盘服务，验的一定是本 worktree 的 web/：
+ * 默认 8022（UI_PORT 可覆盖），拒绝 8000/8010；DB_PATH + TEST_SENTINEL
+ * 把记忆/线程/台账落到 tmp/ui-browser-<stamp>/，不碰用户正在用的 data/。 */
+const root = path.resolve(import.meta.dirname, '..');
+const PORT = Number(process.env.UI_PORT || 8022);
+if (PORT === 8000 || PORT === 8010) { console.error(`端口 ${PORT} 是用户在用的，拒绝`); process.exit(2); }
+const BASE = `http://127.0.0.1:${PORT}`;
+const localVenv = path.join(root, '.venv', 'Scripts', 'python.exe');
+const PY = process.env.UI_PYTHON
+  || (existsSync(localVenv) ? localVenv : 'D:\\project\\neurosama\\.venv\\Scripts\\python.exe');
+const stamp = Date.now().toString(36);
+const SANDBOX = path.join(root, 'tmp', `ui-browser-${stamp}`);
+const server = spawn(PY, ['-m', 'uvicorn', 'server.app:app',
+  '--host', '127.0.0.1', '--port', String(PORT), '--log-level', 'warning'],
+  { cwd: root, env: {
+    ...process.env,
+    DB_PATH: path.join(SANDBOX, 'memory.db'),
+    TEST_SENTINEL: '1',
+  }, stdio: ['ignore', 'pipe', 'pipe'] });
+let serverErr = '';
+server.stderr.on('data', chunk => { serverErr += String(chunk); });
+async function waitHealth(deadlineMs = 45000) {
+  const deadline = Date.now() + deadlineMs;
+  while (Date.now() < deadline) {
+    try {
+      const response = await fetch(`${BASE}/api/health`);
+      if (response.ok) return true;
+    } catch { /* not up yet */ }
+    await new Promise(resolve => setTimeout(resolve, 400));
+  }
+  return false;
+}
+const killTree = () => new Promise(resolve => {
+  if (server.exitCode !== null) { resolve(); return; }
+  spawn('taskkill', ['/PID', String(server.pid), '/T', '/F'], { stdio: 'ignore' })
+    .on('exit', resolve).on('error', resolve);
+});
+
 const errors=[]; const checks=[];
 const assert=(ok,label)=>{if(!ok) throw new Error(label); checks.push(label);};
 await mkdir('eval/ui',{recursive:true});
+let browser;
 try {
+ if (!(await waitHealth())) throw new Error(`独立沙盘服务未就绪（${BASE}）：${serverErr.slice(-400)}`);
+ // 证明确实打的是本 worktree 的代码，而不是 8000 上的旧前端。
+ const [servedApp, servedPanel] = await Promise.all([
+   fetch(`${BASE}/static/app.js`).then(r => r.text()),
+   fetch(`${BASE}/static/memory-panel.js`).then(r => r.text()),
+ ]);
+ assert(servedApp.includes('confirmBeforeDelete') && servedPanel.includes('删除后不可恢复'),
+   'Sandbox serves this worktree JS (hard-delete confirmation present)');
+ console.log(`sandbox ${BASE} (DB_PATH=${path.join(SANDBOX, 'memory.db')})`);
+ browser=await chromium.launch({headless:true});
  const page=await browser.newPage({viewport:{width:1440,height:1000}});
  page.on('pageerror',error=>errors.push(error.message));
- // The existing process may predate assistant routes; isolate UI from that backend version.
+ // 沙盘服务来自当前代码；偏好/任务列表仍用固定夹具，避免依赖运行环境状态。
  await page.route('**/api/preferences/proactivity', route=>route.fulfill({json:{timezone:'Asia/Shanghai',reminder_enabled:false}}));
  for(const endpoint of ['tasks','reminders','notifications']) await page.route(`**/api/${endpoint}`,route=>route.fulfill({json:{items:[]}}));
  await page.route('**/api/threads', route=>route.fulfill({json:{items:[]}}));
@@ -18,7 +70,7 @@ try {
    socket.onMessage(message=>{if(typeof message==='string') { const value=JSON.parse(message); sent.push(value); if(value.type==='text') { socket.send(JSON.stringify({type:'asr',turn_id:value.turn_id,text:value.text})); socket.send(JSON.stringify({type:'thinking',turn_id:value.turn_id})); socket.send(JSON.stringify({type:'text_delta',turn_id:value.turn_id,delta:'那种心里终于轻了一点的感觉，真好。想聊聊是什么事吗？'})); socket.send(JSON.stringify({type:'done',turn_id:value.turn_id})); } }});
  });
  // 聊天页在 /chat：`/` 从 2026-10-24 起是像素世界（world_entry_response）。
- await page.goto(process.env.BASE_URL || 'http://127.0.0.1:8000/chat');
+ await page.goto(`${BASE}/chat`);
  // The workspace deliberately hides the task tab at boot; attachment proves
  // bootstrap, while later task checks explicitly open its tab.
  await page.locator('.assistant-panel:not([data-interaction-preferences])').waitFor({state:'attached'});
@@ -137,6 +189,10 @@ try {
  // 可见文字。0f87efa 同时引入了这条 aria-label 与「非 active 不渲染忘掉」的闸门，
  // 门禁自那天起红在两处：fixture 缺 status，选择器名也过期。与 :131 的编辑记忆同一写法。
  await page.getByRole('button',{name:'忘掉记忆：测试记忆'}).click();
+ // 物理硬删除要先展开确认条：第一下不发请求，第二下才 DELETE（此处 503）。
+ await page.getByRole('button',{name:'确认删除'}).waitFor();
+ assert(await page.locator('.mem').count()===1,'First click keeps memory until deletion is confirmed');
+ await page.getByRole('button',{name:'确认删除'}).click();
  await page.waitForFunction(()=>document.querySelector('#memoryFeedback').textContent.includes('操作未完成'));
  assert(await page.locator('.mem').count()===1,'Failed deletion keeps memory visible');
  await page.route('**/api/memories',route=>route.fulfill({status:503,json:{}}));
@@ -171,6 +227,10 @@ try {
  assert(visual.discussionBg !== visual.botBg || visual.discussionBorder !== visual.botBorder,
    'editor-discussion-message differs from a normal bot bubble');
  assert(errors.length===0,`No page errors: ${errors.join('; ')}`);
- await writeFile('eval/ui/results.json',JSON.stringify({checks,errors,transport:'Mock WebSocket and assistant preference/list APIs; other existing read-only APIs; no model request',screenshots:['desktop.png','conversation.png','mobile.png','mobile-conversation.png','mobile-preferences.png']},null,2));
+ await writeFile('eval/ui/results.json',JSON.stringify({checks,errors,sandbox:BASE,transport:'Self-hosted sandbox server from this worktree (DB_PATH in tmp/); Mock WebSocket and assistant preference/list APIs; no model request; does not touch 8000/8010',screenshots:['desktop.png','conversation.png','mobile.png','mobile-conversation.png','mobile-preferences.png']},null,2));
  console.log(JSON.stringify({checks,errors},null,2));
-} finally { await browser.close(); }
+} finally {
+ await browser?.close();
+ await killTree();
+ rmSync(SANDBOX,{recursive:true,force:true});
+}

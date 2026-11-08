@@ -413,7 +413,7 @@ try {
   assert.match(await linkedMemory.innerText(), /最喜欢：绿茶/);
   assert.match(await linkedMemory.innerText(), /长期自述/);
   assert.match(await linkedMemory.innerText(), /原话日期 2024-01-01（UTC）/);
-  await linkedMemory.locator('summary').click();
+  await linkedMemory.locator('summary', { hasText: '查看原话' }).click();
   assert.equal(await linkedMemory.locator('blockquote').textContent(), evidenceQuote, 'evidence keeps exact whitespace and HTML-looking text');
   assert.equal(await page.locator('#memList img, #memList script').count(), 0, 'evidence text never creates HTML nodes');
   assert.equal(await page.evaluate(() => window.memoryEvidenceExecuted), undefined, 'evidence text cannot execute script or event handlers');
@@ -434,8 +434,12 @@ try {
   const legacyMemory = page.locator('#memList .mem').filter({ hasText: '旧版保存的记忆' });
   assert.match(await manualMemory.innerText(), /手动保存/);
   assert.match(await legacyMemory.innerText(), /旧记忆，未关联原话/);
-  assert.equal(await manualMemory.locator('details').count(), 0);
-  assert.equal(await legacyMemory.locator('details').count(), 0);
+  /* 有 key 的行现在多一个「查看这条事实的历史版本」details；这里要证明的
+   * 是「没有原话证据」，不是「没有任何 details」，所以按类排除 history。 */
+  assert.equal(await manualMemory.locator('details:not(.mem-history)').count(), 0);
+  assert.equal(await legacyMemory.locator('details:not(.mem-history)').count(), 0);
+  assert.equal(await manualMemory.locator('details.mem-history').count(), 1);
+  assert.equal(await legacyMemory.locator('details.mem-history').count(), 1);
   assert.doesNotMatch(await manualMemory.innerText(), /你说过|有原话证据/);
   assert.doesNotMatch(await legacyMemory.innerText(), /你说过|有原话证据/);
   assert.doesNotMatch(await manualMemory.innerText(), /当时自述|未确认延续至今|原话日期/);
@@ -484,10 +488,18 @@ try {
   assert.doesNotMatch(await correctedPreference.locator('.meta').innerText(), /最喜欢：|长期自述|原话日期/);
   assert.match(await correctedPreference.innerText(), /提供为上下文 3 次（不代表模型引用正确）/);
   assert.doesNotMatch(await correctedPreference.locator('.meta').innerText(), /最喜欢：|长期自述|原话日期|未确认延续至今/);
-  assert.equal(await correctedPreference.locator('details').count(), 0);
+  assert.equal(await correctedPreference.locator('details:not(.mem-history)').count(), 0);
   assert.match(await recentMemory.innerText(), /最近自述/);
   checks.push('manual correction refresh clears derived preference/time labels while retaining the other preference member');
-  await page.locator('#memList .mem').filter({ hasText: '旧版保存的记忆' }).getByRole('button', { name: '忘掉' }).click();
+  const legacyRow = page.locator('#memList .mem').filter({ hasText: '旧版保存的记忆' });
+  await legacyRow.getByRole('button', { name: '忘掉' }).click();
+  /* 物理硬删除的第一下只展开确认条：此时必须还没发 DELETE，行也还在。
+   * 这条断言把「一次点击就删」挡在门外，而不是只检查确认文案存在。 */
+  await legacyRow.getByRole('button', { name: '确认删除' }).waitFor();
+  assert.equal(memoryRequests.filter(r => r.method === 'DELETE' && r.path === '/api/memories/901').length, 0,
+    'first click only reveals confirmation and sends no DELETE');
+  assert.equal(await legacyRow.count(), 1, 'memory stays in the list until confirmation');
+  await legacyRow.getByRole('button', { name: '确认删除' }).click();
   await page.waitForFunction(() => document.querySelector('#memList').textContent.includes('旧版保存的记忆') === false);
   const forget = memoryRequests.findLast(r => r.method === 'DELETE');
   assert.equal(forget.path, '/api/memories/901', 'forgetting uses the original memory ID');
