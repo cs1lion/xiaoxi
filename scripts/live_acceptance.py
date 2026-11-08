@@ -910,17 +910,37 @@ async def run_live(
         }
 
         t0 = time.perf_counter()
-        proc, stdout, stderr = _start_server(root, env, port=port, sandbox=sandbox, log_dir=out_dir)
-        health = _wait_health(base_url, timeout=60)
+        # 可注入点：测试要能确定性地复现「服务起不来」而不依赖本机是否装 uvicorn。
+        start_server = deps.get("start_server") or _start_server
+        wait_health = deps.get("wait_health") or _wait_health
+        health_timeout = float(deps.get("health_timeout", 60.0))
+        start_error = ""
+        try:
+            proc, stdout, stderr = start_server(root, env, port=port, sandbox=sandbox, log_dir=out_dir)
+        except OSError as exc:
+            # 解释器路径不存在、权限不足等：进程根本没起来。归为同一类可读失败，
+            # 不要让它冒成 traceback（CI run 42525956843 的 StopIteration 同源问题）。
+            proc = None
+            stdout = stderr = None
+            start_error = redact(f"{type(exc).__name__}: {exc}", env)
+        health = None if start_error else wait_health(base_url, timeout=health_timeout)
         if not health:
-            assertions = [
-                _assert("沙盘服务在 60s 内健康", False,
-                        f"stderr 尾部：\n{_tail(out_dir / 'server.stderr.log')}"),
+            # 这条断言名必须一眼看出「服务没起来」，且不能冒充 Mock 判定：
+            # 起不来 = 环境/启动失败，既不算通过，也不是「服务是 Mock」。
+            detail_lines = [
+                "沙盘服务没有在期限内通过 /api/health：这一条不是 Mock 判定，也不代表任何检查点通过。",
+                "常见原因：当前解释器缺 uvicorn（CI 需 requirements-ci.txt）、端口被占、启动即报错。",
+                f"进程退出码={proc.poll() if proc is not None else '未启动'}",
             ]
+            if start_error:
+                detail_lines.append(f"启动异常：{start_error}")
+            detail_lines.append(f"stderr 尾部：\n{_tail(out_dir / 'server.stderr.log')}")
             checkpoints.append(_checkpoint(
                 "L0.server", "独立端口沙盘服务", status="fail", started=t0,
-                assertions=assertions,
-                evidence={"health": None, "server": server_info},
+                assertions=[_assert("服务未起来：/api/health 未在期限内可用", False,
+                                    "\n".join(detail_lines))],
+                evidence={"health": None, "server": server_info,
+                          "start_error": start_error or None},
                 repro=server_info["command"] + "，然后 curl /api/health",
             ))
             overall = "fail"
