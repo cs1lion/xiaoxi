@@ -10,12 +10,14 @@
 # 由 test_gate_coverage.py --write 生成；条数与登记数以
 # python scripts/test_gate_coverage.py 的输出为准，不写在这里。
 
-test_evals_guards.py
+# 2026-11-08 P0③：原清单 8 条中 6 条已收编进 GATES；余下 2 条故意保留——
+# 同一类「跳过即失败」的洞，只是被本机现状挡住了：
+#
+# test_eye_calibration_analysis.py：缺 Pillow 时输出 OK (skipped=14)，14 条一条也跑不了；
+# 补它需要 requirements-ci.txt + CI 安装 Pillow，并先确认 14 条能真跑（另开任务）。
+#
+# test_pixel_world.py：世界源码已随 7c13fd4 剥离；仅本机有历史副本时可跑，新 clone 必 SKIP。
+# 脚本仍留在磁盘，需要时手动跑。pixel_world_hosting 保留在 GATES：它用 TestClient 打
+# 生产路由，守「/ 必须是语音陪伴页」，不依赖世界源码。
 test_eye_calibration_analysis.py
-test_intent_parser_e2e.py
-test_measure_intent_corpus.py
-test_memory_retrieval_quality.py
-test_memory_snapshot.py
-test_memory_temporal.py
 test_pixel_world.py
-# 分家后由 pixel-world-engine 仓负责，主仓 CI 跳过（2026-11-05，见 docs/WORLD_SPLIT_20261105.md）

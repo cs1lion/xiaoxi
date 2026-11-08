@@ -50,6 +50,17 @@
 - **非 unittest 壳**：没有 `def test_`，只是被 glob 到的辅助脚本。
 - **他人在途文件**：未提交的新测试，登记它会让别人 checkout 后门禁必红。
 
+**2026-11-08 P0③ 收编进度**：原清单 8 条中 6 条已登记进 `GATES`（不进
+`ALWAYS_REQUIRED`，不抬高 always 档）。余下 2 条都不登记，理由同一类——「跳过即失败」，
+登记它们等于自开一个永不判红的洞：
+
+- `test_eye_calibration_analysis.py`：本机与 CI 都没装 Pillow，脚本输出 `OK (skipped=14)`，
+  14 条一条也跑不了。**补它需要**先建 `requirements-ci.txt` 并在 `.github/workflows/ci.yaml`
+  装 Pillow，再确认 14 条能真跑，另开任务处理。
+- `test_pixel_world.py`：世界源码已随 `7c13fd4` 剥离；仅本机有历史副本时可跑，新 clone 必
+  SKIP。脚本仍留在磁盘，需要时手动跑。`pixel_world_hosting` 保留在 `GATES`——它用
+  TestClient 打生产路由，守「`/` 必须是语音陪伴页」，不依赖世界源码。
+
 要认领其中一个：在 `scripts/run_gates.py` 的 `GATES` 里加一条、从清单删掉、
 再跑 `python scripts/test_gate_coverage.py --write` 对齐。**先确认它已
 `git ls-files` 跟踪**，且在 `TEST_SENTINEL=1` 下真跑真过——后者是
@@ -157,8 +168,9 @@ ALWAYS_REQUIRED。`memory_fastloop` 的判据是墙钟停顿（心跳 + 10ms 阈
 - **评测层与生产的刻意差异（2026-10-25）**：生产在 `server/dialogue/orchestrator.py:1091` 有一层无条件空正文兜底（`if not text.strip(): text = '[base]嗯，我在呢。'`，2026-10-25 起带 `[base]` 前缀），保证用户不听到静音；`scripts/run_evals.py:run_live_turns` **刻意不复刻**那层——评测层测的是「模型能不能稳定产出合规回复」，兜掉就等于掩盖退化。length 截断救援两层是相同的（都降到 minimal 推理、600 token）。所以 `emotion-tag-retention-live` 报出的「空回复」是生产里用户永远看不到的模型裸行为——这是有意为之，不是漏抄。（D2 已把生产兜底文案补上 `[base]`：无标签的兜底句自己就违反「每轮回复以合法 [情绪] 开头」这条不变量。）
 - **缺 [情绪] 标签为何算硬失败（2026-10-25 定级）**：保持硬失败，理由三条。① `AGENTS.md` 把「每轮 Assistant 示例都带合法 [情绪] 标签」列为不可违反的设计约束，它是显式不变量；② 该用例的存在意义就是抓格式漂移，降级为告警等于放任漂移；③ 「性格与事实准确性冲突时准确性优先」管的是**两者冲突时听谁**，不是"persona 可以不达标"——标签是 persona 的最低格式要求，与准确性从不冲突，拿它当降级理由属于误读该约束。检查本身已区分三种失败（空回复带 `finish_reason` / 无标签前缀 / 标签非法），排障可定位到具体轮次与模式。
  - **ASR 字错率（CER）的口径（2026-10-27 落档，R43）**：`evals/checks.py` 的 `char_error_rate(reference, hypothesis)` 是纯函数，只保证「给定参考与假设文本时算得对」——中文按字符不按词（中文无天然词边界，按词算要先分词、引入分词器差异），编辑距离 / 参考长度，上限不封顶。**ASR 的真实字错率至今没有评测，也不打算用合成音频假装测过**：那需要固定音频语料 + 真实 ASR 后端 + 固定测试环境，属 live-only，且 Mock 模式下的 ASR 被 mock 掉、离线量不到（2026-10-25 事故的形状正是「门禁全绿但语音栈整个缺失」）。接 live 时必须同时报**域与条件**（方言 / 口音 / 噪声 / 远场），否则数字不可比——依据见 `docs/EVAL_MECHANISM_RESEARCH.md` §2.9.3。离线契约测试见 `scripts/test_evals_guards.py` 的 `CharErrorRateTests`。
+- **离线可量的产品维度（2026-11-08 P0③ 补两格；不新增门禁）**：`extraction-quality-offline` 用 6 条应留 / 8 条应丢的合成标注候选喂 `parse_extraction`，打印并硬断言 precision=1.0、recall≥0.90（实测 14 候选 / 实留 6 / 丢弃 8，precision 1.000、recall 1.000）；它量的是**模型输出之后**的后处理判据，**不是模型抽取能力**——真模型的抽取精确率/召回率依赖 `LLM_API_KEY` 的 live 语料，未验证。`tts-emotion-routing-offline` 断言七档情绪各有专属 `voice/instruction/rate/pitch/volume` 且 `voice_profile()` 不回落 base（实测 7 档、instruction 去重 7、rate/pitch/volume 组合去重 7）；它量的是**路由**，**不是听感**——「这个情绪听起来像不像」依赖 TTS provider 凭据 + 固定脚本文案 + 人耳/评测集，未验证。两条都 offline、零 Key；合成小样本不作生产基准。
 - **xfail**：`status: xfail` 的用例照常运行并在汇报中列出，但不计入失败（必须写 `reason`）。
-- **offline 用例清单（条目数以 `evals/cases/` 目录实况为准，别信这里的数字）**：`fastloop-nonblocking-offline`（快环不阻塞，事件序断言）、`fewshot-emotion-tag-offline`（few-shot 示例带合法情绪标签）、`hallu-empty-retrieval-offline`（空检索必须注入负向约束）、`hard-delete-offline`（SQLite 物理硬删除含 `integrity_check`）、`lesson-injection-offline`（程序性 lesson 检索）、`tier-assembly-offline`（三档置信度装配顺序）、`barge-in-timeline-offline`（T4，2026-10-25 新增：`barge_in` 打断链必须发 `interrupted`→`playback_stopped`，且打断后旧轮迟到的 `audio`/`text_delta`/`done` 一帧不得逃逸；事件序断言不用墙钟，复用 `test_speech_performance_route.py` 的 in-process AST 提取 harness，纯离线零 Key、不起 uvicorn、不占 8000/8010、只读既有 WS 事件）、`valid-time-history-delivery-offline`（时效性历史投递）、`valid-time-future-delivery-offline`（时效性未来投递：未来界计划带 time_note、措辞不得对整条记录断言非现状）、`persona-negative-emotion-boundary-offline`（persona 必须声明「用户要求停止调侃时立刻停止」的边界；**这是配置层守卫、不是行为验证**——它只证明约束写在 persona 里，真实日志中「用户说别调侃了、Agent 仍继续调侃」的违反样本需 live 跑才能抓，配置层管不住。用例红即表示有人把这条状态从 persona 删掉或改坏了）、`persona-voice-style-offline`（persona 必须自述简短口语语音风格与去文字框化，且状态机取值仍合法——两条都是配置层守卫，不证明模型照做）、`empathy-support-offline`（用户发泄 / 低落时「不追问、不评判、先接住」的 persona 规则必须装配进 prompt；配置层守卫，非行为验证）、`proactive-boundary-offline`（主动发言的授权门 / 冷静期 / 安静模式约束在配置装配中可见；配置层守卫，非行为验证）、`offline-emotion-tags-offline`（2026-11-06：mock 回复池、`examples`、`stage_samples` 每条都带合法 `[情绪]` 标签，且固定台词必须真的解析出标签并从播出文本剥掉；带条数下限棘轮防真空绿，纯离线零 Key）、`proactive-authorization-runtime-offline`（2026-11-07：补 `proactive-boundary-offline` 自承的「非行为验证」缺口——用 AST 抽 `orchestrator.py::_proactivity_allowed` 真实函数体离线执行，枚举 5 组 `(cfg, state)` 断言 `require_authorization` 在运行期确实挡住未授权主动发言，尤其「`default_enabled` 翻 true 也不能绕过授权」；零 Key、不 import server 包）。
+- **offline 用例清单（条目数以 `evals/cases/` 目录实况为准，别信这里的数字）**：`fastloop-nonblocking-offline`（快环不阻塞，事件序断言）、`fewshot-emotion-tag-offline`（few-shot 示例带合法情绪标签）、`hallu-empty-retrieval-offline`（空检索必须注入负向约束）、`hard-delete-offline`（SQLite 物理硬删除含 `integrity_check`）、`lesson-injection-offline`（程序性 lesson 检索）、`tier-assembly-offline`（三档置信度装配顺序）、`barge-in-timeline-offline`（T4，2026-10-25 新增：`barge_in` 打断链必须发 `interrupted`→`playback_stopped`，且打断后旧轮迟到的 `audio`/`text_delta`/`done` 一帧不得逃逸；事件序断言不用墙钟，复用 `test_speech_performance_route.py` 的 in-process AST 提取 harness，纯离线零 Key、不起 uvicorn、不占 8000/8010、只读既有 WS 事件）、`valid-time-history-delivery-offline`（时效性历史投递）、`valid-time-future-delivery-offline`（时效性未来投递：未来界计划带 time_note、措辞不得对整条记录断言非现状）、`persona-negative-emotion-boundary-offline`（persona 必须声明「用户要求停止调侃时立刻停止」的边界；**这是配置层守卫、不是行为验证**——它只证明约束写在 persona 里，真实日志中「用户说别调侃了、Agent 仍继续调侃」的违反样本需 live 跑才能抓，配置层管不住。用例红即表示有人把这条状态从 persona 删掉或改坏了）、`persona-voice-style-offline`（persona 必须自述简短口语语音风格与去文字框化，且状态机取值仍合法——两条都是配置层守卫，不证明模型照做）、`empathy-support-offline`（用户发泄 / 低落时「不追问、不评判、先接住」的 persona 规则必须装配进 prompt；配置层守卫，非行为验证）、`proactive-boundary-offline`（主动发言的授权门 / 冷静期 / 安静模式约束在配置装配中可见；配置层守卫，非行为验证）、`offline-emotion-tags-offline`（2026-11-06：mock 回复池、`examples`、`stage_samples` 每条都带合法 `[情绪]` 标签，且固定台词必须真的解析出标签并从播出文本剥掉；带条数下限棘轮防真空绿，纯离线零 Key）、`proactive-authorization-runtime-offline`（2026-11-07：补 `proactive-boundary-offline` 自承的「非行为验证」缺口——用 AST 抽 `orchestrator.py::_proactivity_allowed` 真实函数体离线执行，枚举 5 组 `(cfg, state)` 断言 `require_authorization` 在运行期确实挡住未授权主动发言，尤其「`default_enabled` 翻 true 也不能绕过授权」；零 Key、不 import server 包）、`extraction-quality-offline`（2026-11-08 P0③：抽取后处理的 precision/recall，合成标注集；非模型抽取能力）、`tts-emotion-routing-offline`（2026-11-08 P0③：七档情绪到 TTS 参数的路由闭合；非听感验证）。
 
   数条数用 `grep -l "^layer: offline" evals/cases/*.yaml | wc -l`，别手写——这条清单的标题数字与条目数都会随新增用例漂移（HEAD 上是「2026-10-25 实况 7 条」且只列 7 个用例，而 2026-10-26 目录实况已有 11 条 offline；2026-11-05 又新增 2 条，一律以上面判据命令为准），原因是每加一条用例只补了条目、忘了改标题。
 
@@ -530,9 +542,9 @@ DSH 在本机默认沙箱拒绝写工作目录；花名册/profile 必须显式�
 > **2026-11-07 口径**：下表行号是 2026-10-26 的取证快照，之后多轮重构已普遍漂移
 > （例如 `_confirm_action` 从 `:579` 到 `:623`、`shutdown` 从 `:1852/:1863` 到 `:1916`）。
 > **函数名与判定结论仍有效，行号请以 `grep -n 'async def <函数名>' server/app.py` 重锚**，
-> 不要把表里的数字当当前坐标。几个当前锚：`_confirm_action` `:623`、
-> `_run_turn` `:874`、`websocket_endpoint` `:1394`、
-> `_start_durable_if_enabled` `:1808`、`shutdown` `:1916`。
+> 不要把表里的数字当当前坐标。几个当前锚：`_confirm_action` `:624`、
+> `_run_turn` `:875`、`websocket_endpoint` `:1442`、
+> `_start_durable_if_enabled` `:1856`、`shutdown` `:1964`。
 > 快照原文保留，不逐个改写——改写反而会把历史取证现场抹掉。
 
 | 位置 | 形态 | 判定 |
@@ -558,7 +570,7 @@ DSH 在本机默认沙箱拒绝写工作目录；花名册/profile 必须显式�
 
 ## 已核实无缺口：eval 用例配置一致性（2026-10-26）
 
-对 `evals/cases/` 全部用例（2026-10-26 取证快照为 16 个：5 live + 11 offline；**2026-11-07 复核当前 23 个：7 live + 16 offline**；当前条数以判据命令 `grep -l "^layer: offline" evals/cases/*.yaml | wc -l` 为准，勿信本文写死的任何数字）做过一轮配置一致性核查，结论：**框架本身已堵住主要静默失效入口，本轮只修了两处文档/配置漂移。**
+对 `evals/cases/` 全部用例（2026-10-26 取证快照为 16 个：5 live + 11 offline；**2026-11-07 复核当前 23 个：7 live + 16 offline**；**2026-11-08 复核当前 25 个：7 live + 18 offline**；当前条数以判据命令 `grep -l "^layer: offline" evals/cases/*.yaml | wc -l` 为准，勿信本文写死的任何数字）做过一轮配置一致性核查，结论：**框架本身已堵住主要静默失效入口，本轮只修了两处文档/配置漂移。**
 
 `scripts/run_evals.py` 的加载器已硬校验六类危险配置，任一出现即 `return 1` 让门禁变红，不会静默放过：
 `runs` 不是正整数（0 或负值让 `passed_runs == runs_n` 变成 `0 == 0` 判 PASS）、`checks` 为空或形状损坏（空列表让 `all([])` 恒真、一条断言都不跑却判 PASS；非 list / 条目缺 type 会在 run_case 崩）、offline 用例用 `target: reply`（offline 路径 replies 恒为 `[]`，负向 check 永不命中）、`pass_rule: min_rate:` 阈值不在 (0,1]（阈值 0 会让 `passed_runs/max(1,n) >= 0` 恒真，断言全红仍判过）、`turns` 为空（一次对话都不发生）、seed 记忆良构不达标（`setup.memories` 条目非 dict、`key`/`value` 空或非字符串、`fact_valid_from/until` 非数值——空 value 令排序检查因 `"" in block` 恒真、`block.find("")==0` 而空转 PASS，缺 key/value 与非数值 fact_valid 令 seed_memories 崩整轮）。这六类的修法历史记在加载器注释里，排查时先读那里。

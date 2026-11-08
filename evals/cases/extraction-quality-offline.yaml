@@ -1,0 +1,17 @@
+id: extraction-quality-offline
+title: 抽取后处理在合成标注集上的精确率 / 召回率（非生产基准）
+layer: offline
+origin: "2026-11-08 P0③：docs/TESTING.md 记录的「抽取质量」空白——离线可量的只有模型输出之后的后处理判据"
+tags: [memory, extraction, quality, offline]
+setup: {}
+turns:
+  - 随便聊聊
+pass_rule: all
+# 分工：test_memory_extraction_contract.py 守规则形状（门禁），本用例量产品维度——
+# 14 条已标注候选（6 应留 / 8 应丢）喂给 parse_extraction，打印 precision / recall
+# 并硬断言 1.0 / >= 0.90。合成小样本，不是生产基准；真模型的抽取质量要 live 语料。
+checks:
+  - target: prompt
+    type: custom
+    value: "evals.checks:extraction_quality_offline"
+status: active
