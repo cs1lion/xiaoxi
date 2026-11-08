@@ -99,6 +99,51 @@ const emitTurn = (payload) => page.evaluate((p) => {
 }, payload);
 const emitRaw = (payload) => page.evaluate((p) => window.__harness.ws.emit(p), payload);
 
+/* 心流挂起是「瞬时状态」：胶囊只在静默窗内存活——最后一次输入起 1.2s
+ * （web/aqi-flow.js:11 AQI_QUIET_MS），到点 scheduleAqiDrain 的 tick 就调
+ * hideAqiHeld：box.hidden = true + replaceChildren()，胶囊连呼吸灯一起消失。
+ * 还有第二个清场者：抽屉停在 ops 视图时 executive.js 每 4s 轮询一次
+ * （POLL_MS，web/executive.js:42、:832-836），renderCommissions 拿到空待办就
+ * 写 pending.hidden = true + replaceChildren()——实测把 hideAqiHeld 改成
+ * 永不熄灭后，用例仍会"绿"，因为这条轮询替它把胶囊擦掉了。两个定时器各自
+ * 独立，胶囊的真实寿命是最先到的那个。
+ *
+ * 2026-11-08 全量门禁在负载下红了两次、症状不同但根因同一个：
+ *   ① Node↔浏览器往返整体越过窗口 → 开始等的时候胶囊已经没了 → 4000ms 超时；
+ *   ② 正好压在边界 → 文案等到了，读呼吸灯那一步落在熄灭之后 → count = 0。
+ * 已在同一份代码上各受控复现一次（把等待起点推迟 1250ms 得到①；把呼吸灯
+ * 断言推迟 1100ms 得到②），上限 4000ms 没动过。所以病根不是「上限太小」，
+ * 而是「拿瞬态当稳定状态断言」——等一个会自己消失的东西，上限调多大都可能错过。
+ *
+ * 修法：把 emit 与「胶囊的全部信号」放进同一个 evaluate，在挂起那一帧原子取样；
+ * 之后要等的只剩终态（卡片出现 / 胶囊熄灭），终态可以给足上限。 */
+const probeHeldTurn = (payload) => page.evaluate((p) => {
+  const ws = window.__harness.ws;
+  ws.emit({ type: "turn_started", turn_id: p.turn_id, source: "text" });
+  ws.emit(p);
+  ws.emit({ type: "done", turn_id: p.turn_id, text: "" });
+  const box = document.getElementById("opsPending");
+  const deck = [...document.querySelectorAll("#holoDeck .aqi-block")];
+  const held = p.blocks[0]?.text || "";
+  return {
+    hidden: box ? box.hidden : true,
+    text: box ? (box.textContent || "") : "",
+    breathe: box ? box.querySelectorAll(".ops-breathe").length : 0,
+    cards: deck.length,
+    renderedHeld: held ? deck.some((el) => (el.textContent || "").includes(held)) : false,
+  };
+}, payload);
+
+/* 等一个会一直成立的终态。失败时把「等的是哪个信号」写进消息：
+ * 只把数字调大而不点名信号，下次红起来还是只能靠猜。 */
+async function waitSignal(label, predicate, timeout = 15000) {
+  try {
+    await page.waitForFunction(predicate, null, { timeout, polling: 100 });
+  } catch (error) {
+    throw new Error(`等待信号超时：${label}（上限 ${timeout}ms）\n  原始错误：${error.message.split("\n")[0]}`);
+  }
+}
+
 await page.goto(origin);
 await page.locator("#status").filter({ hasText: "在线" }).waitFor();
 
@@ -301,64 +346,58 @@ const beforeTyping = await deckCount();
 //    心流防打扰必须认它，否则整句中文打下来卡片照弹不误。
 await page.locator("#textInput").click();
 await page.keyboard.insertText("在改这一段的说法");
-await emitTurn({ type: "aqi_blocks", turn_id: "t-held", layout: "stage_holo", nav: null, gaze: "holo_right",
+const heldByIme = await probeHeldTurn({ type: "aqi_blocks", turn_id: "t-held", layout: "stage_holo", nav: null, gaze: "holo_right",
   blocks: [{ kind: "note_snippet", text: "打字时不该弹出来的卡。", title: "待阅" }] });
-await page.waitForTimeout(120);
-assert.equal(await deckCount(), beforeTyping, "IME 输入（只有 input 事件）也让她安静：不弹卡");
-assert.equal(await page.locator('#holoDeck .aqi-block[data-kind="note_snippet"]').filter({ hasText: "打字时" }).count(),
-  0, "挂起的卡内容没有偷偷渲染");
+assert.equal(heldByIme.hidden, false, "IME 输入（只有 input 事件）也让她安静：胶囊亮起报数");
+assert.match(heldByIme.text, /她递了 1 张卡/, `胶囊报数文案（实际「${heldByIme.text}」）`);
+assert.ok(heldByIme.breathe >= 1, "胶囊带呼吸灯");
+assert.equal(heldByIme.renderedHeld, false, "挂起的卡内容没有偷偷渲染");
+assert.equal(heldByIme.cards, beforeTyping, "挂起期间 Holo-Deck 不增卡");
 
 // ② 停手超过静默窗（1200ms）后按原序补弹，内容一字不改。
 //    注意：Holo-Deck 有 6 张上限，前面几节已经填满，所以只能等"这一张出现"，
-//    不能等总数变多（总数到顶就不再变了）。
-await page.waitForTimeout(1500);
-await page.waitForFunction(
+//    不能等总数变多（总数到顶就不再变了）。等的是终态，给足上限即可。
+await waitSignal("停手超过静默窗后『打字时不该弹出来』那张卡按原序补弹",
   () => [...document.querySelectorAll('#holoDeck .aqi-block[data-kind="note_snippet"]')]
-    .some((el) => (el.textContent || "").includes("打字时不该弹出来")),
-  null, { timeout: 4000 },
-);
+    .some((el) => (el.textContent || "").includes("打字时不该弹出来")));
 assert.match(
   await page.locator('#holoDeck .aqi-block[data-kind="note_snippet"]').filter({ hasText: "打字时" }).locator(".aqi-note-body").textContent(),
   /打字时不该弹出来的卡。/, "停手后补弹，内容原样");
-await page.waitForFunction(() => document.getElementById("opsPending")?.hidden === true, null, { timeout: 4000 });
+await waitSignal("待阅队列清空后胶囊熄灭", () => document.getElementById("opsPending")?.hidden === true);
 
 // ③ 快捷键不算打字：焦点在按钮上按 Escape，不该把安静期续上，卡片照常弹。
 await page.locator("#sendBtn").focus();
 await page.keyboard.press("Escape");
 await emitTurn({ type: "aqi_blocks", turn_id: "t-not-held", layout: "stage_holo", nav: null, gaze: "holo_right",
   blocks: [{ kind: "note_snippet", text: "快捷键之后该弹的卡。", title: "照常" }] });
-await page.waitForFunction(
+await waitSignal("快捷键之后该弹的卡没有被安静期续上（照常弹出）",
   () => [...document.querySelectorAll('#holoDeck .aqi-block[data-kind="note_snippet"]')]
-    .some((el) => (el.textContent || "").includes("快捷键之后")),
-  null, { timeout: 4000 },
-);
+    .some((el) => (el.textContent || "").includes("快捷键之后")));
 pass("心流防打扰：IME 静默 / 停手补弹 / 快捷键不续安静期");
 
-// ④ 回到输入框继续打字，下一张卡重新挂起，胶囊报数（2 张：这一张 + 之后的第二张）。
+// ④ 回到输入框继续打字，下一张卡重新挂起，胶囊报数（1 张：上一张已补弹完）。
 await page.locator("#textInput").click();
 await page.keyboard.type("abc", { delay: 5 });
-await emitTurn({ type: "aqi_blocks", turn_id: "t-held-2", layout: "stage_holo", nav: null, gaze: "holo_right",
+/* 胶囊的存活截止时刻是「最后一次输入 + 1.2s」，而测试自己的每次 Node↔浏览器
+ * 往返都在啃这个窗口。这里用产品自身的写作模式把静默态钉住
+ * （web/aqi-flow.js:26-28：写作宽屏一律安静），让挂起与断言不再取决于往返耗时；
+ * 「input 事件触发安静」这条由本节上面的 IME 用例覆盖，本节验的是胶囊的
+ * 可见性 / 报数文案 / 呼吸灯。解除写作模式后，剩下要等的都是终态。 */
+await page.evaluate(() => document.body.classList.add("is-writing"));
+const heldAgain = await probeHeldTurn({ type: "aqi_blocks", turn_id: "t-held-2", layout: "stage_holo", nav: null, gaze: "holo_right",
   blocks: [{ kind: "note_snippet", text: "第二张该挂起的卡。", title: "待阅二" }] });
-await page.waitForTimeout(120);
-assert.equal(await page.locator('#holoDeck .aqi-block[data-kind="note_snippet"]').filter({ hasText: "第二张" }).count(),
-  0, "重新打字后又开始挂起");
-// executive.js 收到报数后要异步刷新一次才画胶囊：等它，不断言瞬间状态。
-const capsule = page.locator("#opsPending");
-await page.waitForFunction(() => {
-  const box = document.getElementById("opsPending");
-  return box && !box.hidden && /她递了 1 张卡/.test(box.textContent || "");
-}, null, { timeout: 4000 });
-assert.ok((await capsule.locator(".ops-breathe").count()) >= 1, "胶囊带呼吸灯");
-await page.waitForTimeout(1500);
-await page.waitForFunction(
+assert.equal(heldAgain.hidden, false, "重新打字后又开始挂起：胶囊亮起报数");
+assert.match(heldAgain.text, /她递了 1 张卡/, `胶囊报数文案（实际「${heldAgain.text}」）`);
+assert.ok(heldAgain.breathe >= 1, "胶囊带呼吸灯");
+assert.equal(heldAgain.renderedHeld, false, "重新打字后这张卡没有偷跑");
+await page.evaluate(() => document.body.classList.remove("is-writing"));
+await waitSignal("停手超过静默窗后第二张也补弹",
   () => [...document.querySelectorAll('#holoDeck .aqi-block[data-kind="note_snippet"]')]
-    .some((el) => (el.textContent || "").includes("第二张该挂起")),
-  null, { timeout: 4000 },
-);
+    .some((el) => (el.textContent || "").includes("第二张该挂起")));
 assert.match(
   await page.locator('#holoDeck .aqi-block[data-kind="note_snippet"]').filter({ hasText: "第二张" }).locator(".aqi-note-body").textContent(),
   /第二张该挂起的卡。/, "停手后第二张也补弹");
-await page.waitForFunction(() => document.getElementById("opsPending")?.hidden === true, null, { timeout: 4000 });
+await waitSignal("待阅队列清空后胶囊熄灯", () => document.getElementById("opsPending")?.hidden === true);
 pass("心流防打扰：胶囊只报数不催，队列清空后熄灯");
 
 // ---- ⑥ 前端渲染防御：经 mock WS 递原始积木（绕过服务端构造器），blocks.js
