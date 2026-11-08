@@ -16,6 +16,8 @@ from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import eval_procedural_memory_boundaries as target
+import pm_boundary_fixture
+import pm_eval_fixture
 
 
 def citation(event, field):
@@ -63,10 +65,15 @@ def simple_catalog():
     return {'read': read, 'preview': preview, 'failure': failure}
 
 
-# 2026-10-25：整组 SkipTest 改成逐条 skipUnless。本文件只有部分用例需要真实域夹具
-# （见各方法的 skipUnless），其余用内联数据自建、照常真跑——整组跳过会让它们在 CI 里假绿。
+# 2026-10-25：整组 SkipTest 改成逐条 skipUnless。边界夹具由 pm_boundary_fixture
+# 离线合成；它的四条 role 由 load_sources() 与 _check_recipe() 双重校验，合成不触发
+# 具名边界会直接 source_recipe_materialization_failed，不会假绿。快照子进程还需要
+# 共享 cases，所以在计算可用性常量前一起落盘。
 BOUNDARY_CASES = Path(__file__).resolve().parents[1] / 'eval/research/procedural_memory_boundary_cases_v1.json'
-BOUNDARY_CASES_AVAILABLE = BOUNDARY_CASES.is_file()
+BOUNDARY_CASES_AVAILABLE = (
+    pm_eval_fixture.ensure_cases()
+    and pm_boundary_fixture.ensure()
+)
 
 
 class SpecificationTests(unittest.TestCase):

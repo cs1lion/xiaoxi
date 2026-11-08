@@ -23,15 +23,16 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 import eval_procedural_memory as target
 
 
-# 2026-10-25：整组 SkipTest 改成逐条 skipUnless。本文件只有部分用例需要真实域夹具
-# （cases + oracles 两个文件，见各方法的 skipUnless），其余用内联数据自建、照常真跑
-# ——整组跳过会让它们在 CI 里假绿。
+# 2026-10-25：整组 SkipTest 改成逐条 skipUnless。依赖夹具的用例必须 cases 与
+# oracles 同时存在才真跑：只补 cases 会让这里从 skipped 变成 19 errors + 1 failure
+# （load_specs() 要求 oracle id 集合匹配），比诚实跳过更糟。
 EVAL_CASES = Path(__file__).resolve().parents[1] / 'eval/research/procedural_memory_eval_cases.json'
-EVAL_CASES_AVAILABLE = EVAL_CASES.is_file()
+EVAL_ORACLES = Path(__file__).resolve().parents[1] / 'eval/research/procedural_memory_eval_oracles.json'
+EVAL_FIXTURES_AVAILABLE = EVAL_CASES.is_file() and EVAL_ORACLES.is_file()
 
 
 class PlanTests(unittest.TestCase):
-    @unittest.skipUnless(EVAL_CASES_AVAILABLE,
+    @unittest.skipUnless(EVAL_FIXTURES_AVAILABLE,
                          "真实域夹具 eval/research/procedural_memory_eval_cases.json 未提供"
                          "（随 /eval 清理被删、从未入 git）")
     def test_default_plan_does_not_load_domain_or_credentials_or_network(self):
@@ -51,7 +52,7 @@ class PlanTests(unittest.TestCase):
             self.assertEqual(report['budget']['calls_reserved'], 0)
             self.assertNotIn('SECRET_SENTINEL', persisted)
 
-    @unittest.skipUnless(EVAL_CASES_AVAILABLE,
+    @unittest.skipUnless(EVAL_FIXTURES_AVAILABLE,
                          "真实域夹具 eval/research/procedural_memory_eval_cases.json 未提供"
                          "（随 /eval 清理被删、从未入 git）")
     def test_frozen_plan_keeps_every_condition_and_budget(self):
@@ -125,7 +126,7 @@ class PlanTests(unittest.TestCase):
                                           'completion_tokens_details': {'reasoning_tokens': 2}})
 
 
-@unittest.skipUnless(EVAL_CASES_AVAILABLE,
+@unittest.skipUnless(EVAL_FIXTURES_AVAILABLE,
                      "真实域夹具 eval/research/procedural_memory_eval_cases.json 未提供"
                      "（随 /eval 清理被删、从未入 git；还需配套 oracles 文件）；"
                      "PlanTests 里不读夹具的方法不受影响，照常真跑")
@@ -247,7 +248,7 @@ def procedure_candidate(observation_id):
                      'evidence': [{'observation_id': observation_id}]}}
 
 
-@unittest.skipUnless(EVAL_CASES_AVAILABLE,
+@unittest.skipUnless(EVAL_FIXTURES_AVAILABLE,
                      "真实域夹具 eval/research/procedural_memory_eval_cases.json 未提供"
                      "（随 /eval 清理被删、从未入 git；还需配套 oracles 文件）")
 class DomainTests(unittest.TestCase):
@@ -467,7 +468,7 @@ class FakeProvider:
                 'reasoning_content': 'HIDDEN_REASONING_SENTINEL'}
 
 
-@unittest.skipUnless(EVAL_CASES_AVAILABLE,
+@unittest.skipUnless(EVAL_FIXTURES_AVAILABLE,
                      "真实域夹具 eval/research/procedural_memory_eval_cases.json 未提供"
                      "（随 /eval 清理被删、从未入 git；还需配套 oracles 文件）")
 class PipelineTests(unittest.IsolatedAsyncioTestCase):

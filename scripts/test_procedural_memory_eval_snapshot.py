@@ -305,25 +305,49 @@ class SnapshotTests(unittest.TestCase):
         with self.assertRaisesRegex(target.SnapshotError, 'invalid_snapshot_manifest'):
             target.verify_snapshot(self.output)
 
-    def test_source_and_destination_parent_links_are_refused(self):
-        external = self.base / 'external.py'
-        external.write_bytes(b'outside source')
-        member = self.source / target.SOURCE_FILES[0]
-        member.unlink()
+    def _make_directory_link(self, link, target_path):
+        """目录 symlink；Windows 无权限时退回 junction（同为 reparse point）。"""
         try:
-            member.symlink_to(external)
-        except OSError as error:
-            self.skipTest(f'symlink creation unavailable: {error.__class__.__name__}')
-        # 无符号链接权限的 Windows 上 symlink_to 可能不报错、也不建链接，
-        # 只落一个普通空文件——场景没建成，跳过而不是误判产品故障。
-        if not member.is_symlink():
-            self.skipTest('symlink creation degraded to a regular file; escape scenario not built')
-        with self.assertRaisesRegex(target.SnapshotError, 'source_file_unavailable'):
-            target.create_snapshot(self.source, self.output)
-        member.unlink()
-        member.write_bytes(b'restored')
+            link.symlink_to(target_path, target_is_directory=True)
+            if link.exists():
+                return 'symlink'
+            link.unlink(missing_ok=True)
+        except OSError:
+            pass
+        if os.name != 'nt':
+            raise OSError('directory symlink unavailable')
+        completed = subprocess.run(['cmd', '/c', 'mklink', '/J', str(link), str(target_path)],
+                                   capture_output=True, text=True)
+        if completed.returncode != 0 or not link.exists():
+            raise OSError(f'directory junction unavailable: {completed.stdout}{completed.stderr}')
+        return 'junction'
+
+    def _remove_directory_link(self, link):
+        if os.name == 'nt':
+            os.rmdir(link)
+        else:
+            link.unlink()
+
+    def test_source_and_destination_parent_links_are_refused(self):
+        # 文件 symlink 在 Windows 需要 SeCreateSymbolicLinkPrivilege；改成"父目录
+        # 链接"后，目录 junction 无需管理员，且一样是 reparse point——产品必须拒绝。
+        # POSIX 上仍走真实 symlink，断言强度不变。
+        relative = target.SOURCE_FILES[0]
+        parent = Path(relative).parent
+        external = self.base / 'external-scripts'
+        os.rename(self.source / parent, external)
+        link = self.source / parent
+        self._make_directory_link(link, external)
+        self.assertTrue(link.exists())
+        try:
+            with self.assertRaisesRegex(target.SnapshotError, 'source_file_unavailable'):
+                target.create_snapshot(self.source, self.output)
+        finally:
+            self._remove_directory_link(link)
+            os.rename(external, self.source / parent)
+
         link = self.base / 'linked-parent'
-        link.symlink_to(self.base, target_is_directory=True)
+        self._make_directory_link(link, self.base)
         with self.assertRaisesRegex(target.SnapshotError, 'linked_path_refused'):
             target.create_snapshot(self.source, link / 'snapshot')
 

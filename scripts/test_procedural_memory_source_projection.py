@@ -9,13 +9,14 @@ import unittest
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import procedural_memory_source_projection as projection
+import pm_eval_fixture
 
 
 ROOT = Path(__file__).resolve().parents[1]
-# 真实域夹具（随 /eval 清理被删、从未入 git）。只有一条用例需要它，其余 8 条用内联
-# fixture() 自建数据；所以跳过做成逐条 skipUnless，不再是整组 setUpModule 假绿。
+# 共享 3 bundle × 2 recipe 合成夹具（形状由 load_sources()/domain.prepare() 钉死）。
+# 在计算可用性常量之前落盘，供子进程与其它套件读同一份 payload。
 REAL_CASES = ROOT / 'eval/research/procedural_memory_eval_cases.json'
-REAL_CASES_AVAILABLE = REAL_CASES.is_file()
+REAL_CASES_AVAILABLE = pm_eval_fixture.ensure_cases()
 
 
 def note(body, version=1, **extra):
