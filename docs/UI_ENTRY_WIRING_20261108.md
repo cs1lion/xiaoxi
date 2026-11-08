@@ -1,11 +1,12 @@
 # UI 入口接线报告（2026-11-08）
 
-分支：`feat/ui-entry-wiring-20261108`（基于 `master` 的 `4658d0d`，不 push、不合 master）
+分支：`feat/ui-entry-wiring-20261108`（已 rebase 到 `origin/master` 的 `c09e2a7`，不 push、不合 master）
 
 改动提交：
 
-- `517c883` feat(web): 接上记忆硬删除/历史、会话记录与评测场景入口
-- 本报告单独提交（见 `git log --oneline feat/ui-entry-wiring-20261108 -2`）
+- `47c67c1` feat(web): 接上记忆硬删除/历史、会话记录与评测场景入口
+- `0bd9cbf` docs: UI 入口接线报告（记忆删除/历史、会话记录、评测场景）
+- 本段（更新到最新 master 的核对记录）为分支 HEAD 的文档提交
 
 ## 一、先核实：四条缺口的实际情况
 
@@ -70,3 +71,34 @@
 - `node --experimental-default-type=module --check web/app.js`：语法通过。
 
 未做浏览器实测：按要求不重启 8000/8010，而运行中的服务读的是主工作树的 `web/`，不是本分支。静态交互均为原生 `fetch` + DOM，已用纯函数单测覆盖文案与入口判定。
+
+## 五、更新到最新 master 的核对（2026-11-09）
+
+- 基线：`git fetch origin` 后 rebase 到 `origin/master` `c09e2a7`（含 ASR 降级、检索桥接、CI 修复、程序性记忆夹具）。
+- 结果：两笔提交无冲突自动重放，新 SHA `47c67c1` / `0bd9cbf`；未 reset、未覆盖任何已合入内容。
+- master 在 `4658d0d..c09e2a7` 之间没有改动 `web/`、`server/app.py`、`scripts/check_protocol.py`（`git diff --stat` 只命中 `docs/TESTING.md`），所以接线代码无需适配。
+
+重跑读数（同一 worktree、同一命令）：
+
+| 命令 | 读数 |
+| --- | --- |
+| `node web/memory-panel.test.mjs` | 15 passed, 0 failed |
+| `npm test` | 各子套件 TAP 合计 479 passed, 0 failed（EXIT=0） |
+| `python scripts/check_protocol.py` | PASS；122 条路由，其中 `/api` 路由 93 条 |
+| `python scripts/test_core.py` | 134 passed, 0 failed |
+| `python scripts/run_evals.py` | 18 passed, 0 failed, 0 xfail（离线层，live 7 条按设计跳过） |
+
+### 新增前端调用 × 路由注册核对
+
+`check_protocol.py` 的第 5 类检查只核对 `/api` 字面量，含 `${` 的模板串会直接放过（见 `scripts/check_protocol.py:17` 与 `:416-418`）。所以四条调用分两种方式核对：
+
+| 前端调用 | 核对方式 | 结果 |
+| --- | --- | --- |
+| `POST /api/memories/forget-key`（body `{key}`） | 字面量，进第 5 类检查 | 命中 `server/app.py:358`，`payload.get("key")` 一致 |
+| `GET /api/memories/history?key=` | 字面量，进第 5 类检查 | 命中 `server/app.py:353`，`key` 必填 query 一致 |
+| `GET /api/eval/scenarios` | 字面量，进第 5 类检查 | 命中 `server/app.py:1744` |
+| `GET /api/session/${id}/transcript?limit=100` | 模板串被检查器跳过，按真实路径手工代入核对 | `/api/session/SAMPLE_SESSION_ID/transcript` 与 `server/app.py:395` 的 `/api/session/{session_id}/transcript` 匹配；`limit` 是 `int = 100` 且服务端夹在 1..200 |
+
+机械核对输出：`literal_calls_hit` 三项均为 `(True, True)`（既在 `frontend_api_calls()` 里，也能匹配到注册路由）；`template_call_substituted True`。没有拼错路径或漏参数。
+
+一处仍与 master 一致的事实：`GET /api/eval/scenarios` 读 `ROOT/eval/scenarios.json`，仓库里没有该文件，因此该入口当前显示空状态；这不是本次接线引入的问题。
