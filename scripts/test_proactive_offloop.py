@@ -86,8 +86,7 @@ class FakeLLM:
 def proactivity_cfg(**flags: bool) -> dict:
     base = {"default_enabled": True, "min_interval_seconds": 0,
             "only_when_user_recently_idle_seconds": 0, "max_per_day": 3,
-            "allow_remind_todo": flags.get("todo", False),
-            "allow_continue_episode": flags.get("episode", False)}
+            "allow_remind_todo": flags.get("todo", False)}
     return {"proactivity": base}
 
 
@@ -114,7 +113,7 @@ def drive_proactive_turn(orch, spy: ThreadSpyRetriever, llm_reply: str):
                                     "〔记忆块〕")[1])
     O.llm = FakeLLM(llm_reply)
     O.store_message = fake_store_message
-    orch.pacing = proactivity_cfg(todo=True, episode=True)
+    orch.pacing = proactivity_cfg(todo=True)
     orch.state["proactivity_enabled"] = True
     orch.state["proactive_suppressed_until"] = 0.0
     orch.state["last_proactive_at"] = 0.0
@@ -160,7 +159,7 @@ def main() -> int:
                                 context_for=lambda q: "")
     O.llm = FakeLLM("[base]不该被调用")
     O.store_message = lambda *a, **k: 1
-    orch.pacing = proactivity_cfg(todo=False, episode=False)
+    orch.pacing = proactivity_cfg(todo=False)
     orch.state.update({"proactivity_enabled": True, "proactive_suppressed_until": 0.0,
                        "last_proactive_at": 0.0, "proactive_count_today": 0})
 

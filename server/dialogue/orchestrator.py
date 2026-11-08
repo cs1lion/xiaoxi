@@ -462,7 +462,6 @@ class Orchestrator:
             "last_ambient_at": 0.0,
             "ambient_seq": 0,
             "day_stamp": time.strftime("%Y-%m-%d"),
-            "recent_reopens": 0,
         }
 
     @property
@@ -1398,9 +1397,9 @@ class Orchestrator:
             return None
         if self.state["proactive_count_today"] >= int(_pacing_number(cfg.get("max_per_day"), 3.0)):
             return None
-        # 许可位先判再检索：flag 全关时连检索都不必起（原顺序是先查后判，
+        # 许可位先判再检索：flag 关时连检索都不必起（原顺序是先查后判，
         # 白付一次全库 ranking 读；语义不变——flag 关时本来就返回 None）。
-        if not any(cfg.get(flag, False) for flag in ("allow_remind_todo", "allow_continue_episode")):
+        if not cfg.get("allow_remind_todo", False):
             return None
 
         # 第二十批（#31 残留，2026-10-31 评审实证）：这两次读原先裸跑在事件

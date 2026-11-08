@@ -3,20 +3,22 @@
 
 **为什么需要它**：2026-11-06 实测 `config/pacing.yaml` 有一批键在
 `server/` / `web/` 里零读取方，其中 `thinking_ms` 还被
-`docs/prompts/Role2_LowLatency_Voice_Stage.md:25,32` 称作「权威参数」——文档与
-代码不一致。既有 `scripts/audit_config_keys.py:28-39` 只扫 `memory.yaml`，
+`docs/prompts/Role2_LowLatency_Voice_Stage.md` 称作「权威参数」——文档与
+代码不一致。既有 `scripts/audit_config_keys.py` 只扫 `memory.yaml`，
 靠 `*_DEFAULTS` 白名单常量判定，而 `pacing_cfg()` 直接 `_load_yaml`，没有
 defaults 常量，框架套不上。
 
-**口径（为什么不直接删键）**：这批键里有 `refuse_sexual_minors` /
-`refuse_self_harm_support` 等安全声明，以及产品侧的语气/话题约定，删掉是产品
-决策而非死代码清理。按 `correct` 的优先级，正确解法是把老毛病变成 CI 闸门：
-既有死键登记进 `scripts/pacing_dead_keys.txt` 作基线，**新增**死键即红；
-键被真正接上（从 dead 里消失）只告警，不判红。
+**口径（2026-11-09 起）**：配置里只放会生效的参数。2026-11-06 的 15 个死键
+与审计新发现的 4 个（`auto_longer_when`、`allow_continue_episode`、
+`barge_in`、`ambient.require_authorization`）已删除，基线清空；安全底线由
+`server/persona.py` 的 `SAFETY_BLOCK` 硬编码。`ambient.respect_typing` 因
+PROTOCOL §16 已声明而保留，但在 `config/pacing.yaml` 就地标注「尚未接线」。
+**新增**死键即红；键不再被读只会在基线里留下 info，不判红。
 
 **消费方定义**：只扫 `server/` 与 `web/` 的字符串字面量。不扫 `scripts/`——
 测试/门禁脚本里提到键名只是断言，不构成消费；把算进去只会让棘轮漏报。
 同理用 AST `Constant(str)` 而非纯文本包含，避免注释里的词被当成读取。
+标量 list 的键名也是叶键（曾经漏掉 `auto_longer_when`，现已覆盖）。
 
 **自检内置**：默认先跑 4 条沙盘断言（有效消费不算死键 / 基线内不红 /
 新增死键判红 / 抹掉基线判红），再跑真实审计。沙盘在系统临时目录，
@@ -43,13 +45,18 @@ SCAN_DIRS = ("server", "web")
 
 
 def leaf_keys(node) -> set[str]:
-    """展开嵌套 dict 的叶键；list 里的 dict 也展开，标量 list 视为叶值。"""
+    """展开嵌套 dict 的叶键；list 里的 dict 也展开，标量 list 视为叶值。
+
+    标量 list 的键名本身也是叶键：`auto_longer_when` 曾因这条漏判，
+    在基线外悄悄当死键存在。
+    """
     out: set[str] = set()
     if isinstance(node, dict):
         for key, value in node.items():
             if isinstance(value, dict):
                 out |= leaf_keys(value)
             elif isinstance(value, list):
+                out.add(str(key))
                 for item in value:
                     if isinstance(item, dict):
                         out |= leaf_keys(item)

@@ -420,13 +420,12 @@ class PacingConfigGuardTest(unittest.TestCase):
         from server import persona
         real_cfg = persona.pacing_cfg  # the function itself, so we can restore it
         real = real_cfg()
-        length, questions, voice = real["length"], real["questions"], real["voice"]
+        length, questions = real["length"], real["questions"]
 
         def install(**over):
             persona.pacing_cfg = lambda: {
                 "length": {**length, **{k: v for k, v in over.items() if k in length}},
-                "questions": {**questions, **{k: v for k, v in over.items() if k in questions}},
-                "voice": voice}
+                "questions": {**questions, **{k: v for k, v in over.items() if k in questions}}}
 
         try:
             for over in ({"default": "shrt"}, {"short_max_chars": "abc"},
@@ -436,6 +435,28 @@ class PacingConfigGuardTest(unittest.TestCase):
                 with self.subTest(over=over):
                     install(**over)
                     self.assertIn("节奏规则", persona._pacing_block())  # must not raise
+        finally:
+            persona.pacing_cfg = real_cfg
+
+    def test_barge_in_hint_is_unconditional_not_voice_config(self):
+        # 2026-11-09：pacing.yaml 的 voice.barge_in 已删除。打断是前端无条件行为，
+        # 提示词必须始终出现；既不能要求 pacing["voice"] 存在，也不能被
+        # voice.barge_in=False 关掉。
+        from server import persona
+        real_cfg = persona.pacing_cfg
+        real = real_cfg()
+        try:
+            configs = (
+                {"length": real["length"], "questions": real["questions"]},
+                {"length": real["length"], "questions": real["questions"],
+                 "voice": {"barge_in": False}},
+            )
+            for cfg in configs:
+                with self.subTest(has_voice="voice" in cfg):
+                    persona.pacing_cfg = lambda cfg=cfg: cfg
+                    block = persona._pacing_block()
+                    self.assertIn("你说的话是可打断的", block)
+                    self.assertIn("用户开口时立刻停下来听", block)
         finally:
             persona.pacing_cfg = real_cfg
 

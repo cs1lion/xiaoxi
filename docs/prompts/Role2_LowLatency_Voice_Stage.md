@@ -22,14 +22,14 @@
 
 ### 1) 首包 8 字语义切分规则（§11 首包提速 + V2 §7.1）
 
-- 权威参数在 `config/pacing.yaml`：`speech.first_chunk.min_chars=8`、`speech.micro_chunk.target_chars=26`、`speech.pause.{clause_ms=140,sentence_ms=320,thinking_ms=480}`。
+- 权威参数在 `config/pacing.yaml`：`speech.first_chunk.min_chars=8`、`speech.micro_chunk.target_chars=26`、`speech.pause.{clause_ms=140,sentence_ms=320}`。
 - 首段达到 8 字后，遇合适句末/停顿标点**立即**提交合成；8 字只是提交条件的目标下限，**不得**截断词语、破坏句意或忽略标点边界；若 8 字前已形成完整短句，按既有语义切分策略提前提交，避免无意义等待。第 2 段起恢复正常目标长度。
 - 流式切分必须**无损语义**：不把词切两半、不丢标点；兼容断流、合成失败、残余文本、过短分块（失败段跳过、`index`/`seq` 单调不减，前端继续播后续）。
 
 ### 2) TTS 语速/音高/停顿与流式输出（V2 §7.1）
 
 - 落地 `voice_delivery.rate=1.08`/`pitch=1.02`：作为**每个人物情绪 profile 之上的全局偏移**（在 `voice_profile` 应用处叠加），默认**不得盖过** `persona.yaml.tts_emotions` 的情绪音色。只影响“怎么读”，不影响“读什么”。
-- `pause.thinking_ms`（思考期预演结束、正式起话前停顿）由播放调度消费，停顿期间口型放松、`breath` 点轻眨眼；`timeline.js` 只暴露字段，不停播。
+- `pause.thinking_ms` 从未被播放调度消费，2026-11-09 已从 `pacing.yaml` 删除；若仍需要「思考期预演结束、正式起话前停顿」，先接上消费方再把键加回。`clause_ms`/`sentence_ms`/`max_ms` 由 `micro_options()` 正常消费。
 
 ### 3) 首包延迟与异常降级
 

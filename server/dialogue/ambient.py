@@ -20,9 +20,8 @@ AMBIENT_DEFAULTS: dict[str, Any] = {
     "mumble_seconds": 28,
     "proactive_seconds": 90,
     "dedupe_window_seconds": 300,
-    "respect_typing": True,
+    "respect_typing": True,       # 尚未接线：前端不上报输入/媒体状态（PROTOCOL §16 已声明）
     "quiet_mode_default": False,
-    "require_authorization": True,
     "mumble_voice": True,
     "voice_backoff": 2.0,
     "voice_backoff_max_seconds": 240,
