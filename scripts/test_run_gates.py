@@ -19,7 +19,9 @@ PASS（不许把真跑过的绿洗成假跳），以及 R51 红线在新增式�
 from __future__ import annotations
 
 import io
+import os
 import sys
+import tempfile
 import unittest
 from contextlib import redirect_stdout
 from pathlib import Path
@@ -264,6 +266,58 @@ class RunGatesArtifactRequirementTests(unittest.TestCase):
         self.assertIn("agent_runtime_node_modules",
                       RG.GATES["durable_takeover"]["requires"])
         self.assertIn("node_modules", RG.GATES["ui_browser"]["requires"])
+        # 跑 .mjs 的门禁都要 chromium.launch()，浏览器二进制同样不在 git 里。
+        self.assertIn("playwright_browser", RG.GATES["blocks_browser"]["requires"])
+        self.assertNotIn("playwright_browser", RG.GATES["npm"]["requires"],
+                         "npm test 不启动浏览器，不该被浏览器二进制拖成 SKIP")
+
+    def test_playwright_browser_artifact_is_detected(self):
+        with tempfile.TemporaryDirectory() as home:
+            with patch.dict(os.environ, {"PLAYWRIGHT_BROWSERS_PATH": home}):
+                self.assertIsNotNone(
+                    RG.missing_artifact({"requires": ["playwright_browser"]}),
+                    "空目录里没有 chromium*，应判缺失")
+                (Path(home) / "chromium-1234" / "chrome-win").mkdir(parents=True)
+                self.assertIsNone(
+                    RG.missing_artifact({"requires": ["playwright_browser"]}),
+                    "有 chromium* 目录就不该再判缺失")
+
+
+def _load_leak_module():
+    import importlib.util
+    spec = importlib.util.spec_from_file_location(
+        "gate_tmp_leak_for_test", SCRIPTS / "test_gate_tmp_leak.py")
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+class GateTmpLeakVerdictTests(unittest.TestCase):
+    """泄漏棘轮的裁决：门禁自己红 ≠ 泄漏，失败也不许静默通过。
+
+    2026-11-09 前只看 delta>0：抽样门禁失败时按设计留沙盘 → 被打印成 LEAK，
+    排查方向被带偏；反过来失败但清干净 → 判 ok，是静默通过。
+    """
+
+    def test_gate_failure_with_leftover_sandbox_is_not_called_a_leak(self):
+        verdict, detail = _load_leak_module().classify(1, 1, "FAIL - 某条断言红了")
+        self.assertEqual(verdict, "gate_failed")
+        self.assertIn("1", detail)
+
+    def test_gate_failure_that_cleaned_up_is_not_a_silent_pass(self):
+        verdict, _ = _load_leak_module().classify(2, 0, "")
+        self.assertEqual(verdict, "gate_failed")
+
+    def test_clean_exit_with_growth_is_a_leak(self):
+        self.assertEqual(_load_leak_module().classify(0, 3, "")[0], "leak")
+
+    def test_clean_exit_without_growth_is_ok(self):
+        self.assertEqual(_load_leak_module().classify(0, 0, "ok - 都过了")[0], "ok")
+
+    def test_self_reported_skip_and_missing_command_skip(self):
+        leak = _load_leak_module()
+        self.assertEqual(leak.classify(0, 0, "SKIP: 8000 未起")[0], "skip")
+        self.assertEqual(leak.classify(127, 0, "")[0], "skip")
 
 
 if __name__ == "__main__":

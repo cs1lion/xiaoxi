@@ -1,6 +1,6 @@
 # 门禁在非理想环境下给出假结论 —— 修复证据（2026-11-09）
 
-分支 `fix/gates-honest-skips`，基线 `origin/master` = `3d86bf9`。
+分支 `fix/gates-honest-skips`，基线 `origin/master` = `ad3458e`。
 本目录是一次全量门禁的两组原始读数与盘点依据，不是结论截图。
 
 ## 1. 症状
@@ -28,7 +28,9 @@
 | `scripts/test_speech_performance_route.py` | 判据从「循环最长停顿 < 10ms」改为「40ms 同步窗口内事件循环有没有被打点」。心跳协程 `sleep(0)` 记时间戳，桩在同步 `sleep` 前后记窗口，数落进窗口的打点数；对照臂要求同步窗口内打点数为 0。 |
 | `scripts/test_memory_fastloop.py` | `_measure()` 多返回「窗口内打点数」；删除墙钟比值判据，改为「同步对照窗口 0 打点 / 异步窗口 ≥1 打点」。心跳同时记 gap 与时间戳，`worst` 语义不变。 |
 | `scripts/test_intent_probe.py` | 超时用例：改判「5s 的模型调用有没有走完」（`answered["done"] is False`），外层 `wait_for(3.0)` 只做防挂死安全网。并行用例：改判「两段工作的时间窗口有没有重叠」，串行为 0、并行为 ≈0.3s。 |
-| `scripts/test_run_gates.py` | 新增 4 条回归用例：缺依赖物 → SKIP + 理由 + `--allow-skip` 下总码 0；未 `--allow-skip` 仍是 1；依赖物在时非零退出仍 FAIL；关键门禁必须登记 `requires`。 |
+| `scripts/test_run_gates.py` | 新增 5 条回归用例：缺依赖物 → SKIP + 理由 + `--allow-skip` 下总码 0；未 `--allow-skip` 仍是 1；依赖物在时非零退出仍 FAIL；关键门禁必须登记 `requires`；Playwright 浏览器按目录探测。 |
+| `scripts/dev_env_check.py` | 与 `ad3458e` 新增的自检脚本对齐措辞：缺项现在是「run_gates 记 SKIP」，不再是「直接失败 / 直接红」；`web/vendor` 的「影响浏览器门禁」按实测收紧。 |
+| `docs/TESTING.md` | 本机产物表的「缺了影响」列同步为「记 SKIP + 补救命令」，与 `ARTIFACTS` 口径一致。 |
 
 ### 依赖物按命令形状登记（避免 214 条手写清单漏项）
 
@@ -36,7 +38,9 @@
   回退系统解释器，那正是「报 PASS 但跑的其实是另一个解释器」的来源。
 - `cwd == agent-runtime` 的 node 门禁 → `agent_runtime_node_modules`。
 - 其余 `node` / `npm` 门禁 → `node_modules`（browser 门的 `@playwright/test`、
-  `npm test` 的 `three` / `@pixiv/three-vrm`）。
+  `npm test` 的 `three` / `@pixiv/three-vrm`）；`.mjs` 门禁再加 `playwright_browser`
+  （探测 `PLAYWRIGHT_BROWSERS_PATH` 或默认 `ms-playwright/chromium*` 目录，
+  不靠 `require()` 是否抛错来猜）。
 - 显式附加：`step8_e2e_browser` → `pixel_world_dist`；
   `ui_browser` / `drill_network` / `drill_badkey` / `drill_ws_reconnect` → `venv`
   （这几个 `.mjs` 自己起沙盘服务、Python 路径写死在脚本里）。
@@ -47,9 +51,10 @@
 | --- | ---: | --- | --- | --- |
 | `.venv` | 186 | 全部 Python 门禁（`core`、`protocol`、`venv_lock`、`speech_performance_route`…） | 缺失时 `venv_lock` FAIL；其余静默回退系统解释器（可能 PASS = 假结论，也可能 ModuleNotFoundError = FAIL） | 全部 SKIP：`缺 .venv/Scripts/python.exe；补救：uv sync --frozen` |
 | `agent-runtime/node_modules` | 17 | `durable_*`（`durable_takeover`、`durable_block_kind`、`durable_mcp`…） | `ERR_MODULE_NOT_FOUND` → FAIL | SKIP：`cd agent-runtime && npm ci` |
-| `node_modules` | 6 | `npm`、`ui_nav_browser`、`blocks_browser`、`companion_browser`、`experience_entry_browser`、`voice_browser` | `npm test` 缺 `three` 报错；browser 门缺 `@playwright/test` → FAIL | SKIP：`npm ci` |
-| `node_modules` + `.venv` | 4 | `ui_browser`、`drill_network`、`drill_badkey`、`drill_ws_reconnect` | 任缺一个就起不来 → FAIL | 缺哪个报哪个，SKIP |
-| `node_modules` + `pixel-world/dist` | 1 | `step8_e2e_browser` | 缺 dist → `/world` FAIL + 留沙盘 | SKIP + 补救命令，不建沙盘 |
+| `node_modules` | 1 | `npm` | 缺 `three` / `@pixiv/three-vrm` 报错 → FAIL | SKIP：`npm ci` |
+| `node_modules` + Playwright Chromium | 5 | `ui_nav_browser`、`blocks_browser`、`companion_browser`、`experience_entry_browser`、`voice_browser` | 缺 `@playwright/test` → FAIL；缺浏览器 → 启动抛错 exit 1（实测 `MJS_EXIT=1`） | SKIP：`npm ci` / `npx playwright install chromium` |
+| `node_modules` + Playwright Chromium + `.venv` | 4 | `ui_browser`、`drill_network`、`drill_badkey`、`drill_ws_reconnect` | 任缺一个就起不来 → FAIL | 缺哪个报哪个，SKIP |
+| `node_modules` + Playwright Chromium + `pixel-world/dist` | 1 | `step8_e2e_browser` | 缺 dist → `/world` FAIL + 留沙盘 | SKIP + 补救命令，不建沙盘 |
 | `web/models` | 0 | ——（`test_seed_eye_*` 已在 `3d86bf9` 移出 GATES，自报 `unittest.skip`） | 不适用 | 登记在 `ARTIFACTS` 里备用 |
 | `.agents` bundle | 0 | `poteto_loading` 自己判：两个 bundle 目录都不在 → SKIP；目录在但文件缺 → FAIL（半装坏不伪装成没安装） | 已正确 | 不变 |
 | 8000 服务 | 0（直接依赖） | `ui_nav_browser` 读 `BASE_URL`（默认 8000），连不上自报 `SKIP:` exit 0 | 已正确 | 不变 |
@@ -112,7 +117,13 @@ Get-ChildItem tmp -Directory -Filter 'step8-e2e-*'      # 期望：0 项
 # 3) 泄漏棘轮：缺 dist 时 step8 记为 skip，不判泄漏
 .\.venv\Scripts\python.exe scripts\test_gate_tmp_leak.py ; echo "EXIT=$LASTEXITCODE"
 
-# 4) 计时判据（空载 + 高负载各一次，两次都必须绿）
+# 4) 缺 Playwright 浏览器 → SKIP（拿空目录冒充，不动本机已装的浏览器）
+$env:PLAYWRIGHT_BROWSERS_PATH="$env:TEMP\pw-empty"; New-Item -ItemType Directory -Force $env:PLAYWRIGHT_BROWSERS_PATH | Out-Null
+.\.venv\Scripts\python.exe scripts\run_gates.py --only blocks_browser --allow-skip   # 期望：1 跳过
+node scripts\test-aqi-blocks-browser.mjs ; echo "EXIT=$LASTEXITCODE"                 # 期望：1（绕过 run_gates 时的原行为）
+Remove-Item Env:\PLAYWRIGHT_BROWSERS_PATH
+
+# 5) 计时判据（空载 + 高负载各一次，两次都必须绿）
 .\.venv\Scripts\python.exe -m unittest scripts.test_speech_performance_route
 .\.venv\Scripts\python.exe scripts\test_memory_fastloop.py
 .\.venv\Scripts\python.exe scripts\test_intent_probe.py

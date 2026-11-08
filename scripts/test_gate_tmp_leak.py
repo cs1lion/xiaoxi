@@ -23,6 +23,12 @@ plan-118 用差分法实测全部门禁，确认除一次偶然采样外零泄�
 **跳过而非假红**：8000 未起时浏览器门禁会 SKIP 并退 0，那不是泄漏；跑不起来
 （退出码 127 / 命令不存在）也跳过。只在「门禁真的跑了且 tmp/ 净增」时判红。
 
+**门禁自己红了 ≠ 泄漏**（2026-11-09）：抽样门禁失败时会按设计把沙盘留下供调试，
+此前这会被打印成「LEAK 漏沙盘」，把排查方向从「哪条断言红了」带偏。现在分两种
+结论：`LEAK`（退 0 但 tmp/ 净增）与 `FAIL 门禁本身失败`（退非 0，附输出末几行），
+两者都让棘轮红，但说法不同。反向的静默通过也一并堵上：门禁失败却顺手清干净了，
+以前判 ok，现在判 FAIL。
+
 **缺依赖物不算泄漏**（2026-11-09）：`pixel-world/dist` 这类 gitignore 产物不在时，
 step8_e2e_browser 会自报 SKIP（退 0）且不建沙盘；这里也用 run_gates 的
 `missing_artifact` 提前判掉，直接记 skip、不跑、更不计进差分。此前它 FAIL 后
@@ -46,6 +52,30 @@ TMP = ROOT / "tmp"
 SANDBOX_PATTERN = re.compile(r"browser|drill|e2e|shake|step8", re.I)
 MAX_GATES = 10          # 抽样上限：跑太多会让本棘轮自己变慢
 PER_GATE_TIMEOUT = 120
+
+
+def classify(code: int, delta: int, output: str) -> tuple[str, str]:
+    """单条抽样门禁的裁决：ok / skip / leak / gate_failed。
+
+    为什么要分开（2026-11-09）：此前只看 `delta > 0`，于是「门禁自己失败、按设计
+    把沙盘留下供调试」会被打印成「LEAK 漏沙盘」—— 那是错的结论，排查方向从
+    「哪条断言红了」被带偏到「谁没删目录」。反过来「门禁失败但顺手清干净了」
+    又被判 ok，是个静默通过。两种都报。
+    """
+    if code == 127:
+        return "skip", "退出码 127（命令不存在）"
+    if code == 0 and re.search(r"^\s*SKIP", output, re.M):
+        return "skip", "自报 SKIP"
+    if code != 0:
+        return "gate_failed", f"退出码 {code}"
+    if delta > 0:
+        return "leak", f"tmp/ 净增 {delta} 项"
+    return "ok", "无净增"
+
+
+def _tail(output: str, lines: int = 3) -> str:
+    kept = [line for line in output.splitlines() if line.strip()][-lines:]
+    return " / ".join(kept)[:300]
 
 
 def _load_gates() -> tuple[dict, object]:
@@ -84,6 +114,7 @@ def main() -> int:
     print(f"[gate_tmp_leak] 抽样 {len(suspects)} 个最可能漏沙盘的门禁")
     leaked: list[tuple[str, int]] = []
     skipped: list[str] = []
+    failed_gates: list[tuple[str, str, str]] = []
 
     for name, spec in suspects:
         # 依赖物缺失（如 pixel-world/dist 未构建）：整条门禁这轮不跑，也不计差分。
@@ -110,16 +141,16 @@ def main() -> int:
         delta = after - before
         output = ((proc.stdout or b"") + (proc.stderr or b"")).decode("utf-8", "replace")
 
-        # 127 = 命令不存在（node 未装等），跳过而非假红。
-        if code == 127:
-            skipped.append(f"{name}(退出码 127)")
-            continue
-        # 门禁自报 SKIP（退出码 0 + 行首 SKIP）：这轮没验，不把它的临时目录算成泄漏。
-        if code == 0 and re.search(r"^\s*SKIP", output, re.M):
-            skipped.append(f"{name}(自报 SKIP)")
-            print(f"  skip {name}: 自报 SKIP，不计泄漏")
-            continue
-        if delta > 0:
+        verdict, detail = classify(code, delta, output)
+        if verdict == "skip":
+            skipped.append(f"{name}({detail})")
+            print(f"  skip {name}: {detail}，不计泄漏")
+        elif verdict == "gate_failed":
+            # 门禁自己红了：沙盘按设计留着供调试，这不是「泄漏」，也不该冒充「ok」。
+            failed_gates.append((name, detail, _tail(output)))
+            print(f"  FAIL {name}: 门禁本身失败（{detail}），不判为泄漏")
+            print(f"       | {_tail(output)}")
+        elif verdict == "leak":
             leaked.append((name, delta))
             print(f"  LEAK {name}: tmp/ 净增 {delta} 项（{time.time() - started:.1f}s）")
         else:
@@ -128,12 +159,21 @@ def main() -> int:
     if skipped:
         print(f"  skip {', '.join(skipped)}")
 
+    if failed_gates:
+        print(f"\n=== {len(failed_gates)} 个抽样门禁自己失败（不是泄漏）===")
+        for name, detail, tail in failed_gates:
+            print(f"  {name}: {detail}")
+            print(f"       | {tail}")
+        print("\n这些门禁红了要单独查；沙盘按设计保留，本棘轮不把它算进差分。")
+
     if leaked:
         print(f"\n=== {len(leaked)} 个门禁漏沙盘 ===")
         for name, delta in leaked:
             print(f"  {name}: +{delta}")
         print("\n修法参考（plan-45）：沙盘目录在 finally 里删，且只在通过时删——")
         print("失败时留沙盘供调试。删除前等服务进程真退出，否则 Windows 上 EBUSY。")
+
+    if failed_gates or leaked:
         return 1
 
     print(f"\n=== 抽样 {len(suspects)} 个门禁全部无 tmp/ 净增 ===")

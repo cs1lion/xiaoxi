@@ -35,7 +35,8 @@ if not PY.is_file():
 
 # ---------- 不在 git 里的依赖物（2026-11-09） ----------
 # 干净检出 / 新机器上这些东西必然不在：`.venv`、`node_modules` 靠安装命令，
-# `pixel-world/dist` 靠构建，`web/models` 靠素材归档，`.agents/` bundle 靠单独安装。
+# Playwright 浏览器靠 `npx playwright install`，`pixel-world/dist` 靠构建，
+# `web/models` 靠素材归档，`.agents/` bundle 靠单独安装。
 # 缺它们时门禁**跑了也什么都断言不了**：要么 ModuleNotFoundError，要么页面 404。
 # 此前这些被报成 FAIL —— 「环境没装」被说成「代码坏了」，任何干净机器跑全量必红。
 # 判据：缺依赖物 → 不执行命令、直接 SKIP，并打印缺的是哪个路径、怎么补。
@@ -45,6 +46,8 @@ ARTIFACTS: dict[str, tuple[str, str]] = {
     "node_modules": ("node_modules/@playwright/test", "npm ci"),
     "agent_runtime_node_modules": (
         "agent-runtime/node_modules/@earendil-works/chord", "cd agent-runtime && npm ci"),
+    "playwright_browser": (
+        "Playwright Chromium（ms-playwright/chromium*）", "npx playwright install chromium"),
     "pixel_world_dist": (
         "pixel-world/dist/index.html",
         "cd pixel-world && npm ci && npm run build:world（dist/ 在 .gitignore 内）"),
@@ -55,11 +58,30 @@ ARTIFACTS: dict[str, tuple[str, str]] = {
 }
 
 
+def _playwright_browsers_root() -> Path:
+    override = os.environ.get("PLAYWRIGHT_BROWSERS_PATH")
+    candidates = [Path(override)] if override else []
+    if os.name == "nt":
+        local = os.environ.get("LOCALAPPDATA")
+        if local:
+            candidates.append(Path(local) / "ms-playwright")
+    else:
+        candidates.append(Path.home() / ".cache" / "ms-playwright")
+    return candidates[0] if candidates else Path(".cache/ms-playwright")
+
+
+def _artifact_present(key: str, rel: str) -> bool:
+    if key == "playwright_browser":
+        root = _playwright_browsers_root()
+        return root.is_dir() and any(p.is_dir() for p in root.glob("chromium*"))
+    return (ROOT / rel).exists()
+
+
 def missing_artifact(spec: dict) -> tuple[str, str, str] | None:
-    """返回 (依赖物键, 仓库相对路径, 补救命令)；全都在则 None。只看存在性。"""
+    """返回 (依赖物键, 展示名/仓库相对路径, 补救命令)；全都在则 None。只看存在性。"""
     for key in spec.get("requires") or ():
         rel, hint = ARTIFACTS[key]
-        if not (ROOT / rel).exists():
+        if not _artifact_present(key, rel):
             return key, rel, hint
     return None
 
@@ -1181,7 +1203,11 @@ def _requirements_for(spec: dict) -> list[str]:
     if str(spec.get("cwd") or "") == "agent-runtime":
         return ["agent_runtime_node_modules"]
     base = Path(cmd[0]).name.lower() if cmd else ""
-    if base in {"node", "node.exe"} or base.startswith("npm"):
+    if base in {"node", "node.exe"}:
+        # 跑 .mjs 的门禁都会 chromium.launch()，浏览器二进制不在 git 里。
+        return ["node_modules", "playwright_browser"] \
+            if any(a.endswith(".mjs") for a in cmd) else ["node_modules"]
+    if base.startswith("npm"):
         return ["node_modules"]
     return []
 
