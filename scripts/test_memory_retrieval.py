@@ -1045,15 +1045,43 @@ class SynonymBridgeTests(unittest.TestCase):
         lexicon = parse_bridge_lexicon('# 说明\n\n定居\t居住,城市\n')
         self.assertEqual(lexicon, {'定居': ('居住', '城市')})
 
-    def test_shipped_lexicon_is_empty_noop(self):
+    def test_shipped_lexicon_rows_have_provenance(self):
         path = (Path(__file__).resolve().parents[1] / 'config' /
                 'memory_synonyms.tsv')
-        self.assertEqual(parse_bridge_lexicon(path.read_text(encoding='utf-8-sig')), {},
-                         '生产默认词表必须为空：空表 = 与接入前行为一致')
+        text = path.read_text(encoding='utf-8-sig')
+        lines = text.splitlines()
+        active = [(number, line) for number, line in enumerate(lines, 1)
+                  if line.strip() and not line.lstrip().startswith('#')]
+        self.assertTrue(active, '生产词表不应回退为空：2026-11-09 已启用 6 条')
+        for number, line in active:
+            block = []
+            index = number - 2
+            while index >= 0 and lines[index].strip().startswith('#'):
+                block.append(lines[index])
+                index -= 1
+            self.assertTrue(any('出处' in previous for previous in block),
+                            f'第 {number} 行缺少「# 出处」注释：{line[:40]}')
+        lexicon = parse_bridge_lexicon(text)
+        self.assertEqual(
+            set(lexicon), {'杭洲', '定居', '起身', '外文', '沙盒', 'sandbox'})
+        self.assertEqual(lexicon['杭洲'], ('杭州',))
+        self.assertEqual(lexicon['沙盒'], ('sandbox', '隔离环境'))
+        for trigger in ('小橘', '种田', '不能碰', '安排'):
+            self.assertNotIn(
+                trigger, lexicon,
+                '省略/词义推理/需整条记忆文本的案例不得用词表硬凑')
+
+    def test_shipped_lexicon_negative_constraint_intact(self):
+        path = (Path(__file__).resolve().parents[1] / 'config' /
+                'memory_synonyms.tsv')
         self.retriever.cfg['synonym_bridge'] = {
             'enabled': True, 'lexicon_path': str(path)}
-        self.assertEqual(self.retriever.search('现在定居的地方是哪儿'), [],
-                         '空词表时救援不得改变行为，负向约束照旧生效')
+        self.assertEqual(self.retriever.search('明天天气怎么样'), [],
+                         '词表没有触发词时必须保持空结果，让负向约束生效')
+        self.assertEqual(
+            [memory.id for memory, _score in
+             self.retriever.search('现在定居的地方是哪儿')],
+            [self.city_id], '生产词表应能救援已标注的定居改述')
 
 
 if __name__ == '__main__':
