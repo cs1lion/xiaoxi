@@ -34,6 +34,39 @@
 改动 `web/` 前端文件后必须杀掉旧服务进程再重启，否则 `StaticFiles` 缓存的目录
 列表会让新增前端文件持续 404，浏览器回归会假失败。
 
+### 换 worktree / 换机器前：本机产物自检
+
+`run_gates.py` 的门禁依赖一批**不在 git 里**的本机产物（`.venv`、`node_modules`、
+`.agents`、`web/models/`、`pixel-world/` 等）。缺项报出来的错常常像代码坏了——
+`durable_*` 抛 `ERR_MODULE_NOT_FOUND`、`venv_lock` 说解释器缺失——同一个人在同一个
+仓库换一棵 worktree 就得到相反结论。换树前先跑：
+
+```bash
+.\.venv\Scripts\python.exe scripts\dev_env_check.py
+```
+
+它只读、不创建、不下载，逐项给出「在 / 缺 + 影响哪些门禁 + 怎么补」；门禁清单现读
+`run_gates.GATES`，不复制会过期的名单。**它不是门禁**，不进 `run_gates` 的判定，
+退出码只在「必须项」缺失时为 1。
+
+| 本机产物 | 必需度 | 缺了影响 |
+|---|---|---|
+| `.venv` | 必须 | 全部 Python 门禁；`venv_lock` 直接红 |
+| `node` / `npm` 可执行 | 必须 | Node 侧门禁（TS / npm / 浏览器） |
+| `node_modules/`（仓库根） | 部分 | `npm` 与浏览器门禁（缺 `@playwright/test` 会直接失败，不是 SKIP） |
+| `agent-runtime/node_modules/` | 部分 | `durable_*` TS 门禁（`ERR_MODULE_NOT_FOUND`） |
+| `web/vendor/three`、`web/vendor/three-vrm` | 部分 | 浏览器门禁（importmap 指向 `/static/vendor/...`） |
+| Playwright Chromium | 部分 | 浏览器门禁（`npx playwright install chromium`） |
+| `.agents` bundle | 部分 | `poteto_loading`（缺失时显式 SKIP，不判红） |
+| `web/models/`（seed-daily 链） | 部分 | `seed_eye_*`（缺资产时 SKIP；第三方许可资产不入库） |
+| `pixel-world/dist/` | 部分 | `step8_e2e_browser`（`/world` 静态产物） |
+| `127.0.0.1:8000` 本地服务 | 部分（运行时） | 浏览器门禁（未起时多数 SKIP） |
+
+「必须」= 缺了门禁主体成片失败；「部分」= 只影响表里列出的门禁，其余照跑。
+补齐命令见脚本输出；不要替别人的机器自动创建或下载。本机多 worktree 可用
+junction（`.venv`、`node_modules`、`agent-runtime/node_modules`），CI / 新 clone
+一律按 `uv sync --frozen` 与 `npm ci`。
+
 ### 门禁外的测试（本地不跑，CI 跑）
 
 `scripts/gates_unregistered.txt` 是一份棘轮基线，列着**不在本地 `run_gates`
