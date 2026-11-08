@@ -14,6 +14,11 @@ import {
   memoryDisableControl,
   memoryForgetControl,
   memoryForgetNote,
+  memoryForgetConfirm,
+  memoryForgetKeyControl,
+  memoryForgetKeyConfirm,
+  memoryHistoryRows,
+  DELETE_IRREVERSIBLE,
 } from "./memory-panel.js";
 
 const CREATED = Date.UTC(2026, 9, 1) / 1000;
@@ -98,4 +103,48 @@ test("忘掉说明：非 active 行给一句解释，别让按钮消失像 bug",
   }
   assert.equal(memoryForgetNote({ status: "active" }), "", "active 行不出解释");
   assert.equal(memoryForgetNote(null), "");
+});
+
+test("硬删除确认文案：必须写明删除后不可恢复，且带上是哪条记忆", () => {
+  assert.match(DELETE_IRREVERSIBLE, /不可恢复/);
+  assert.equal(memoryForgetConfirm({ value: "用户在乙公司工作" }),
+    "删除「用户在乙公司工作」的全部版本？删除后不可恢复。");
+  assert.match(memoryForgetConfirm({ value: "  " }), /这条记忆.*不可恢复/);
+  assert.match(memoryForgetConfirm(null), /不可恢复/);
+});
+
+test("忘掉整条事实：非 active 且有 key 才给入口；active 已有忘掉不重复", () => {
+  assert.deepEqual(
+    memoryForgetKeyControl({ status: "superseded", key: "employment:user" }),
+    {
+      label: "忘掉整条事实",
+      key: "employment:user",
+      done: "这条事实的全部版本已删除，且不可恢复。",
+    });
+  assert.equal(memoryForgetKeyControl({ status: "active", key: "employment:user" }), null);
+  assert.equal(memoryForgetKeyControl({ status: "conflict", key: "  " }), null, "空 key 不入口");
+  assert.equal(memoryForgetKeyControl({ status: "conflict" }), null);
+  assert.equal(memoryForgetKeyControl(null), null);
+});
+
+test("忘掉整条事实确认文案：说清会连带当前生效行，且不可恢复", () => {
+  assert.equal(memoryForgetKeyConfirm({ key: "employment:user" }),
+    "删除「employment:user」的所有版本（含当前生效的一行）？删除后不可恢复。");
+  assert.match(memoryForgetKeyConfirm({}), /这条事实.*不可恢复/);
+});
+
+test("历史时间线：按 key 返回的 items 只留状态/值/日期，缺日期不编", () => {
+  assert.deepEqual(memoryHistoryRows([
+    { status: "active", value: "用户在乙公司工作", created_at: CREATED, id: 3, kind: "fact" },
+    { status: "superseded", value: "用户在甲公司工作", created_at: CREATED },
+    { status: "conflict", value: "用户待业" },
+    { status: null, value: 42 },
+  ]), [
+    { status: "active", value: "用户在乙公司工作", created: "2026-10-01" },
+    { status: "superseded", value: "用户在甲公司工作", created: "2026-10-01" },
+    { status: "conflict", value: "用户待业", created: "" },
+    { status: "", value: "", created: "" },
+  ]);
+  assert.deepEqual(memoryHistoryRows(null), []);
+  assert.deepEqual(memoryHistoryRows({ items: [] }), []);
 });

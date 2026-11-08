@@ -24,7 +24,9 @@ import { bootCompanion } from './companion.js';
 import { mountStarmap } from './starmap/index.js';
 import { mountExperience } from './experience.js';
 import { appendContextUsage } from './context-usage.js';
-import { memoryDisabledTag, memoryUpdatedNote, memoryEvidenceNote, memoryDisableControl, memoryForgetControl, memoryForgetNote } from './memory-panel.js';
+import { memoryDisabledTag, memoryUpdatedNote, memoryEvidenceNote, memoryDisableControl,
+  memoryForgetControl, memoryForgetNote, memoryForgetConfirm, memoryForgetKeyControl,
+  memoryForgetKeyConfirm, memoryHistoryRows } from './memory-panel.js';
 import { mountModeStrip } from './mode-strip.js';
 import { mountWorkDrawer } from './drawer.js';
 import { mountExternalModel } from './external-model.js';
@@ -1452,6 +1454,91 @@ async function mutateMemory(control, path, options, message) {
   } catch (error) { el("memoryFeedback").textContent = error.message; }
   finally { control.disabled = false; }
 }
+/* 物理硬删除的二次确认：第一次点击只展开确认条，文案写清不可恢复；
+ * 再点「确认删除」才真的发请求。一次点击不会删掉任何东西。 */
+function confirmBeforeDelete(host, trigger, warning, run) {
+  const box = document.createElement("span");
+  box.className = "confirm";
+  box.hidden = true;
+  const text = document.createElement("span");
+  text.textContent = warning;
+  const yes = document.createElement("button");
+  yes.type = "button";
+  yes.className = "ghost danger";
+  yes.textContent = "确认删除";
+  const no = document.createElement("button");
+  no.type = "button";
+  no.className = "ghost";
+  no.textContent = "取消";
+  box.append(text, yes, no);
+  trigger.onclick = () => {
+    box.hidden = false;
+    trigger.hidden = true;
+    no.focus({ preventScroll: true });
+  };
+  no.onclick = () => {
+    box.hidden = true;
+    trigger.hidden = false;
+    trigger.focus({ preventScroll: true });
+  };
+  yes.onclick = async () => {
+    yes.disabled = true;
+    try { await run(yes); } finally { yes.disabled = false; }
+  };
+  host.append(trigger, box);
+}
+
+/* 这条事实的历史版本：GET /api/memories/history?key=，展开时才请求。
+ * 与「显示历史和待核对记录」不同——那条是按状态列行，这里按 key 看同一
+ * 事实的版本链条。 */
+function memoryHistoryDisclosure(memory) {
+  const details = document.createElement("details");
+  details.className = "mem-history";
+  const summary = document.createElement("summary");
+  summary.textContent = "查看这条事实的历史版本";
+  details.append(summary);
+  details.addEventListener("toggle", async () => {
+    if (!details.open || details.dataset.loaded === "1") return;
+    details.dataset.loaded = "1";
+    const status = document.createElement("p");
+    status.textContent = "读取中…";
+    details.append(status);
+    try {
+      const res = await fetch(`/api/memories/history?key=${encodeURIComponent(memory.key)}`);
+      if (!res.ok) throw new Error(`读取失败（${res.status}）`);
+      const data = await res.json();
+      const rows = memoryHistoryRows(data.items);
+      status.remove();
+      if (!rows.length) {
+        const empty = document.createElement("p");
+        empty.textContent = "没有可显示的历史版本。";
+        details.append(empty);
+        return;
+      }
+      for (const row of rows) {
+        const line = document.createElement("div");
+        line.className = "mem-history-row";
+        const state = document.createElement("span");
+        state.className = "tag";
+        state.textContent = STATUS_LABEL[row.status] || row.status || "未标注";
+        const value = document.createElement("span");
+        value.textContent = row.value;
+        line.append(state, value);
+        if (row.created) {
+          const when = document.createElement("span");
+          when.textContent = `记于 ${row.created}（UTC）`;
+          line.append(when);
+        }
+        details.append(line);
+      }
+    } catch (error) {
+      details.dataset.loaded = "";
+      status.textContent = `历史未读取：${error.message}`;
+    }
+  });
+  return details;
+}
+
 function refreshMemories() {
   return loadMemories().catch(error => { el("memoryFeedback").textContent = `记忆未刷新：${error.message}`; });
 }
@@ -1565,26 +1652,43 @@ async function loadMemories() {
       meta.appendChild(toggle);
     }
     /* 忘掉只在 active 行提供：DELETE 删整条身份链（含当前生效行），在待核对
-     * 或历史行上点它会误删正在生效的记忆。非 active 行给一句解释。 */
+     * 或历史行上点它会误删正在生效的记忆。非 active 行给一句解释，并补上
+     * 「忘掉整条事实」（POST /api/memories/forget-key）这个显式入口。
+     * 两条删除路径都先出确认条，写明不可恢复。 */
     const forgetControl = memoryForgetControl(m);
     if (forgetControl) {
       const del = document.createElement("button");
       del.className = "ghost danger";
+      del.type = "button";
       del.textContent = forgetControl.label;
       del.setAttribute("aria-label", `${forgetControl.label}记忆：${m.value}`);
-      del.onclick = async () => {
-        await mutateMemory(del, `/api/memories/${m.id}`, { method: "DELETE" }, forgetControl.done);
-      };
-      meta.appendChild(del);
+      confirmBeforeDelete(meta, del, memoryForgetConfirm(m), (control) =>
+        mutateMemory(control, `/api/memories/${m.id}`, { method: "DELETE" }, forgetControl.done));
     } else {
-      const note = memoryForgetNote(m);
-      if (note) {
-        const why = document.createElement("span");
-        why.textContent = note;
-        meta.appendChild(why);
+      const keyControl = memoryForgetKeyControl(m);
+      if (keyControl) {
+        const del = document.createElement("button");
+        del.className = "ghost danger";
+        del.type = "button";
+        del.textContent = keyControl.label;
+        del.setAttribute("aria-label", `${keyControl.label}：${keyControl.key}`);
+        confirmBeforeDelete(meta, del, memoryForgetKeyConfirm(m), (control) =>
+          mutateMemory(control, "/api/memories/forget-key", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ key: keyControl.key }),
+          }, keyControl.done));
+      } else {
+        const note = memoryForgetNote(m);
+        if (note) {
+          const why = document.createElement("span");
+          why.textContent = note;
+          meta.appendChild(why);
+        }
       }
     }
     div.append(val, meta);
+    if (typeof m.key === "string" && m.key) div.append(memoryHistoryDisclosure(m));
     if (m.evidence_state === "linked" && typeof m.evidence_quote === "string" && m.evidence_quote) {
       const evidence = document.createElement("details");
       const summary = document.createElement("summary");
@@ -1781,6 +1885,86 @@ el("memClear").onclick = async () => {
     body: JSON.stringify({}),
   }, "全部记忆已清空。");
 };
+
+/* ---------------- 诊断记录：会话 transcript / 评测场景 ----------------
+ * 两个端点（GET /api/session/{id}/transcript、GET /api/eval/scenarios）早已
+ * 存在但没有前端调用方，这里只补只读入口，不执行场景、不新增协议字段。
+ * session_id 用最后一帧 ready 的值（断线续接后同步更新）。 */
+function diagRow(text, tag) {
+  const row = document.createElement("div");
+  row.className = "ops-diag-row";
+  if (tag) {
+    const label = document.createElement("span");
+    label.className = "tag";
+    label.textContent = tag;
+    row.append(label);
+  }
+  const body = document.createElement("span");
+  body.textContent = text;
+  row.append(body);
+  return row;
+}
+
+el("opsTranscriptLoad")?.addEventListener("click", async () => {
+  const box = el("opsTranscript");
+  const status = el("opsDiagStatus");
+  if (!box || !status) return;
+  box.hidden = false;
+  box.replaceChildren();
+  if (!lastSessionId) {
+    status.textContent = "还没有会话 ID：等连接就绪（状态变「在线」）后再试。";
+    return;
+  }
+  status.textContent = `读取会话 ${lastSessionId} 的最近消息…`;
+  try {
+    const res = await fetch(`/api/session/${encodeURIComponent(lastSessionId)}/transcript?limit=100`);
+    if (!res.ok) throw new Error(`读取失败（${res.status}）`);
+    const data = await res.json();
+    const items = Array.isArray(data.items) ? data.items : [];
+    if (!items.length) {
+      box.append(diagRow("这个会话还没有消息。"));
+    } else {
+      for (const item of items) {
+        const role = item?.role === "user" ? "你" : item?.role === "assistant" ? "小溪" : (item?.role || "未知");
+        box.append(diagRow(typeof item?.text === "string" ? item.text : "", item?.mode ? `${role} · ${item.mode}` : role));
+      }
+    }
+    status.textContent = `已载入 ${items.length} 条消息（只读，来自 /api/session/{id}/transcript）。`;
+  } catch (error) {
+    status.textContent = `会话记录未载入：${error.message}`;
+  }
+});
+
+el("opsScenariosLoad")?.addEventListener("click", async () => {
+  const box = el("opsScenarios");
+  const status = el("opsDiagStatus");
+  if (!box || !status) return;
+  box.hidden = false;
+  box.replaceChildren();
+  status.textContent = "读取评测场景…";
+  try {
+    const res = await fetch("/api/eval/scenarios");
+    if (!res.ok) throw new Error(`读取失败（${res.status}）`);
+    const data = await res.json();
+    const items = Array.isArray(data.scenarios) ? data.scenarios
+      : Array.isArray(data.items) ? data.items : [];
+    if (!items.length) {
+      box.append(diagRow("服务端没有可用的评测场景（eval/scenarios.json 未加载）。"));
+      status.textContent = "评测场景为空。";
+      return;
+    }
+    for (const item of items) {
+      const id = typeof item?.id === "string" ? item.id : "";
+      const name = typeof item?.name === "string" ? item.name : "";
+      const user = typeof item?.user === "string" ? item.user : "";
+      const rules = item?.checks && typeof item.checks === "object" ? Object.keys(item.checks).length : 0;
+      box.append(diagRow(`${name}${user ? ` — ${user}` : ""}`, `${id || "场景"} · ${rules} 项检查`));
+    }
+    status.textContent = `已载入 ${items.length} 个评测场景（只读，不会执行）。`;
+  } catch (error) {
+    status.textContent = `评测场景未载入：${error.message}`;
+  }
+});
 
 function updateContinuousVoice() {
   el("bargeToggle").textContent = `连续对话：${alwaysListen ? "开" : "关"}`;
