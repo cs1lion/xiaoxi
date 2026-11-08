@@ -336,22 +336,54 @@ class HelperTests(unittest.TestCase):
         self.assertIn("base64 100 chars", event["data"])
 
 
+class _DeadProc:
+    """已退出子进程的替身：poll() 非零，terminate/wait/kill 都是空操作。"""
+
+    def __init__(self, code: int = 1) -> None:
+        self._code = code
+
+    def poll(self):
+        return self._code
+
+    def terminate(self):
+        pass
+
+    def wait(self, timeout=None):
+        return self._code
+
+    def kill(self):
+        pass
+
+
+def _find_assertion(checkpoint, needle: str):
+    """取断言但给可读取证，不抛 StopIteration。
+
+    旧写法 `next(a for a in ... if ...)` 在「服务没起来」时没有任何一条含目标的
+    断言，于是抛 StopIteration，读起来像测试自身崩了；这里改成返回 None，由用例
+    决定怎么报。
+    """
+    return next((a for a in checkpoint.get("assertions") or [] if needle in a["name"]), None)
+
+
+def _live_args():
+    import argparse
+
+    return argparse.Namespace(wav="", mic=False, mic_seconds=4.0, expect_text="",
+                              min_asr_ratio=0.6, play=False, keep_sandbox=False)
+
+
 class LiveBoundaryTests(unittest.TestCase):
     def test_live_refuses_to_run_when_service_is_mock(self):
         """无 Key 时沙盘服务会进 Mock；live 必须在 L0 拒绝继续，不能产出“通过”。"""
-        import argparse
-
         # Windows 上子进程退出后句柄释放可能滞后一拍；清理失败不影响断言。
         with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmp:
             tmp = Path(tmp)
             cfg = {**BASE_CFG, "llm_api_key_present": False,
                    "tts_engine": "silent", "asr_engine": "whisper"}
-            args = argparse.Namespace(wav="", mic=False, mic_seconds=4.0, expect_text="",
-                                      min_asr_ratio=0.6, play=False, keep_sandbox=False)
             report = la.asyncio.run(la.run_live(
                 root=ROOT,
                 env={"LLM_API_KEY": "", "TTS_ENGINE": "silent", "ASR_ENGINE": "whisper"},
-                cfg=cfg, out_dir=tmp, args=args,
+                cfg=cfg, out_dir=tmp, args=_live_args(),
                 deps=_Deps().as_dict(),
             ))
             self.assertEqual(report["overall"], "fail")
@@ -359,10 +391,72 @@ class LiveBoundaryTests(unittest.TestCase):
             l0 = report["checkpoints"][0]
             self.assertEqual(l0["id"], "L0.server")
             self.assertEqual(l0["status"], "fail")
-            mock_assert = next(a for a in l0["assertions"] if "Mock" in a["name"])
+            mock_assert = _find_assertion(l0, "Mock")
+            if mock_assert is None:
+                # 服务没起来时本用例验不了 Mock 语义。这属于环境缺失（典型是缺
+                # uvicorn），不是产品断言失败；给出可读原因而不是 StopIteration。
+                self.fail(f"沙盘服务未起来，无法验证 Mock 判定；请确认当前解释器可 "
+                          f"`python -m uvicorn`（CI 走 requirements-ci.txt）。"
+                          f"实际断言：{[a['name'] for a in l0['assertions']]}")
             self.assertFalse(mock_assert["ok"])
             self.assertNotIn(report["server"]["port"], (8000, 8010))
             self.assertTrue((tmp / "server.stderr.log").is_file())
+
+    def test_service_that_never_starts_fails_readably(self):
+        """uvicorn 缺失等导致沙盘起不来：给可读失败，不崩在断言取元素上。
+
+        复现方式与 CI run 42525956843 同源：进程起来即死，健康检查永远不是 200。
+        这里替换 start_server 让它在离线环境也确定性复现，不依赖本机装没装 uvicorn。
+        """
+        with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmp:
+            tmp = Path(tmp)
+            cfg = {**BASE_CFG, "llm_api_key_present": False,
+                   "tts_engine": "silent", "asr_engine": "whisper"}
+
+            def dead_server(root, env, *, port, sandbox, log_dir):
+                (Path(log_dir) / "server.stderr.log").write_text(
+                    "ModuleNotFoundError: No module named 'uvicorn'\n", encoding="utf-8")
+                return _DeadProc(1), None, None
+
+            report = la.asyncio.run(la.run_live(
+                root=ROOT,
+                env={"LLM_API_KEY": ""},
+                cfg=cfg, out_dir=tmp, args=_live_args(),
+                deps={**_Deps().as_dict(), "start_server": dead_server,
+                      "health_timeout": 0.5},
+            ))
+            self.assertEqual(report["overall"], "fail", "起不来绝不能算通过")
+            self.assertEqual(len(report["checkpoints"]), 1)
+            l0 = report["checkpoints"][0]
+            self.assertEqual(l0["status"], "fail")
+            names = [a["name"] for a in l0["assertions"]]
+            self.assertTrue(any("服务未起来" in name for name in names), names)
+            self.assertIsNone(_find_assertion(l0, "Mock"),
+                              "起不来不能被伪装成 Mock 判定")
+            deps_detail = l0["assertions"][0]["detail"]
+            self.assertIn("No module named 'uvicorn'", deps_detail)
+            self.assertIn("退出码=1", deps_detail)
+
+    def test_start_that_raises_oserror_is_a_readable_failure(self):
+        """解释器路径不存在（FileNotFoundError）也不能冒成 traceback。"""
+        with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmp:
+            tmp = Path(tmp)
+            cfg = {**BASE_CFG, "llm_api_key_present": False,
+                   "tts_engine": "silent", "asr_engine": "whisper"}
+
+            def broken_start(root, env, *, port, sandbox, log_dir):
+                raise FileNotFoundError(2, "No such file or directory", "C:/no/such/python.exe")
+
+            report = la.asyncio.run(la.run_live(
+                root=ROOT, env={"LLM_API_KEY": ""}, cfg=cfg, out_dir=tmp,
+                args=_live_args(),
+                deps={**_Deps().as_dict(), "start_server": broken_start},
+            ))
+            self.assertEqual(report["overall"], "fail")
+            l0 = report["checkpoints"][0]
+            self.assertTrue(any("服务未起来" in a["name"] for a in l0["assertions"]))
+            self.assertIn("启动异常", l0["assertions"][0]["detail"])
+            self.assertIn("FileNotFoundError", l0["assertions"][0]["detail"])
 
 
 if __name__ == "__main__":

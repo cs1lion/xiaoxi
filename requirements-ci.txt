@@ -9,6 +9,13 @@
 #   edge-tts        server/speech/tts.py 里函数内懒加载，CI 不碰真实 TTS
 #
 # 这些包在本地全量回归里仍然需要（见 requirements.txt / docs/TESTING.md）。
+#
+# uvicorn 是例外：它纯 Python、零系统依赖，但 CI 层确实要用——
+# scripts/test_live_acceptance.py 会起一个真实 uvicorn 子进程做 L0 沙盘服务。
+# 2026-11-09 CI run 42525956843 的红就是这个缺口：子进程 `python -m uvicorn`
+# 立刻死，服务起不来，测试在断言取元素处抛 StopIteration。补上它，并让
+# 「服务起不来」这条路径本身给出可读失败（见 test_live_acceptance.py）。
+uvicorn>=0.30
 fastapi>=0.115
 httpx>=0.27
 PyYAML>=6.0
