@@ -1,11 +1,81 @@
 """Extract actual Recognizer without config/model/network bootstrap."""
 import ast
 import asyncio
+import importlib.util
+import math
+import sys
 import threading
 from pathlib import Path
 from types import SimpleNamespace
 import unittest
 import numpy as np
+
+
+def _vad_module():
+    source = Path(__file__).resolve().parents[1] / 'server/speech/vad.py'
+    spec = importlib.util.spec_from_file_location('vad_under_test', source)
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[spec.name] = module   # dataclass 解析注解时要能按 __module__ 找到它
+    spec.loader.exec_module(module)
+    return module
+
+
+class VadTests(unittest.TestCase):
+    """服务端 VAD 只用合成帧序列断言，不碰麦克风、不碰网络。
+
+    判据是「这段 PCM 里有没有人说话」，所以用可解释的信号：静音、短促
+    音、稳态底噪、静音-说话-静音。阈值是相对底噪的，绝对电平不作判据。
+    """
+
+    def setUp(self):
+        self.vad = _vad_module()
+
+    def _pcm(self, seconds, *, amplitude=0.3, frequency=440.0, sample_rate=16000):
+        count = int(seconds * sample_rate)
+        if amplitude == 0:
+            return b"\x00" * (count * 2)
+        t = np.arange(count) / float(sample_rate)
+        sine = amplitude * np.sin(2 * math.pi * frequency * t)
+        return (np.clip(sine, -1, 1) * 32767).astype("<i2").tobytes()
+
+    def test_digital_silence_has_no_speech(self):
+        result = self.vad.analyze_pcm(self._pcm(1.0, amplitude=0), 16000)
+        self.assertEqual(result.frames, 50)
+        self.assertEqual(result.total_ms, 1000)
+        self.assertEqual(result.speech_ms, 0)
+        self.assertFalse(result.has_speech)
+
+    def test_speech_burst_between_silence_is_detected(self):
+        pcm = self._pcm(0.8, amplitude=0) + self._pcm(0.3) + self._pcm(0.8, amplitude=0)
+        result = self.vad.analyze_pcm(pcm, 16000)
+        self.assertTrue(result.has_speech)
+        self.assertEqual(result.total_ms, 1900)
+        # 帧边界允许 ±1 帧误差（300ms 的 burst 落在 20ms 帧网格上）。
+        self.assertGreaterEqual(result.speech_ms, 260)
+        self.assertLessEqual(result.speech_ms, 320)
+
+    def test_steady_hiss_stays_below_threshold(self):
+        result = self.vad.analyze_pcm(self._pcm(2.0, amplitude=0.002), 16000)
+        self.assertFalse(result.has_speech)
+        self.assertEqual(result.speech_ms, 0)
+
+    def test_burst_shorter_than_min_speech_is_rejected(self):
+        pcm = self._pcm(0.5, amplitude=0) + self._pcm(0.06) + self._pcm(0.5, amplitude=0)
+        result = self.vad.analyze_pcm(pcm, 16000)
+        self.assertLess(result.speech_ms, 120)
+        self.assertFalse(result.has_speech)
+
+    def test_empty_and_odd_buffers_degrade_to_no_speech(self):
+        for pcm in (b"", b"\x01", b"\x00"):
+            result = self.vad.analyze_pcm(pcm, 16000)
+            self.assertFalse(result.has_speech)
+            self.assertEqual(result.total_ms, 0)
+
+    def test_frame_size_follows_sample_rate(self):
+        result = self.vad.analyze_pcm(self._pcm(0.5, amplitude=0, sample_rate=8000), 8000)
+        self.assertEqual(result.frames, 25)
+        self.assertEqual(result.total_ms, 500)
+
 
 class LanguageTests(unittest.IsolatedAsyncioTestCase):
     async def test_language_override_without_global_mutation(self):

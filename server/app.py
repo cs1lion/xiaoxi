@@ -32,6 +32,7 @@ from .llm import llm
 from .memory.manager import manager
 from .memory.store import store
 from .speech.asr import recognizer, to_wav_bytes
+from .speech.vad import analyze_pcm
 
 # 自进化通道允许发出的 WS 事件类型（协议 §十）。白名单之外的一个都不发：
 # 自造事件比少发一个事件更难查——前端对未知 type 安全忽略，于是两边都看不出来。
@@ -1109,6 +1110,47 @@ def _transcribe_error_message(exc: Exception) -> str:
     return text
 
 
+_ASR_UNAVAILABLE_MARKERS = ("download", "model", "network", "connection", "timed out",
+                            "timeout", "no such file", "not found", "credential",
+                            "api key", "401", "403", "404", "429", "502", "503", "504")
+
+
+def _asr_unavailable(exc: Exception) -> bool:
+    """Only "the recognizer cannot be reached" failures degrade.
+
+    Bad audio, a provider 400, or a genuine bug stays a terminal error:
+    folding every exception into the fallback would hide real failures.
+    """
+    if isinstance(exc, (ImportError, FileNotFoundError, ConnectionError, TimeoutError)):
+        return True
+    text = str(exc).lower()
+    return any(marker in text for marker in _ASR_UNAVAILABLE_MARKERS)
+
+
+async def _degrade_transcribe(conn: Connection, turn: VoiceTurn, data: bytes, exc: Exception) -> None:
+    """Offline/no-model ASR: keep the socket and the turn alive, and say so.
+
+    Reuses the existing `error` (recoverable) + `done` frames; no `asr` text is
+    invented, so a degraded turn can never look like a successful recognition.
+    The server-side VAD verdict only decides the wording ("heard speech" vs
+    "heard nothing"), not whether to claim a transcript.
+    """
+    import logging
+
+    vad = analyze_pcm(data, settings.audio_sample_rate)
+    logging.getLogger("server.app").warning(
+        "voice_turn_metric asr_degraded=1 speech_ms=%d total_ms=%d noise_floor_dbfs=%.1f reason=%r",
+        vad.speech_ms, vad.total_ms, vad.noise_floor_dbfs, str(exc)[:120])
+    heard = ("这轮检测到说话声，但内容没能转写出来"
+             if vad.has_speech else "这轮也没有检测到说话声")
+    await conn.send_turn(turn, {
+        "type": "error",
+        "recoverable": True,
+        "message": f"语音识别暂时不可用（离线或本机没有语音模型）：{heard}。可以打字继续说。",
+    })
+    await conn.finish(turn, {"type": "done", "text": "", "latency_ms": 0})
+
+
 async def _transcribe_turn(conn: Connection, turn: VoiceTurn, data: bytes) -> None:
     try:
         import logging
@@ -1123,12 +1165,18 @@ async def _transcribe_turn(conn: Connection, turn: VoiceTurn, data: bytes) -> No
             # 零采集。这里量的是 transcribe_wav 的墙钟耗时，与音频时长分列，
             # 只走结构化日志（不新增 WS 事件/API 字段、不落盘、不阻塞）。
             started = time.perf_counter()
-            if (turn.editor_insight is None and
-                    ((getattr(conn, 'practice', None) is not None and conn.practice.mode != 'off')
-                    or (getattr(conn, 'experience', None) is not None and conn.experience.mode == 'expression'))):
-                transcript = await recognizer.transcribe_wav(wav, language='en')
-            else:
-                transcript = await recognizer.transcribe_wav(wav)
+            try:
+                if (turn.editor_insight is None and
+                        ((getattr(conn, 'practice', None) is not None and conn.practice.mode != 'off')
+                        or (getattr(conn, 'experience', None) is not None and conn.experience.mode == 'expression'))):
+                    transcript = await recognizer.transcribe_wav(wav, language='en')
+                else:
+                    transcript = await recognizer.transcribe_wav(wav)
+            except Exception as exc:
+                if not _asr_unavailable(exc):
+                    raise
+                await _degrade_transcribe(conn, turn, data, exc)
+                return
             asr_process_ms = int((time.perf_counter() - started) * 1000)
             if not conn.current(turn):
                 return
