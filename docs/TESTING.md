@@ -51,7 +51,7 @@
 - **他人在途文件**：未提交的新测试，登记它会让别人 checkout 后门禁必红。
 
 **2026-11-08 P0③ 收编进度**：原清单 8 条中 6 条已登记进 `GATES`（不进
-`ALWAYS_REQUIRED`，不抬高 always 档）。余下 2 条都不登记，理由同一类——「跳过即失败」，
+`ALWAYS_REQUIRED`，不抬高 always 档）。当日余下 2 条都不登记，理由同一类——「跳过即失败」，
 登记它们等于自开一个永不判红的洞：
 
 - `test_eye_calibration_analysis.py`：本机与 CI 都没装 Pillow，脚本输出 `OK (skipped=14)`，
@@ -60,6 +60,20 @@
 - `test_pixel_world.py`：世界源码已随 `7c13fd4` 剥离；仅本机有历史副本时可跑，新 clone 必
   SKIP。脚本仍留在磁盘，需要时手动跑。`pixel_world_hosting` 保留在 `GATES`——它用
   TestClient 打生产路由，守「`/` 必须是语音陪伴页」，不依赖世界源码。
+
+**2026-11-09 seed 视觉夹具两条移出**：`test_seed_eye_expression.py`、`test_seed_eye_lids.py`
+从 `GATES` 移出、登记进清单。它们读 `web/models/` 下的 VRM 夹具（`seed-daily.vrm` →
+`seed-daily-eyes.vrm` → `seed-daily-lids.vrm`），整条链源自 VirtualCast, Inc. 的
+`seed-san.vrm`（VRM Public License 1.0，`creditNotation: required`，派生须署名）；
+而 `web/models/` 被 `.gitignore` 第 51 行整目录忽略、`git ls-files` 为空，新 clone 必
+`ASSET_MISSING`。`ci.yaml` 第 10-11 行已声明这类「需要 gitignore 的 VRM 资产」的测试
+不在 CI 范围，CI 那步又是「跳过计通过」——只有本机全量在逼它们必跑，而这个要求从未被
+认领。把本地门禁对齐到已声明的 CI 范围，比把 11 MB 第三方许可二进制入库干净。
+
+手动跑绿的条件：`web/models/` 里有上述三份 VRM 副本。此时
+`.\.venv\Scripts\python.exe scripts\test_seed_eye_expression.py` 与
+`scripts\test_seed_eye_lids.py` 分别输出 `9 tests` / `10 tests` OK（2026-11-08 主工作树
+实测）。它们验的是「资产存在 + 构建可确定性重建 + 篡改必拒」，不依赖服务或 API Key。
 
 要认领其中一个：在 `scripts/run_gates.py` 的 `GATES` 里加一条、从清单删掉、
 再跑 `python scripts/test_gate_coverage.py --write` 对齐。**先确认它已

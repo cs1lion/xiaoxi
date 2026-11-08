@@ -10,7 +10,8 @@
 # 由 test_gate_coverage.py --write 生成；条数与登记数以
 # python scripts/test_gate_coverage.py 的输出为准，不写在这里。
 
-# 2026-11-08 P0③：原清单 8 条中 6 条已收编进 GATES；余下 2 条故意保留——
+# 2026-11-08 P0③：原清单 8 条中 6 条已收编进 GATES；当日余下 2 条故意保留（2026-11-09
+# 又移出两条 seed 视觉夹具门禁，见文末）——
 # 同一类「跳过即失败」的洞，只是被本机现状挡住了：
 #
 # test_eye_calibration_analysis.py：缺 Pillow 时输出 OK (skipped=14)，14 条一条也跑不了；
@@ -21,3 +22,19 @@
 # 生产路由，守「/ 必须是语音陪伴页」，不依赖世界源码。
 test_eye_calibration_analysis.py
 test_pixel_world.py
+
+# 2026-11-09：两条 eye 视觉夹具门禁移出 GATES（裁决走 C——把本地门禁对齐到已声明的
+# CI 范围，而不是把 11 MB 第三方许可二进制入库）。
+#
+# test_seed_eye_expression.py / test_seed_eye_lids.py 读 web/models/ 下的 VRM 夹具
+# （seed-daily.vrm → seed-daily-eyes.vrm → seed-daily-lids.vrm），整条链源自 seed-san.vrm，
+# 是 VirtualCast, Inc. 的第三方资产（VRM Public License 1.0，creditNotation: required，
+# 派生须署名）。web/models/ 被 .gitignore:51 整目录忽略，git ls-files 为空，
+# 新 clone 必然 ASSET_MISSING。
+#
+# .github/workflows/ci.yaml:10-11 已声明「需要 gitignore 的 VRM 资产的测试不在 CI 范围」，
+# CI 那步又是「跳过计通过」（ci.yaml:81）；只有本机全量门禁在逼它们必须跑，
+# 而这个要求从未被认领。本机有副本时手动跑可绿：2026-11-08 主工作树实测
+# 9 tests / 10 tests，均 OK（覆盖资产存在性 + 构建确定性，不依赖服务/Key）。
+test_seed_eye_expression.py
+test_seed_eye_lids.py
