@@ -21,7 +21,7 @@ os.environ['LLM_PROVIDER'] = 'mock'
 os.environ['LLM_API_KEY'] = ''
 with patch('dotenv.load_dotenv', return_value=False):
     from server.memory.store import MemoryStore
-    from server.memory.retriever import MemoryRetriever
+    from server.memory.retriever import MemoryRetriever, parse_bridge_lexicon
     from server.memory.manager import MemoryManager
     from server.memory.starmap import starmap_graph, starmap_node
     from server.assistant.context import ContextBuilder
@@ -975,6 +975,85 @@ class ValidTimeExtractionPathTests(unittest.IsolatedAsyncioTestCase):
         self.assertIsNone(open_ended.fact_valid_from,
                           '开放式表述必须保守留空，不能凭常识补界')
         self.assertIsNone(open_ended.fact_valid_until)
+
+
+class SynonymBridgeTests(unittest.TestCase):
+    """同义桥（救援路径）：只补零命中查询，门与打分不变，坏词表不打断检索。"""
+
+    def setUp(self):
+        self._tmp = tempfile.TemporaryDirectory(prefix='bridge-test-')
+        self.lexicon = Path(self._tmp.name) / 'lexicon.tsv'
+        self.lexicon.write_text('定居\t居住,城市,杭州\n杭州\t喝,绿茶\n',
+                                encoding='utf-8')
+        self.store = MemoryStore(':memory:')
+        self.retriever = MemoryRetriever(self.store)
+        self.retriever.cfg = dict(self.retriever.cfg)
+        self.retriever.cfg.update(min_score=0, min_similarity=.08, max_inject_chars=600)
+        self.retriever.cfg['synonym_bridge'] = {
+            'enabled': True, 'lexicon_path': str(self.lexicon)}
+        self.city_id = self.store.upsert(
+            kind='fact', key='居住:城市', value='用户住在杭州，搬过去两年了',
+            subject='user', source='stated', importance=.5)
+        self.tea_id = self.store.upsert(
+            kind='fact', key='饮食:饮品偏好', value='用户长期喜欢喝绿茶',
+            subject='user', source='stated', importance=.5)
+
+    def tearDown(self):
+        self.store._conn.close()
+        self._tmp.cleanup()
+
+    def test_rescues_zero_hit_query(self):
+        hits = self.retriever.search('现在定居的地方是哪儿')
+        self.assertEqual([memory.id for memory, _score in hits], [self.city_id],
+                         '首轮零命中时应由同义桥补回共享表层形式')
+
+    def test_rescue_only_runs_after_a_zero_hit(self):
+        hits = self.retriever.search('杭州')
+        self.assertEqual([memory.id for memory, _score in hits], [self.city_id],
+                         '已命中的查询不得再被桥接扩展，否则会多注入无关记录')
+
+    def test_base_gate_still_applies_to_rescue(self):
+        self.retriever.cfg['min_similarity'] = 1.1
+        self.assertEqual(self.retriever.search('现在定居的地方是哪儿'), [],
+                         '桥接不得绕过基础 min_similarity 硬门')
+
+    def test_no_trigger_keeps_negative_constraint(self):
+        self.assertEqual(self.retriever.search('明天天气怎么样'), [],
+                         '词表没有触发词时必须保持空结果，让负向约束生效')
+
+    def test_disabled_ignores_lexicon(self):
+        self.retriever.cfg['synonym_bridge'] = {
+            'enabled': False, 'lexicon_path': str(self.lexicon)}
+        self.assertEqual(self.retriever.search('现在定居的地方是哪儿'), [])
+
+    def test_missing_lexicon_falls_back_to_pre_change(self):
+        self.retriever.cfg['synonym_bridge'] = {
+            'enabled': True, 'lexicon_path': str(self.lexicon) + '.missing'}
+        self.assertEqual(self.retriever.search('现在定居的地方是哪儿'), [])
+
+    def test_empty_query_still_lists(self):
+        hits = self.retriever.search('   ')
+        self.assertEqual(len(hits), 2, '空查询仍按列表返回，不触发桥接')
+
+    def test_parse_rejects_bad_rows(self):
+        for text in ('没有制表符\n', '只有触发词\t\n', '触发\t扩展\n触发\t扩展\n'):
+            with self.subTest(text=text):
+                with self.assertRaises(ValueError):
+                    parse_bridge_lexicon(text)
+
+    def test_parse_ignores_comments_and_blank_lines(self):
+        lexicon = parse_bridge_lexicon('# 说明\n\n定居\t居住,城市\n')
+        self.assertEqual(lexicon, {'定居': ('居住', '城市')})
+
+    def test_shipped_lexicon_is_empty_noop(self):
+        path = (Path(__file__).resolve().parents[1] / 'config' /
+                'memory_synonyms.tsv')
+        self.assertEqual(parse_bridge_lexicon(path.read_text(encoding='utf-8-sig')), {},
+                         '生产默认词表必须为空：空表 = 与接入前行为一致')
+        self.retriever.cfg['synonym_bridge'] = {
+            'enabled': True, 'lexicon_path': str(path)}
+        self.assertEqual(self.retriever.search('现在定居的地方是哪儿'), [],
+                         '空词表时救援不得改变行为，负向约束照旧生效')
 
 
 if __name__ == '__main__':
