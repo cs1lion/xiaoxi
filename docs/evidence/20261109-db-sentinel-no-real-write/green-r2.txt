@@ -1,0 +1,12 @@
+[生产库哨兵]
+  ok   生产进程（无 TEST_SENTINEL）放行真实库路径
+  ok   生产进程（无 TEST_SENTINEL）打开库副本不报错
+  ok   副本经生产模式打开后 schema 为当前版本
+  ok   测试进程打开真实 memory.db 被拦
+  ok   被拦时不会在建库位置留下文件
+  ok   测试进程打开真实台账 commissions.db 被拦
+  ok   data/ 子目录同样被拦（不只挡顶层文件）
+  ok   :memory: 正常
+  ok   临时文件正常
+
+=== 9 passed, 0 failed ===

@@ -1,0 +1,28 @@
+=== R0 before ===
+[
+  {
+    "path": "D:\\project\\neurosama-wt-dbsentinel\\data\\memory.db",
+    "user_version": 4,
+    "mtime_ns": 1794176142941779300,
+    "size": 286720
+  }
+]
+=== R0 old gate output ===
+[生产库哨兵]
+  ok   生产进程（无 TEST_SENTINEL）打开真实库不报错
+  ok   测试进程打开真实 memory.db 被拦
+  ok   测试进程打开真实台账 commissions.db 被拦
+  ok   data/ 子目录同样被拦（不只挡顶层文件）
+  ok   :memory: 正常
+  ok   临时文件正常
+
+=== 6 passed, 0 failed ===
+=== R0 after ===
+[
+  {
+    "path": "D:\\project\\neurosama-wt-dbsentinel\\data\\memory.db",
+    "user_version": 5,
+    "mtime_ns": 1794180573695230000,
+    "size": 286720
+  }
+]

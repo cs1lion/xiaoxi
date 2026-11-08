@@ -447,6 +447,7 @@ def test_cancel_records_reason() -> None:
     print("[cancel reason]")
     import sqlite3
     from server.assistant.dispatcher import Dispatcher
+    from server.assistant.evaluator import Evaluator
     from server.interaction.threads import CommissionStore
 
     db = sqlite3.connect(":memory:", check_same_thread=False)
@@ -454,7 +455,10 @@ def test_cancel_records_reason() -> None:
         commissions = CommissionStore(":memory:")
         created = commissions.create("测试单", "验证取消留痕", agent_id="writer")
         cid = created["id"]
-        dispatcher = Dispatcher(commissions=commissions)
+        # 不传 evaluator 时 Dispatcher 会自建一个，而 EvalRubricStore 的默认路径是
+        # 相对路径 `data/executive.db`——cwd 就是仓库根，等于门禁直接写真实执行库
+        # （2026-11-09 审计实测：core 门禁创建/改写了 data/executive.db）。
+        dispatcher = Dispatcher(commissions=commissions, evaluator=Evaluator(path=":memory:"))
 
         before = commissions.get(cid)
         check("取消前 audit 无 cancelled", not (before.get("audit") or {}).get("cancelled"))
@@ -527,7 +531,7 @@ def test_contract_gaps_reach_the_packet_end_to_end() -> None:
     print("[contract gaps end-to-end]")
     import sqlite3
     from server.assistant.dispatcher import Dispatcher
-    from server.assistant.evaluator import load_roster
+    from server.assistant.evaluator import Evaluator, load_roster
     from server.interaction.threads import CommissionStore
 
     roster = load_roster()
@@ -541,7 +545,9 @@ def test_contract_gaps_reach_the_packet_end_to_end() -> None:
         store = CommissionStore(":memory:")
         created = store.create("写一份季度报告", "整理Q3数据", agent_id=str(agents[0]["id"]))
         cid = created["id"]
-        dispatcher = Dispatcher(commissions=store)
+        # 同上：evaluator 钉到 :memory:，否则真实 data/executive.db 被建/被写。
+        dispatcher = Dispatcher(commissions=store,
+                                evaluator=Evaluator(roster=roster, path=":memory:"))
 
         # 信息不全的单：dispatch 必须跑通，且 packet 带缺口
         updated, packet = dispatcher.dispatch(cid)
