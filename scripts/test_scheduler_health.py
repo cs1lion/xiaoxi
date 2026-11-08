@@ -119,43 +119,47 @@ async def scan_due_does_not_block_the_loop() -> None:
     模拟最坏形状的写事务（持锁加慢盘），心跳协程用 sleep(0) 打点（Windows
     15.6ms 定时器精度会盖住被测对象），量调度期间循环还能不能跑。同步对照
     证明这个测量器看得见阻塞。
+
+    抗抖动：忙机上别的进程会抢走 CPU，单次采样的「最长停顿」会把「机器忙」
+    误判成「代码阻塞」（2026-11-08 高负载单轮实测 42.64 ms 判红，单独连跑
+    3 次全绿；本机 20 路忙循环下旧测法实测 130.71 ms）。所以不再比「停顿多长」，
+    改问「scan_due 执行的那 40 ms 里事件循环还能不能跑」：按每次 scan_due 的
+    起止时刻开窗口，数窗口里心跳打点次数。同步阻塞时循环整段停摆，计数恰好为
+    0；卸载到线程时，即使满负载也有几千次（本机实测 3683~4300）。调度抖动只会
+    减少计数，压不到 0，也不会像取最小值那样把「偶发一次大停顿」的真阻塞洗白。
     """
     import time
 
     state = SchedulerState()
     service = FakeService()
-    calls = {"n": 0}
+    windows: list[tuple[float, float]] = []
 
     def slow_scan():
-        calls["n"] += 1
+        started = time.perf_counter()
         time.sleep(0.04)
+        windows.append((started, time.perf_counter()))
         return []
 
     service.store.scan_due = slow_scan
 
-    gaps: list[float] = []
+    beats: list[float] = []  # 每次心跳打点的时刻
     stop = asyncio.Event()
 
     async def heartbeat():
-        last = time.perf_counter()
         while not stop.is_set():
             await asyncio.sleep(0)
-            now = time.perf_counter()
-            gaps.append((now - last) * 1000)
-            last = now
+            beats.append(time.perf_counter())
 
     beat = asyncio.create_task(heartbeat())
     await asyncio.sleep(0)
     task = asyncio.create_task(
         scheduler(service, state, base_delay=0.01, max_delay=0.02))
     try:
-        ran = await wait_for(lambda: calls["n"] >= 2, timeout=2.0)
-        check("slow scan_due 被调用过（测试不是空转）", ran, f"calls={calls['n']}")
+        ran = await wait_for(lambda: len(windows) >= 8, timeout=4.0)
+        check("slow scan_due 被调用过（测试不是空转）", ran, f"scans={len(windows)}")
         check("调度器状态健康（卸载不影响存活与降级判据）",
               state.alive and not state.snapshot()["degraded"], str(state.snapshot()))
-        worst = max(gaps) if gaps else 0.0
-        check("scan_due 不再阻塞事件循环（最长停顿 < 10 ms）", worst < 10.0,
-              f"最长停顿 {worst:.2f} ms")
+        measured = list(windows)
     finally:
         stop.set()
         await beat
@@ -165,8 +169,16 @@ async def scan_due_does_not_block_the_loop() -> None:
         except asyncio.CancelledError:
             pass
 
+    ticks = [sum(1 for at in beats if start < at <= end)
+             for start, end in measured]
+    least = min(ticks) if ticks else 0
+    check("scan_due 执行期间事件循环仍在跑（每轮窗口内都有心跳）",
+          least >= 1,
+          f"{len(ticks)} 轮窗口心跳最少 {least} 次"
+          f"（同步阻塞时为 0，高负载实测 3000+）")
+
     # 对照：同样的 40ms 同步 scan_due 直接跑在循环上，心跳必须被卡住。
-    gaps.clear()
+    control_gaps: list[float] = []
     stop2 = asyncio.Event()
 
     async def heartbeat2():
@@ -174,7 +186,7 @@ async def scan_due_does_not_block_the_loop() -> None:
         while not stop2.is_set():
             await asyncio.sleep(0)
             now = time.perf_counter()
-            gaps.append((now - last) * 1000)
+            control_gaps.append((now - last) * 1000)
             last = now
 
     beat2 = asyncio.create_task(heartbeat2())
@@ -182,8 +194,8 @@ async def scan_due_does_not_block_the_loop() -> None:
     slow_scan()
     stop2.set()
     await beat2
-    check("对照：同步跑法确实卡住循环（证明测量器看得见）", max(gaps) > 20,
-          f"最长停顿仅 {max(gaps):.2f} ms")
+    check("对照：同步跑法确实卡住循环（证明测量器看得见）", max(control_gaps) > 20,
+          f"最长停顿仅 {max(control_gaps):.2f} ms")
 
 
 def main() -> int:
