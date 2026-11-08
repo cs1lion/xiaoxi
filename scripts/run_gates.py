@@ -1121,6 +1121,12 @@ GATES: dict[str, dict[str, object]] = {
         "cmd": [str(PY), "scripts/test_memory_temporal.py"],
         "skip_regex": r"^\s*SKIP",
     },
+    "live_acceptance_guard": {
+        # 真环境验收向导自身：无 Key 判未就绪、上游 400 判 blocked、
+        # Mock 服务在 L0 拒跑（临时 DB + 独立端口，不碰 8000/8010）。
+        "cmd": [str(PY), "scripts/test_live_acceptance.py"],
+        "skip_regex": r"^\s*SKIP",
+    },
 }
 
 # 这些门禁的本体是纯逻辑单测，不需要本地服务，永远必须真跑。

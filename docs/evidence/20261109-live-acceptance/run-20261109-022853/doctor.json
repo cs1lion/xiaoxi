@@ -1,0 +1,145 @@
+{
+  "schema": "xiaoxi.live_acceptance.doctor/v1",
+  "generated_at": "2026-11-09T02:28:54",
+  "root": "D:\\project\\neurosama-wt-freshclone",
+  "python": {
+    "executable": "D:\\project\\neurosama\\.venv\\Scripts\\python.exe",
+    "venv": "D:\\project\\neurosama-wt-freshclone\\.venv\\Scripts\\python.exe",
+    "using_venv": false
+  },
+  "config": {
+    "llm_provider": "openai",
+    "llm_base_url": "https://api.deepseek.com/v1",
+    "llm_model": "deepseek-chat",
+    "llm_api_key_present": false,
+    "tts_engine": "edge_tts",
+    "asr_engine": "whisper",
+    "asr_model": "small",
+    "asr_model_id": "stepaudio-2.5-asr"
+  },
+  "upstream": null,
+  "checks": [
+    {
+      "id": "runtime.python",
+      "group": "runtime",
+      "status": "warn",
+      "required": false,
+      "summary": "不是项目 .venv 解释器",
+      "detail": "sys.executable=D:\\project\\neurosama\\.venv\\Scripts\\python.exe；venv=D:\\project\\neurosama-wt-freshclone\\.venv\\Scripts\\python.exe",
+      "how_to_fix": "用 .\\.venv\\Scripts\\python.exe 运行本脚本"
+    },
+    {
+      "id": "runtime.deps",
+      "group": "runtime",
+      "status": "ok",
+      "required": true,
+      "summary": "httpx/websockets/numpy 可用",
+      "detail": "required=['httpx', 'websockets', 'numpy']",
+      "how_to_fix": ""
+    },
+    {
+      "id": "runtime.ffmpeg",
+      "group": "runtime",
+      "status": "ok",
+      "required": false,
+      "summary": "ffmpeg/ffplay 可用",
+      "detail": "ffmpeg=C:\\ProgramData\\chocolatey\\bin\\ffmpeg.EXE；ffplay=C:\\ProgramData\\chocolatey\\bin\\ffplay.EXE",
+      "how_to_fix": ""
+    },
+    {
+      "id": "env.key",
+      "group": "config",
+      "status": "missing",
+      "required": true,
+      "summary": "LLM_API_KEY 未配置",
+      "detail": "provider=openai；base_url=https://api.deepseek.com/v1；model=deepseek-chat",
+      "how_to_fix": "在 .env 里填 LLM_API_KEY（见 .env.example；StepFun 还需订阅/模型权限生效）"
+    },
+    {
+      "id": "llm.upstream",
+      "group": "llm",
+      "status": "skip",
+      "required": false,
+      "summary": "无 Key，未探测上游（Mock 模式的边界见下方）",
+      "detail": "未发起请求",
+      "how_to_fix": "先配 LLM_API_KEY"
+    },
+    {
+      "id": "tts.engine",
+      "group": "tts",
+      "status": "ok",
+      "required": true,
+      "summary": "edge_tts 可用且外网可达",
+      "detail": "",
+      "how_to_fix": ""
+    },
+    {
+      "id": "asr.engine",
+      "group": "asr",
+      "status": "ok",
+      "required": true,
+      "summary": "本地 whisper 模型已缓存（small）",
+      "detail": "C:\\Users\\18712\\.cache\\huggingface\\hub\\models--Systran--faster-whisper-small",
+      "how_to_fix": ""
+    },
+    {
+      "id": "asr.input",
+      "group": "asr",
+      "status": "ok",
+      "required": false,
+      "summary": "检测到 14 个麦克风输入设备；用 --mic 可做真人语音",
+      "detail": "",
+      "how_to_fix": ""
+    },
+    {
+      "id": "env.ports",
+      "group": "io",
+      "status": "info",
+      "required": false,
+      "summary": "用户服务端口状态（本脚本只用独立端口，不重启 8000/8010）",
+      "detail": "8000=占用，8010=空闲",
+      "how_to_fix": ""
+    },
+    {
+      "id": "io.evidence",
+      "group": "io",
+      "status": "ok",
+      "required": true,
+      "summary": "证据目录可写",
+      "detail": "D:\\project\\neurosama-wt-freshclone\\docs\\evidence\\20261109-live-acceptance-fresh\\run-20261109-022853",
+      "how_to_fix": ""
+    },
+    {
+      "id": "io.sandbox",
+      "group": "io",
+      "status": "ok",
+      "required": true,
+      "summary": "可创建临时 DB 沙盘",
+      "detail": "",
+      "how_to_fix": ""
+    }
+  ],
+  "readiness": {
+    "ready": false,
+    "missing": [
+      {
+        "id": "env.key",
+        "summary": "LLM_API_KEY 未配置",
+        "how_to_fix": "在 .env 里填 LLM_API_KEY（见 .env.example；StepFun 还需订阅/模型权限生效）"
+      }
+    ],
+    "warn": [
+      "runtime.python"
+    ]
+  },
+  "command": {
+    "cwd": "D:\\project\\neurosama-wt-freshclone",
+    "argv": [
+      "scripts/live_acceptance.py",
+      "--doctor",
+      "--out",
+      "D:\\project\\neurosama-wt-freshclone\\docs\\evidence\\20261109-live-acceptance-fresh"
+    ]
+  },
+  "duration_ms": 1418
+}

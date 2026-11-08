@@ -15,6 +15,20 @@
 .\.venv\Scripts\python.exe scripts\run_evals.py        # 回归评测离线层，失败即非零退出码
 ```
 
+### 真环境验收（真实 Key / 麦克风由人提供）
+
+```bash
+.\.venv\Scripts\python.exe scripts\live_acceptance.py --doctor          # 无 Key 也能跑，体检脚本本身
+.\.venv\Scripts\python.exe scripts\test_live_acceptance.py              # 向导自身门禁（离线，exit 0 = PASS）
+.\.venv\Scripts\python.exe scripts\live_acceptance.py --mic             # 条件就绪后跑真实链路
+```
+
+- 操作手册：[`docs/LIVE_ACCEPTANCE_GUIDE.md`](LIVE_ACCEPTANCE_GUIDE.md)
+- 证据：`docs/evidence/<YYYYMMDD>-live-acceptance/`
+- 边界：Mock 通过不等于真实通过；体检未就绪时不会开跑 live。
+- 门禁记账（2026-11-09 登记 `live_acceptance_guard` 后复跑）：磁盘 `test_*.py` 180 /
+  已登记 178 / 清单 2（`scripts/test_gate_coverage.py` 输出）。
+
 ### 门禁报告（一条命令确认"每道门都真的跑过"）
 
 ```bash
