@@ -4,6 +4,7 @@ import asyncio
 import math
 import json
 import re
+import threading
 import time
 from typing import Any
 
@@ -14,7 +15,8 @@ from .extractor import (MAX_EVIDENCE_QUOTE_CHARS, MAX_KEY_CHARS, extract_memorie
 from .retriever import MemoryRetriever
 from .temporal import temporal_bounds
 from .preference import normalize_preference, PreferenceValidationError
-from .store import KINDS, SOURCES, Memory, MemoryStore, store as default_store
+from . import store as store_module
+from .store import KINDS, SOURCES, Memory, MemoryStore
 
 
 # Change words are a conservative gate, not proof of semantic entailment.
@@ -53,7 +55,7 @@ def _publish_memory_event(action: str, memory: Memory, *, provenance: str) -> No
 
 class MemoryManager:
     def __init__(self, store: MemoryStore | None = None, retriever: MemoryRetriever | None = None) -> None:
-        self.store = store or default_store
+        self.store = store or store_module.store
         # 记忆配置按使用点读，不在构造时冻结（协议 §17）。测试仍可整体替换 self.cfg。
         self._cfg_override: dict[str, Any] | None = None
         self.retriever = retriever or MemoryRetriever(self.store)
@@ -383,4 +385,22 @@ class MemoryManager:
         return self.store.history_for_key(key.lower())
 
 
-manager = MemoryManager()
+# 惰性单例（PEP 562）：import 本模块不再建库；`from ... import manager` 才构造。
+# 构造会经 `.store` 的 `__getattr__` 取同一个 `store`，所以三个单例共享一条惰性链。
+_default_manager: MemoryManager | None = None
+_manager_lock = threading.Lock()
+
+
+def get_manager() -> MemoryManager:
+    global _default_manager
+    if _default_manager is None:
+        with _manager_lock:
+            if _default_manager is None:
+                _default_manager = MemoryManager()
+    return _default_manager
+
+
+def __getattr__(name: str) -> Any:
+    if name == "manager":
+        return get_manager()
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
