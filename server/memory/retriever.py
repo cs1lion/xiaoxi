@@ -14,7 +14,8 @@ from sklearn.feature_extraction.text import TfidfVectorizer
 
 from ..config import memory_cfg
 from .presentation import present_memory
-from .store import Memory, MemoryStore, RankingRow, store as default_store
+from . import store as store_module
+from .store import Memory, MemoryStore, RankingRow
 
 # 同义桥词表的默认位置与格式。词表是**配置资源**，不是代码常量：真正生效的
 # 路径由 `retrieval.synonym_bridge.lexicon_path` 决定，这里只是缺省值。
@@ -72,7 +73,7 @@ class MemoryRetriever:
     """
 
     def __init__(self, store: MemoryStore | None = None) -> None:
-        self.store = store or default_store
+        self.store = store or store_module.store
         # 检索配置按使用点读，不在构造时冻结：协议 §17 要求 `memory_cfg()` 的底层
         # 「可换快照」，在 __init__ 里取一次等于把 `config/memory.local.yaml` 的
         # retrieval.* 关在进程外。测试仍可整体替换 self.cfg 做隔离。
@@ -422,4 +423,21 @@ class MemoryRetriever:
         return ctx.block, ctx.used_ids, ctx.found
 
 
-retriever = MemoryRetriever()
+# 惰性单例（PEP 562）：import 本模块不建库；`from ... import retriever` 才构造。
+_default_retriever: MemoryRetriever | None = None
+_retriever_lock = threading.Lock()
+
+
+def get_retriever() -> MemoryRetriever:
+    global _default_retriever
+    if _default_retriever is None:
+        with _retriever_lock:
+            if _default_retriever is None:
+                _default_retriever = MemoryRetriever()
+    return _default_retriever
+
+
+def __getattr__(name: str) -> Any:
+    if name == "retriever":
+        return get_retriever()
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")

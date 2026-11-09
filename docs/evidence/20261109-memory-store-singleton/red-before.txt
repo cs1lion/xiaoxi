@@ -1,0 +1,39 @@
+[store import is inert]
+  ok   取常量退出 0
+  FAIL 取常量没有建库  
+  ok   bare import store 模块 退出 0
+  FAIL bare import store 模块 没有建库（bare.db 不存在）  
+  ok   import manager 模块 退出 0
+  FAIL import manager 模块 没有建库（manager.db 不存在）  
+  ok   import retriever 模块 退出 0
+  FAIL import retriever 模块 没有建库（retriever.db 不存在）  
+  ok   from ... import store 退出 0
+  ok   显式取 store 才建库
+  ok   两次取到同一个单例
+  ok   store 是 MemoryStore
+  ok   store 库版本 = SCHEMA_VERSION
+  ok   from ... import manager 退出 0
+  ok   显式取 manager 才建库
+  ok   manager 库版本 = SCHEMA_VERSION
+  ok   from ... import retriever 退出 0
+  ok   显式取 retriever 才建库
+  FAIL 哨兵下 import store 不报错  __init__
+    guard_sqlite_path(self.db_path)
+  File "D:\project\neurosama-wt-dbsentinel\server\config.py", line 86, in guard_sqlite_path
+    raise RuntimeError(
+RuntimeError: 测试进程的数据库路径指向真实数据目录：D:\project\neurosama-wt-dbsentinel\data\__store_import_probe.db。测试必须用临时库（tempfile / :memory:），见 issue #39。
+  ok   哨兵下 import store 不落文件
+  ok   哨兵下显式取 store 必须报错
+  ok   哨兵报错指向真实数据目录
+  ok   哨兵拦下后没有落文件
+
+=== 18 passed, 5 failed ===
+  - 取常量没有建库
+  - bare import store 模块 没有建库（bare.db 不存在）
+  - import manager 模块 没有建库（manager.db 不存在）
+  - import retriever 模块 没有建库（retriever.db 不存在）
+  - 哨兵下 import store 不报错  __init__
+    guard_sqlite_path(self.db_path)
+  File "D:\project\neurosama-wt-dbsentinel\server\config.py", line 86, in guard_sqlite_path
+    raise RuntimeError(
+RuntimeError: 测试进程的数据库路径指向真实数据目录：D:\project\neurosama-wt-dbsentinel\data\__store_import_probe.db。测试必须用临时库（tempfile / :memory:），见 issue #39。

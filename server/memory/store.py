@@ -1719,6 +1719,30 @@ class MemoryStore:
 
 # 生产库哨兵（#39）落在 MemoryStore/__init__ 的 guard_sqlite_path 与
 # CommissionStore 的同类检查上：测试态下打开仓库 data/ 下的库即报错。
-# 模块级单例照常创建（生产路径零变化）——测试只要钉了临时库就不受影响，
-# 没钉的会在真正打开库时被拦。
-store = MemoryStore()
+#
+# 单例是**惰性**的（PEP 562）：模块导入本身不再建库、不再迁移。历史事故：
+# `test_db_sentinel.py` 只为拿 `SCHEMA_VERSION` 就 `import server.memory.store`，
+# 于是真实 `data/memory.db` 被写成 v5。想拿 `Memory` / `SCHEMA_VERSION` 的工具
+# 现在 import 是零副作用；真正读写记忆的路径都会走到 `store`/`get_store()`。
+#
+# `from server.memory.store import store` 照旧可用：PEP 562 规定 `from ... import name`
+# 在属性缺失时回落到模块 `__getattr__`。模块级赋值（测试里 `store_module.store = fake`）
+# 直接写模块字典，优先于本函数，补丁语义不变。
+_default_store: MemoryStore | None = None
+_store_lock = threading.Lock()
+
+
+def get_store() -> MemoryStore:
+    global _default_store
+    if _default_store is None:
+        with _store_lock:
+            if _default_store is None:
+                _default_store = MemoryStore()
+    return _default_store
+
+
+def __getattr__(name: str) -> Any:
+    if name == "store":
+        return get_store()
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+

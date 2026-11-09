@@ -935,6 +935,12 @@ GATES: dict[str, dict[str, object]] = {
         "cmd": [str(PY), "scripts/test_db_sentinel.py"],
         "skip_regex": r"^\s*SKIP",
     },
+    "store_import_inert": {
+        # 模块级 store/manager/retriever 已惰性化：import 不建库，显式取单例才建库。
+        # 全部在子进程里跑，父进程不 import server.*。
+        "cmd": [str(PY), "scripts/test_store_import_is_inert.py"],
+        "skip_regex": r"^\s*SKIP",
+    },
     "intent_normalize": {
         # B1（#42）：意图输入归一化（礼貌前缀/语气词/ASR 同音字）。
         "cmd": [str(PY), "scripts/test_intent_normalize.py"],
