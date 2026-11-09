@@ -5,6 +5,10 @@
 但那一轮其实什么都没验。这个脚本把每条命令的退出码与输出一起收上来，
 凡是出现 SKIP 的金门禁单独列一行，最后以非零退出——除非显式传 `--allow-skip`。
 
+不在 git 里的依赖物（`.venv`、`node_modules`、`pixel-world/dist`、`web/models` 等）
+缺失时同样记 SKIP，并打印缺的路径与补救命令——那是环境事实，不是代码坏了。
+见 ARTIFACTS 与 _requirements_for。
+
 用法：
     python scripts/run_gates.py                # 全部门禁，跳过即失败
     python scripts/run_gates.py --allow-skip   # 跳过只告警（兼容旧口径）
@@ -27,6 +31,59 @@ ROOT = Path(__file__).resolve().parents[1]
 PY = ROOT / ".venv" / "Scripts" / "python.exe"
 if not PY.is_file():
     PY = Path(sys.executable)
+
+
+# ---------- 不在 git 里的依赖物（2026-11-09） ----------
+# 干净检出 / 新机器上这些东西必然不在：`.venv`、`node_modules` 靠安装命令，
+# Playwright 浏览器靠 `npx playwright install`，`pixel-world/dist` 靠构建，
+# `web/models` 靠素材归档，`.agents/` bundle 靠单独安装。
+# 缺它们时门禁**跑了也什么都断言不了**：要么 ModuleNotFoundError，要么页面 404。
+# 此前这些被报成 FAIL —— 「环境没装」被说成「代码坏了」，任何干净机器跑全量必红。
+# 判据：缺依赖物 → 不执行命令、直接 SKIP，并打印缺的是哪个路径、怎么补。
+# 这不是放宽门禁：依赖物在时行为完全不变（test_run_gates.py 有反向用例钉住）。
+ARTIFACTS: dict[str, tuple[str, str]] = {
+    "venv": (".venv/Scripts/python.exe", "uv sync --frozen"),
+    "node_modules": ("node_modules/@playwright/test", "npm ci"),
+    "agent_runtime_node_modules": (
+        "agent-runtime/node_modules/@earendil-works/chord", "cd agent-runtime && npm ci"),
+    "playwright_browser": (
+        "Playwright Chromium（ms-playwright/chromium*）", "npx playwright install chromium"),
+    "pixel_world_dist": (
+        "pixel-world/dist/index.html",
+        "cd pixel-world && npm ci && npm run build:world（dist/ 在 .gitignore 内）"),
+    # 当前没有门禁声明它：seed 视觉两条（test_seed_eye_*）在 3d86bf9 已移出 GATES，
+    # 它们自己按 unittest.skip 跳过。登记在这里是为了别的门禁要用时直接声明即可。
+    "web_models": (
+        "web/models/seed-daily.vrm", "素材不入库；从归档检出到 web/models/（见 docs/TESTING.md）"),
+}
+
+
+def _playwright_browsers_root() -> Path:
+    override = os.environ.get("PLAYWRIGHT_BROWSERS_PATH")
+    candidates = [Path(override)] if override else []
+    if os.name == "nt":
+        local = os.environ.get("LOCALAPPDATA")
+        if local:
+            candidates.append(Path(local) / "ms-playwright")
+    else:
+        candidates.append(Path.home() / ".cache" / "ms-playwright")
+    return candidates[0] if candidates else Path(".cache/ms-playwright")
+
+
+def _artifact_present(key: str, rel: str) -> bool:
+    if key == "playwright_browser":
+        root = _playwright_browsers_root()
+        return root.is_dir() and any(p.is_dir() for p in root.glob("chromium*"))
+    return (ROOT / rel).exists()
+
+
+def missing_artifact(spec: dict) -> tuple[str, str, str] | None:
+    """返回 (依赖物键, 展示名/仓库相对路径, 补救命令)；全都在则 None。只看存在性。"""
+    for key in spec.get("requires") or ():
+        rel, hint = ARTIFACTS[key]
+        if not _artifact_present(key, rel):
+            return key, rel, hint
+    return None
 
 
 def npm_cmd() -> list[str]:
@@ -1129,6 +1186,48 @@ GATES: dict[str, dict[str, object]] = {
     },
 }
 
+
+# 不在 git 里的依赖物按「命令形状」自动登记，避免 200 条清单手写漏项（2026-11-09）：
+#   - 用本仓 Python 解释器跑的 → 要 `.venv`。run_gates 在 `.venv` 缺失时会**静默**
+#     回退到系统解释器；那条路正是「报 PASS 但跑的其实是另一个解释器」的假结论来源。
+#   - `cwd` 是 agent-runtime 的 node 门禁 → 要 `agent-runtime/node_modules`。
+#   - 其余 node / npm 门禁 → 要根 `node_modules`（@playwright/test 与 npm test 的 three）。
+# 再叠加各条显式声明的额外依赖（见 _EXTRA_REQUIRES）。
+_EXTRA_REQUIRES: dict[str, tuple[str, ...]] = {
+    # /world 段要真实构建产物；缺了它整条门禁只能验别的 11 条断言。
+    "step8_e2e_browser": ("pixel_world_dist",),
+    # 这几条自己起沙盘服务，Python 解释器写死在 .mjs 里（本地 .venv 或主检出回退）。
+    "ui_browser": ("venv",),
+    "drill_network": ("venv",),
+    "drill_badkey": ("venv",),
+    "drill_ws_reconnect": ("venv",),
+}
+
+
+def _requirements_for(spec: dict) -> list[str]:
+    cmd = [str(a) for a in (spec.get("cmd") or [])]
+    if cmd and Path(cmd[0]).name.lower() in {"python", "python.exe", "python3", "python3.exe"}:
+        return ["venv"]
+    if str(spec.get("cwd") or "") == "agent-runtime":
+        return ["agent_runtime_node_modules"]
+    base = Path(cmd[0]).name.lower() if cmd else ""
+    if base in {"node", "node.exe"}:
+        # 跑 .mjs 的门禁都会 chromium.launch()，浏览器二进制不在 git 里。
+        return ["node_modules", "playwright_browser"] \
+            if any(a.endswith(".mjs") for a in cmd) else ["node_modules"]
+    if base.startswith("npm"):
+        return ["node_modules"]
+    return []
+
+
+for _gate_name, _gate_spec in GATES.items():
+    _reqs = _requirements_for(_gate_spec)
+    for _extra in _EXTRA_REQUIRES.get(_gate_name, ()):
+        if _extra not in _reqs:
+            _reqs.append(_extra)
+    if _reqs:
+        _gate_spec["requires"] = _reqs
+
 # 这些门禁的本体是纯逻辑单测，不需要本地服务，永远必须真跑。
 ALWAYS_REQUIRED = ("protocol", "core", "doc_drift", "process_trail", "process_trail_probe", "risk_view", "pacing_dead_keys", "fabrication_signal", "memory_recall_paraphrase", "poteto_loading", "scheduler_health", "budget_scope", "backup_restore", "operation_outbox", "outbox_crash", "mood_writer", "evals", "npm", "executive_v3", "adapter_ext",
                    "codex_shim", "claude_shim", "gateway", "task_planning", "cross_day",
@@ -1163,6 +1262,13 @@ UNITTEST_SKIPPED_RE = re.compile(r"^\s*OK \(skipped=([1-9]\d*)", re.M)
 
 def run_gate(name: str, spec: dict) -> dict:
     started = time.time()
+    # 不在 git 里的依赖物缺失：不执行命令，直接判「这轮没验」。
+    # 判据仍是 exit==0 + SKIP，R51 的 fail-closed 裁决不变（exit!=0 永远 FAIL）。
+    absent = missing_artifact(spec)
+    if absent is not None:
+        _, rel, hint = absent
+        return {"name": name, "exit": 0, "skipped": True, "seconds": 0.0,
+                "skip_reason": f"缺 {rel}；补救：{hint}", "output_tail": ""}
     try:
         cwd = ROOT / str(spec["cwd"]) if spec.get("cwd") else ROOT
         # 生产库哨兵（#39）**默认打开**：所有门禁子进程带 TEST_SENTINEL=1，
@@ -1358,6 +1464,8 @@ def main() -> int:
         rows.append(row)
         print(f"[{verdict:4}] {name:20} exit={row['exit']:<4} {row['seconds']:>6}s"
               + ("  ← 这轮没有真的断言" if verdict == "SKIP" else ""), flush=True)
+        if verdict == "SKIP" and row.get("skip_reason"):
+            print(f"       | SKIP: {row['skip_reason']}", flush=True)
         # 失败时把子进程输出贴出来。不贴的话，唯一可得的证据就是一个 exit code
         # ——而失败往往正是「脚本自己没跑起来」，光看退出码无从判断（实测：
         # drill_network 间歇失败，报告里只有 exit=1，得手动重跑五次才抓得到）。
@@ -1379,7 +1487,8 @@ def main() -> int:
     print(f"  失败       : {len(failed)}" + (f"  {', '.join(r['name'] for r in failed)}" if failed else ""))
     print(f"  跳过       : {len(skipped)}" + (f"  {', '.join(r['name'] for r in skipped)}" if skipped else ""))
     for row in skipped:
-        print(f"      - {row['name']}: 环境不满足，退出码 0 但什么都没验")
+        print(f"      - {row['name']}: "
+              + (row.get("skip_reason") or "环境不满足，退出码 0 但什么都没验"))
     if args.json:
         Path(args.json).write_text(json.dumps(
             {"rows": [{k: v for k, v in r.items() if k != 'output_tail'} for r in rows],
@@ -1390,7 +1499,8 @@ def main() -> int:
     if failed:
         return 1
     if skipped and not args.allow_skip:
-        print("\n结论：有门禁这轮没有真的跑。先按上面的提示起服务，或用 --allow-skip 明确接受。")
+        print("\n结论：有门禁这轮没有真的跑。先按上面的提示补齐依赖物 / 起服务，"
+              "或用 --allow-skip 明确接受。")
         return 1
     print("\n结论：所有门禁都真跑过并断言。")
     return 0

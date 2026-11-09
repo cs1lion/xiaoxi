@@ -66,28 +66,37 @@ def check(name: str, condition: bool, detail: str = "") -> None:
         print(f"  FAIL {name}｜{detail}")
 
 
-async def _heartbeat(stop: asyncio.Event, gaps: list[float]) -> None:
+async def _heartbeat(stop: asyncio.Event, gaps: list[float], beats: list[float]) -> None:
     last = time.perf_counter()
     while not stop.is_set():
         await asyncio.sleep(0)          # 见模块 docstring：1 ms 分辨率不够
         now = time.perf_counter()
         gaps.append((now - last) * 1000)
+        beats.append(now)
         last = now
 
 
-async def _measure(coro_factory) -> tuple[float, float, int]:
-    """跑一次 coro，返回 (耗时, 循环最长停顿, 采样数)。"""
+async def _measure(coro_factory) -> tuple[float, float, int, int]:
+    """跑一次 coro，返回 (耗时, 循环最长停顿, 采样数, 窗口内打点数)。
+
+    「窗口内打点数」= 被测 coro 执行期间事件循环被调度了几次。同步阻塞时窗口
+    里一个都没有；卸载到线程时窗口里有成千上万个。这是行为事实，不是墙钟：
+    机器越慢窗口越长、打点只会更多，不会像「最长停顿 < N ms」那样随负载假红。
+    """
     gaps: list[float] = []
+    beats: list[float] = []
     stop = asyncio.Event()
-    beat = asyncio.create_task(_heartbeat(stop, gaps))
+    beat = asyncio.create_task(_heartbeat(stop, gaps, beats))
     await asyncio.sleep(0)
     started = time.perf_counter()
     await coro_factory()
-    elapsed = (time.perf_counter() - started) * 1000
+    closed = time.perf_counter()
+    elapsed = (closed - started) * 1000
     stop.set()
     await beat
     worst = max(gaps) if gaps else 0.0
-    return elapsed, worst, len(gaps)
+    inside = sum(1 for at in beats if started < at <= closed)
+    return elapsed, worst, len(gaps), inside
 
 
 def _build_world(size: int):
@@ -134,7 +143,7 @@ async def main_async() -> int:
         def run_sync():
             orchestrator._turn_context(query, "p", [])
 
-        sync_elapsed, sync_worst, sync_beats = await _measure(
+        sync_elapsed, sync_worst, sync_beats, sync_inside = await _measure(
             lambda: asyncio.to_thread(lambda: None) if False else _run_sync(orchestrator, query))
         print(f"       耗时 {sync_elapsed:6.2f} ms，循环最长停顿 {sync_worst:6.2f} ms，"
               f"心跳 {sync_beats} 次")
@@ -142,7 +151,7 @@ async def main_async() -> int:
               sync_worst > 20, f"最长停顿仅 {sync_worst:.2f} ms，测量器可能没生效")
 
         print("[2] async 调用（改动后，走 _turn_context_async）不卡循环")
-        async_elapsed, async_worst, async_beats = await _measure(
+        async_elapsed, async_worst, async_beats, async_inside = await _measure(
             lambda: orchestrator._turn_context_async(query, "p", []))
         print(f"       耗时 {async_elapsed:6.2f} ms，循环最长停顿 {async_worst:6.2f} ms，"
               f"心跳 {async_beats} 次")
@@ -152,9 +161,15 @@ async def main_async() -> int:
         check(f"异步心跳数 >= 同步对照的 {BEAT_RATIO:.0f} 倍（检索不再独占循环）",
               async_beats >= BEAT_RATIO * max(sync_beats, 1),
               f"异步 {async_beats} 次 vs 同步 {sync_beats} 次")
-        check("检索确实搬到了线程（改动前 > 20 ms 的停顿现在消失）",
-              async_worst < sync_worst / 2,
-              f"同步 {sync_worst:.2f} ms vs 异步 {async_worst:.2f} ms")
+        # 原来的「异步最长停顿 < 同步的一半」是墙钟判据：并发跑门禁时实测同步
+        # 310ms / 异步 229ms，比值 0.74，卸载明明生效却假红（2026-11-09）。
+        # 换成行为判据：检索窗口内事件循环有没有被调度过。同步对照窗口里必须
+        # 是 0（测量器看得见阻塞），异步窗口里必须 >= 1（循环确实被让出去了）。
+        check("同步对照的检索窗口内一次心跳都没有（测量器看得见阻塞）",
+              sync_inside == 0, f"同步窗口内仍有 {sync_inside} 次心跳")
+        check("检索期间事件循环仍在跑（卸载确实发生）",
+              async_inside >= 1,
+              f"检索窗口内 {async_inside} 次心跳（最长停顿 {async_worst:.2f} ms）")
 
         print("[3] 卸载的只是检索：结果必须与同步路径完全一致")
         # 两条路径必须用**不同**的 session_id：`examples` 有会话级冷却
@@ -214,7 +229,7 @@ async def main_async() -> int:
         orchestrator._circadian_and_mood = slow_mood
         orchestrator._mark_used = slow_mark
         try:
-            ctrl_elapsed, ctrl_worst, ctrl_beats = await _measure(
+            ctrl_elapsed, ctrl_worst, ctrl_beats, _ctrl_inside = await _measure(
                 lambda: _run_sync(orchestrator, query))
             print(f"       对照（同步路径）：耗时 {ctrl_elapsed:6.2f} ms，"
                   f"循环最长停顿 {ctrl_worst:6.2f} ms，心跳 {ctrl_beats} 次")
@@ -224,7 +239,7 @@ async def main_async() -> int:
             check("注入延迟后同步路径确实卡住（证明测量器看得见）",
                   ctrl_worst > 20, f"最长停顿仅 {ctrl_worst:.2f} ms")
             slow["mood"] = slow["mark_used"] = 0
-            slow_elapsed, slow_worst, slow_beats = await _measure(
+            slow_elapsed, slow_worst, slow_beats, _slow_inside = await _measure(
                 lambda: orchestrator._turn_context_async(query, "slow", []))
             print(f"       异步路径：耗时 {slow_elapsed:6.2f} ms，"
                   f"循环最长停顿 {slow_worst:6.2f} ms，心跳 {slow_beats} 次")
@@ -272,7 +287,7 @@ async def main_async() -> int:
 
         manager.lessons_for = slow_lessons
         try:
-            ctrl2_elapsed, ctrl2_worst, ctrl2_beats = await _measure(
+            ctrl2_elapsed, ctrl2_worst, ctrl2_beats, _ctrl2_inside = await _measure(
                 lambda: _run_sync(orchestrator, query))
             print(f"       对照（同步路径）：耗时 {ctrl2_elapsed:6.2f} ms，"
                   f"循环最长停顿 {ctrl2_worst:6.2f} ms，心跳 {ctrl2_beats} 次")
@@ -281,10 +296,10 @@ async def main_async() -> int:
             check("注入延迟后同步路径确实卡住（证明测量器看得见）",
                   ctrl2_worst > 20, f"最长停顿仅 {ctrl2_worst:.2f} ms")
 
-            base_elapsed, base_worst, base_beats = await _measure(
+            base_elapsed, base_worst, base_beats, _base_inside = await _measure(
                 lambda: orchestrator._turn_context_async(query, "base", []))
             lessons_calls["n"] = 0
-            slow_elapsed, slow_worst, slow_beats = await _measure(
+            slow_elapsed, slow_worst, slow_beats, _slow2_inside = await _measure(
                 lambda: orchestrator._turn_context_async(query, "slow", []))
             print(f"       异步路径：基线最长停顿 {base_worst:6.2f} ms（心跳 {base_beats} 次）；"
                   f"带 40ms 延迟 {slow_worst:6.2f} ms（心跳 {slow_beats} 次）")

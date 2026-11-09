@@ -14,9 +14,13 @@
     .\\.venv\\Scripts\\python.exe scripts\\dev_env_check.py
 
 判定口径：
-- **必须**：缺了门禁主体成片失败（不是个别用例）。
+- **必须**：缺了门禁主体成片 SKIP（一条断言都拿不到，不是个别用例）。
 - **部分**：只影响列出的门禁，其余照跑；`.agents` / `web/models` 缺失时
   脚本自己会 SKIP，不判红（是否算覆盖损失由你判断）。
+
+注意：2026-11-09 起 `run_gates.py` 自己也登记了这些依赖物（`ARTIFACTS`），
+缺项时直接记 SKIP 并打印补救命令，不再让它们变成 FAIL。本脚本仍是「开跑前
+一次看清缺什么」的诊断，不是门禁判定。
 
 退出码：有「必须」项缺失时 1，否则 0。部分项缺失只告警。
 """
@@ -129,8 +133,8 @@ def main() -> int:
         missing_required.append(".venv")
     emit(
         present, f".venv（{py.relative_to(ROOT)}）", True,
-        f"全部 Python 门禁（{len(py_gates)} 条）。缺了 run_gates 会退回启动它的"
-        "解释器；`venv_lock` 仍会直接判红。",
+        f"全部 Python 门禁（{len(py_gates)} 条）。缺了 run_gates 会把它们全部记 "
+        "SKIP（`venv_lock` 不再判红）；但这一轮也一条断言都拿不到。",
         "仓库根跑 `uv sync --frozen`（不要用 `uv pip install -r requirements.txt`）。"
         "仅本机多 worktree 时可建 junction："
         "`cmd /c mklink /J <本树>\\.venv <有依赖的树>\\.venv`"
@@ -165,8 +169,8 @@ def main() -> int:
         f"npm 门禁（{names_text(npm_gates)}）与浏览器门禁（{names_text(browser_gates)}）",
         "仓库根跑 `npm ci`（按 package-lock.json）。仅本机多 worktree 时可"
         " `cmd /c mklink /J <本树>\\node_modules <有依赖的树>\\node_modules`。",
-        "" if present else f"{root_modules} 不存在；浏览器门禁会因 "
-        "`@playwright/test` 找不到而直接失败，不是 SKIP。",
+        "" if present else f"{root_modules} 不存在；run_gates 会把相关门禁记 SKIP "
+        "（直接跑脚本仍是 `@playwright/test` 找不到而报错）。",
     )
 
     # 4. agent-runtime/node_modules
@@ -180,8 +184,8 @@ def main() -> int:
         "`cd agent-runtime` 后跑 `npm ci`。多 worktree 可"
         " `cmd /c mklink /J <本树>\\agent-runtime\\node_modules "
         "<有依赖的树>\\agent-runtime\\node_modules`。",
-        "" if present else f"{runtime_modules} 不存在；TS 门禁报 "
-        "`ERR_MODULE_NOT_FOUND`（如 @earendil-works/chord），看起来像代码坏了。",
+        "" if present else f"{runtime_modules} 不存在；run_gates 会把 TS 门禁记 SKIP "
+        "（直接跑脚本才报 `ERR_MODULE_NOT_FOUND`，如 @earendil-works/chord）。",
     )
 
     # 5. web/vendor
@@ -195,8 +199,8 @@ def main() -> int:
         missing_partial.append("web/vendor")
     emit(
         present, "web/vendor/three + three-vrm（浏览器 importmap 依赖）", False,
-        f"浏览器门禁（{names_text(browser_gates)}）；页面 importmap 指向 "
-        "`/static/vendor/...`，缺了模块加载失败。",
+        "真实页面 importmap 指向 `/static/vendor/...`，人工看页面需要；现有浏览器门禁"
+        "都 stub 了 avatar 运行时或只取静态文本，2026-11-09 干净环境全量实测不依赖。",
         "先装根 node_modules，再跑 `npm run vendor:avatar`（从 node_modules 复制 "
         "three 0.180.0 与 three-vrm 3.5.5）。",
         "缺：" + "、".join(absent_vendor) if absent_vendor else "",
@@ -211,7 +215,8 @@ def main() -> int:
         missing_partial.append("playwright-browser")
     emit(
         present, "Playwright Chromium", False,
-        f"浏览器门禁（{names_text(browser_gates)}）：`chromium.launch()` 需要已下载的浏览器",
+        f"浏览器门禁（{names_text(browser_gates)}）：`chromium.launch()` 需要已下载的浏览器；"
+        "缺时 run_gates 记 SKIP",
         "`npx playwright install chromium`（版本由 package-lock.json 的 "
         "@playwright/test 1.61.1 决定）。",
         f"目录={browsers or '缺'}；" + (f"找到 {names_text(chromium)}" if chromium else "无 chromium*"),
