@@ -610,7 +610,7 @@ DSH 在本机默认沙箱拒绝写工作目录；花名册/profile 必须显式�
 > **函数名与判定结论仍有效，行号请以 `grep -n 'async def <函数名>' server/app.py` 重锚**，
 > 不要把表里的数字当当前坐标。几个当前锚：`_confirm_action` `:637`、
 > `_run_turn` `:888`、`websocket_endpoint` `:1455`、
-> `_start_durable_if_enabled` `:1872`、`shutdown` `:1981`。
+> `_start_durable_if_enabled` `:1874`、`shutdown` `:1983`。
 > （2026-11-09 重锚：`_service_data_dir` 上提到 `server/config.py`，app.py 因此
 > 前移 19 行；锚点按 `ast` 实测更新，表内历史快照仍保留。）
 > 快照原文保留，不逐个改写——改写反而会把历史取证现场抹掉。
