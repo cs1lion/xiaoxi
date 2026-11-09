@@ -1,0 +1,16 @@
+[durable supervisor]
+  ok   起得来并回报端口
+  ok   健康检查通过
+  ok   接单
+  ok   事件流以 artifact 收尾
+  ok   进度事件都在
+  ok   没有模型 token 事件（零外部网络）
+  ok   收尸后端点清空
+  ok   收掉后健康检查为假
+  ok   巡检把内核拉回来了
+  ok   端口换了新内核
+  ok   巡检任务已清掉
+  ok   入口不存在时明说不可用
+  ok   失败后不留进程
+
+=== 13 passed, 0 failed ===

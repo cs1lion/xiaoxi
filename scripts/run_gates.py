@@ -303,6 +303,10 @@ GATES: dict[str, dict[str, object]] = {
         "cmd": [str(PY), "scripts/test_world_bridge.py"],
         "skip_regex": r"^\s*SKIP",
     },
+    # sidecar 监督器自检：钉 `XIAOXI_WORKER_MODE=script`，零外部网络。
+    # 不钉住时 sidecar 会继承宿主 os.environ（import server.assistant.* 即
+    # load_dotenv），LLM_BASE_URL/LLM_MODEL 一在就选 model 模式真调模型，
+    # 这条门禁就会依赖付费订阅（实测 400: no active step plan subscription）。
     "durable_supervisor": {
         "cmd": [str(PY), "scripts/test_durable_supervisor.py"],
         "skip_regex": r"^\s*SKIP",

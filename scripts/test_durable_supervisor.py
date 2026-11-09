@@ -3,7 +3,14 @@
     python scripts/test_durable_supervisor.py
 
 需要用本机 Node 和 agent-runtime 的依赖；缺任何一样就 SKIP，不算失败
-（与 test-ui-nav-browser.mjs 同一约定）。零外部网络：只连 127.0.0.1。
+（与 test-ui-nav-browser.mjs 同一约定）。
+
+零外部网络：sidecar 被钉在 `XIAOXI_WORKER_MODE=script`（见 SCRIPT_ENV），
+只走本地的 scripted 路径。**必须显式钉住**：import `server.assistant.*` 会经
+`server/assistant/__init__.py` → `server/config.py:load_dotenv()` 把 `.env` 里的
+`LLM_BASE_URL`/`LLM_MODEL` 灌进 `os.environ`，supervisor 又把自己继承的整份
+环境交给 sidecar；不钉住时 `task.ts:workerMode()` 会选 model 模式，真去调
+stepfun——这条门禁就变成依赖付费订阅（实测 400: no active step plan subscription）。
 """
 from __future__ import annotations
 
@@ -27,6 +34,9 @@ from server.assistant.durable_supervisor import DurableSupervisor  # noqa: E402
 
 passed, failed = 0, []
 
+# 钉住本地 scripted 路径，不让宿主 `.env` 把门禁拖进模型调用。
+SCRIPT_ENV = {"XIAOXI_WORKER_MODE": "script"}
+
 
 def check(name: str, condition: bool, detail: str = "") -> None:
     global passed
@@ -48,7 +58,7 @@ def runnable() -> tuple[bool, str]:
 
 async def test_lifecycle() -> None:
     directory = tempfile.mkdtemp(prefix="durable-supervisor-")
-    supervisor = DurableSupervisor(directory=directory, startup_timeout=30.0)
+    supervisor = DurableSupervisor(directory=directory, startup_timeout=30.0, extra_env=SCRIPT_ENV)
     try:
         endpoint = await supervisor.start()
         check("起得来并回报端口", endpoint.startswith("http://127.0.0.1:"), endpoint)
@@ -72,6 +82,8 @@ async def test_lifecycle() -> None:
         check("事件流以 artifact 收尾",
               bool(events) and events[-1]["type"] == "artifact", str(events[-1:])[:200])
         check("进度事件都在", sum(1 for e in events if e["type"] == "progress") == 3)
+        check("没有模型 token 事件（零外部网络）",
+              not any(e["type"] == "token" for e in events), str(events[-1:])[:200])
     finally:
         await supervisor.stop()
     check("收尸后端点清空", supervisor.endpoint is None and not supervisor.available)
@@ -79,7 +91,7 @@ async def test_lifecycle() -> None:
 
 async def test_patrol() -> None:
     directory = tempfile.mkdtemp(prefix="durable-supervisor-patrol-")
-    supervisor = DurableSupervisor(directory=directory, startup_timeout=30.0)
+    supervisor = DurableSupervisor(directory=directory, startup_timeout=30.0, extra_env=SCRIPT_ENV)
     try:
         first = await supervisor.start()
         # 模拟"进程还在但不应答"：直接把当前内核收掉，让巡检重起一个。
