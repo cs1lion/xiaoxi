@@ -23,18 +23,22 @@
 
 ## 2. 工作区
 
-生产默认在 roster 的 `AQI_WORKSPACE_ROOT`（当前 `data/commissions`）下，每个 Commission 一棵树：
+生产默认在 roster 的 `AQI_WORKSPACE_ROOT`（当前相对值 `commissions`）下，每个 Commission 一棵树：
 
 ```text
 data/commissions/<commission_id>-<YYYYMMDD-HHMMSS>/
 └── out/                 # Worker 的交付物
 ```
 
+- 相对值由 `server/assistant/adapters/workspace.py::resolve_workspace_root` 解析，
+  基准是 `config.service_data_dir()`（生产 `<repo>/data`；`TEST_SENTINEL=1` 的进程
+  跟随 `DB_PATH`/`APP_DATA_DIR`/进程临时目录），**不是进程 cwd**。所以这里写
+  `commissions` 而不是 `data/commissions`（后者会拼成 `data/data/commissions`）。
 - durable 适配器用 `workspace_root + commission_id + 时间戳` 建目录，见 `server/assistant/adapters/durable.py` 的 `_workspace`。
 - sidecar 把目录写进 `RunMeta.workspace`；`write_file/read_file/list_files` 只能在这个目录内。
 - 接管 CLI 时，`takeover.ts` 注入 `AQI_WORKDIR` / `AQI_OUTDIR`；shim 的 `resolve_workdir()` 解析。
-- `cli_subproc` 的 shim 用 `AQI_WORKSPACE_ROOT + AQI_COMMISSION_ID` 分配。
-- 探针/测试可以显式覆盖 workspace_root 到 `tmp/` 或系统临时目录，不要写真实 `data/commissions`。
+- `cli_subproc` 的 shim 用 `AQI_WORKSPACE_ROOT + AQI_COMMISSION_ID` 分配；下发时已换成**绝对路径**，与 `durable` 同源，回读才对得上。
+- 探针/测试可以显式覆盖 workspace_root 到 `tmp/` 或系统临时目录（绝对路径原样采纳），不要写真实 `data/commissions`。
 
 ## 3. 加一个 CLI Worker
 
@@ -46,7 +50,7 @@ data/commissions/<commission_id>-<YYYYMMDD-HHMMSS>/
   args: ["scripts/worker_shims/my_worker.py"]
   timeout: 420
   env:
-    AQI_WORKSPACE_ROOT: "data/commissions"
+    AQI_WORKSPACE_ROOT: "commissions"
   summary: 一句话说明它适合干什么
   strengths: [关键词1, 关键词2]
   weaknesses: [不适合什么]
@@ -64,7 +68,7 @@ shim 必须在 stdout 上说 PROTOCOL §22 的五种事件（progress/token/arti
 ```yaml
 adapter: durable
 # executable/args/env 原样保留
-workspace_root: data/commissions
+workspace_root: commissions
 ```
 
 这样拿到的是：真实 CLI 的 Read/Bash/Grep + durable 的 checkpoint/续跑/事件流。不要同时写一个“用模型重写 CLI 工具”的 Worker。

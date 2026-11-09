@@ -79,6 +79,14 @@ GATES: dict[str, dict[str, object]] = {
         "cmd": [str(PY), "scripts/test_gate_tmp_leak.py"],
         "skip_regex": r"^\s*SKIP",
     },
+    "workspace_root": {
+        # 工作区根解析契约（2026-11-09）：相对值基准固定为服务数据目录、绝不按
+        # 进程 cwd。三条门禁曾靠 cwd 把产物写进真实 data/commissions/，且
+        # cli_subproc 下发与 durable 回读一旦不同源就"写了但验收看不见"。
+        # 纯逻辑 + 一次真子进程 + 一次真实链路回读，离线、确定性。
+        "cmd": [str(PY), "scripts/test_workspace_root.py"],
+        "skip_regex": r"^\s*SKIP",
+    },
     "check_staged_scope": {
         # check_staged_scope 自身回归：判据（暂存区 ⊆ 声明路径）不许退化成
         # 永真。测试在临时 git 仓库造场景，不碰真实 index。纯逻辑、零网络零

@@ -1,0 +1,41 @@
+[解析器：三层基准 + cwd 无关]
+  FAIL config.service_data_dir 存在（基准的唯一出处）
+  ok   service_data_dir 是绝对路径
+  ok   哨兵进程跟随 DB_PATH 的临时根
+  ok   service_data_dir 不落在仓库 data/
+  FAIL 解析器存在（server/assistant/adapters/workspace.py）  ｜ModuleNotFoundError: No module named 'server.assistant.adapters.workspace'
+[cli_subproc：下发给子进程的值]
+  FAIL 下发的根是绝对路径  ｜data/commissions
+  FAIL 下发的根 = 解析器结果  ｜data/commissions 期望=None
+  ok   换 cwd 下发的根不变
+[durable：回读侧同源]
+  ok   每单目录是绝对路径
+  FAIL 每单目录挂在解析后的根下  ｜D:\project\neurosama-wt-dbsentinel\commissions 期望=None
+  FAIL 换 cwd 每单目录的根不变  ｜C:\Users\18712\AppData\Local\Temp\workspace-root-0otb0wjs\cwd-probe-3\commissions / D:\project\neurosama-wt-dbsentinel\commissions
+  ok   未配置时返回空（sidecar 不允许写文件）
+[shim：拿到绝对根就落在绝对根]
+  ok   shim 交了文件成果
+  ok   产物落在传入的绝对根下
+  ok   产物存在且可回读
+  ok   产物不在仓库 data/ 下
+[真实链路：默认配置 + 验收回读]
+  ok   验收通过（初审回查到了真文件）
+  FAIL 产物落在 <服务数据目录>/commissions 下  ｜D:\project\neurosama-wt-dbsentinel\data\commissions\c_55e5d9f46fe7-20261109-075343\out\verify_report.json 期望根=C:\Users\18712\AppData\Local\Temp\workspace-root-0otb0wjs\commissions
+  ok   产物存在且含本单号
+  FAIL 真实 data/commissions 前后无变化  ｜前=1 后=2 新增=['c_55e5d9f46fe7-20261109-075343']
+[生产基准]
+  FAIL 无哨兵时基准是仓库 data/（cwd 不是仓库根）  ｜None｜Traceback (most recent call last):
+  File "<string>", line 3, in <module>
+AttributeError: module 'server.config' has no attribute 'service_data_dir'
+
+
+=== 12 passed, 9 failed ===
+  - config.service_data_dir 存在（基准的唯一出处）
+  - 解析器存在（server/assistant/adapters/workspace.py）
+  - 下发的根是绝对路径
+  - 下发的根 = 解析器结果
+  - 每单目录挂在解析后的根下
+  - 换 cwd 每单目录的根不变
+  - 产物落在 <服务数据目录>/commissions 下
+  - 真实 data/commissions 前后无变化
+  - 无哨兵时基准是仓库 data/（cwd 不是仓库根）

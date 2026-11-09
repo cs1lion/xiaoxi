@@ -1,0 +1,1 @@
+{"event": "file_write", "gate": "", "pid": 23656, "argv": ["-c"], "cwd": "D:\\project\\neurosama-wt-dbsentinel", "target": "D:\\project\\neurosama-wt-dbsentinel\\data\\audit-probe.tmp", "mode": "w", "stack": "<string>:1:<module>"}
