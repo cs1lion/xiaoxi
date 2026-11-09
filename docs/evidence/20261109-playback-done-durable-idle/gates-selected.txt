@@ -1,0 +1,21 @@
+== check_protocol ==
+PASS  6 个情绪标签双向齐全；29 个参数与中位姿态互为全集；22 个消息类型的字段全部对得上；122 个 /api 路由与前端引用一致；7 种积木 kind 三方认账；aqi 信封 layout/gaze/source 取值域文档与组装器一致；ui_nav 5 视图 / 4 子动作前后端一致
+      （服务端还发了这些，前端未处理，对形象层无影响：archive, commission_update, diary_notice, gap, note, object, preference, segment_done, source, source_final, source_partial, stopped, thread, translation）
+
+== playback_done test ==
+........
+----------------------------------------------------------------------
+Ran 8 tests in 0.375s
+
+OK
+
+== gate coverage ==
+磁盘 test_*.py：183   已登记：179   清单：4   未登记：4
+
+PASS 覆盖度棘轮成立（登记 179 + 清单 4 = 磁盘 183）
+
+== procedural_memory_eval ==
+----------------------------------------------------------------------
+Ran 24 tests in 0.012s
+
+OK (skipped=20)

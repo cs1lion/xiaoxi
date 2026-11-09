@@ -404,6 +404,23 @@ function finishTurn() {
   turns.clear(); currentBubble = null; pendingText = "";
   avatar.stopSpeaking(); idleStatus();
 }
+/* 协议 §六 playback_done：播放队列的终态回执。
+ * 只跟一个轮次（服务端同一时刻只交付一轮），队列空/被打断时发一次，
+ * 发完即清，重复 stop 不会重报。resume 的本地续播没有 turn_id，不上报。 */
+const playbackReport = { turn: null, played: false, failed: false };
+function reportPlayback(status) {
+  const turnId = playbackReport.turn;
+  if (!turnId) return false;
+  playbackReport.turn = null; playbackReport.played = false; playbackReport.failed = false;
+  return send({ type: 'playback_done', turn_id: turnId, status });
+}
+function enqueuePlayback(item) {
+  const accepted = playback.enqueue(item);
+  if (accepted && item.turn_id && playbackReport.turn !== item.turn_id) {
+    playbackReport.turn = item.turn_id; playbackReport.played = false; playbackReport.failed = false;
+  }
+  return accepted;
+}
 const playback = new PlaybackQueue({
   decode: async item => {
     recordBaselineItem('decode_start', item);
@@ -427,6 +444,7 @@ const playback = new PlaybackQueue({
       if (sourceNode === source) { sourceNode = null; playbackState = null; playbackBaselineTurn = null; }
     };
     source.onended = () => {
+      if (item.turn_id && playbackReport.turn === item.turn_id) playbackReport.played = true;
       dialogueReview?.event({ type: 'playback-end', turn_id: item.turn_id || item._baselineTurn, meta: { reason: 'natural', audioTime: ctx.currentTime } });
       recordBaselineItem('playback_end', item, { reason: 'natural' }); cleanup(); done();
     };
@@ -461,10 +479,14 @@ const playback = new PlaybackQueue({
     };
   },
   onIdle: () => {
+    reportPlayback(playbackReport.failed && !playbackReport.played ? 'failed' : 'completed');
     if (resumeReviewId) { dialogueReview?.endTurn(resumeReviewId, 'complete'); resumeReviewId = null; }
     avatar.stopSpeaking({turnPending: !!turns.id && !turns.done}); finishTurn(); idleStatus();
   },
-  onError: voiceError,
+  onError: error => {
+    playbackReport.failed = true;
+    voiceError(error);
+  },
 });
 editorInsightVoice = mountEditorInsightVoice({
   available: () => !disposed && !document.hidden,
@@ -481,7 +503,7 @@ editorInsightVoice = mountEditorInsightVoice({
     return id;
   },
   enqueueAudio: item => {
-    const accepted = playback.enqueue(item);
+    const accepted = enqueuePlayback(item);
     if (accepted && turns.id === item.turn_id) dialogueReview?.event({ type: 'done', turn_id: item.turn_id, text: item.text || '' });
     if (accepted && turns.id === item.turn_id) { turns.done = true; finishTurn(); }
     return accepted;
@@ -847,6 +869,7 @@ editorDiscussion = mountEditorDiscussion({
 returnToDraft.onclick = () => window.dispatchEvent(new Event('aqi-editor-discussion-return'));
 endDiscussion.onclick = () => { editorDiscussion.end(); subtitle.textContent = '已结束这条观点的讨论，继续聊。'; };
 function stopPlayback() {
+  reportPlayback('stopped');
   playback.stop();
   if (resumeReviewId) { dialogueReview?.endTurn(resumeReviewId, 'interrupted'); resumeReviewId = null; }
   setDucked(false); avatar.stopSpeaking();
@@ -1316,7 +1339,7 @@ async function onWsMessage(event) {
         recordBaselineTurn('audio_received', msg.turn_id, { source: 'ws' });
         const item = { ...msg, _baselineToken: baselineTurns.get(msg.turn_id)?.token, _baselineChunk: ++baselineChunk };
         if (item.chunk) { microFlow = true; syncModeStrip(); }
-        if (!playback.enqueue(item)) recordBaselineTurn('queue_rejected', msg.turn_id);
+        if (!enqueuePlayback(item)) recordBaselineTurn('queue_rejected', msg.turn_id);
         idleStatus();
       }
       else if (msg.data) voiceError(new Error("音频片段无效或过大，已跳过"));

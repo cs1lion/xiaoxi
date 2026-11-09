@@ -1,0 +1,49 @@
+
+> test:voice:browser
+> node scripts/test-voice-browser.mjs
+
+{
+  "ok": true,
+  "checks": [
+    "slow persona response preserves acknowledged speech and startup configs omit unknown preference",
+    "older successful speech acknowledgement cannot revert a newer local selection",
+    "natural default, speech choices, retained preference and server acknowledgement",
+    "silent monitoring sends no audio turn",
+    "speech onset + pre-roll + automatic endpoint",
+    "new turn rejects late websocket events and pending decode",
+    "real playback completion permits next hands-free utterance",
+    "natural queue drain reports playback_done completed",
+    "short vocal response ducks then restores without cancelling",
+    "interrupted playback reports playback_done stopped",
+    "an open settings panel never covers the composer send button",
+    "spoken barge-in stops old turn and silent result returns to listening",
+    "avatar and visible state follow decode/playback/interruption facts",
+    "manual-only fallback ignores noise but permits explicit keyboard interruption",
+    "interrupted sentence continuation never sends a new task",
+    "stop control and disable release",
+    "permission popup pointer-release race",
+    "permission rejection leaves continuous mode off",
+    "keyboard hold-to-talk submits and releases tracks",
+    "disable cancels unfinished speech without submitting",
+    "continuous utterance cap waits for quiet before rearming",
+    "English practice settings, longer pause, tagged review and exit",
+    "experience config acknowledgements, fictional kickoff and exit reuse real voice controls",
+    "applied source preview, draft gating and explicit relationship question reuse the real voice turn",
+    "hidden page releases microphone and disables listening",
+    "linked memory reveals exact evidence as safe text, including whitespace and HTML-looking content",
+    "favorite and additional recent like render degree and original date as safe text without claiming present validity",
+    "manual and legacy memories use honest labels without invented original quotes",
+    "history toggle fetches superseded and conflict records, while conflict notice retains the active memory honestly",
+    "manual correction refresh clears derived preference/time labels while retaining the other preference member",
+    "edit and forget preserve original IDs and display the refreshed saved result",
+    "baseline scenario, judgment and export controls fit wide and narrow desktop sidebars",
+    "baseline is opt-in, defaults to speaker environment and starts neither microphone nor server config",
+    "rejected late experience acknowledgement changes neither active trial context nor endpoint wait",
+    "real app voice seams export detector and scheduling metadata, actual browser settings and no conversation content",
+    "spoken interruption records detector onset through actual stop request, keeping text outside speech latency",
+    "interrupting audio-only continuation records its own gate timing without new generation or decode latency",
+    "strategy changes invalidate trials and delayed audio callbacks retain their original trial token",
+    "disconnect invalidates active baseline while retaining exportable local failure evidence",
+    "disconnect releases microphone and invalidates experience while preserving draft"
+  ]
+}

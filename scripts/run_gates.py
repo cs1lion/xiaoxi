@@ -751,6 +751,10 @@ GATES: dict[str, dict[str, object]] = {
         "cmd": [str(PY), "scripts/test_practice_websocket.py"],
         "skip_regex": r"^\s*SKIP",
     },
+    "playback_done": {
+        "cmd": [str(PY), "scripts/test_playback_done.py"],
+        "skip_regex": r"^\s*SKIP",
+    },
     "preferences": {
         "cmd": [str(PY), "scripts/test_preferences.py"],
         "skip_regex": r"^\s*SKIP",
@@ -880,6 +884,11 @@ GATES: dict[str, dict[str, object]] = {
         "skip_regex": r"^\s*SKIP",
     },
     "procedural_memory_eval": {
+        # 2026-11-09 Role 0 裁决：维持 SKIP，不合成夹具。
+        # cases/oracles 从未入库（/eval 清理时删除），而 oracles 的 human_card 是
+        # 金标准——合成它等于自编参考答案，评测会退化成自己出题自己判卷。
+        # 这是**政策阻塞**，不是能力阻塞：要转绿需真人提供一份真实 human_card。
+        # 在此之前本条 [SKIP] 只证明「夹具缺失时不误报」，不代表程序性记忆质量。
         "cmd": [str(PY), "scripts/test_procedural_memory_eval.py"],
         "skip_regex": r"^\s*SKIP",
     },

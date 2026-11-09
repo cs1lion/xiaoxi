@@ -26,6 +26,11 @@ import eval_procedural_memory as target
 # 2026-10-25：整组 SkipTest 改成逐条 skipUnless。依赖夹具的用例必须 cases 与
 # oracles 同时存在才真跑：只补 cases 会让这里从 skipped 变成 19 errors + 1 failure
 # （load_specs() 要求 oracle id 集合匹配），比诚实跳过更糟。
+#
+# 2026-11-09 Role 0 裁决：**维持 SKIP，不合成夹具**（20/24 条跳过）。
+# oracles 里的 human_card 是金标准；用合成数据补它等于自编参考答案，评测会退化成
+# 「自己出题自己判卷」。这是政策阻塞，不是能力阻塞——要转绿需真人提供真实卡。
+# 在此之前 skip 只证明「夹具缺失时不会误报」，不能当作程序性记忆质量的证据。
 EVAL_CASES = Path(__file__).resolve().parents[1] / 'eval/research/procedural_memory_eval_cases.json'
 EVAL_ORACLES = Path(__file__).resolve().parents[1] / 'eval/research/procedural_memory_eval_oracles.json'
 EVAL_FIXTURES_AVAILABLE = EVAL_CASES.is_file() and EVAL_ORACLES.is_file()

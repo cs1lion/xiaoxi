@@ -1,0 +1,12 @@
+== 8000 probes ==
+/api/health => 200
+/api/memories => 200
+/api/memories/context?query=%E6%B2%99%E7%9B%92 => 200
+
+== durable startup line ==
+
+[durable] 执行内核就绪 http://127.0.0.1:53851；已绑定 0 个 Worker
+
+
+== sidecar process ==
+PID=2340 start=11/09/2026 12:30:27

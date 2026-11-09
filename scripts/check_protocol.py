@@ -289,6 +289,25 @@ def check_ui_nav(problems: list[str]) -> None:
                 problems.append(f"web/ui_nav.js 的 {key} 白名单没覆盖协议取值 {sorted(missing)}")
 
 
+def check_playback_event(problems: list[str]) -> None:
+    """§六 playback_done：协议文档、前端发送点、服务端收包点三方认账。
+
+    这是唯一一条「客户端 → 服务端」的事件检查。少了任何一边都不会报错：
+    前端不发，`playback_confirmed` 永远无法确认；服务端不接，事件被静默丢弃，
+    空闲基准仍停在交付结束。
+    """
+    name = "playback_done"
+    protocol_text = (ROOT / "docs" / "PROTOCOL.md").read_text(encoding="utf-8")
+    app_text = APP_JS.read_text(encoding="utf-8")
+    server_text = (SERVER_DIR / "app.py").read_text(encoding="utf-8")
+    if name not in protocol_text:
+        problems.append(f"PROTOCOL.md §六 缺事件 {name!r}（客户端回执没有契约）")
+    if name not in app_text:
+        problems.append(f"web/app.js 不发 {name!r}（播放终态永远到不了服务端）")
+    if name not in server_text:
+        problems.append(f"server/app.py 不接 {name!r}（回执会被静默丢弃）")
+
+
 DURABLE_ROUTES_TS = ROOT / "agent-runtime" / "src" / "routes.ts"
 DURABLE_ROUTES_PY = ROOT / "server" / "assistant" / "adapters" / "durable.py"
 
@@ -585,6 +604,8 @@ def main() -> int:
 
     # ---- 8. 协议 §24 ui_nav 领航：前后端取值域同步 ----
     check_ui_nav(problems)
+    # ---- 8b. 协议 §六 playback_done：客户端回执三方认账 ----
+    check_playback_event(problems)
     # ---- 9. 慢环 sidecar 路由：Python 适配器与 Node 侧同步 ----
     check_durable_routes(problems)
     # ---- 11. 像素世界事件：协议、服务端、世界客户端三方认账 ----

@@ -214,6 +214,8 @@ try {
   const starts=(await sent()).filter(e=>e.type==='start');
   assert.equal(starts.length,2,'listening continues after actual playback');
   checks.push('real playback completion permits next hands-free utterance');
+  await page.waitForFunction(turn=>voiceHarness.sent.some(e=>e.type==='playback_done'&&e.turn_id===turn&&e.status==='completed'),second.turn_id);
+  checks.push('natural queue drain reports playback_done completed');
   const third = starts.at(-1);
   await emit({type:'thinking',turn_id:third.turn_id});
   await emit({type:'audio',turn_id:third.turn_id,data:'AA==',text:'请打断我',emotion:'base'});
@@ -226,6 +228,8 @@ try {
   assert.ok(await page.evaluate(()=>voiceHarness.gains.every(g=>g.gain.value!==.22)),'short response restores volume');
   checks.push('short vocal response ducks then restores without cancelling');
   await feed(.8,.15);
+  await page.waitForFunction(turn=>voiceHarness.sent.some(e=>e.type==='playback_done'&&e.turn_id===turn&&e.status==='stopped'),third.turn_id);
+  checks.push('interrupted playback reports playback_done stopped');
   const fourth = (await sent()).filter(e=>e.type==='start').at(-1);
   await page.locator('details.preferences > summary').click();
   /* 面板开着的时候 composer 必须仍然可点——这条不变量曾经被破坏过：

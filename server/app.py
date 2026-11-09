@@ -448,6 +448,11 @@ class Connection:
         self.emotion_override = default_voice if default_voice in EMOTIONS else "base"
         self.last_spoke_at = time.time()
         self.turn: VoiceTurn | None = None
+        # §六 playback_done：最近一次 done 的轮次、该轮第一次播放终态、
+        # 以及确实播放完成的轮次（done.delivery.playback_confirmed 仍恒 False）。
+        self.delivered_turn_id: str | None = None
+        self.playback_report: dict[str, str] | None = None
+        self.playback_confirmed_turn_id: str | None = None
         self.closed = False
         self.revision = 0
         self.tasks: set[asyncio.Task] = set()
@@ -530,6 +535,33 @@ class Connection:
             self.buffer.clear()
             await self.send_turn(turn, payload)
             turn.live = False
+            if payload.get("type") == "done":
+                self.delivered_turn_id = turn.turn_id
+
+    def note_playback(self, event: dict[str, Any]) -> bool:
+        """§六 playback_done：记录客户端播放终态，只取第一次上报。
+
+        只认当前轮或最近一次 done 的轮次；completed / stopped 才推进空闲基准，
+        failed 只记录（解码失败、自动播放被拦截、设备错误都不是用户拒绝）。
+        不回包，也不改 done.delivery.playback_confirmed。
+        """
+        turn_id = event.get("turn_id")
+        status = event.get("status")
+        if (not isinstance(turn_id, str) or not turn_id
+                or status not in ("completed", "stopped", "failed")):
+            return False
+        current = self.turn
+        known = turn_id == self.delivered_turn_id or (
+            current is not None and turn_id == current.turn_id and not current.live)
+        if not known:
+            return False
+        if self.playback_report is not None and self.playback_report.get("turn_id") == turn_id:
+            return False
+        self.playback_report = {"turn_id": turn_id, "status": status}
+        if status != "failed":
+            self.playback_confirmed_turn_id = turn_id
+            self.last_spoke_at = time.time()
+        return True
 
     async def cancel(self, *, playback: bool = False) -> None:
         self.revision += 1
@@ -1520,6 +1552,9 @@ async def websocket_endpoint(ws: WebSocket) -> None:
                 if conn.matches(event) or (conn.turn is None and event.get("turn_id") is None):
                     await conn.cancel(playback=True)
                     _v2_presence(conn, "idle")
+            elif kind == "playback_done":
+                # §六：客户端播放队列清空/被打断/失败时的单向回执，不回包。
+                conn.note_playback(event)
             elif kind in V2_COMMAND_TYPES:
                 # §25.3 五命令：校验 + request_id 幂等 + 动作路由都在
                 # V2CommandActions 里；错误回执走 _v2_reply（v1 error 帧形状）。

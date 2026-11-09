@@ -103,6 +103,7 @@ uv run python scripts/check_protocol.py
 - **主动搭话心跳（打磨轮 2026-10-14）**：前端在 `/ws` 连接打开后启动约 45 秒一轮的心跳，本地空闲（页面可见、未录音、无活动轮次、播放队列空、麦克风挂起为假）且用户已授权主动发言时发送 `{"type":"proactive_check"}`；断开时清除。服务端 `proactive_check` 分支的守卫（忙碌、practice/experience 关闭）不变，仍是最终门。没有这条心跳线，主动发言与自进化均不可达。
 - ASR在独立任务中等待，WS接收循环仍可处理新start/取消。空输入或空转写使用 `asr` 空文本加 `done`；错误终结该轮。
 - `done` 表示生成结束，不表示浏览器播放完成。客户端预解码下一段但按序播放，仍需等待播放队列idle，静默TTS则直接完成。
+- **播放回执 `playback_done`（2026-11-09 Role 0 批准，最小集）**：客户端在播放队列清空、被打断或播放失败时向 `/ws` 发送 `{"type":"playback_done","turn_id":"该轮ID","status":"completed|stopped|failed"}`，单向、不期待回包。服务端只认**当前轮或最近一次 `done` 的轮次**，陈旧/未知 `turn_id` 静默忽略，同一轮重复上报只取第一次终态。`completed` / `stopped` 才把该轮记为播放已确认，并把连接空闲基准 `last_spoke_at` 从「交付结束」推进到「播放结束」；`failed`（解码失败、自动播放被拦截、设备错误）只记录，不确认、不推进基准，**不得**当成用户拒绝或情绪信号。该事件不改 `done.delivery`，`playback_confirmed` 仍恒 `False`——`done` 发得比播放早，不能承载播放结果。
 - 服务端拒绝超过30秒的PCM16单声道输入并清空缓存，发 `error` / `code: audio_too_long`；前端上限29.5秒含预录。
 - 取消只停止录音、生成和投递，不代表撤销已发生的工具副作用。后台记忆抽取可能继续；轮次已结束的memory_notice不再投递，可从记忆面板刷新查看。
 - 普通对话在首次模型等待前保存用户消息；记忆抽取关联该消息ID及原话。`memory_notice.items` 可包含 `active` 或 `conflict`，冲突只表示待核对，不能显示为已应用的新事实。删除、人工维护、记忆关开与持久写入水位使旧任务失效；消息证据与边界见 [MEMORY_EVIDENCE.md](MEMORY_EVIDENCE.md)。
