@@ -1140,6 +1140,13 @@ GATES: dict[str, dict[str, object]] = {
         "cmd": [str(PY), "scripts/test_shared_retriever_concurrency.py"],
         "skip_regex": r"^\s*SKIP",
     },
+    "eval_scenarios_api": {
+        # /api/eval/scenarios 的目录契约：evals/cases/*.yaml 必须全部出现在
+        # 返回里，坏 YAML 只进 invalid 清单。此前接口读未入库的
+        # eval/scenarios.json，恒返回空。
+        "cmd": [str(PY), "scripts/test_eval_scenarios_api.py"],
+        "skip_regex": r"^\s*SKIP",
+    },
     "evals_report": {
         # 评测报告层（docs/EVAL_MECHANISM_PLAN.md）：读 evals/results/ 快照出
         # 通过率（平均与全过概率分列）、与上次的配对差异、token 成本。

@@ -1972,7 +1972,7 @@ el("opsScenariosLoad")?.addEventListener("click", async () => {
     const items = Array.isArray(data.scenarios) ? data.scenarios
       : Array.isArray(data.items) ? data.items : [];
     if (!items.length) {
-      box.append(diagRow("服务端没有可用的评测场景（eval/scenarios.json 未加载）。"));
+      box.append(diagRow("服务端没有可用的评测场景（evals/cases/ 为空或全部无法解析）。"));
       status.textContent = "评测场景为空。";
       return;
     }

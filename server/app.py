@@ -1759,10 +1759,12 @@ async def chat() -> Any:
 
 @app.get("/api/eval/scenarios")
 async def scenarios() -> Any:
-    path = ROOT / "eval" / "scenarios.json"
-    if not path.exists():
-        return JSONResponse({"items": []})
-    return json.loads(path.read_text(encoding="utf-8"))
+    """评测场景目录：现读 evals/cases/*.yaml（eval/scenarios.json 已废弃）。
+
+    只读诊断入口，不执行用例；读盘卸载到工作线程，空目录返回空清单而不是 500。
+    """
+    from .eval_catalog import load_catalog
+    return await asyncio.to_thread(load_catalog)
 
 
 app.mount("/static", AppStaticFiles(directory=str(ROOT / "web")), name="static")
