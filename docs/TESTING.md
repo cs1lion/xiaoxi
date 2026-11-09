@@ -324,7 +324,7 @@ node scripts\test-ui-nav-browser.mjs                             # 领航浏览�
 ```bash
 .\.venv\Scripts\python.exe scripts\test_restart_recovery.py   # briefing/running/auditing 收口 + drafting 重派 + 停车场不占槽
 .\.venv\Scripts\python.exe scripts\test_durable_adapter.py    # durable 适配器：假 sidecar 验密件/事件映射/内核不可用降级/重启对账
-.\.venv\Scripts\python.exe scripts\test_durable_supervisor.py # sidecar 监督：起得来/探得活/收得干净（需本机 node，缺则 SKIP）
+.\.venv\Scripts\python.exe scripts\test_durable_supervisor.py # sidecar 监督：起得来/探得活/收得干净（需本机 node，缺则 SKIP；钉 script 模式，零外部网络）
 .\.venv\Scripts\python.exe scripts\test_durable_app_wiring.py # app 接线：环境变量启用、switch_agents、端点提供者、写盘根（需 node，缺则 SKIP）
 .\.venv\Scripts\python.exe scripts\test_durable_reconcile.py   # 周期对账：完成采纳/丢失或失败转 blocked/仍跑不误杀/不自动 done
 .\.venv\Scripts\python.exe scripts\test_durable_soak.py        # 短时 chaos：多单硬杀 sidecar，重启后恰好一次进度/artifact
