@@ -100,7 +100,7 @@ agents:
       AQI_GATEWAY_URL: "http://127.0.0.1:15722"
       AQI_CLAUDE_MODEL: "claude-opus-5-5"
       AQI_CLAUDE_TIMEOUT: "360"
-      AQI_WORKSPACE_ROOT: "data/commissions"
+      AQI_WORKSPACE_ROOT: "commissions"
     # 单次 prompt 实测 15.3–23.7 万 tokens（多轮工具调用累积，非系统提示开销），
     # 长期贴着 120K 质量闸。代码/脚本/测试/重构这类会触发多轮读写的活让给 dsh
     # （同一任务单次最高仅 2,586 tokens，见 issue #2 诊断）。Claude Code 保留它
@@ -126,7 +126,7 @@ agents:
       CODEBUDDY_API_KEY: "PROXY_MANAGED"
       AQI_WORKBUDDY_MODEL: "step-5-preview"
       AQI_WORKBUDDY_TIMEOUT: "300"
-      AQI_WORKSPACE_ROOT: "data/commissions"
+      AQI_WORKSPACE_ROOT: "commissions"
     summary: 真机 WorkBuddy：文档、表格、汇报、整理与信息归纳；成果落在独立工作目录
     strengths: [文档, 表格, 汇报, 整理, 写作, 办公, 演示, 数据, 归纳, 总结, 文案]
     weaknesses: [不跑长命令, 不改后端契约, 不做无法验证的审美判断]
@@ -149,7 +149,7 @@ agents:
       # 能写文件。隔离未解决前，这条只在独立 commission 工作目录里跑。
       DSH_PERMISSION_MODE: "danger-full-access"
       AQI_DSH_TIMEOUT: "300"
-      AQI_WORKSPACE_ROOT: "data/commissions"
+      AQI_WORKSPACE_ROOT: "commissions"
     # 自带 session 与 compaction，每轮只发增量：同一代码任务单次 prompt 最高
     # 2,586 tokens（Claude Code 同一任务 152,976）。长任务默认落这里。
     summary: 真机 DeepSeek Harness：多步任务、长上下文、代码、调研与分析与实现；成果落在独立工作目录
@@ -171,7 +171,7 @@ agents:
     args: ["scripts/worker_shims/sandbox_worker.py"]
     timeout: 60
     env:
-      AQI_WORKSPACE_ROOT: "data/commissions"
+      AQI_WORKSPACE_ROOT: "commissions"
     summary: 沙盒打样：受控小任务真子进程执行（生成并回读校验一个小文件）；不联网、不删数据
     strengths: [打样, 沙盒, 校验, 演练, 受控]
     weaknesses: [不联网, 不删除既有文件, 只做受控小任务]
@@ -214,7 +214,7 @@ agents:
       AQI_GATEWAY_MODEL: "step-5-preview"
       AQI_CODEX_SANDBOX: "danger-full-access"
       AQI_CODEX_EFFORT: "low"
-      AQI_WORKSPACE_ROOT: "data/commissions"
+      AQI_WORKSPACE_ROOT: "commissions"
     summary: 真机 Codex：实现、修复与命令；当前仅探针可用，生产隔离未定
     strengths: [实现, 代码, 修复, 命令, 测试, 脚本, 重构]
     weaknesses: [需要 danger-full-access, 生产隔离未定]
@@ -249,7 +249,11 @@ durable:
   shadow_log: data/durable-shadow.jsonl
   # durable 的 Worker 只能写这一个根目录下的每单独立子树（与 cli_subproc 的
   # AQI_WORKSPACE_ROOT 同一个根）。留空则不允许写文件，只交文字成果。
-  workspace_root: data/commissions
+  # 相对值（`commissions` 而非 `data/commissions`）的基准是**服务数据目录**
+  # （`server/config.py::service_data_dir`：生产 `<repo>/data`，哨兵进程跟随
+  # DB_PATH/APP_DATA_DIR），不是进程 cwd——两边据此解析才不会各写各的，
+  # 门禁也不会再漏进真实 data/commissions（2026-11-09 审计）。
+  workspace_root: commissions
   # 模型窗口与答案预算。compaction 的 reserve/keep/background 由 sidecar 按
   # 这两个值推导并断言 contextWindow - reserve > keep；需要覆盖再写下面三项。
   context_window: 32768

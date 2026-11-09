@@ -82,11 +82,10 @@ class AgentLoopTests(unittest.IsolatedAsyncioTestCase):
         runtime.close()
 
     async def test_checkpoint_reopen(self):
-        # data/ 被 gitignore，全新检出时不存在。先建出来再在里面开临时目录，
-        # 否则这个用例会取决于前面有没有测试先把 data/ 建出来——时红时绿。
-        data_dir = Path(__file__).resolve().parents[1] / 'data'
-        data_dir.mkdir(parents=True, exist_ok=True)
-        with tempfile.TemporaryDirectory(dir=data_dir) as directory:
+        # 临时库放系统临时目录。曾放在仓库 data/ 下（当时理由是 data/ 可能不存在），
+        # 2026-11-09 审计实测这会往真实数据目录里落 tmp*u*/runtime.db——门禁产物
+        # 不该出现在 data/，哪怕事后会删。
+        with tempfile.TemporaryDirectory(prefix='agent-loop-') as directory:
             path = Path(directory) / 'runtime.db'
             runtime = RuntimeStore(path)
             loop = AgentLoop(self.model([{'action': 'tool_call', 'tool': 'task.create', 'arguments': {'title': 'test'}}]),

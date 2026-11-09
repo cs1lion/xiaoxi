@@ -17,7 +17,8 @@ from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
 from fastapi.responses import FileResponse, JSONResponse
 from .static import AppStaticFiles, mount_pixel_world, world_entry_response
 
-from .config import ROOT, avatar_cfg, ensure_dirs, pacing_cfg, persona_cfg, settings
+from .config import (ROOT, avatar_cfg, ensure_dirs, pacing_cfg, persona_cfg,
+                     service_data_dir, settings)
 # 协议 §17 的原子热重载。只在 startup/shutdown 两个生命周期钩子里调它，
 # 不在 import 期调：测试进程 import server.app 时不该起后台线程、也不该把
 # 真实 config/ 的快照装进去（那会让测试看到开发者本机的 .local.yaml）。
@@ -76,32 +77,12 @@ def _repository_root() -> Path:
 def _service_data_dir() -> Path:
     """慢环各库（context/threads/preferences/commissions）的根目录。
 
-    生产：仓库 data/。
-    测试进程（TEST_SENTINEL=1）：优先跟随调用方已钉的 DB_PATH（测试把库钉在
-    自己的临时根里，`APP_DATA_DIR` 可显式指定）；都没给才用进程临时目录。
-    本模块在 import 时就构造 AssistantService，而集成测试普遍「import app 再
-    替换依赖」——如果这里固定 data/，import 本身就会打开真实库（#39：379 条
-    测试数据进真实台账正是这条路）。
+    实现已上提到 `server/config.py::service_data_dir()`：工作区根的相对基准
+    （`adapters/workspace.py`）也要用同一个判据，放在 config 里才不会让
+    config ← app 形成环。这里保留薄包装，`app.py` 的启动路径与既有测试
+    （`scripts/test_memory_manage.py` 直接调它）都照旧。
     """
-    if os.environ.get("TEST_SENTINEL") != "1":
-        return ROOT / "data"
-    # 测试进程：跟随 config.DATA_DIR（测试普遍 patch 它来做隔离根），
-    # 再退到显式 APP_DATA_DIR / DB_PATH 同根 / 进程临时目录。
-    # 判据是「DATA_DIR 是否仍指向**仓库** data/」。仓库根必须用 `__file__` 算，
-    # 不能用模块级的 `ROOT`——那个是 `config.ROOT` 的绑定，会被测试的 patch
-    # 带着一起漂，于是两边相等、判据失效（#41）。
-    from . import config as _config
-    if Path(_config.DATA_DIR).resolve() != (_repository_root() / "data").resolve():
-        return Path(_config.DATA_DIR)
-    explicit = os.environ.get("APP_DATA_DIR")
-    if explicit:
-        return Path(explicit)
-    db_path = os.environ.get("DB_PATH", "")
-    if db_path and db_path != ":memory:":
-        # 与记忆库同根，测试的单一隔离根就能同时管住两类库。
-        return Path(db_path).resolve().parent
-    import tempfile
-    return Path(tempfile.mkdtemp(prefix="app-test-data-"))
+    return service_data_dir()
 
 
 assistant = AssistantService(_service_data_dir(), llm, manager)
@@ -1893,8 +1874,9 @@ async def _start_durable_if_enabled() -> None:
             {
                 **supervisor.config(),
                 # 每单沙箱的根。以前只写在 YAML 的 durable 段里，bind 时没带过去，
-                # 被 switch_agents 切过来的 Worker 因此拿不到写盘目录。
-                "workspace_root": str(cfg.get("workspace_root") or "data/commissions"),
+                # 被 switch_agents 切过来的 Worker 因此拿不到写盘目录。相对值由
+                # adapters/workspace.py 按服务数据目录解析，与 cli_subproc 同源。
+                "workspace_root": str(cfg.get("workspace_root") or "commissions"),
             },
             apply_to=_durable_switch_agents(cfg),
             # 硬杀后 sidecar 会在新端口重起；每次派单重新取地址，不能缓存

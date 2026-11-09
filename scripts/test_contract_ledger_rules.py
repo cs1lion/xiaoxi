@@ -39,7 +39,7 @@ sys.path.insert(0, str(ROOT))
 from server.assistant.dispatcher import (  # noqa: E402
     Dispatcher, _contract_gaps,
 )
-from server.assistant.evaluator import _ACCEPTANCE_RULES, load_roster  # noqa: E402
+from server.assistant.evaluator import _ACCEPTANCE_RULES, Evaluator, load_roster  # noqa: E402
 from server.interaction.threads import CommissionStore  # noqa: E402
 
 passed, failed = 0, []
@@ -111,7 +111,11 @@ def main() -> int:
     check("roster 有可用 agent", bool(agents))
     if agents:
         store = CommissionStore(":memory:")
-        dispatcher = Dispatcher(commissions=store)
+        # 不传 evaluator 时 Dispatcher 会自建一个，而 EvalRubricStore 的默认路径是
+        # 相对路径 `data/executive.db`——cwd 是仓库根，等于门禁直接写真实执行库
+        # （2026-11-09 审计实测）。钉到 :memory: 。
+        dispatcher = Dispatcher(commissions=store,
+                                evaluator=Evaluator(roster=load_roster(), path=":memory:"))
         cid = store.create(COMMISSION["title"], COMMISSION["brief"],
                            agent_id=str(agents[0]["id"]))["id"]
         row, packet = dispatcher.dispatch(cid, acceptance=LEDGER_RULES)

@@ -1,0 +1,10 @@
+--- doc 2 base {"runs":{"c_supervisor@0":{"taskId":10,"conversationId":"3"}}}
+--- doc 5 base {"items":[]}
+--- doc 7 base {"sessionId":"01a1bdab-b661-7179-b225-c0bde1e45fcc"}
+--- doc 8 base {"model":{"provider":"xiaoxi","modelId":"step-3.7-flash"},"instructions":"你是慢环里的执行体 w1。任务：自检\n做完必须调用 submit_artifact 交差：summary 写做了什么，intercepted 写替老板拦下了什么（没有就写「没有」），artifacts 至少一项，wired 为 true。\n对话被压缩后摘要就在上下文里；复述对话内的约定先看摘要，不要用 search_memory / read_note 查对话本身。\n缺素材时用 block_and_ask 问一句具体的选择题，不要编造。"}
+--- doc 9 base {"workspace":"","commission_id":"c_supervisor","packet":{"objective":"自检"},"command":[],"worker_env":{},"telemetry_proxy":"","profile":"worker","lease_id":"","session_id":""}
+--- doc 4 base {}
+--- doc 6 base {"models":{"xiaoxi/step-3.7-flash":{"input":0,"output":0,"cacheRead":0,"cacheWrite":0,"totalTokens":0,"cost":{"input":0,"output":0,"cacheRead":0,"cacheWrite":0,"total":0}}},"tools":{}}
+--- doc 16 base {"events":[{"type":"error","text":"执行体没交差：没有调用 submit_artifact"}]}
+== task 10 "xiaoxi.run" terminal {"id":10,"conversationId":3,"kind":"xiaoxi.run","version":1,"input":{"commission_id":"c_supervisor","agent_id":"w1","packet":{"objective":"自检"},"workspace":"","command":[],"worker_env":{},"attempt":0,"telemetry_proxy":"","profile":"worker","lease_id":"","session_id":""},"background":false,"abortRequested":false,"state":{"status":"terminal","outcome":{"status":"failed","error":{"message":"没有调用 subm
+== task 13 "pi.generation" terminal {"id":13,"conversationId":3,"kind":"pi.generation","version":1,"input":{},"background":false,"abortRequested":false,"state":{"status":"terminal","outcome":{"status":"failed","error":{"message":"400: {\"message\":\"you have no active step plan subscription\",\"type\":\"request_params_invalid\"}","detail":{"reason":"model_error"}}}},"startedAt":1794183509611,"endedAt":1794183511641}

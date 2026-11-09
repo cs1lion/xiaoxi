@@ -20,6 +20,7 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
 from server.assistant.adapters import adapter_types  # noqa: E402
+from server.assistant.adapters.workspace import resolve_workspace_root  # noqa: E402
 from server.assistant.evaluator import load_roster  # noqa: E402
 
 
@@ -43,8 +44,8 @@ def resolve_executable(value: str) -> Path | None:
 
 
 def resolve_workspace(value: str) -> Path:
-    path = Path(value)
-    return path if path.is_absolute() else (ROOT / path)
+    """与运行时同源：相对值按服务数据目录解析，不按 cwd（见 adapters/workspace.py）。"""
+    return Path(resolve_workspace_root(value, default=None) or value)
 
 
 def check_worker(agent: dict, registered: list[str]) -> dict:

@@ -26,6 +26,52 @@ AUDIO_DIR = DATA_DIR / "audio"
 # 等）只 import 配置、从不建连接，import 即抛会误伤它们；而任何真的写库的
 # 路径都绕不开 MemoryStore/CommissionStore 的构造。
 _TEST_SENTINEL = os.getenv("TEST_SENTINEL") == "1"
+_FALLBACK_DATA_DIR: Path | None = None
+
+
+def repository_root() -> Path:
+    """仓库根，**不随 `config.ROOT` 的 patch 漂移**。
+
+    `__file__` 不受任何 patch 影响，是唯一稳的锚（#41：曾拿模块级 `ROOT` 当参照，
+    测试「先 patch `config.ROOT`、后 import server.app」时两边一起漂、判据恒真）。
+    """
+    return Path(__file__).resolve().parent.parent
+
+
+def service_data_dir() -> Path:
+    """慢环各库（context/threads/preferences/commissions）的根目录。
+
+    生产：仓库 `data/`。
+    测试进程（`TEST_SENTINEL=1`）：跟随调用方已钉的 `DATA_DIR`（测试普遍 patch 它
+    做隔离根）、`APP_DATA_DIR`、`DB_PATH` 同根，都没给才用进程临时目录。
+
+    为什么放在 config 而不是 app：`app._service_data_dir` 只服务 app 启动期，
+    而工作区根（`server/assistant/adapters/workspace.py`）也要用同一个基准——
+    相对路径只有固定在「服务数据目录」上，才不会随进程 cwd 漂（2026-11-09 审计：
+    三条浏览器门禁正是靠 cwd 把产物写进了真实 `data/commissions/`）。
+    本函数不 import app，避免 config ← app 的环。
+    """
+    if os.environ.get("TEST_SENTINEL") != "1":
+        return DATA_DIR
+    # 判据是「DATA_DIR 是否仍指向**仓库** data/」。仓库根必须用 `__file__` 算，
+    # 不能用模块级 `ROOT`（它会被测试的 patch 带着一起漂，两边相等、判据失效）。
+    if Path(DATA_DIR).resolve() != (repository_root() / "data").resolve():
+        return Path(DATA_DIR)
+    explicit = os.environ.get("APP_DATA_DIR")
+    if explicit:
+        return Path(explicit)
+    db_path = os.environ.get("DB_PATH", "")
+    if db_path and db_path != ":memory:":
+        # 与记忆库同根，测试的单一隔离根就能同时管住两类库。
+        return Path(db_path).resolve().parent
+    # 兜底目录必须在**进程内**稳定：`resolve_workspace_root` 每单都会调本函数，
+    # 每次 `mkdtemp` 会给出不同的根，于是 cli_subproc 下发的根和 durable 回读的
+    # 根各是一个临时目录（产物写了、验收却按另一处回读）。物理同一进程只建一次。
+    global _FALLBACK_DATA_DIR
+    if _FALLBACK_DATA_DIR is None:
+        import tempfile
+        _FALLBACK_DATA_DIR = Path(tempfile.mkdtemp(prefix="app-test-data-"))
+    return _FALLBACK_DATA_DIR
 
 
 def guard_sqlite_path(path: str) -> None:

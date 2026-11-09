@@ -1,0 +1,145 @@
+[run ] protocol
+[PASS] protocol             exit=0       1.7s
+[run ] poteto_loading
+[PASS] poteto_loading       exit=0       1.1s
+[run ] core
+[PASS] core                 exit=0       2.7s
+[run ] gate_tmp_leak
+[PASS] gate_tmp_leak        exit=0     138.8s
+[run ] workspace_root
+[PASS] workspace_root       exit=0       1.4s
+[run ] check_staged_scope
+[PASS] check_staged_scope   exit=0       2.0s
+[run ] check_probe
+[PASS] check_probe          exit=0       0.3s
+[run ] process_trail
+[PASS] process_trail        exit=0       0.2s
+[run ] process_trail_probe
+[PASS] process_trail_probe  exit=0       2.2s
+[run ] risk_view
+[PASS] risk_view            exit=0       1.4s
+[run ] pacing_dead_keys
+[PASS] pacing_dead_keys     exit=0      27.4s
+[run ] fabrication_signal
+[PASS] fabrication_signal   exit=0       2.1s
+[run ] memory_recall_paraphrase
+[PASS] memory_recall_paraphrase exit=0       2.1s
+[run ] doc_drift
+[FAIL] doc_drift            exit=1       0.2s
+       | ain__.AnchorTests.test_function_line_anchors_match_ast)
+       | 文档写的 `函数名` `:行号` 必须真的指向 app.py 里同名函数。 ... FAIL
+       | test_case_count_matches_disk (__main__.CurrentWordingTests.test_case_count_matches_disk)
+       | 文档里的复核数字必须与 evals/cases/ 实际数量一致。 ... ok
+       | test_current_entry_and_split_ci_are_documented (__main__.CurrentWordingTests.test_current_entry_and_split_ci_are_documented) ... ok
+       | test_snapshot_anchor_and_recheck_numbers_present (__main__.CurrentWordingTests.test_snapshot_anchor_and_recheck_numbers_present) ... ok
+       | test_obsolete_ci_wording_is_gone (__main__.OldWordingTests.test_obsolete_ci_wording_is_gone) ... ok
+       | test_obsolete_entry_wording_is_gone (__main__.OldWordingTests.test_obsolete_entry_wording_is_gone) ... ok
+       | test_obsolete_testing_wording_is_gone (__main__.OldWordingTests.test_obsolete_testing_wording_is_gone) ... ok
+       | 
+       | ======================================================================
+       | FAIL: test_function_line_anchors_match_ast (__main__.AnchorTests.test_function_line_anchors_match_ast)
+       | 文档写的 `函数名` `:行号` 必须真的指向 app.py 里同名函数。
+       | ----------------------------------------------------------------------
+       | Traceback (most recent call last):
+       |   File "D:\project\neurosama-wt-dbsentinel\scripts\test_doc_drift.py", line 97, in test_function_line_anchors_match_ast
+       |     self.assertEqual(positions[name], int(line),
+       | AssertionError: 605 != 624 : TESTING.md 锚 _confirm_action:624 与 app.py 实际 605 不符
+       | 
+       | ----------------------------------------------------------------------
+       | Ran 7 tests in 0.030s
+       | 
+       | FAILED (failures=1)
+[run ] run_gates_verdict
+[PASS] run_gates_verdict    exit=0       3.3s
+[run ] gate_coverage
+[PASS] gate_coverage        exit=0       0.2s
+[run ] scheduler_health
+[PASS] scheduler_health     exit=0       1.2s
+[run ] budget_scope
+[PASS] budget_scope         exit=0       0.3s
+[run ] backup_restore
+[PASS] backup_restore       exit=0       0.9s
+[run ] operation_outbox
+[PASS] operation_outbox     exit=0       1.1s
+[run ] outbox_crash
+[PASS] outbox_crash         exit=0       2.2s
+[run ] mood_writer
+[PASS] mood_writer          exit=0       1.5s
+[run ] config_keys
+[PASS] config_keys          exit=0       0.3s
+[run ] evals
+[PASS] evals                exit=0       2.9s
+[run ] npm
+[PASS] npm                  exit=0      16.9s
+[run ] executive_v3
+[PASS] executive_v3         exit=0       7.3s
+[run ] adapter_ext
+[PASS] adapter_ext          exit=0       2.9s
+[run ] codex_shim
+[PASS] codex_shim           exit=0       1.0s
+[run ] claude_shim
+[PASS] claude_shim          exit=0       1.2s
+[run ] gateway
+[PASS] gateway              exit=0       0.8s
+[run ] task_planning
+[PASS] task_planning        exit=0       5.2s
+[run ] task_fsm
+[PASS] task_fsm             exit=0       1.1s
+[run ] contract_v2
+[PASS] contract_v2          exit=0       0.4s
+[run ] contract_ledger_rules
+[PASS] contract_ledger_rules exit=0       0.4s
+[run ] v2_broadcast
+[PASS] v2_broadcast         exit=0       1.5s
+[run ] cross_day
+[PASS] cross_day            exit=0      10.4s
+[run ] thread_conversation
+[PASS] thread_conversation  exit=0       8.6s
+[run ] self_evolution
+[PASS] self_evolution       exit=0       3.0s
+[run ] agent_loop
+[PASS] agent_loop           exit=0       0.6s
+[run ] llm_client
+[PASS] llm_client           exit=0       4.7s
+[run ] self_evolution_send
+[PASS] self_evolution_send  exit=0       0.5s
+[run ] config_hot
+[PASS] config_hot           exit=0       0.4s
+[run ] config_hot_consumers
+[PASS] config_hot_consumers exit=0       2.1s
+[run ] durable_adapter
+[PASS] durable_adapter      exit=0       5.4s
+[run ] durable_authorization_ui
+[PASS] durable_authorization_ui exit=0       4.3s
+[run ] world_bridge
+[PASS] world_bridge         exit=0       3.1s
+[run ] durable_supervisor
+[FAIL] durable_supervisor   exit=1      11.2s
+       | [durable supervisor]
+       |   ok   起得来并回报端口
+       |   ok   健康检查通过
+       |   ok   接单
+       |   FAIL 事件流以 artifact 收尾  [{'type': 'error', 'text': '执行体没交差：没有调用 submit_artifact'}]
+       |   FAIL 进度事件都在  
+       |   ok   收尸后端点清空
+       |   ok   收掉后健康检查为假
+       |   ok   巡检把内核拉回来了
+       |   ok   端口换了新内核
+       |   ok   巡检任务已清掉
+       |   ok   入口不存在时明说不可用
+       |   ok   失败后不留进程
+       | 
+       | === 10 passed, 2 failed ===
+       |   - 事件流以 artifact 收尾  [{'type': 'error', 'text': '执行体没交差：没有调用 submit_artifact'}]
+       |   - 进度事件都在
+[run ] durable_takeover
+[PASS] durable_takeover     exit=0       3.3s
+[run ] durable_recovery
+[PASS] durable_recovery     exit=0       4.0s
+[run ] durable_revive
+[PASS] durable_revive       exit=0      12.9s
+[run ] durable_app_wiring
+[PASS] durable_app_wiring   exit=0       6.1s
+[run ] durable_reconcile
+[PASS] durable_reconcile    exit=0       0.8s
+[run ] durable_soak

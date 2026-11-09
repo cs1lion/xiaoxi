@@ -1,0 +1,10 @@
+Traceback (most recent call last):
+  File "<string>", line 1, in <module>
+  File "D:\project\neurosama-wt-dbsentinel\server\memory\store.py", line 1724, in <module>
+    store = MemoryStore()
+            ^^^^^^^^^^^^^
+  File "D:\project\neurosama-wt-dbsentinel\server\memory\store.py", line 417, in __init__
+    guard_sqlite_path(self.db_path)
+  File "D:\project\neurosama-wt-dbsentinel\server\config.py", line 40, in guard_sqlite_path
+    raise RuntimeError(
+RuntimeError: 测试进程的数据库路径指向真实数据目录：D:\project\neurosama-wt-dbsentinel\data\memory.db。测试必须用临时库（tempfile / :memory:），见 issue #39。

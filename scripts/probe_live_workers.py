@@ -233,7 +233,7 @@ def worker_profiles() -> dict[str, Worker]:
         {"AQI_GATEWAY_URL": "http://127.0.0.1:15722",
          "AQI_CLAUDE_MODEL": "claude-opus-5-5",
          "AQI_CLAUDE_TIMEOUT": "360",
-         "AQI_WORKSPACE_ROOT": "data/commissions"},
+         "AQI_WORKSPACE_ROOT": "commissions"},
         "Anthropic Messages -> 15722")
     codex = Worker(
         "codex", "codex_worker.py",

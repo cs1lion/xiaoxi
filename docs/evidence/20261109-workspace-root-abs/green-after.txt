@@ -1,0 +1,36 @@
+[解析器：三层基准 + cwd 无关]
+  ok   config.service_data_dir 存在（基准的唯一出处）
+  ok   service_data_dir 是绝对路径
+  ok   哨兵进程跟随 DB_PATH 的临时根
+  ok   service_data_dir 不落在仓库 data/
+  ok   默认值解析成绝对路径
+  ok   默认值 = <服务数据目录>/commissions
+  ok   相对值走同一基准（老写法不再指仓库 data/）
+  ok   显式绝对路径原样采纳
+  ok   进程 env 覆盖在无配置时生效
+  ok   同一相对值在两个 cwd 下结果一致
+  ok   结果与 cwd 无关（== 基准/commissions）
+[cli_subproc：下发给子进程的值]
+  ok   下发的根是绝对路径
+  ok   下发的根 = 解析器结果
+  ok   换 cwd 下发的根不变
+[durable：回读侧同源]
+  ok   每单目录是绝对路径
+  ok   每单目录挂在解析后的根下
+  ok   换 cwd 每单目录的根不变
+  ok   未配置时返回空（sidecar 不允许写文件）
+  ok   未配置时不被宿主 shell 的 env 顶开（留空=明确关闭）
+[shim：拿到绝对根就落在绝对根]
+  ok   shim 交了文件成果
+  ok   产物落在传入的绝对根下
+  ok   产物存在且可回读
+  ok   产物不在仓库 data/ 下
+[真实链路：默认配置 + 验收回读]
+  ok   验收通过（初审回查到了真文件）
+  ok   产物落在 <服务数据目录>/commissions 下
+  ok   产物存在且含本单号
+  ok   真实 data/commissions 前后无变化
+[生产基准]
+  ok   无哨兵时基准是仓库 data/（cwd 不是仓库根）
+
+=== 28 passed, 0 failed ===

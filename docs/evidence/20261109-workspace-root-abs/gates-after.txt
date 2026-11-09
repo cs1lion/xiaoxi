@@ -1,0 +1,43 @@
+# 2026-11-09 修复后：三条泄漏门禁 + data/commissions 顶层快照差
+GATE gate_tmp_leak
+BEFORE[c_55e5d9f46fe7-20261109-075343,c_baaf7efa5412-20261109-075332]
+AFTER [c_55e5d9f46fe7-20261109-075343,c_baaf7efa5412-20261109-075332]
+DIFF  0
+[run ] gate_tmp_leak
+[PASS] gate_tmp_leak        exit=0     130.3s
+
+=== 门禁报告 ===
+  跑过并断言 : 1
+  失败       : 0
+  跳过       : 0
+
+结论：所有门禁都真跑过并断言。
+
+GATE step8_e2e_browser
+BEFORE[c_55e5d9f46fe7-20261109-075343,c_baaf7efa5412-20261109-075332]
+AFTER [c_55e5d9f46fe7-20261109-075343,c_baaf7efa5412-20261109-075332]
+DIFF  0
+[run ] step8_e2e_browser
+[PASS] step8_e2e_browser    exit=0      12.5s
+
+=== 门禁报告 ===
+  跑过并断言 : 1
+  失败       : 0
+  跳过       : 0
+
+结论：所有门禁都真跑过并断言。
+
+GATE drill_ws_reconnect
+BEFORE[c_55e5d9f46fe7-20261109-075343,c_baaf7efa5412-20261109-075332]
+AFTER [c_55e5d9f46fe7-20261109-075343,c_baaf7efa5412-20261109-075332]
+DIFF  0
+[run ] drill_ws_reconnect
+[PASS] drill_ws_reconnect   exit=0      21.0s
+
+=== 门禁报告 ===
+  跑过并断言 : 1
+  失败       : 0
+  跳过       : 0
+
+结论：所有门禁都真跑过并断言。
+

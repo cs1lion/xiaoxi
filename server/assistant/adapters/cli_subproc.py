@@ -27,6 +27,7 @@ from .base import (ARTIFACT, ERROR, LOG, PROGRESS, TOKEN, AdapterError,
                    BaseWorkerAdapter, artifact_event, make_event,
                    terminate_process_group)
 from .registry import register_adapter
+from .workspace import ENV_KEY, resolve_workspace_root
 
 DEFAULT_TIMEOUT = 600.0
 MAX_LINE = 64 * 1024
@@ -59,6 +60,11 @@ class CliSubprocessAdapter(BaseWorkerAdapter):
             env.setdefault("OPENAI_BASE_URL", str(telemetry["proxy_url"]))
         for key, value in (self.config.get("env") or {}).items():
             env[str(key)] = str(value)
+        # 工作区根必须**绝对**下发。花名册里是相对值（`commissions`），shim 拿到
+        # 相对值就按自己的 cwd 解析——门禁进程 cwd 恰是仓库根，产物于是漏进真实
+        # `data/commissions/`（2026-11-09 审计）。基准由 resolve_workspace_root 钉在
+        # 服务数据目录上，且与 `durable._workspace()` 同源，回读才找得到产物。
+        env[ENV_KEY] = resolve_workspace_root(env.get(ENV_KEY))
         return {
             "commission_id": str(commission_id),
             "agent_id": str(self.config.get("id") or ""),

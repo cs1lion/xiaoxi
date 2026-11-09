@@ -22,6 +22,7 @@ from typing import Any, AsyncIterator
 from .base import (ARTIFACT, ERROR, LOG, PROGRESS, TOKEN, AdapterError,
                    BaseWorkerAdapter, artifact_event, make_event)
 from .registry import register_adapter
+from .workspace import ENV_KEY, resolve_workspace_root
 
 DEFAULT_TIMEOUT = 600.0
 
@@ -96,13 +97,20 @@ class DurableAdapter(BaseWorkerAdapter):
         时间戳）：成果必须落在每单独立的树里，否则两个并发单会互相覆盖，而
         sidecar 的 `write_file` 只认这一个目录。没配 `workspace_root` 就返回空
         字符串——sidecar 那时不允许写文件，也不会去猜一个目录。
+
+        根由 `resolve_workspace_root` 算，与 `cli_subproc` 下发的是同一个基准：
+        花名册写相对值 `commissions` 时，两侧都解析到「服务数据目录/commissions」，
+        产物写在这里、验收也按这里回读。按 cwd 解析的旧实现在门禁里会把产物漏进
+        真实 `data/commissions/`（2026-11-09 审计），且与 shim 的 cwd 一旦不同就
+        两边对不上。
         """
-        root = self.config.get("workspace_root")
-        if not (isinstance(root, str) and root.strip()):
+        root = resolve_workspace_root(self.config.get("workspace_root"), default=None,
+                                      allow_env=False)
+        if not root:
             return ""
         safe = "".join(ch for ch in commission_id if ch.isalnum() or ch in "-_")[:40] or "ad-hoc"
         stamp = time.strftime("%Y%m%d-%H%M%S")
-        workspace = (Path(root).resolve() / f"{safe}-{stamp}").resolve()
+        workspace = (Path(root) / f"{safe}-{stamp}").resolve()
         # 与 shim 的 main() 一致：目录必须先存在。sidecar 的 write_file 用 realpath
         # 定沙箱基目录，基目录不存在时它只会报错，不会替宿主猜一个位置。
         workspace.mkdir(parents=True, exist_ok=True)
@@ -141,7 +149,15 @@ class DurableAdapter(BaseWorkerAdapter):
             found = shutil.which("node")
             if found:
                 resolved[0] = found
-        return resolved, {str(k): str(v) for k, v in env.items()}
+        worker_env = {str(k): str(v) for k, v in env.items()}
+        # shim 跑在 sidecar 的沙箱 cwd 里：工作区根必须**在这里**就绝对化。相对值
+        # 会让它按 sidecar 的 cwd 解析，于是它写的目录和 `_workspace()` 交给 sidecar
+        # 的沙箱不是一个根——产物写了、sidecar 的 write_file 却看不见。
+        root = resolve_workspace_root(worker_env.get(ENV_KEY) or self.config.get("workspace_root"),
+                                      default=None, allow_env=False)
+        if root:
+            worker_env[ENV_KEY] = root
+        return resolved, worker_env
 
     @staticmethod
     def _absolute(item: str) -> str:
