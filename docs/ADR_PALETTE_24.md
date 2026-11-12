@@ -1,5 +1,11 @@
 # ADR: 世界调色板从 16 色扩展到 24 色
 
+> **归档（2026-11-12）**：本 ADR 属于 `pixel-world` 工程。该工程已于 `7c13fd4`
+> 移出本仓，由 [`cs1lion/pixel-world-engine`](https://github.com/cs1lion/pixel-world-engine) 维护。
+> 本文仅作历史记录保留，**不约束当前仓库**；现行决策见 `docs/PROTOCOL.md`、
+> `docs/AGENT_PLAYBOOK.md`、`docs/process/ENGINEERING-DISCIPLINE.md`。
+
+
 - **状态**：已批准（用户，2026-10-21）
 - **决策范围**：`pixel-world` 的世界 canvas 源色；UI 仍 8 色
 - **相关**：`ART_SPEC.md` §2.1、`ART_PALETTE_AUDIT.md`、`palette-data.ts`、`prefabs.json`

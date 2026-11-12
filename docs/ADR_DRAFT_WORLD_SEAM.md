@@ -1,5 +1,11 @@
 # ADR 草案：pixel-world-engine 与小溪的事件接缝契约
 
+> **归档（2026-11-12）**：本 ADR 属于 `pixel-world` 工程。该工程已于 `7c13fd4`
+> 移出本仓，由 [`cs1lion/pixel-world-engine`](https://github.com/cs1lion/pixel-world-engine) 维护。
+> 本文仅作历史记录保留，**不约束当前仓库**；现行决策见 `docs/PROTOCOL.md`、
+> `docs/AGENT_PLAYBOOK.md`、`docs/process/ENGINEERING-DISCIPLINE.md`。
+
+
 - **状态**：草案，待 Role 0 拍板（本文不执行任何改动）
 - **日期**：2026-10-27
 - **决策范围**：`cs1lion/xiaoxi` 与 `cs1lion/pixel-world-engine` 两仓之间的接缝契约；不改本仓 WS 事件集，不新增 PROTOCOL.md 字段

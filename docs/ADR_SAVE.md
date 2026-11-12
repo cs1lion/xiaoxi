@@ -1,5 +1,11 @@
 # ADR_SAVE — 世界存档（D-SAVE-1）
 
+> **归档（2026-11-12）**：本 ADR 属于 `pixel-world` 工程。该工程已于 `7c13fd4`
+> 移出本仓，由 [`cs1lion/pixel-world-engine`](https://github.com/cs1lion/pixel-world-engine) 维护。
+> 本文仅作历史记录保留，**不约束当前仓库**；现行决策见 `docs/PROTOCOL.md`、
+> `docs/AGENT_PLAYBOOK.md`、`docs/process/ENGINEERING-DISCIPLINE.md`。
+
+
 > 状态：**final**（用户 2026-10-19 定稿：6 项按推荐通过 + 5 条硬要求；**§1 frozen**）。Chief 书面确认记于 `DECISION_TRAIL_20261019.md` D-SAVE-1；task-21/S2-1b 已 QA 通过并提交 `2bde7cb`；task-18 按本 ADR 开工（`NEXT_PHASE_PLAN.md:100,110`）。
 > 依据：用户原话「只存世界自有事实；读档先与台账对账；带版本号」；`PROJECT_BRIEF.md:30,43`；D2 accepted（`DECISION_TRAIL_20261019.md:35-39`）。
 > 一句话：**单槽 JSON 只序列化世界自有事实；台账是真相源、存档不复制；读档先重建世界、再与台账对账；已结算按 id 去重、Mock/台账/角色分账、时钟不混用；高版本/坏档/存储失败一律降级不写坏原档。**

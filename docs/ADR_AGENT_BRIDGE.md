@@ -1,5 +1,11 @@
 # ADR：Agent ⇄ 像素世界最小桥接（范围已批准 · 实施待 S5 · v2.7）
 
+> **归档（2026-11-12）**：本 ADR 属于 `pixel-world` 工程。该工程已于 `7c13fd4`
+> 移出本仓，由 [`cs1lion/pixel-world-engine`](https://github.com/cs1lion/pixel-world-engine) 维护。
+> 本文仅作历史记录保留，**不约束当前仓库**；现行决策见 `docs/PROTOCOL.md`、
+> `docs/AGENT_PLAYBOOK.md`、`docs/process/ENGINEERING-DISCIPLINE.md`。
+
+
 - **状态**：**范围已批准，实施待 S5**（v2.7 · 用户 2026-10-19 批准：§4.4 选 A；G2 为范围预批准；7 条实施条件见 §7.1。v2.6→v2.7（2026-10-20 用户实测补缺）：§4.4.1 增加"两条路径的区分"——"同义改写静默不建单"仅 live 路成立，Mock 路（`?ledger=off`）同义句被 `oracle.ts` 接走建成 Mock 单并交付（parseOracle 9/9 已跑 + 用户实测转报）；已知限制验收必须指定路径。历史：v2.5→v2.6 架构复审修订（A6 三重断言/代表性抽样/B2 stub handler/§4.7 触发条件更正与静态声明变体）。首席架构审查官终审通过（2026-10-19）+ 两轮复审修订。**未实现、未承诺；S3/S4 收口前不动 `server/assistant/**`。**
 - **日期**：2026-10-19 · **作者**：Agent 集成工程师 · **分派**：Chief（选 A）；**评审**：首席架构审查官三轮（两轮有条件通过 → 终审通过），P1 全闭、P2 并入、勘误 5 条已 patch
 - **核验基线**：分支 `feat/pixel-world-oracle-world`，HEAD `5214eb5`。本文只读核验 + 文档提案，**未改任何源码/配置/测试，未 commit**。工作区 task-28 调色板改动进行中，本文不触碰 `pixel-world/src` 与 `docs/ART_PALETTE_AUDIT.md`。

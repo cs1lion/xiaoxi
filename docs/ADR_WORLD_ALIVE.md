@@ -1,5 +1,11 @@
 # ADR: 世界变活（时辰、神谕石板、有来源的摆件）
 
+> **归档（2026-11-12）**：本 ADR 属于 `pixel-world` 工程。该工程已于 `7c13fd4`
+> 移出本仓，由 [`cs1lion/pixel-world-engine`](https://github.com/cs1lion/pixel-world-engine) 维护。
+> 本文仅作历史记录保留，**不约束当前仓库**；现行决策见 `docs/PROTOCOL.md`、
+> `docs/AGENT_PLAYBOOK.md`、`docs/process/ENGINEERING-DISCIPLINE.md`。
+
+
 - **状态**：已批准（用户，2026-10-21）。切片 0、1a、1b、1c、1d 已落地；第一阶段完成，切片 2（造物模式）待另开 ADR。
 - **日期**：2026-10-21
 - **决策范围**：`pixel-world/` 的渲染层、世界层、存档 schema；不改主产品 `server/`，不改 `web/`，不新增 WS 事件
