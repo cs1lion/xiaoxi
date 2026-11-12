@@ -232,6 +232,205 @@ def probe_edge_network(*, timeout: float = 5.0) -> dict[str, Any]:
         return {"reachable": False, "detail": str(exc)}
 
 
+def probe_fish_tts(cfg: Mapping[str, Any], env: Mapping[str, str], *,
+                   timeout: float = 20.0) -> dict[str, Any]:
+    """Fish Audio TTS 真发一次请求：验 Key、验模型档、验真的出了音频字节。
+
+    为什么必须真发：doctor 的 `stepaudio` 分支只看「LLM 上游通不通」就判 TTS/ASR 就绪
+    （`build_doctor` 里 stepaudio 复用 LLM 的凭据与出口）。但 TTS 与 ASR 的端点跟
+    LLM 的 chat/completions **不是同一个** —— 2026-11-12 实测：把 LLM 指向讯飞后，
+    doctor 报「stepaudio TTS 配置就绪 / ASR 配置就绪」，而讯飞根本没有
+    `/audio/speech` 与 `/audio/asr/sse`（都返 404 no Route matched）。
+    那是假绿。本函数只对 Fish 走真实探测，不改 stepaudio 的既有语义。
+    """
+    key = str(env.get("FISH_API_KEY") or "").strip()
+    base = str(env.get("FISH_BASE_URL") or "https://api.fish.audio").rstrip("/")
+    model = str(env.get("FISH_TTS_MODEL") or "s2.1-pro-free").strip()
+    if not key:
+        return {"ok": False, "reason": "no_key", "status": 0, "bytes": 0,
+                "latency_ms": 0, "detail": "FISH_API_KEY 未配置"}
+    payload = json.dumps({"text": "你好。", "format": "mp3", "language": "zh-CN"}).encode("utf-8")
+    request = urllib.request.Request(
+        f"{base}/v1/tts",
+        data=payload,
+        headers={"Content-Type": "application/json",
+                 "Authorization": f"Bearer {key}",
+                 "model": model},
+        method="POST",
+    )
+    started = time.perf_counter()
+    try:
+        with urllib.request.urlopen(request, timeout=timeout) as response:
+            body = response.read()
+            return {
+                "ok": response.status < 400 and len(body) > 2000,
+                "status": response.status,
+                "reason": "" if len(body) > 2000 else "empty_audio",
+                "bytes": len(body),
+                "latency_ms": int((time.perf_counter() - started) * 1000),
+                "model": model,
+                "detail": f"{model} 返回 {len(body)} 字节",
+            }
+    except urllib.error.HTTPError as exc:
+        body = exc.read().decode("utf-8", "replace")
+        return {"ok": False, "status": exc.code, "reason": "upstream_rejected",
+                "bytes": 0, "latency_ms": int((time.perf_counter() - started) * 1000),
+                "detail": redact(body, env)[:200]}
+    except (urllib.error.URLError, TimeoutError, OSError) as exc:
+        return {"ok": False, "status": 0, "reason": "unreachable", "bytes": 0,
+                "latency_ms": int((time.perf_counter() - started) * 1000),
+                "detail": redact(str(exc), env)[:200]}
+
+
+def probe_fish_asr(cfg: Mapping[str, Any], env: Mapping[str, str], *,
+                   timeout: float = 20.0) -> dict[str, Any]:
+    """Fish Audio ASR 真发一次请求：用一段 0.4s 静音当探针，验 Key 与端点通不通。
+
+    静音不产生有效转写（端点会返 400 audio_too_short 之类），但**能区分
+    「Key/端点可用」与「上游拒绝」** —— 这正是 doctor 要回答的问题。
+    真 ASR 仍由 B2 检查点用真人音频做，不拿探针冒充。
+    """
+    key = str(env.get("FISH_API_KEY") or "").strip()
+    base = str(env.get("FISH_BASE_URL") or "https://api.fish.audio").rstrip("/")
+    model = str(env.get("FISH_ASR_MODEL") or "transcribe-1-pro").strip()
+    if not key:
+        return {"ok": False, "reason": "no_key", "status": 0,
+                "latency_ms": 0, "detail": "FISH_API_KEY 未配置"}
+    # 0.4s 16kHz 单声道静音 PCM，够短到不会计费出账单争议，又够让端点认出格式。
+    pcm = b"\x00" * (16000 * 2 // 2)
+    wav = _wav_bytes(pcm, 16000)
+    boundary = "----xiaoxiFishProbe"
+    body = (
+        f"--{boundary}\r\n"
+        f'Content-Disposition: form-data; name="audio"; filename="probe.wav"\r\n'
+        "Content-Type: audio/wav\r\n\r\n"
+    ).encode("utf-8") + wav + f"\r\n--{boundary}--\r\n".encode("utf-8")
+    request = urllib.request.Request(
+        f"{base}/v1/asr",
+        data=body,
+        headers={"Content-Type": f"multipart/form-data; boundary={boundary}",
+                 "Authorization": f"Bearer {key}",
+                 "model": model},
+        method="POST",
+    )
+    started = time.perf_counter()
+    try:
+        with urllib.request.urlopen(request, timeout=timeout) as response:
+            payload = response.read().decode("utf-8", "replace")
+            try:
+                data = json.loads(payload)
+                detail = f"{model} 返回转写 {data.get('text', '')!r}"
+            except json.JSONDecodeError:
+                detail = payload[:160]
+            return {"ok": True, "status": response.status, "reason": "",
+                    "latency_ms": int((time.perf_counter() - started) * 1000),
+                    "model": model, "detail": detail}
+    except urllib.error.HTTPError as exc:
+        body = exc.read().decode("utf-8", "replace")
+        # 400 audio_too_short 是**预期内**的：说明端点收到了请求、认得格式，
+        # 只是音频太短。那仍然证明 Key 与路由可用。
+        if exc.code == 400 and "audio_too_short" in body:
+            return {"ok": True, "status": exc.code, "reason": "",
+                    "latency_ms": int((time.perf_counter() - started) * 1000),
+                    "model": model,
+                    "detail": "端点已受理（探针静音过短，被判 audio_too_short）"}
+        return {"ok": False, "status": exc.code, "reason": "upstream_rejected",
+                "latency_ms": int((time.perf_counter() - started) * 1000),
+                "detail": redact(body, env)[:200]}
+    except (urllib.error.URLError, TimeoutError, OSError) as exc:
+        return {"ok": False, "status": 0, "reason": "unreachable",
+                "latency_ms": int((time.perf_counter() - started) * 1000),
+                "detail": redact(str(exc), env)[:200]}
+
+
+def _wav_bytes(pcm: bytes, sample_rate: int) -> bytes:
+    """把 16-bit 单声道 PCM 包成 WAV 容器。"""
+    import struct
+
+    header = b"RIFF" + struct.pack("<I", 36 + len(pcm)) + b"WAVEfmt "
+    header += struct.pack("<IHHIIHH", 16, 1, 1, sample_rate,
+                          sample_rate * 2, 2, 16)
+    header += b"data" + struct.pack("<I", len(pcm))
+    return header + pcm
+
+
+def probe_stepaudio_endpoint(cfg: Mapping[str, Any], env: Mapping[str, str], *,
+                             path: str, payload: Mapping[str, Any],
+                             timeout: float = 20.0) -> dict[str, Any]:
+    """探一次 stepaudio 家族的**专属端点**，不看 LLM 的 chat/completions。
+
+    为什么需要它：2026-11-12 实测 —— 把 LLM 指向讯飞后，`build_doctor` 的 stepaudio
+    分支报「TTS/ASR 配置就绪」，但讯飞没有 `/audio/speech` 与 `/audio/asr/sse`
+    （都返 404 `no Route matched with those values`）。doctor 当时给的是**假绿**。
+
+    判据：端点返回**非 404** 即视为「路由存在」。stepaudio 的端点在参数不全时可能返
+    400/422（缺字段、音频太短），那说明服务在、只是这个探针没喂对 —— 与 404 是两类事。
+    """
+    key = str(cfg.get("llm_api_key") or env.get("LLM_API_KEY") or "")
+    base = str(cfg.get("llm_base_url") or "").rstrip("/")
+    if not key or not base:
+        return {"ok": False, "status": 0, "reason": "no_key_or_base",
+                "detail": "缺 Key 或 base_url", "latency_ms": 0}
+    request = urllib.request.Request(
+        f"{base}{path}",
+        data=json.dumps(dict(payload)).encode("utf-8"),
+        headers={"Content-Type": "application/json", "Authorization": f"Bearer {key}"},
+        method="POST",
+    )
+    started = time.perf_counter()
+    try:
+        with urllib.request.urlopen(request, timeout=timeout) as response:
+            return {"ok": True, "status": response.status, "reason": "",
+                    "latency_ms": int((time.perf_counter() - started) * 1000),
+                    "detail": f"{path} 存在（HTTP {response.status}）"}
+    except urllib.error.HTTPError as exc:
+        body = exc.read().decode("utf-8", "replace")
+        if exc.code == 404:
+            return {"ok": False, "status": 404, "reason": "route_missing",
+                    "latency_ms": int((time.perf_counter() - started) * 1000),
+                    "detail": f"{path} 不存在：{redact(body, env)[:160]}"}
+        # 400/422 = 端点在、只是探针参数不全。判为可达。
+        return {"ok": True, "status": exc.code, "reason": "",
+                "latency_ms": int((time.perf_counter() - started) * 1000),
+                "detail": f"{path} 存在（HTTP {exc.code}，探针参数不全）"}
+    except (urllib.error.URLError, TimeoutError, OSError) as exc:
+        return {"ok": False, "status": 0, "reason": "unreachable",
+                "latency_ms": int((time.perf_counter() - started) * 1000),
+                "detail": redact(str(exc), env)[:200]}
+
+
+def probe_stepaudio_speech(cfg: Mapping[str, Any], env: Mapping[str, str], *,
+                           timeout: float = 20.0) -> dict[str, Any]:
+    return probe_stepaudio_endpoint(
+        cfg, env, path="/audio/speech", timeout=timeout,
+        payload={"model": str(cfg.get("tts_model") or ""),
+                 "input": "你好。", "voice": str(cfg.get("tts_voice") or ""),
+                 "response_format": "mp3"},
+    )
+
+
+def probe_stepaudio_asr(cfg: Mapping[str, Any], env: Mapping[str, str], *,
+                        timeout: float = 20.0) -> dict[str, Any]:
+    payload = {
+        "audio": {
+            "data": "",
+            "input": {
+                "transcription": {
+                    "model": str(cfg.get("asr_model_id") or ""),
+                    "language": "zh",
+                },
+                "format": {
+                    "type": "pcm", "codec": "pcm_s16le", "rate": 16000,
+                    "bits": 16, "channel": 1,
+                },
+            },
+        }
+    }
+    return probe_stepaudio_endpoint(
+        cfg, env, path="/audio/asr/sse", timeout=timeout, payload=payload,
+    )
+
+
 def probe_mic() -> dict[str, Any]:
     try:
         import sounddevice as sd
@@ -364,14 +563,45 @@ def build_doctor(
         tts_check = _check("tts.engine", group="tts", status="missing",
                            summary="TTS_ENGINE=silent：不会真正合成音频",
                            how_to_fix="把 TTS_ENGINE 设为 stepaudio 或 edge_tts")
+    elif tts_engine == "fish":
+        # 2026-11-12：Fish 走自己的出口（api.fish.audio），不与 LLM 共用凭据，
+        # 所以必须真发一次请求才知道能不能用 —— 不能像 stepaudio 那样只看 LLM 上游。
+        fish_tts = deps["fish_tts_probe"](cfg, env)
+        if not str(env.get("FISH_API_KEY") or "").strip():
+            tts_check = _check("tts.engine", group="tts", status="skip", required=False,
+                               summary="fish TTS 需要 FISH_API_KEY；当前未配置",
+                               how_to_fix="在 .env 里填 FISH_API_KEY")
+        elif fish_tts.get("ok"):
+            tts_check = _check("tts.engine", group="tts", status="ok",
+                               summary=f"fish TTS 真发一次请求成功（{fish_tts.get('model')}，"
+                                       f"{fish_tts.get('bytes')} 字节，{fish_tts.get('latency_ms')}ms）",
+                               detail=str(fish_tts.get("detail") or ""))
+        else:
+            tts_check = _check("tts.engine", group="tts", status="blocked",
+                               summary="fish TTS 真发一次请求失败",
+                               detail=redact(str(fish_tts.get("detail") or ""), env),
+                               how_to_fix="检查 FISH_API_KEY / FISH_BASE_URL / 额度；不要用 Mock 音频代替")
     elif tts_engine == "stepaudio":
         if not key_present:
             tts_check = _check("tts.engine", group="tts", status="skip", required=False,
                                summary="stepaudio 复用 LLM 凭据；当前无 Key",
                                how_to_fix="先配 LLM_API_KEY")
         elif upstream_ok:
-            tts_check = _check("tts.engine", group="tts", status="ok",
-                               summary="stepaudio TTS 配置就绪（与 LLM 同一出口）")
+            # 2026-11-12：这个分支此前只看「LLM 上游通不通」就判 stepaudio TTS 就绪。
+            # 但 stepaudio TTS 打的是 {base_url}/audio/speech，与 chat/completions **不同端点**：
+            # 把 LLM 指向讯飞后本分支报「配置就绪」，而讯飞根本没有 /audio/speech
+            # （实测 404 no Route matched）—— 那是假绿。现在加一条端点存在性探测，
+            # 只有 LLM 与 TTS 两个端点都通才算就绪。
+            speech = deps["stepaudio_speech_probe"](cfg, env)
+            if speech.get("ok"):
+                tts_check = _check("tts.engine", group="tts", status="ok",
+                                   summary="stepaudio TTS 配置就绪（与 LLM 同一出口，且 /audio/speech 已验证可达）",
+                                   detail=str(speech.get("detail") or ""))
+            else:
+                tts_check = _check("tts.engine", group="tts", status="blocked",
+                                   summary="stepaudio TTS 端点不可用（LLM 通，但 TTS 的 /audio/speech 不通）",
+                                   detail=redact(str(speech.get("detail") or ""), env),
+                                   how_to_fix="换 TTS_ENGINE=fish 或 edge_tts；LLM 与 TTS 是不同端点，LLM 通不代表 TTS 通")
         else:
             tts_check = _check("tts.engine", group="tts", status="blocked",
                                summary="stepaudio TTS 依赖的上游不可用",
@@ -399,14 +629,42 @@ def build_doctor(
 
     # ---- ASR
     asr_engine = str(cfg.get("asr_engine") or "")
-    if asr_engine == "stepaudio":
+    if asr_engine == "fish":
+        # 同 TTS：Fish ASR 走自己的出口与凭据，必须真发一次才知道。
+        fish_asr = deps["fish_asr_probe"](cfg, env)
+        if not str(env.get("FISH_API_KEY") or "").strip():
+            asr_check = _check("asr.engine", group="asr", status="skip", required=False,
+                               summary="fish ASR 需要 FISH_API_KEY；当前未配置",
+                               how_to_fix="在 .env 里填 FISH_API_KEY")
+        elif fish_asr.get("ok"):
+            asr_check = _check("asr.engine", group="asr", status="ok",
+                               summary=f"fish ASR 真发一次请求成功（{fish_asr.get('model')}，"
+                                       f"{fish_asr.get('latency_ms')}ms）",
+                               detail=str(fish_asr.get("detail") or ""))
+        else:
+            asr_check = _check("asr.engine", group="asr", status="blocked",
+                               summary="fish ASR 真发一次请求失败",
+                               detail=redact(str(fish_asr.get("detail") or ""), env),
+                               how_to_fix="检查 FISH_API_KEY / FISH_BASE_URL / 余额；ASR 按音频时长计费")
+    elif asr_engine == "stepaudio":
         if not key_present:
             asr_check = _check("asr.engine", group="asr", status="skip", required=False,
                                summary="stepaudio ASR 复用 LLM 凭据；当前无 Key",
                                how_to_fix="先配 LLM_API_KEY")
         elif upstream_ok:
-            asr_check = _check("asr.engine", group="asr", status="ok",
-                               summary=f"stepaudio ASR 配置就绪（{cfg.get('asr_model_id')}）")
+            # 同 TTS 分支的假绿修复：stepaudio ASR 打的是 {base_url}/audio/asr/sse，
+            # 与 chat/completions 是不同端点，必须单独验。
+            asr_ep = deps["stepaudio_asr_probe"](cfg, env)
+            if asr_ep.get("ok"):
+                asr_check = _check("asr.engine", group="asr", status="ok",
+                                   summary=f"stepaudio ASR 配置就绪（{cfg.get('asr_model_id')}，"
+                                           "且 /audio/asr/sse 已验证可达）",
+                                   detail=str(asr_ep.get("detail") or ""))
+            else:
+                asr_check = _check("asr.engine", group="asr", status="blocked",
+                                   summary="stepaudio ASR 端点不可用（LLM 通，但 ASR 的 /audio/asr/sse 不通）",
+                                   detail=redact(str(asr_ep.get("detail") or ""), env),
+                                   how_to_fix="换 ASR_ENGINE=fish 或 whisper；LLM 与 ASR 是不同端点，LLM 通不代表 ASR 通")
         else:
             asr_check = _check("asr.engine", group="asr", status="blocked",
                                summary="stepaudio ASR 依赖的上游不可用",
@@ -495,9 +753,16 @@ def build_doctor(
         "llm_model": cfg.get("llm_model"),
         "llm_api_key_present": key_present,
         "tts_engine": tts_engine,
+        "tts_model": cfg.get("tts_model"),
+        "tts_voice": cfg.get("tts_voice"),
         "asr_engine": asr_engine,
         "asr_model": cfg.get("asr_model"),
         "asr_model_id": cfg.get("asr_model_id"),
+        # Fish 的凭据只记「有没有」，值不进报告。
+        "fish_api_key_present": bool(str(env.get("FISH_API_KEY") or "").strip()),
+        "fish_base_url": env.get("FISH_BASE_URL") or "",
+        "fish_tts_model": env.get("FISH_TTS_MODEL") or "",
+        "fish_asr_model": env.get("FISH_ASR_MODEL") or "",
     }
     if cfg.get("config_import_error"):
         config_snapshot["config_import_error"] = cfg["config_import_error"]
@@ -627,8 +892,11 @@ def _load_cfg() -> dict[str, Any]:
             "llm_provider": settings.llm_provider,
             "llm_base_url": settings.llm_base_url,
             "llm_model": settings.llm_model,
+            "llm_api_key": settings.llm_api_key,
             "llm_api_key_present": bool(settings.llm_api_key),
             "tts_engine": settings.tts_engine,
+            "tts_model": settings.tts_model,
+            "tts_voice": settings.tts_voice,
             "asr_engine": settings.asr_engine,
             "asr_model": settings.asr_model,
             "asr_model_id": settings.asr_model_id,
@@ -639,8 +907,11 @@ def _load_cfg() -> dict[str, Any]:
             "llm_provider": os.getenv("LLM_PROVIDER", ""),
             "llm_base_url": os.getenv("LLM_BASE_URL", ""),
             "llm_model": os.getenv("LLM_MODEL", ""),
+            "llm_api_key": os.getenv("LLM_API_KEY", ""),
             "llm_api_key_present": bool(os.getenv("LLM_API_KEY")),
             "tts_engine": os.getenv("TTS_ENGINE", ""),
+            "tts_model": os.getenv("TTS_MODEL", ""),
+            "tts_voice": os.getenv("TTS_VOICE", ""),
             "asr_engine": os.getenv("ASR_ENGINE", ""),
             "asr_model": os.getenv("ASR_MODEL", ""),
             "asr_model_id": os.getenv("ASR_MODEL_ID", ""),
@@ -651,6 +922,21 @@ def _load_cfg() -> dict[str, Any]:
 
 def _assert(name: str, ok: bool, detail: str = "") -> dict[str, Any]:
     return {"name": name, "ok": bool(ok), "detail": detail}
+
+
+def _as_int(value: Any, default: int = -1) -> int:
+    """把可能缺失/为 null 的计数字段转成 int。
+
+    为什么不能用 `int(value or -1)`：**0 是合法的计数**（记忆全删光后 count 就是 0）。
+    `0 or -1` 得到 -1，会把「删干净了」判成「没删掉」。这是 2026-11-12 实测踩到的：
+    B4 的硬删除其实成功（removed_rows=1、库表空），但 `deleted_ok` 报 False。
+    """
+    if value is None:
+        return default
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return default
 
 
 def _checkpoint(check_id: str, title: str, *, status: str, started: float,
@@ -1174,27 +1460,41 @@ async def run_live(
         context_text = str(context.get("context") or "")
         assertions = [
             _assert("写入返回 id", isinstance(memory_id, int), f"id={memory_id}"),
-            _assert("写入后计数 +1", int(after_add.get("count") or -1) == baseline + 1,
+            _assert("写入后计数 +1", _as_int(after_add.get("count")) == baseline + 1,
                     f"baseline={baseline}；after={after_add.get('count')}"),
             _assert("检索 found=true", found, f"found={found}"),
             _assert("检索上下文含写入内容", (key in context_text) or ("修自行车" in context_text),
                     context_text[:300]),
             _assert("没有 HTTP 异常", not memory_error, memory_error),
         ]
-        b4_status = "pass" if all(item["ok"] for item in assertions) else "fail"
+        # 硬删除：先删再判。checkpoint 名字叫「记忆写入 → 检索命中 → 硬删除」，
+        # 原先**没有**「硬删除后计数回基线」这条断言 —— 删不掉也算 pass。
+        # 2026-11-12 补上；同时修了 `int(x or -1)` 的真值陷阱：
+        # count 合法地等于 0 时，`0 or -1` 得到 -1，会把「删干净了」判成「没删掉」。
         delete_ok = None
+        final_count: Any = None
         if isinstance(memory_id, int):
             try:
                 memory_log.request("DELETE", f"/api/memories/{memory_id}")
                 final = memory_log.request("GET", "/api/memories")
-                delete_ok = int(final.get("count") or -1) == baseline
+                final_count = final.get("count")
+                delete_ok = _as_int(final_count) == baseline
             except Exception as exc:
                 memory_error = memory_error or redact(str(exc), env)
                 delete_ok = False
+        assertions.append(_assert(
+            "硬删除后计数回基线", delete_ok is True,
+            f"baseline={baseline}；删除后 count={final_count}"))
+        b4_status = "pass" if all(item["ok"] for item in assertions) else "fail"
         checkpoints.append(_checkpoint(
             "B4.memory", "记忆写入 → 检索命中 → 硬删除", status=b4_status, started=t4,
             assertions=assertions,
-            evidence={**memory_log.calls[-8:], "baseline": baseline, "key": key,
+            # 2026-11-12 修：原先写的是 {**memory_log.calls[-8:], ...}，
+            # 但 calls 是 list（`_HttpLog.calls`），`**list` 抛
+            # TypeError: 'list' object is not a mapping —— B4 一跑到就崩，
+            # 整个 live 段在最后一步炸掉，前三个检查点的读数全丢。
+            # 这条路径 2026-10-13 以来从没真跑过（订阅阻塞），所以一直没暴露。
+            evidence={"calls": memory_log.calls[-8:], "baseline": baseline, "key": key,
                       "found": found, "deleted_ok": delete_ok,
                       "context_excerpt": context_text[:400]},
             repro=server_info["command"] + "；按 B4 的 REST 序列重放（库是临时沙盘）",
@@ -1273,6 +1573,12 @@ def _default_deps() -> dict[str, Any]:
         "mic_probe": probe_mic,
         "whisper_probe": probe_whisper,
         "edge_probe": probe_edge_network,
+        # 2026-11-12：Fish 走自己的出口与凭据，必须真发一次；stepaudio 家族
+        # 的 TTS/ASR 端点与 LLM 的 chat/completions 不同，也要单独探。
+        "fish_tts_probe": probe_fish_tts,
+        "fish_asr_probe": probe_fish_asr,
+        "stepaudio_speech_probe": probe_stepaudio_speech,
+        "stepaudio_asr_probe": probe_stepaudio_asr,
         "now": datetime.now,
     }
 

@@ -30,7 +30,9 @@ class _Deps:
     """可注入的探测依赖：测试里不碰网络、不碰麦克风、不碰真实缓存。"""
 
     def __init__(self, *, installed=None, which=None, ports=None,
-                 upstream=None, mic=None, whisper=None, edge=None):
+                 upstream=None, mic=None, whisper=None, edge=None,
+                 fish_tts=None, fish_asr=None, stepaudio_speech=None,
+                 stepaudio_asr=None):
         self.installed = installed if installed is not None else {
             "httpx", "websockets", "numpy", "faster_whisper", "edge_tts", "sounddevice",
         }
@@ -41,6 +43,20 @@ class _Deps:
         self.mic = mic if mic is not None else {"available": True, "count": 1, "error": None}
         self.whisper = whisper if whisper is not None else {"available": True, "detail": "small"}
         self.edge = edge if edge is not None else {"reachable": True}
+        # 2026-11-12：Fish 与 stepaudio 端点探测的默认桩都判「通」，
+        # 让既有「全就绪」用例的语义不变；假绿由专门的新用例钉。
+        self.fish_tts = fish_tts if fish_tts is not None else {
+            "ok": True, "status": 200, "bytes": 4096, "latency_ms": 30,
+            "reason": "", "model": "s2.1-pro-free", "detail": "probe ok"}
+        self.fish_asr = fish_asr if fish_asr is not None else {
+            "ok": True, "status": 200, "latency_ms": 30, "reason": "",
+            "model": "transcribe-1-pro", "detail": "probe ok"}
+        self.stepaudio_speech = stepaudio_speech if stepaudio_speech is not None else {
+            "ok": True, "status": 200, "reason": "", "latency_ms": 25,
+            "detail": "/audio/speech 存在"}
+        self.stepaudio_asr = stepaudio_asr if stepaudio_asr is not None else {
+            "ok": True, "status": 200, "reason": "", "latency_ms": 25,
+            "detail": "/audio/asr/sse 存在"}
 
     def as_dict(self):
         def find_spec(name):
@@ -66,6 +82,18 @@ class _Deps:
         def edge_probe():
             return self.edge
 
+        def fish_tts_probe(cfg, env):
+            return self.fish_tts
+
+        def fish_asr_probe(cfg, env):
+            return self.fish_asr
+
+        def stepaudio_speech_probe(cfg, env):
+            return self.stepaudio_speech
+
+        def stepaudio_asr_probe(cfg, env):
+            return self.stepaudio_asr
+
         return {
             "find_spec": find_spec,
             "which": which,
@@ -74,6 +102,10 @@ class _Deps:
             "mic_probe": mic_probe,
             "whisper_probe": whisper_probe,
             "edge_probe": edge_probe,
+            "fish_tts_probe": fish_tts_probe,
+            "fish_asr_probe": fish_asr_probe,
+            "stepaudio_speech_probe": stepaudio_speech_probe,
+            "stepaudio_asr_probe": stepaudio_asr_probe,
             "now": lambda: datetime(2026, 11, 9, 10, 0, 0),
         }
 
@@ -178,6 +210,175 @@ class DoctorTests(unittest.TestCase):
             self.assertFalse(report["readiness"]["ready"])
             tts = next(c for c in report["checks"] if c["id"] == "tts.engine")
             self.assertEqual(tts["status"], "missing")
+
+
+class FalseGreenTests(unittest.TestCase):
+    """2026-11-12：doctor 曾把「LLM 通但 TTS/ASR 端点不存在」判成就绪。
+
+    触发场景实测：把 LLM 指向讯飞（`https://maas-api.cn-huabei-1.xf-yun.com/v1`）后，
+    doctor 报「stepaudio TTS 配置就绪 / stepaudio ASR 配置就绪」，
+    而讯飞根本没有 `/audio/speech` 与 `/audio/asr/sse`（都返 404 no Route matched）。
+    根因：stepaudio 分支只看 LLM 的 chat/completions 通不通，而 TTS/ASR 是**不同端点**。
+    """
+
+    def test_stepaudio_tts_route_missing_is_blocked_not_ready(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp = Path(tmp)
+            deps = _Deps(stepaudio_speech={
+                "ok": False, "status": 404, "reason": "route_missing",
+                "latency_ms": 30,
+                "detail": "/audio/speech 不存在：no Route matched with those values",
+            }).as_dict()
+            report = _build(tmp, deps=deps)
+            self.assertFalse(report["readiness"]["ready"],
+                             "LLM 通但 TTS 端点 404 时不得判就绪")
+            tts = next(c for c in report["checks"] if c["id"] == "tts.engine")
+            self.assertEqual(tts["status"], "blocked")
+            self.assertIn("/audio/speech", tts["detail"])
+
+    def test_stepaudio_asr_route_missing_is_blocked_not_ready(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp = Path(tmp)
+            deps = _Deps(stepaudio_asr={
+                "ok": False, "status": 404, "reason": "route_missing",
+                "latency_ms": 30,
+                "detail": "/audio/asr/sse 不存在：no Route matched with those values",
+            }).as_dict()
+            report = _build(tmp, deps=deps)
+            self.assertFalse(report["readiness"]["ready"],
+                             "LLM 通但 ASR 端点 404 时不得判就绪")
+            asr = next(c for c in report["checks"] if c["id"] == "asr.engine")
+            self.assertEqual(asr["status"], "blocked")
+            self.assertIn("/audio/asr/sse", asr["detail"])
+
+    def test_stepaudio_route_present_but_params_wrong_is_still_ready(self):
+        """400/422 = 端点在、只是探针参数没喂全；那仍然是就绪。"""
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp = Path(tmp)
+            deps = _Deps(
+                stepaudio_speech={"ok": True, "status": 400, "reason": "",
+                                  "latency_ms": 25, "detail": "端点存在（参数不全）"},
+                stepaudio_asr={"ok": True, "status": 400, "reason": "",
+                               "latency_ms": 25, "detail": "端点存在（参数不全）"},
+            ).as_dict()
+            report = _build(tmp, deps=deps)
+            self.assertTrue(report["readiness"]["ready"], report["readiness"])
+
+    def test_fish_engine_requires_its_own_key_not_llm_key(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp = Path(tmp)
+            cfg = {"tts_engine": "fish", "asr_engine": "fish"}
+            report = _build(tmp, cfg=cfg, env={"LLM_API_KEY": "sk-test-SECRET"},
+                            deps=_Deps().as_dict())
+            statuses = {c["id"]: c["status"] for c in report["checks"]}
+            self.assertEqual(statuses["tts.engine"], "skip")
+            self.assertEqual(statuses["asr.engine"], "skip")
+
+    def test_fish_engine_is_ready_when_its_probe_succeeds(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp = Path(tmp)
+            cfg = {"tts_engine": "fish", "asr_engine": "fish"}
+            env = {"LLM_API_KEY": "sk-test-SECRET", "FISH_API_KEY": "sk-fish-test"}
+            report = _build(tmp, cfg=cfg, env=env, deps=_Deps().as_dict())
+            self.assertTrue(report["readiness"]["ready"], report["readiness"])
+            statuses = {c["id"]: c["status"] for c in report["checks"]}
+            self.assertEqual(statuses["tts.engine"], "ok")
+            self.assertEqual(statuses["asr.engine"], "ok")
+
+    def test_fish_probe_failure_blocks_readiness(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp = Path(tmp)
+            cfg = {"tts_engine": "fish", "asr_engine": "fish"}
+            env = {"LLM_API_KEY": "sk-test-SECRET", "FISH_API_KEY": "sk-fish-test"}
+            deps = _Deps(fish_tts={"ok": False, "status": 402, "reason": "upstream_rejected",
+                                   "bytes": 0, "latency_ms": 30,
+                                   "detail": "quota_exceeded"}).as_dict()
+            report = _build(tmp, cfg=cfg, env=env, deps=deps)
+            self.assertFalse(report["readiness"]["ready"])
+            tts = next(c for c in report["checks"] if c["id"] == "tts.engine")
+            self.assertEqual(tts["status"], "blocked")
+
+    def test_fish_key_never_reaches_the_report(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp = Path(tmp)
+            secret = "sk-fish-SECRET"
+            cfg = {"tts_engine": "fish", "asr_engine": "fish"}
+            env = {"LLM_API_KEY": "sk-test-SECRET", "FISH_API_KEY": secret}
+            report = _build(tmp, cfg=cfg, env=env, deps=_Deps().as_dict())
+            blob = json.dumps(report, ensure_ascii=False) + la.render_doctor_md(report)
+            self.assertNotIn(secret, blob)
+            # 但「有没有配」要留痕，否则排障时看不出是缺 key 还是缺额度。
+            self.assertTrue(report["config"]["fish_api_key_present"])
+
+    def test_probe_stepaudio_endpoint_treats_404_as_missing(self):
+        """真实 HTTP 层：404 判路由不存在；400 判端点存在（参数不全）。"""
+        import urllib.error
+        import urllib.request
+
+        class _Resp:
+            status = 200
+
+            def read(self):
+                return b"{}"
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *a):
+                return False
+
+        calls = []
+
+        def fake_urlopen(request, timeout=None):
+            calls.append(request.full_url)
+            raise urllib.error.HTTPError(
+                request.full_url, 404, "Not Found", {},
+                __import__("io").BytesIO(b"no Route matched with those values"))
+
+        original = urllib.request.urlopen
+        urllib.request.urlopen = fake_urlopen
+        try:
+            cfg = {"llm_base_url": "https://example.invalid/v1", "llm_api_key": "k",
+                   "tts_model": "m", "tts_voice": "v", "asr_model_id": "a"}
+            result = la.probe_stepaudio_speech(cfg, {})
+        finally:
+            urllib.request.urlopen = original
+        self.assertFalse(result["ok"])
+        self.assertEqual(result["status"], 404)
+        self.assertEqual(result["reason"], "route_missing")
+        self.assertTrue(calls[0].endswith("/audio/speech"))
+
+    def test_wav_header_helper_produces_riff_wave(self):
+        raw = la._wav_bytes(b"\x00\x01" * 100, 16000)
+        self.assertTrue(raw.startswith(b"RIFF"))
+        self.assertIn(b"WAVE", raw[:16])
+        self.assertIn(b"data", raw[:48])
+
+    def test_as_int_keeps_zero(self):
+        """0 是合法计数 —— `0 or -1` 会把「删干净了」判成「没删掉」。
+
+        2026-11-12 实测：B4 的硬删除**其实成功**（removed_rows=1、memories 表空），
+        但 `deleted_ok` 报 False，因为写的是 `int(final.get("count") or -1)`：
+        count=0 是 falsy，`0 or -1` → -1，-1 != baseline(0) → 判成没删掉。
+        """
+        self.assertEqual(la._as_int(0), 0, "0 必须是 0，不能变成 -1")
+        self.assertEqual(la._as_int(1), 1)
+        self.assertEqual(la._as_int(None), -1)
+        self.assertEqual(la._as_int("3"), 3)
+        self.assertEqual(la._as_int("x"), -1)
+        # 反例对照：旧写法会把 0 变成 -1。
+        self.assertNotEqual(int(0 or -1), 0)
+
+    def test_b4_asserts_hard_delete_returns_count_to_baseline(self):
+        """B4 叫「记忆写入 → 检索命中 → 硬删除」，就必须真的断言硬删除。
+
+        原先断言列表里没有「硬删除后计数回基线」这一条 —— 删不掉也算 pass。
+        """
+        import inspect
+
+        source = inspect.getsource(la.run_live)
+        self.assertIn("硬删除后计数回基线", source,
+                      "B4 没有断言硬删除，checkpoint 名字与实际校验不符")
 
 
 class CliTests(unittest.TestCase):
@@ -457,6 +658,81 @@ class LiveBoundaryTests(unittest.TestCase):
             self.assertTrue(any("服务未起来" in a["name"] for a in l0["assertions"]))
             self.assertIn("启动异常", l0["assertions"][0]["detail"])
             self.assertIn("FileNotFoundError", l0["assertions"][0]["detail"])
+
+    def test_b4_evidence_is_json_serializable(self):
+        """B4 的 evidence 必须是能 JSON 序列化的 mapping。
+
+        2026-11-12 实测踩到：原先写 `{**memory_log.calls[-8:], ...}`，
+        而 `_HttpLog.calls` 是 **list**，`**list` 抛
+        `TypeError: 'list' object is not a mapping` —— B4 一跑到就崩，
+        整个 live 段在最后一步炸掉，B1/B2/B3 已经拿到的读数全丢。
+        那条路径自 2026-10-13 以来从没真跑过（订阅阻塞），所以一直没暴露。
+
+        这里不真起服务、不发 HTTP：用最小桩替掉 HTTP 客户端与 WebSocket，
+        把 run_live 推到 B4，断言它**不抛**且 evidence 能序列化。
+        """
+        import json as jsonlib
+
+        with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmp:
+            tmp = Path(tmp)
+            cfg = {**BASE_CFG, "llm_api_key_present": True,
+                   "tts_engine": "silent", "asr_engine": "whisper"}
+
+            class _Resp:
+                def __init__(self, payload):
+                    self._payload = payload
+                    self.status_code = 200
+                    self.text = jsonlib.dumps(payload, ensure_ascii=False)
+
+                def json(self):
+                    return self._payload
+
+                def raise_for_status(self):
+                    return None
+
+            class _Client:
+                def __init__(self, *a, **k):
+                    pass
+
+                def __enter__(self):
+                    return self
+
+                def __exit__(self, *a):
+                    return False
+
+                def request(self, method, path, **kwargs):
+                    if path.endswith("/api/memories") and method == "GET":
+                        return _Resp({"count": 1})
+                    if path.endswith("/api/memories/context"):
+                        return _Resp({"found": True, "context": "修自行车 周六"})
+                    if path.endswith("/api/memories") and method == "POST":
+                        return _Resp({"id": 1})
+                    return _Resp({"count": 1})
+
+            import httpx
+
+            original_client = httpx.Client
+            httpx.Client = _Client  # type: ignore[assignment]
+            try:
+                report = la.asyncio.run(la.run_live(
+                    root=ROOT, env={"LLM_API_KEY": "sk-test"}, cfg=cfg, out_dir=tmp,
+                    args=_live_args(),
+                    deps={**_Deps().as_dict(),
+                          "wait_health": lambda base_url, timeout=60.0: {
+                              "ok": True, "llm": {"offline": False},
+                              "tts": {"engine": "silent"}, "asr": {"engine": "whisper"}},
+                          },
+                ))
+            finally:
+                httpx.Client = original_client  # type: ignore[assignment]
+
+            # 关键断言：整份报告能 JSON 序列化（这是原先崩掉的地方）。
+            blob = jsonlib.dumps(report, ensure_ascii=False)
+            self.assertIn("B4.memory", blob)
+            b4 = next(cp for cp in report["checkpoints"] if cp["id"] == "B4.memory")
+            self.assertIsInstance(b4["evidence"], dict)
+            self.assertIn("calls", b4["evidence"])
+            self.assertIsInstance(b4["evidence"]["calls"], list)
 
 
 if __name__ == "__main__":

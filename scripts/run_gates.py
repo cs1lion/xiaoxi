@@ -1210,6 +1210,13 @@ GATES: dict[str, dict[str, object]] = {
         "cmd": [str(PY), "scripts/test_live_acceptance.py"],
         "skip_regex": r"^\s*SKIP",
     },
+    "fish_engine": {
+        # Fish Audio 作为 TTS/ASR 引擎的契约：instruction 原样进方括号、
+        # rate→prosody.speed、volume→dB、无 pitch 旋钮、ASR 上传 WAV 容器。
+        # 全部桩住 HTTP，不联网不花钱。
+        "cmd": [str(PY), "scripts/test_fish_engine.py"],
+        "skip_regex": r"^\s*SKIP",
+    },
 }
 
 
