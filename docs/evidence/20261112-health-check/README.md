@@ -231,3 +231,34 @@ CI 负载下仍会假红。本机连跑 4 次实测同步对照最长停顿 30.0
 
 另更正本文件 §1 的一处结论：**Fish TTS 在 API 层非确定**（缓存是唯一让重复请求字节一致的东西）。
 当时用 `synthesize_profile` 测出「5/5 相同」，实际那是 **LRU 缓存命中**，第二次起根本没发 HTTP。
+
+---
+
+## 11. 本文件 §4 的六条，处理结果
+
+§4 提的六个问题里，四个当天就修掉了（见下表），两个剩下。
+
+| # | 问题 | 状态 |
+| --- | --- | --- |
+| §4.1 | `--allow-skip` 打印「所有门禁都真跑过并断言」 | **已修**（提交 `74d1276`）。结论按实际跳过数分两种说法 |
+| §4.2 | `ci_test_shard.py` 用 locale 编解码，失败输出整段丢失 | **已修**（提交 `74d1276`）。两端钉死 utf-8 |
+| §4.3 | CI 从不调 `run_gates.py`，24 条 ALWAYS_REQUIRED 门禁无 CI 步骤执行 | **已修**。Node 门禁接进 `ci_test_shard.py` 的第二个池（`agent-runtime/test-*.ts` 全集，26 条），7 条非 `test_*.py` 的探针脚本在 CI 里显式跑。`venv_lock` / `tmp_sweep` 按设计是本机环境门禁，不进 CI。新增 `scripts/test_ci_coverage.py` 把「每条 ALWAYS_REQUIRED 都有 CI 路径」变成会红的门禁 |
+| §4.4 | 泄漏棘轮抽样静默截断，丢掉 `ui_nav_browser` / `voice_browser` | **已修**（提交 `884beda`）。上限 10→24、不再截断、被跳过要按名报出 |
+| §4.5 | 决策 trail 停在 2026-10-27，近两天的 19 个提交无记录 | **已修**（提交 `1ca90cd` 起追加 `20261112-PROC11`～`PROC14`，现 18 条） |
+| §4.6 | 五处文档与代码相反 | **已修**（提交 `965f0bf`）：`PROTOCOL_REQUEST_playback_confirm.md`、`NEXT_PHASE_PLAN.md` §10.1、`MEMORY_VALID_TIME.md` §10、`TESTING.md` 门禁记账 |
+
+§4.3 的原判断（「CI 从不调 `run_gates.py`，所以 24 条 ALWAYS_REQUIRED 门禁无 CI 步骤执行」）
+经查**因果链是错的**，修法也跟着换了：
+
+那 24 条之所以没被执行，不是因为 CI 不调 `run_gates.py`，而是因为**它们的形态
+进不了 CI 唯一那条执行路径** —— `ci_test_shard.py` 只 glob `scripts/test_*.py`，
+而 17 条是 `agent-runtime/*.ts` 的 Node 门禁、7 条是 `scripts/` 下**非** `test_*.py`
+的探针脚本。所以把 `run_gates.py --always` 加进 CI（当时的「甲」方案）解决不了：
+它会把 `tmp_sweep` / `venv_lock` 这两条本机环境门禁也拉进 CI，换来一串永远 SKIP
+的噪声，掩盖真正的漏跑。
+
+采用的是「乙」：**扩展分片器的发现范围**（Node 门禁进第二个池）+ **在 CI 里显式跑
+那 7 条探针**。覆盖判据做成了 `scripts/test_ci_coverage.py` ——
+「每条 ALWAYS_REQUIRED 门禁都要有 CI 执行路径」，覆盖关系由 cmd 特征推出，
+不是靠人肉维护名单。四个变异（CI 不跑分片器 / 加 `--skip-ts` / 移除探针步骤 /
+分片器不再发现 TS）全部被抓住。

@@ -1229,6 +1229,13 @@ GATES: dict[str, dict[str, object]] = {
         "cmd": [str(PY), "scripts/test_leak_sampling.py"],
         "skip_regex": r"^\s*SKIP",
     },
+    "ci_coverage": {
+        # CI 覆盖完整性：每条 ALWAYS_REQUIRED 门禁都要有 CI 执行路径。
+        # 2026-11-12 实测，此前 24 条 ALWAYS_REQUIRED 门禁没有任何 CI 步骤执行过
+        # （17 条 agent-runtime/*.ts 的 Node 门禁 + 7 条非 test_*.py 的探针）。
+        "cmd": [str(PY), "scripts/test_ci_coverage.py"],
+        "skip_regex": r"^\s*SKIP",
+    },
 }
 
 

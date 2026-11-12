@@ -4,12 +4,18 @@
 #   1. scripts/check_protocol.py   协议契约静态校验（字段/路由/引用漂移）
 #   2. scripts/test_*.py           由 scripts/ci_test_shard.py --workers 4 并发分片跑全集
 #                                   （先 --self-test 校验并集=全集；缺夹具的用例按设计优雅跳过）
-#   3. npm test                    Node 单测（无浏览器、无 GPU、不读模型文件）
+#   3. agent-runtime/test-*.ts     同一条分片命令的第二个池（Node 门禁，cwd=agent-runtime）
+#   4. npm test                    Node 单测（无浏览器、无 GPU、不读模型文件）
+#   5. 探针脚本                     process trail / outbox 崩溃 / 自进化质量 / 评测报告
 #
 # 明确不在 CI 跑的层（按 docs/TESTING.md 在本地执行）：
 #   - 浏览器回归 scripts/test-*.browser.mjs：需要 Playwright + 本地服务 + gitignore 的 VRM 资产
 #   - npm run test:eyes 中的模型夹具测试（test_eye_morph/test_eye_lids 读 web/models/*.vrm）
 #   - scripts/eval_*.py --live：需要真实模型供应商凭据与预算
+#   - venv_lock / tmp_sweep：本机环境门禁（前者要 uv 装的 .venv，后者要本机 tmp/ 水位），
+#     但它们在**本地** run_gates.py --always 里仍是 ALWAYS_REQUIRED（跳过即失败）。
+#     判据见 scripts/test_ci_coverage.py：每条 ALWAYS_REQUIRED 门禁都要有 CI 路径，
+#     除非它按设计就是本机门禁。
 name: Aqi Mind CI
 
 on:
@@ -78,15 +84,37 @@ jobs:
       # pixel-world/ 由独立仓 cs1lion/pixel-world-engine 负责，新 clone 无该目录，
       # 其 Node 依赖安装与门禁不再属于主仓 CI。
 
-      - name: Python 测试（并发分片，跳过计通过）
+      - name: Python + Node 门禁（并发分片，跳过计通过）
         run: |
           # 2026-11-06：原串行 for 循环实测 13-16 分钟。不能换成
           # run_gates.py --always（那一档只覆盖 ALWAYS_REQUIRED 子集，会砍掉大量回归），
           # 也不按「慢脚本跳过」提速——那同样是覆盖下降。这里保持
           # scripts/test_*.py 全集、只把串行改分片并发；先自检分片映射，
           # 并集漏一个或重复一个都会当场红，再实跑全部脚本。
+          #
+          # 2026-11-12：同一命令现在还跑 agent-runtime 的 Node 门禁池。
+          # 那 17 条 ALWAYS_REQUIRED 门禁（durable_takeover / durable_recovery /
+          # durable_mcp 等）是 agent-runtime/*.ts 的 Node 测试，此前**从没有任何
+          # CI 步骤执行过** —— 上面那步只跑 scripts/test_*.py。CI 装了
+          # agent-runtime 的 npm 依赖，却一次都没跑过它的测试。
+          # 这批测试用 node:os 的 tmpdir() 建沙盘，无 Windows 专属假设，
+          # Linux 可跑（2026-11-12 本机实测 26/26 通过，31 秒）。
           python scripts/ci_test_shard.py --workers 4 --self-test
           python scripts/ci_test_shard.py --workers 4
 
       - name: Node 单测（无浏览器 / 无模型依赖）
         run: npm test
+
+      # 2026-11-12：ALWAYS_REQUIRED 里还有 6 条**非** test_*.py 的探针脚本，
+      # 此前也没有任何 CI 步骤执行它们。它们的语义是「必须每次都被跑到」，
+      # CI 不跑就等于那层保护在 CI 里不存在。
+      # venv_lock 与 tmp_sweep **故意不在这里**：前者要本机 uv 装的 .venv
+      # （CI 用 pip + requirements-ci.txt），后者要本机 tmp/ 的水位（新检出没有），
+      # docs/TESTING.md 已写明这两条是本机环境门禁。
+      - name: 探针脚本（进程 trail / outbox 崩溃 / 自进化质量 / 评测报告）
+        run: |
+          python scripts/check_process_trail.py
+          python scripts/probe_outbox_crash.py
+          python scripts/eval_self_evolution_quality.py
+          python scripts/evals_report.py
+          python scripts/evals_health.py
