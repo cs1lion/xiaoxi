@@ -74,13 +74,24 @@ class EnableThinkingConfigTests(unittest.TestCase):
 
 class EnableThinkingPayloadTests(unittest.TestCase):
     def _payload(self, *, enable_thinking, reasoning_effort="low"):
-        """造一个能观察到 payload 的 LLM 实例（不发真请求）。"""
-        from server import config as sc
+        """造一个能观察到 payload 的 LLM 实例（不发真请求）。
+
+        **不能拿 `sc.settings` 当 config**：CI 没有 `LLM_API_KEY`，
+        `offline=True` 会让 `complete_raw()` 直接返回 Mock、根本走不到 payload
+        组装（2026-11-12 CI 实测 4 条红）。这里给一个假 key，强制走网络分支，
+        由假 client 接住请求。
+        """
+        from types import SimpleNamespace
+
         from server.llm import LLM
 
-        saved = (sc.settings.llm_enable_thinking, sc.settings.llm_reasoning_effort)
-        sc.settings.llm_enable_thinking = enable_thinking
-        sc.settings.llm_reasoning_effort = reasoning_effort
+        cfg = SimpleNamespace(
+            llm_provider="openai", llm_base_url="https://example.invalid/v1",
+            llm_api_key="test-key", llm_model="test-model",
+            llm_temperature=0.9, llm_max_tokens=400, llm_reply_tokens=1200,
+            llm_reasoning_effort=reasoning_effort, llm_frequency_penalty=0,
+            llm_presence_penalty=0, llm_enable_thinking=enable_thinking,
+        )
         captured = {}
 
         class _Resp:
@@ -95,14 +106,11 @@ class EnableThinkingPayloadTests(unittest.TestCase):
                 captured.update(json or {})
                 return _Resp()
 
-        try:
-            llm = LLM(config=sc.settings)
-            llm._client = _Client()
-            import asyncio
+        import asyncio
 
-            asyncio.run(llm.complete_raw([{"role": "user", "content": "hi"}]))
-        finally:
-            sc.settings.llm_enable_thinking, sc.settings.llm_reasoning_effort = saved
+        llm = LLM(config=cfg)
+        llm._client = _Client()
+        asyncio.run(llm.complete_raw([{"role": "user", "content": "hi"}]))
         return captured
 
     def test_not_set_means_the_key_is_absent(self):

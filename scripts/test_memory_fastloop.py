@@ -15,7 +15,7 @@
 同一台机器上测，机器速度被约掉，只对「卸载有没有真的发生」敏感：
 卸载被改回同步时，异步路径同样被卡住，心跳数跌到对照的同一量级。
 
-测量器失灵由同步对照段把守：对照必须真的卡住（最长停顿 > 20 ms），
+测量器失灵由同步对照段把守：对照必须真的卡住（最长停顿 > 10 ms），
 否则说明这个测量看不见阻塞，比值再高也没有意义。
 
 坑（第一版就踩了）：不能用 `asyncio.sleep(0.001)` 做心跳。Windows 默认
@@ -147,8 +147,12 @@ async def main_async() -> int:
             lambda: asyncio.to_thread(lambda: None) if False else _run_sync(orchestrator, query))
         print(f"       耗时 {sync_elapsed:6.2f} ms，循环最长停顿 {sync_worst:6.2f} ms，"
               f"心跳 {sync_beats} 次")
+        # 阈值 10ms 而不是 20ms：同步检索的墙钟耗时随平台变化 —— Windows 本机
+        # 约 30ms，Linux CI 实测 19.01ms（run 43173085301），刚巧卡在 20ms 下沿
+        # 假红。判「测量器看得见阻塞」只需要一次明显超过心跳间隔的停顿，
+        # 10ms 已足够；测量器真失灵时 sync_worst 会掉到心跳粒度（~1ms）。
         check("同步路径确实会阻塞（证明这个测量能看见阻塞）",
-              sync_worst > 20, f"最长停顿仅 {sync_worst:.2f} ms，测量器可能没生效")
+              sync_worst > 10, f"最长停顿仅 {sync_worst:.2f} ms，测量器可能没生效")
 
         print("[2] async 调用（改动后，走 _turn_context_async）不卡循环")
         async_elapsed, async_worst, async_beats, async_inside = await _measure(
