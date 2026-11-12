@@ -1,0 +1,46 @@
+{
+  "text": "你回来啦。今天过得怎么样？",
+  "audio_bytes": 50990,
+  "audio_head_hex": "fffb90c4",
+  "timings_count": 11,
+  "timings_first": {
+    "text": "你",
+    "start": 0.0,
+    "end": 0.24
+  },
+  "timings_last": {
+    "text": "样",
+    "start": 2.8,
+    "end": 3.04
+  },
+  "joined_matches_spoken": true,
+  "monotonic": true,
+  "duration_covered": 3.04,
+  "sample": [
+    {
+      "text": "你",
+      "start": 0.0,
+      "end": 0.24
+    },
+    {
+      "text": "回",
+      "start": 0.24,
+      "end": 0.64
+    },
+    {
+      "text": "来",
+      "start": 0.64,
+      "end": 0.8
+    },
+    {
+      "text": "啦",
+      "start": 0.8,
+      "end": 1.12
+    },
+    {
+      "text": "今",
+      "start": 1.68,
+      "end": 1.92
+    }
+  ]
+}

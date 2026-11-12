@@ -47,12 +47,31 @@ class _FakeResponse:
     def json(self):
         return jsonlib.loads(self.content.decode("utf-8"))
 
+    @property
+    def text(self):
+        return self.content.decode("utf-8", "replace")
+
+    async def aiter_lines(self):
+        for line in self.text.splitlines():
+            yield line
+
     async def aread(self):
         return self.content
 
     def raise_for_status(self):
         if self.status_code >= 400:
             raise RuntimeError(f"HTTP {self.status_code}")
+
+
+class _Ctx:
+    def __init__(self, payload: bytes):
+        self.payload = payload
+
+    async def __aenter__(self):
+        return _FakeResponse(self.payload)
+
+    async def __aexit__(self, *a):
+        return False
 
 
 class FakeHttpx:
@@ -86,19 +105,20 @@ class FakeHttpx:
         raise AssertionError(f"unexpected POST {url}")
 
     def stream(self, method, url, *, json=None, headers=None, **kwargs):
+        if url.endswith("/v1/tts/stream/with-timestamp"):
+            # P4：Fish 逐字对齐走 SSE；假 transport 回一条带 audio + segments 的事件。
+            self.tts_calls.append({"url": url, "json": json, "headers": headers or {}})
+            event = {
+                "audio_base64": base64.b64encode(self.tts_bytes).decode("ascii"),
+                "alignment": {"segments": [
+                    {"text": "你", "start": 0.0, "end": 0.2},
+                    {"text": "好", "start": 0.2, "end": 0.4},
+                ]},
+            }
+            body = ("data: " + jsonlib.dumps(event, ensure_ascii=False) + "\n\n").encode("utf-8")
+            return _Ctx(body)
         self.asr_calls.append({"url": url, "json": json, "headers": headers or {}})
-
-        class _Ctx:
-            def __init__(self, outer):
-                self.outer = outer
-
-            async def __aenter__(self):
-                return _FakeResponse(jsonlib.dumps(self.outer.asr_payload).encode("utf-8"))
-
-            async def __aexit__(self, *a):
-                return False
-
-        return _Ctx(self)
+        return _Ctx(jsonlib.dumps(self.asr_payload).encode("utf-8"))
 
 
 class FishConfigTests(unittest.TestCase):
@@ -198,7 +218,7 @@ class FishTtsTests(unittest.TestCase):
         self.assertGreater(len(audio), 0)
         self.assertEqual(len(fake.tts_calls), 1)
         call = fake.tts_calls[0]
-        self.assertTrue(call["url"].endswith("/v1/tts"), call["url"])
+        self.assertTrue(call["url"].endswith("/v1/tts/stream/with-timestamp"), call["url"])
         # 模型走请求头，不是 body 字段。
         self.assertEqual(call["headers"].get("model"), "s2.1-pro-free")
         # instruction 的**第一子句**在方括号里。

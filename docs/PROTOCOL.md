@@ -129,7 +129,7 @@ uv run python scripts/check_protocol.py
 
 - `audio.performance` 为可选对象 `{version:1, source:"llm"|"fallback", cues:[{intent,gesture,anchor,start_char,end_char,strength}]}`。偏移量针对当前 `audio.text`，使用 Unicode 码点、起点包含/终点不包含；锚点必须逐字匹配范围。每句最多两条有效意图、强度 `0.15–0.75`，只允许预定义的四种动作映射。
 - 有效的 `source:"llm"` 空 `cues` 表示保持自然，压过关键词规则；缺失、不受支持或 `source:"fallback"` 的计划保持旧客户端兼容行为。长句无损切片后偏移量归零到各片段；跨切片锚点省略但保留 `llm` 来源。
-- `audio.word_timings` 可选，为相对当前片段的秒数 `[{text,start,end}]`。前端只在顺序、完整文本和时长范围都有效时使用，标记 `alignment:"provider"`；否则使用解码时长估算，标记 `"estimated"`。当前 StepAudio 不提供词时间戳；Edge TTS 可透传真实 `WordBoundary`。
+- `audio.word_timings` 可选，为相对当前片段的秒数 `[{text,start,end}]`。前端只在顺序、完整文本和时长范围都有效时使用，标记 `alignment:"provider"`；否则使用解码时长估算，标记 `"estimated"`。时间戳来源按引擎区分：Edge TTS 透传真实 `WordBoundary`；Fish Audio 用 `/v1/tts/stream/with-timestamp` 的逐字 `alignment.segments`（累计列表取最长一份，不含标点，方括号 instruction 不进 segments）；StepAudio 不提供词时间戳。
 - `PlaybackQueue.play` 在 `source.start()` 后才向 `Avatar.speak` 的第五参数传 `{performance,wordTimings}`；`text_delta`、音频到达和 `done` 都不安排说话手势。动作与口型使用同一 `AudioContext.currentTime`，不可用 token 到达时间或 `setTimeout` 替代。
 - 模型在同一次回复里的 `[motion:JSON]` 由服务端流式过滤，不能进入正文、TTS 或存储。无须额外规划请求；动作计划本身不是脚本或任意骨骼指令。
 - 新轮次/打断清除正在执行、已排队及未初始化的动作；旧 `turn_id` 和迟到解码结果被隔离。音频续播维持自然姿态，避免旧动作意图重复。

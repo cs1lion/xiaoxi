@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 import asyncio
+import base64
 import hashlib
 import inspect
+import json
 import logging
 import math
 import re
@@ -370,6 +372,47 @@ def _fish_volume_db(profile: dict[str, Any]) -> float:
     return 20.0 * math.log10(ratio)
 
 
+def _fish_word_timings(events: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Fish `alignment.segments` → `word_timings`（2026-11-12 实测形状）。
+
+    Fish 的 segments 是**累计**的：每个 SSE 事件都带一份从 0 开始的完整列表，
+    取最长的一份即可；把每个事件拼起来会重复整段。时间是相对整段音频的绝对
+    秒数（`chunk_audio_offset_sec` 实测恒为 0，不能当分块偏移加）。
+
+    校验按前端 `providerMap` 的同一套口径（`web/avatar/drivers/speech-plan.js:44`）：
+    文本非空、start/end 有限、`0 <= start < end`、列表整体单调。
+    任何一条不合格就整份返回空 —— 前端本来也会整份退回估算，与其送坏数据
+    让下游猜，不如在这里明确降级。
+    """
+    best: list[Any] = []
+    for event in events:
+        if not isinstance(event, dict):
+            continue
+        segments = (event.get("alignment") or {}).get("segments")
+        if isinstance(segments, list) and len(segments) > len(best):
+            best = segments
+    out: list[dict[str, Any]] = []
+    last_end = 0.0
+    for segment in best:
+        if not isinstance(segment, dict):
+            continue
+        word = segment.get("text")
+        try:
+            start = float(segment["start"])
+            end = float(segment["end"])
+        except (KeyError, TypeError, ValueError, OverflowError):
+            continue
+        if not (isinstance(word, str) and word.strip()):
+            continue
+        if not (math.isfinite(start) and math.isfinite(end) and 0 <= start < end):
+            continue
+        if start < last_end - 1e-3:
+            return []  # 乱序列表整体不可信
+        out.append({"text": word, "start": start, "end": end})
+        last_end = end
+    return out
+
+
 def _fish_text(text: str, profile: dict[str, Any]) -> str:
     """把 persona 的 instruction 变成 Fish 的方括号提示。
 
@@ -454,7 +497,7 @@ class TTSEngine:
         elif self.engine == "stepaudio":
             audio = await self._stepaudio(text, profile)
         elif self.engine == "fish":
-            audio = await self._fish(text, profile)
+            audio = await self._fish(text, profile, word_timings=timings)
         elif self.engine == "silent":
             audio = b""
         else:
@@ -487,8 +530,10 @@ class TTSEngine:
                      profile: dict[str, Any] | None = None) -> list[dict[str, Any]]:
         """Actual provider boundaries from the matching cached synthesis, in seconds.
 
-        StepAudio and silent synthesis supply no timestamps. Callers can omit
-        timing metadata and use an explicitly approximate alignment instead.
+        Edge TTS supplies WordBoundary events; Fish's streaming endpoint supplies
+        per-character `alignment.segments` (see `_fish_word_timings`). StepAudio
+        and silent synthesis supply no timestamps. Callers can omit timing
+        metadata and use an explicitly approximate alignment instead.
         """
         text = re.sub(r"\s+", " ", (text or "").strip())
         if not text:
@@ -528,13 +573,20 @@ class TTSEngine:
             audio = trim_wav_silence(audio)
         return audio
 
-    async def _fish(self, text: str, profile: dict[str, Any]) -> bytes:
+    async def _fish(self, text: str, profile: dict[str, Any], *,
+                    word_timings: list[dict[str, Any]] | None = None) -> bytes:
         """Fish Audio TTS（2026-11-12）。
 
         与 stepaudio 的关键差别：**instruction 是自然语言括号标签**，不是引擎旋钮。
         persona.yaml 的七档 instruction 直接放进 `text` 的方括号，Fish S2 认这个。
         语速走 prosody.speed（倍率），音量走 prosody.volume（dB）。
         **没有 pitch 旋钮** —— 语气表演力全交给 instruction。
+
+        逐字对齐走 `POST /v1/tts/stream/with-timestamp`（SSE）：每个事件带
+        `audio_base64` 与累计的 `alignment.segments`。实测段粒度是中文**逐字**、
+        不含标点、方括号 instruction 不进 segments（正好与前端
+        `providerMap` 的「去标点后逐字匹配」口径一致）。非流式 `/v1/tts`
+        不返回任何时间戳，所以只要走 Fish 就必须用这个端点。
 
         凭据与出口独立于 LLM（api.fish.audio），不与 chat/completions 共用。
         """
@@ -558,20 +610,42 @@ class TTSEngine:
                 "normalize_loudness": True,
             },
             "normalize": True,
+            # 流式端点参数：一次请求远小于 200 字，分块只为边生成边下发。
+            "chunk_length": 200,
+            "latency": "balanced",
         }
+        headers = {
+            "Authorization": f"Bearer {key}",
+            # Fish 用 model **请求头**选模型，不是 body 字段。
+            "model": model,
+        }
+        events: list[dict[str, Any]] = []
+        audio = bytearray()
         async with httpx.AsyncClient(timeout=60.0) as client:
-            resp = await client.post(
-                f"{base}/v1/tts",
-                json=payload,
-                headers={
-                    "Authorization": f"Bearer {key}",
-                    # Fish 用 model **请求头**选模型，不是 body 字段。
-                    "model": model,
-                },
-            )
-        if resp.status_code >= 400:
-            raise RuntimeError(f"fish tts {resp.status_code}: {resp.text[:200]}")
-        return resp.content
+            async with client.stream("POST", f"{base}/v1/tts/stream/with-timestamp",
+                                     json=payload, headers=headers) as resp:
+                if resp.status_code >= 400:
+                    await resp.aread()
+                    raise RuntimeError(f"fish tts {resp.status_code}: {resp.text[:200]}")
+                async for line in resp.aiter_lines():
+                    if not line.startswith("data: "):
+                        continue
+                    try:
+                        event = json.loads(line[6:])
+                    except json.JSONDecodeError:
+                        continue
+                    if not isinstance(event, dict):
+                        continue
+                    encoded = event.get("audio_base64")
+                    if isinstance(encoded, str) and encoded:
+                        try:
+                            audio.extend(base64.b64decode(encoded))
+                        except (ValueError, TypeError):
+                            continue
+                    events.append(event)
+        if word_timings is not None:
+            word_timings.extend(_fish_word_timings(events))
+        return bytes(audio)
 
     async def _edge(self, text: str, profile: dict[str, Any], *,
                     word_timings: list[dict[str, Any]] | None = None) -> bytes:

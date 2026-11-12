@@ -1243,6 +1243,13 @@ GATES: dict[str, dict[str, object]] = {
         "cmd": [str(PY), "scripts/test_llm_enable_thinking.py"],
         "skip_regex": r"^\s*SKIP",
     },
+    "fish_word_timings": {
+        # Fish 逐字对齐（P4）：SSE 的 alignment.segments 是累计列表，
+        # 只取最长一份；校验口径与前端 providerMap 一致（去标点、逐字、单调）。
+        # 另钉住 fish 分支必须把 timings 交给引擎并随缓存保存。
+        "cmd": [str(PY), "scripts/test_fish_word_timings.py"],
+        "skip_regex": r"^\s*SKIP",
+    },
 }
 
 
@@ -1309,7 +1316,9 @@ ALWAYS_REQUIRED = ("protocol", "core", "doc_drift", "process_trail", "process_tr
                    "durable_profiles", "durable_orchestrator_tools", "durable_orchestrator_api",
                    "durable_orchestrator_run", "durable_block_kind", "durable_c3_api",
                    "durable_clarification_cap", "durable_mcp", "durable_mcp_live",
-                   "durable_authorization_ui", "world_bridge", "gateway_env")
+                   "durable_authorization_ui", "world_bridge", "gateway_env",
+                    # 纯离线、亚秒级、零服务零 Key：进 always 档，否则黄金命令不跑它们。
+                    "llm_enable_thinking", "fish_word_timings")
 
 
 # unittest 原生 skip 的汇总行：`OK (skipped=N)`，且只认 N>0（`[1-9]\d*` 天然排除

@@ -274,9 +274,9 @@ python scripts/live_acceptance.py --wav <录音> --expect-text "..."   # 期望�
 **验收命令**：脚本退出码 0 且 `run.json` 里所有必需检查点 `status == "pass"`。
 **注意**：`partial` / `skip` / `fail` 都不是通过（`docs/LIVE_ACCEPTANCE_GUIDE.md:130`）。
 
-### 3.5 P4（可选）：用 Fish 的逐字对齐补 `word_timings`
+### 3.5 P4（已完成 2026-11-12）：用 Fish 的逐字对齐补 `word_timings`
 
-**项目现状**：`server/speech/tts.py:486` 的 `word_timings()` 只在 `_edge()` 路径有数据
+**项目现状**：`server/speech/tts.py:486` 的 `word_timings()` 原先只在 `_edge()` 路径有数据
 （edge_tts 的 `WordBoundary` 事件）。`stepaudio` 与 `silent` 都返回空列表。
 下游是唇形与字幕（`docs/PARKED_TASKS.md:18` 记着 `Edge TTS WordBoundary → word_timings`）。
 
@@ -286,9 +286,20 @@ Fish 的 `/v1/tts/stream/with-timestamp` 每 chunk 都给字级 `alignment.segme
 **这是 Fish 相对现有引擎的真实增量**，但**不是 P0**：`_edge()` 的路径今天就能用，
 补 Fish 的对齐属于「让新引擎达到旧引擎的既有能力」，不是「补一个缺口」。
 
-**改法**：`tts.py` 加 `_fish()` 分支，用 `httpx` 流式读 SSE，把 `alignment.segments` 累进到
-`_word_timings`（`_measure` 的缓存结构已支持）。注意 `synthesize_profile` 现在返回整段 bytes，
-逐字对齐需要流式重构 —— 这一步要动快环的交付路径。
+**改法（已落地）**：`tts.py` 的 fish 分支改走 `httpx` 流式读 SSE，
+把 `alignment.segments` 收进 `word_timings`（`_word_timings` 缓存结构原本就支持）。
+`synthesize_profile` 仍返回整段 bytes（音频本来就是缓冲后交付），
+所以**不需要**重构快环的交付路径 —— 只需把引擎内的取流方式换成带时间戳的端点。
+
+实测形状（2026-11-12，短/长文本各一次）：
+- `segments` 是**累计**的：每个事件带一份从 0 开始的完整列表，取最长一份；
+- 时间是相对整段音频的绝对秒数，`chunk_audio_offset_sec` 恒为 0，不能当分块偏移加；
+- 段粒度中文逐字、**不含标点**，方括号 instruction 不进 segments —— 正好匹配前端
+  `providerMap`（`web/avatar/drivers/speech-plan.js:44`）的「去标点后逐字匹配」口径；
+- 连流后的 mp3 可解码：ffprobe 2.847s vs 末事件 `audio_duration` 2.786s（差值是尾部静音）。
+
+门禁：`scripts/test_fish_word_timings.py`（6 条，含「累计取最长」「坏段过滤」「乱序整份拒绝」
+「fish 分支必须传 timings」「缓存命中仍可查 timings」）。
 
 **2026-11-12 更正：不需要 ADR。** 先前这句「按 `AGENTS.md` 的红线应先出 ADR 再动」是**错的**，
 我把「世界工程移交后 ADR 惯例随调色板红线一起失效」误当成了「ADR 是通用前置条件」。核对实况：
@@ -357,10 +368,10 @@ Fish 的 `/v1/tts/stream/with-timestamp` 每 chunk 都给字级 `alignment.segme
 | 阶段 | 内容 | 依赖 | 可逆性 |
 | --- | --- | --- | --- |
 | P0 | 凭据进 `.env`（**已完成**） | 无 | 删三行 |
-| P1 | `llm.py` 加 `enable_thinking` | 决定是否让讯飞当主路 | 一处 payload 组装 |
+| P1 | `llm.py` 加 `enable_thinking`（**已完成**，含 `stream()` 路径） | 决定是否让讯飞当主路 | 一处 payload 组装 |
 | P2 | `live_acceptance.py` 加 fish / 讯飞分支（**已完成**，含修 doctor 假绿） | P0 | 一个脚本 |
 | P3 | 跑真环境验收并留证（**已完成**：`overall: pass`，5/5 检查点） | P2 + 一段录音 | 只写 `docs/evidence/` |
-| P4 | Fish 逐字对齐接进 `word_timings` | 需先出 ADR | 动快环交付路径 |
+| P4 | Fish 逐字对齐接进 `word_timings`（**已完成**） | 无需 ADR（字段已登记） | 一处引擎取流 |
 
 **P2 → P3 是这一轮的最小可交付闭环**：它不改主链路、不改协议、不改 persona，
 只让「真环境验收」第一次能跑出 B1–B4 的真实读数。
