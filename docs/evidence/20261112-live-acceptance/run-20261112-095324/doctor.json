@@ -1,0 +1,157 @@
+{
+  "schema": "xiaoxi.live_acceptance.doctor/v1",
+  "generated_at": "2026-11-12T09:53:28",
+  "root": "D:\\project\\neurosama",
+  "python": {
+    "executable": "D:\\project\\neurosama\\.venv\\Scripts\\python.exe",
+    "venv": "D:\\project\\neurosama\\.venv\\Scripts\\python.exe",
+    "using_venv": true
+  },
+  "config": {
+    "llm_provider": "openai",
+    "llm_base_url": "https://api.stepfun.com/step_plan/v1",
+    "llm_model": "step-3.7-flash",
+    "llm_api_key_present": true,
+    "tts_engine": "stepaudio",
+    "asr_engine": "stepaudio",
+    "asr_model": "small",
+    "asr_model_id": "stepaudio-2.5-asr"
+  },
+  "upstream": {
+    "ok": false,
+    "status": 400,
+    "reason": "upstream_rejected",
+    "latency_ms": 2496,
+    "excerpt": "{\"error\":{\"message\":\"you have no active step plan subscription\",\"type\":\"request_params_invalid\"}}"
+  },
+  "checks": [
+    {
+      "id": "runtime.python",
+      "group": "runtime",
+      "status": "ok",
+      "required": false,
+      "summary": "正在用项目 .venv 解释器",
+      "detail": "sys.executable=D:\\project\\neurosama\\.venv\\Scripts\\python.exe；venv=D:\\project\\neurosama\\.venv\\Scripts\\python.exe",
+      "how_to_fix": ""
+    },
+    {
+      "id": "runtime.deps",
+      "group": "runtime",
+      "status": "ok",
+      "required": true,
+      "summary": "httpx/websockets/numpy 可用",
+      "detail": "required=['httpx', 'websockets', 'numpy']",
+      "how_to_fix": ""
+    },
+    {
+      "id": "runtime.ffmpeg",
+      "group": "runtime",
+      "status": "ok",
+      "required": false,
+      "summary": "ffmpeg/ffplay 可用",
+      "detail": "ffmpeg=C:\\ProgramData\\chocolatey\\bin\\ffmpeg.EXE；ffplay=C:\\ProgramData\\chocolatey\\bin\\ffplay.EXE",
+      "how_to_fix": ""
+    },
+    {
+      "id": "env.key",
+      "group": "config",
+      "status": "ok",
+      "required": true,
+      "summary": "LLM_API_KEY 已配置（只看是否存在，不打印值）",
+      "detail": "provider=openai；base_url=https://api.stepfun.com/step_plan/v1；model=step-3.7-flash",
+      "how_to_fix": ""
+    },
+    {
+      "id": "llm.upstream",
+      "group": "llm",
+      "status": "blocked",
+      "required": true,
+      "summary": "被上游拒绝（HTTP 400）",
+      "detail": "reason=upstream_rejected；excerpt={\"error\":{\"message\":\"you have no active step plan subscription\",\"type\":\"request_params_invalid\"}}",
+      "how_to_fix": "检查 Key 是否有效、订阅是否激活、模型是否有权限；这一步失败时不得用 Mock 结果代替真实验收"
+    },
+    {
+      "id": "tts.engine",
+      "group": "tts",
+      "status": "blocked",
+      "required": true,
+      "summary": "stepaudio TTS 依赖的上游不可用",
+      "detail": "被上游拒绝（HTTP 400）",
+      "how_to_fix": "先修上游；TTS 与 LLM 复用 base_url/key"
+    },
+    {
+      "id": "asr.engine",
+      "group": "asr",
+      "status": "blocked",
+      "required": true,
+      "summary": "stepaudio ASR 依赖的上游不可用",
+      "detail": "被上游拒绝（HTTP 400）",
+      "how_to_fix": "先修上游；ASR 与 LLM 复用 base_url/key"
+    },
+    {
+      "id": "asr.input",
+      "group": "asr",
+      "status": "ok",
+      "required": false,
+      "summary": "检测到 14 个麦克风输入设备；用 --mic 可做真人语音",
+      "detail": "",
+      "how_to_fix": ""
+    },
+    {
+      "id": "env.ports",
+      "group": "io",
+      "status": "info",
+      "required": false,
+      "summary": "用户服务端口状态（本脚本只用独立端口，不重启 8000/8010）",
+      "detail": "8000=空闲，8010=空闲",
+      "how_to_fix": ""
+    },
+    {
+      "id": "io.evidence",
+      "group": "io",
+      "status": "ok",
+      "required": true,
+      "summary": "证据目录可写",
+      "detail": "D:\\project\\neurosama\\docs\\evidence\\20261112-live-acceptance\\run-20261112-095324",
+      "how_to_fix": ""
+    },
+    {
+      "id": "io.sandbox",
+      "group": "io",
+      "status": "ok",
+      "required": true,
+      "summary": "可创建临时 DB 沙盘",
+      "detail": "",
+      "how_to_fix": ""
+    }
+  ],
+  "readiness": {
+    "ready": false,
+    "missing": [
+      {
+        "id": "llm.upstream",
+        "summary": "被上游拒绝（HTTP 400）",
+        "how_to_fix": "检查 Key 是否有效、订阅是否激活、模型是否有权限；这一步失败时不得用 Mock 结果代替真实验收"
+      },
+      {
+        "id": "tts.engine",
+        "summary": "stepaudio TTS 依赖的上游不可用",
+        "how_to_fix": "先修上游；TTS 与 LLM 复用 base_url/key"
+      },
+      {
+        "id": "asr.engine",
+        "summary": "stepaudio ASR 依赖的上游不可用",
+        "how_to_fix": "先修上游；ASR 与 LLM 复用 base_url/key"
+      }
+    ],
+    "warn": []
+  },
+  "command": {
+    "cwd": "D:\\project\\neurosama",
+    "argv": [
+      "scripts/live_acceptance.py",
+      "--doctor"
+    ]
+  },
+  "duration_ms": 3919
+}

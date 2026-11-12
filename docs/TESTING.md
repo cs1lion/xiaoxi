@@ -608,11 +608,13 @@ DSH 在本机默认沙箱拒绝写工作目录；花名册/profile 必须显式�
 > **2026-11-07 口径**：下表行号是 2026-10-26 的取证快照，之后多轮重构已普遍漂移
 > （例如 `_confirm_action` 从 `:579` 到 `:623`、`shutdown` 从 `:1852/:1863` 到 `:1916`）。
 > **函数名与判定结论仍有效，行号请以 `grep -n 'async def <函数名>' server/app.py` 重锚**，
-> 不要把表里的数字当当前坐标。几个当前锚：`_confirm_action` `:637`、
-> `_run_turn` `:888`、`websocket_endpoint` `:1455`、
-> `_start_durable_if_enabled` `:1874`、`shutdown` `:1983`。
+> 不要把表里的数字当当前坐标。几个当前锚：`_confirm_action` `:643`、
+> `_run_turn` `:894`、`websocket_endpoint` `:1461`、
+> `_start_durable_if_enabled` `:1880`、`shutdown` `:1989`。
 > （2026-11-09 重锚：`_service_data_dir` 上提到 `server/config.py`，app.py 因此
 > 前移 19 行；锚点按 `ast` 实测更新，表内历史快照仍保留。）
+> （2026-11-12 重锚：`/api/health` 的 tts/asr 段加了 fish 分支的模型名，
+> app.py 因此后移 6 行；锚点按 `ast` 实测更新，表内历史快照仍保留。）
 > 快照原文保留，不逐个改写——改写反而会把历史取证现场抹掉。
 
 | 位置 | 形态 | 判定 |

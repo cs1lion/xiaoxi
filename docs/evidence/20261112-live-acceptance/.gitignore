@@ -1,0 +1,14 @@
+# 每次 live 运行的原始音频、服务日志、逐帧事件与 TTS 分片：
+# 体积大、含本机路径、可重建，不入库。
+# 验收结论仍以 doctor.json/md 与 run.json/md 为准，那四类照常入库。
+run-*/*.wav
+run-*/*.log
+run-*/*.mp3
+run-*/*.ogg
+run-*/*.m4a
+run-*/*.webm
+run-*/dialog-events.json
+run-*/tts-chunk-*
+# 录屏逐帧与抓下来的音频分片：可由 recording/ 里的脚本重建，不入库。
+recording/*.png
+recording/audio-*.mp3
