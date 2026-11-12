@@ -199,11 +199,14 @@ class LLM:
         payload: dict[str, Any] = {
             "model": model or self.model,
             "messages": messages,
-            "temperature": settings.llm_temperature if temperature is None else temperature,
-            "max_tokens": max_tokens or settings.llm_reply_tokens,
+            "temperature": self.settings.llm_temperature if temperature is None else temperature,
+            "max_tokens": max_tokens or self.settings.llm_reply_tokens,
             "stream": True,
         }
-        effort = reasoning_effort if reasoning_effort is not None else settings.llm_reasoning_effort
+        # 与 complete_raw() 同一口径：用实例自己的 settings，不读模块级单例。
+        # 传自定义 config 的调用方（测试桩、不同角色的客户端）不该被全局 .env
+        # 的 reasoning_effort/temperature 覆盖 —— 2026-11-12 CI 抓到这条不一致。
+        effort = reasoning_effort if reasoning_effort is not None else self.settings.llm_reasoning_effort
         if effort:
             payload["reasoning_effort"] = effort
         # 与 complete_raw 同一套三态语义：未配置不下发。生产对话走 stream()，
