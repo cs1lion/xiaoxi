@@ -5,6 +5,7 @@ import io
 import json
 import math
 import os
+import re
 import struct
 import threading
 import wave
@@ -123,6 +124,8 @@ class Recognizer:
         duration_ms = int(audio.size / settings.audio_sample_rate * 1000)
         if settings.asr_engine == "stepaudio":
             return await self._stepaudio(audio, duration_ms, language)
+        if settings.asr_engine == "fish":
+            return await self._fish(audio, duration_ms, language)
         return await self._whisper(audio, duration_ms, language)
 
     async def _whisper(self, audio: np.ndarray, duration_ms: int, language: str | None = None) -> Transcript:
@@ -229,6 +232,55 @@ class Recognizer:
             language=language or "auto",
             duration_ms=duration_ms,
             confidence=0.0 if text.strip() else 0.0,
+        )
+
+    async def _fish(self, audio: np.ndarray, duration_ms: int, language: str | None = None) -> Transcript:
+        """Fish Audio ASR（2026-11-12）。
+
+        与 stepaudio 的关键差别：**上传的是文件**，不是 JSON 里的 base64。
+        Fish 的 `/v1/asr` 只接受 multipart/form-data（文件上传）或 msgpack；
+        裸 PCM 不支持，所以这里包成 WAV 容器再传（官方文档：支持 WAV/MP3/AAC/FLAC/
+        Ogg/WebM，不支持 AIFF/CAF/WMA/AMR/AC-3 与无头 PCM）。
+
+        模型走 **请求头**（`model: transcribe-1-pro`），body 里的 model 字段会被忽略。
+        ASR **按音频时长计费**，所以这里不请求时间戳（`ignore_timestamps` 默认 true）。
+        """
+        import httpx
+
+        key = str(settings.fish_api_key or "").strip()
+        if not key:
+            raise RuntimeError(
+                "ASR_ENGINE=fish 需要 FISH_API_KEY（.env）；不配就报错，"
+                "不许静默退回别的引擎")
+        base = str(settings.fish_base_url or "https://api.fish.audio").rstrip("/")
+        model = str(settings.fish_asr_model or "transcribe-1-pro")
+        pcm = (np.clip(audio, -1.0, 1.0) * 32767).astype("<i2").tobytes()
+        wav = to_wav_bytes(audio, settings.audio_sample_rate)
+        payload: dict[str, Any] = {}
+        if language:
+            payload["language"] = str(language)
+        async with httpx.AsyncClient(timeout=120.0) as client:
+            resp = await client.post(
+                f"{base}/v1/asr",
+                files={"audio": ("turn.wav", wav, "audio/wav")},
+                data=payload,
+                headers={
+                    "Authorization": f"Bearer {key}",
+                    # 模型走请求头；body 里的 model 会被忽略。
+                    "model": model,
+                },
+            )
+        if resp.status_code >= 400:
+            raise RuntimeError(f"fish asr {resp.status_code}: {resp.text[:200]}")
+        body = resp.json()
+        text = str(body.get("text") or "")
+        # Fish 会把说话人标记写成 <|speaker:0|>；单人场景去掉它，别混进转写文本。
+        text = re.sub(r"<\|speaker:\d+\|>", " ", text).strip()
+        return Transcript(
+            text=text,
+            language=str(body.get("language_code") or language or "auto"),
+            duration_ms=duration_ms,
+            confidence=0.0,
         )
 
     async def transcribe_wav(self, data: bytes, *, language: str | None = None) -> Transcript:

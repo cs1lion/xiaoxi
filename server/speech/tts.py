@@ -334,6 +334,80 @@ def iter_micro_chunks(text: str, *, total_known: bool = False, **options: Any):
                "text": piece, "pause_after_ms": pause_ms, "breath": breath}
 
 
+def _signed_percent(value: Any) -> float | None:
+    """把 edge_tts 风格的 "+10%" / "-8%" 解析成小数（0.10 / -0.08）。"""
+    if isinstance(value, bool) or not isinstance(value, str):
+        return None
+    match = re.match(r"\s*([+-]?\d+(?:\.\d+)?)\s*%", value)
+    if not match:
+        return None
+    return float(match.group(1)) / 100.0
+
+
+def _fish_speed(profile: dict[str, Any]) -> float:
+    """persona 的 rate（"+10%"）→ Fish 的 prosody.speed（1.10）。
+
+    Fish 的 speed 是倍率（0.5~2.0，1.0 = 正常），与 edge_tts 的 rate 是百分比偏移，
+    两者语义不同但方向一致：越大越快。所以 1 + rate/100。
+    """
+    rate = _signed_percent(profile.get("rate"))
+    if rate is None:
+        return 1.0
+    return max(0.5, min(2.0, 1.0 + rate))
+
+
+def _fish_volume_db(profile: dict[str, Any]) -> float:
+    """persona 的 volume（"+3%" / "-12%"）→ Fish 的 prosody.volume（dB）。
+
+    百分比转 dB 用 20*log10(1 + pct/100)：-12% ≈ -1.1 dB，+3% ≈ +0.26 dB。
+    人耳对 dB 的敏感度远高于线性百分比，所以这个换算会显得比原值"轻"——
+    那是物理事实，不是换算写错。
+    """
+    pct = _signed_percent(profile.get("volume"))
+    if pct is None:
+        return 0.0
+    ratio = max(0.01, 1.0 + pct)
+    return 20.0 * math.log10(ratio)
+
+
+def _fish_text(text: str, profile: dict[str, Any]) -> str:
+    """把 persona 的 instruction 变成 Fish 的方括号提示。
+
+    Fish S2 的方括号标签接受**自然语言描述**，不限于固定 tag 表
+    （官方 emotions 文档：「Bracket cues can use natural language descriptions
+    and are not limited to a fixed set of tags」）。所以 persona.yaml 的中文
+    instruction 不需要另造映射表 —— 但**不能整条照搬**。
+
+    2026-11-12 实测（每档 3 次，Fish ASR 转写回来比对）：
+      整条 instruction 进方括号 → 七档里 **base 与 得意 3/3 泄漏**，
+      泄漏的内容是 instruction 的**后半截**被当成正文念了出来
+      （base 念出「不要播音腔，不刻意表演」）。
+      只取**第一子句**（逗号前）→ 七档全部 0/2 泄漏，
+      且七档音频字节仍两两不同（情绪分化保留）。
+
+    这与 Fish 官方文档的说法一致：方括号描述要**简洁**，
+    「Don't make bracket descriptions so long that they interrupt readability」。
+    逗号分隔的多子句长描述会被模型当成要念的内容。
+
+    所以这里只取第一子句 —— 那才是 persona 情绪的核心
+    （「语气自然随意」「带点调侃和促狭」「有点小得意」…），
+    后半截是补充说明，丢掉它们不改变情绪归属。
+    """
+    instruction = (profile.get("instruction") or "").strip()
+    if not instruction:
+        return text
+    # 方括号内的文本不能含 [ ] < > —— persona 侧已由 test_fish_engine 钉住，
+    # 这里再挡一次，避免将来有人改了 yaml 而忘了改这里。
+    if any(ch in instruction for ch in "[]<>"):
+        logging.getLogger("server.speech.tts").warning(
+            "fish instruction 含 Fish 会当标签解析的字符，原样丢弃：%r", instruction)
+        return text
+    cue = instruction.replace("，", ",").split(",")[0].strip()
+    if not cue:
+        return text
+    return f"[{cue}] {text}"
+
+
 class TTSEngine:
     """Pluggable TTS. Every engine answers the same question:
     (text, emotion) -> audio bytes. Personality lives in two places -- the
@@ -379,6 +453,8 @@ class TTSEngine:
             audio = await self._edge(text, profile, word_timings=timings)
         elif self.engine == "stepaudio":
             audio = await self._stepaudio(text, profile)
+        elif self.engine == "fish":
+            audio = await self._fish(text, profile)
         elif self.engine == "silent":
             audio = b""
         else:
@@ -451,6 +527,51 @@ class TTSEngine:
         if settings.tts_trim_silence:
             audio = trim_wav_silence(audio)
         return audio
+
+    async def _fish(self, text: str, profile: dict[str, Any]) -> bytes:
+        """Fish Audio TTS（2026-11-12）。
+
+        与 stepaudio 的关键差别：**instruction 是自然语言括号标签**，不是引擎旋钮。
+        persona.yaml 的七档 instruction 直接放进 `text` 的方括号，Fish S2 认这个。
+        语速走 prosody.speed（倍率），音量走 prosody.volume（dB）。
+        **没有 pitch 旋钮** —— 语气表演力全交给 instruction。
+
+        凭据与出口独立于 LLM（api.fish.audio），不与 chat/completions 共用。
+        """
+        import httpx
+
+        key = str(settings.fish_api_key or "").strip()
+        if not key:
+            raise RuntimeError(
+                "TTS_ENGINE=fish 需要 FISH_API_KEY（.env）；不配就报错，"
+                "不许静默退回别的引擎")
+        base = str(settings.fish_base_url or "https://api.fish.audio").rstrip("/")
+        model = str(settings.fish_tts_model or "s2.1-pro-free")
+        payload: dict[str, Any] = {
+            "text": _fish_text(text, profile),
+            "format": settings.tts_format if settings.tts_format in ("mp3", "wav", "opus", "pcm")
+                      else "mp3",
+            "language": "zh-CN",
+            "prosody": {
+                "speed": _fish_speed(profile),
+                "volume": _fish_volume_db(profile),
+                "normalize_loudness": True,
+            },
+            "normalize": True,
+        }
+        async with httpx.AsyncClient(timeout=60.0) as client:
+            resp = await client.post(
+                f"{base}/v1/tts",
+                json=payload,
+                headers={
+                    "Authorization": f"Bearer {key}",
+                    # Fish 用 model **请求头**选模型，不是 body 字段。
+                    "model": model,
+                },
+            )
+        if resp.status_code >= 400:
+            raise RuntimeError(f"fish tts {resp.status_code}: {resp.text[:200]}")
+        return resp.content
 
     async def _edge(self, text: str, profile: dict[str, Any], *,
                     word_timings: list[dict[str, Any]] | None = None) -> bytes:

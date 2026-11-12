@@ -415,8 +415,14 @@ async def health() -> Any:
             "extract_model": settings.llm_extract_model or llm.model,
             "offline": llm.offline,
         },
-        "tts": {"engine": settings.tts_engine, "model": settings.tts_model, "voice": settings.tts_voice},
-        "asr": {"engine": settings.asr_engine, "model": settings.asr_model_id if settings.asr_engine == "stepaudio" else settings.asr_model},
+        "tts": {"engine": settings.tts_engine,
+                "model": (settings.fish_tts_model if settings.tts_engine == "fish"
+                          else settings.tts_model),
+                "voice": settings.tts_voice},
+        "asr": {"engine": settings.asr_engine,
+                "model": (settings.asr_model_id if settings.asr_engine == "stepaudio"
+                          else settings.fish_asr_model if settings.asr_engine == "fish"
+                          else settings.asr_model)},
         "scheduler": scheduler_state,
         "degraded": bool(scheduler_state["degraded"]),
         "memories": memories,

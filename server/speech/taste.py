@@ -11,11 +11,14 @@ STYLES = {
 def catalog(engine):
     base = deepcopy(engine.profile('base'))
     voice = base.get('voice') or 'zh-CN-XiaoxiaoNeural'
-    if engine.engine != 'stepaudio' and not voice.startswith('zh-CN'):
+    # fish 与 stepaudio 一样是 instruction 驱动（Fish 吃自然语言方括号标签），
+    # 所以音色名不强制 zh-CN；edge_tts 才需要。
+    if engine.engine not in ('stepaudio', 'fish') and not voice.startswith('zh-CN'):
         voice = 'zh-CN-XiaoxiaoNeural'
-    effective = engine.engine if engine.engine in ('stepaudio', 'silent') else 'edge_tts'
+    effective = engine.engine if engine.engine in ('stepaudio', 'fish', 'silent') else 'edge_tts'
     return {'engine': effective, 'voice': voice,
-            'controls': 'instruction' if effective == 'stepaudio' else 'rate/pitch' if effective == 'edge_tts' else 'none',
+            'controls': 'instruction' if effective in ('stepaudio', 'fish')
+                        else 'rate/pitch' if effective == 'edge_tts' else 'none',
             'styles': [{'id': key, 'label': values[0]} for key, values in STYLES.items()]}
 
 def profile(engine, style):

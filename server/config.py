@@ -243,6 +243,13 @@ DEFAULTS: dict[str, Any] = {
     "tts_format": os.getenv("TTS_FORMAT", "mp3"),
     "tts_sample_rate": int(os.getenv("TTS_SAMPLE_RATE", "24000")),
     "tts_default_emotion": os.getenv("TTS_DEFAULT_EMOTION", "base"),
+    # ---- Fish Audio（2026-11-12）：独立出口与独立凭据，不与 LLM 共用。
+    # TTS_ENGINE=fish / ASR_ENGINE=fish 时走这里。s2.1-pro-free 是 $0/M UTF-8 bytes
+    # 的免费档（无 TTFA 与 DPA 保证）。凭据只进 .env，不入库。
+    "fish_base_url": os.getenv("FISH_BASE_URL", "https://api.fish.audio"),
+    "fish_api_key": os.getenv("FISH_API_KEY", ""),
+    "fish_tts_model": os.getenv("FISH_TTS_MODEL", "s2.1-pro-free"),
+    "fish_asr_model": os.getenv("FISH_ASR_MODEL", "transcribe-1-pro"),
     # 供应商在每个音频块前后各垫了约 0.36s / 0.38s 静音。微句链路把这段静音和
     # pacing.yaml 里设计的呼吸停顿叠加起来，实际句间空隙达到 0.9~1.1s，人听起来
     # 是一顿一顿的。打开时按 WAV 修剪首尾静音，让设计的 pause 成为真实停顿。
