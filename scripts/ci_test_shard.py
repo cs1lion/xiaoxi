@@ -17,6 +17,7 @@
 from __future__ import annotations
 
 import argparse
+import os
 import subprocess
 import sys
 from concurrent.futures import ThreadPoolExecutor
@@ -44,9 +45,26 @@ def assign(scripts: list[Path], workers: int) -> tuple[list[list[Path]], list[Pa
 
 
 def run_one(path: Path) -> tuple[str, int, str]:
+    # 2026-11-12：编码要**两端都钉死**。
+    #
+    # 修前是 `capture_output=True, text=True` —— text=True 默认按 locale 编码解码
+    # （Windows 本机是 cp936/GBK）。子进程写出 GBK 不可解码的字节（UTF-8 中文、
+    # emoji、二进制片段）时，Python 的 _readerthread 抛 UnicodeDecodeError，
+    # proc.stdout 变 None，于是下面的 tail 变空串：**失败原因一个字都贴不出来**，
+    # CI 日志只剩一个脚本名。stderr 也会同样丢。
+    #
+    # 只给父进程加 encoding='utf-8' 还不够：实测本机子进程的 stdout 走 locale，
+    # 字节是 d6d0cec4...（「中文测试」的 GBK），父进程按 utf-8 解出来是乱码 ——
+    # 不丢输出但没法读。所以子进程那边也要用 PYTHONIOENCODING=utf-8 钉成写 utf-8。
+    #
+    # scripts/run_gates.py:1322 早就写对了父进程这一半（utf-8 + replace），
+    # 但同样漏了子进程那一半 —— 它的失败输出在本机也是乱码。
+    env = {**os.environ, "PYTHONIOENCODING": "utf-8"}
     try:
         proc = subprocess.run([sys.executable, str(path)], cwd=str(ROOT),
-                              capture_output=True, text=True, timeout=900)
+                              capture_output=True, text=True,
+                              encoding="utf-8", errors="replace", timeout=900,
+                              env=env)
     except subprocess.TimeoutExpired:
         return path.name, 124, f"timeout after 900s: {path.name}"
     if proc.returncode == 0:

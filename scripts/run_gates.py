@@ -1217,6 +1217,12 @@ GATES: dict[str, dict[str, object]] = {
         "cmd": [str(PY), "scripts/test_fish_engine.py"],
         "skip_regex": r"^\s*SKIP",
     },
+    "ci_test_shard": {
+        # 并发分片器自身的输出捕获契约：子进程输出必须两端钉死 utf-8，
+        # 否则 Windows 上失败脚本的诊断整段丢失（见 scripts/ci_test_shard.py 的注释）。
+        "cmd": [str(PY), "scripts/test_ci_test_shard.py"],
+        "skip_regex": r"^\s*SKIP",
+    },
 }
 
 
@@ -1316,7 +1322,13 @@ def run_gate(name: str, spec: dict) -> dict:
         # 开关没人会一直开着。
         #
         # 需要临时关掉（例如调试一个尚未隔离的新套件）：GATE_SENTINEL=off。
-        env = {**os.environ}
+        #
+        # 2026-11-12：子进程也要钉死写 utf-8。本机子进程的 stdout 走 locale
+        # （cp936/GBK），字节是「中文」的 GBK 编码；父进程按 utf-8 解出来是
+        # 乱码 —— 不丢输出，但「贴失败原因」这件事等于没做。
+        # scripts/ci_test_shard.py 漏了父进程那一半（encoding/errors），
+        # 那边的后果更重：坏字节直接把 stdout 打成 None，tail 整段变空。
+        env = {**os.environ, "PYTHONIOENCODING": "utf-8"}
         if os.environ.get("GATE_SENTINEL", "on") == "on":
             env["TEST_SENTINEL"] = "1"
         proc = subprocess.run(spec["cmd"], cwd=str(cwd), capture_output=True, text=True,
@@ -1535,6 +1547,14 @@ def main() -> int:
         print("\n结论：有门禁这轮没有真的跑。先按上面的提示补齐依赖物 / 起服务，"
               "或用 --allow-skip 明确接受。")
         return 1
+    if skipped:
+        # 2026-11-12：原先这一支直接落到下面那句无条件的「所有门禁都真跑过并断言」，
+        # 哪怕这一轮有 3 条门禁没跑。两份已入库的证据日志带着这句自相矛盾的话
+        # （gates-clean.log:441 / gates-full.log:438）。--allow-skip 的语义是
+        # 「接受跳过」，不是「宣称都跑过了」。
+        print(f"\n结论：有 {len(skipped)} 条门禁没有真的跑（本轮已按 --allow-skip 接受，"
+              "不计失败）；其余门禁都真跑过并断言。")
+        return 0
     print("\n结论：所有门禁都真跑过并断言。")
     return 0
 

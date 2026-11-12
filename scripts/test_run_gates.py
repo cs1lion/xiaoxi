@@ -86,8 +86,7 @@ class RunGatesVerdictTests(unittest.TestCase):
         """
         code, verdict, out = self._run(prints_skip=True, exit_code=1, allow_skip=True)
         self.assertEqual(verdict, "FAIL")
-        self.assertEqual(code, 1,
-                         "--allow-skip 只接受环境不满足的 exit 0 跳过，不放任真实失败")
+        self.assertEqual(code, 1,                         "--allow-skip 只接受环境不满足的 exit 0 跳过，不放任真实失败")
         self.assertNotIn("所有门禁都真跑过并断言", out,
                          "有真实失败时不得打印全绿结论")
 
@@ -107,6 +106,30 @@ class RunGatesVerdictTests(unittest.TestCase):
         code, verdict, _ = self._run(prints_skip=True, exit_code=0, allow_skip=True)
         self.assertEqual(verdict, "SKIP")
         self.assertEqual(code, 0)
+
+    def test_allow_skip_does_not_print_a_false_all_green_conclusion(self):
+        """--allow-skip 接受跳过时，**不得**再打印「所有门禁都真跑过并断言」。
+
+        2026-11-12 实测踩到：加了 --allow-skip 后，
+        `run_gates.py` 跳过「有门禁这轮没有真的跑」的分支，直接落到无条件
+        `print("结论：所有门禁都真跑过并断言。")` —— 明明这一轮有 3 条门禁
+        没跑，却打印「所有门禁都真跑过并断言」。两份已入库的证据日志带着这句
+        自相矛盾的话（gates-clean.log:441 / gates-full.log:438）。
+
+        修法：结论行按实际跳过数分两种说法。
+        """
+        code, verdict, out = self._run(prints_skip=True, exit_code=0, allow_skip=True)
+        self.assertEqual(code, 0, "--allow-skip 接受跳过时整体仍应 exit 0")
+        self.assertNotIn("所有门禁都真跑过并断言。", out,
+                         "有门禁被跳过时不得打印「所有门禁都真跑过并断言。」")
+        self.assertIn("条门禁没有真的跑", out,
+                      "应明确说明这一轮有门禁没跑，只是不判失败")
+
+    def test_no_skip_still_prints_the_all_green_conclusion(self):
+        """对照：真跑过并断言时，那句话照旧要出现（别把结论改没了）。"""
+        code, verdict, out = self._run(prints_skip=False, exit_code=0)
+        self.assertEqual(code, 0)
+        self.assertIn("所有门禁都真跑过并断言。", out)
 
     def test_zero_exit_no_skip_is_pass(self):
         code, verdict, _ = self._run(prints_skip=False, exit_code=0)
@@ -206,6 +229,52 @@ class RunGatesUnittestSkipTests(unittest.TestCase):
         code, verdict, _ = self._run(out_text, exit_code=0, allow_skip=True)
         self.assertEqual(verdict, "SKIP")
         self.assertEqual(code, 0)
+
+
+class RunGatesEncodingTests(unittest.TestCase):
+    """门禁子进程的输出编码必须两端钉死 utf-8（2026-11-12）。
+
+    父进程这一半 run_gates.py 早就写对了（encoding='utf-8', errors='replace'），
+    但**子进程那一半漏了**：本机子进程 stdout 走 locale（cp936/GBK），
+    字节是「中文」的 GBK 编码，父进程按 utf-8 解出来是乱码 ——
+    不丢输出，但「贴失败原因」这件事等于没做。
+
+    scripts/ci_test_shard.py 漏得更狠：父进程也没给 encoding=，
+    坏字节直接把 stdout 打成 None，tail 整段变空 —— CI 日志只剩一个脚本名。
+    """
+
+    def test_child_env_forces_utf8_output(self):
+        import inspect
+
+        source = inspect.getsource(RG.run_gate)
+        self.assertIn("PYTHONIOENCODING", source,
+                      "必须给子进程设 PYTHONIOENCODING=utf-8 —— "
+                      "本机子进程默认按 locale（cp936/GBK）写，"
+                      "父进程按 utf-8 解就得到乱码")
+
+    def test_parent_decodes_utf8_with_replace(self):
+        import inspect
+
+        source = inspect.getsource(RG.run_gate)
+        self.assertIn('encoding="utf-8"', source)
+        self.assertIn('errors="replace"', source,
+                      "必须 errors='replace'，否则一个坏字节就丢掉整段输出")
+
+
+class RunGatesShardEncodingTests(unittest.TestCase):
+    """分片器的编码契约（2026-11-12）。详见 scripts/test_ci_test_shard.py。"""
+
+    def test_shard_runner_declares_explicit_encoding(self):
+        import inspect
+        import sys as _sys
+
+        _sys.path.insert(0, str(RG.ROOT / "scripts"))
+        import ci_test_shard as cts
+
+        source = inspect.getsource(cts.run_one)
+        self.assertIn("encoding=", source)
+        self.assertIn("errors=", source)
+        self.assertIn("PYTHONIOENCODING", source)
 
 
 class RunGatesArtifactRequirementTests(unittest.TestCase):
