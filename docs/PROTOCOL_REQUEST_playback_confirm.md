@@ -1,7 +1,18 @@
-# [PROTOCOL_REQUEST] 播放确认闭环（draft）
+# [PROTOCOL_REQUEST] 播放确认闭环（已批准并实施）
 
-**状态：待 Role 0 批准，未实施。**
-本文件只是草案：**未改 `docs/PROTOCOL.md`、未改 `scripts/check_protocol.py`、未写任何业务代码、未重启服务。**
+**状态：2026-11-09 Role 0 批准（最小集），已实施。**
+
+> **2026-11-12 更正**：本文件原头写「待 Role 0 批准，未实施」，而实现已落地
+> （提交 `cba2e94`）。协议侧现写在 `docs/PROTOCOL.md` §六「播放回执 `playback_done`
+> （2026-11-09 Role 0 批准，最小集）」；服务端在 `server/app.py` 的
+> `Connection.note_playback` 与 `/ws` 接收分支，前端在 `web/app.js` 的
+> `reportPlayback`，checker 在 `scripts/check_protocol.py` 的三方认账，
+> 契约测试在 `scripts/test_playback_done.py`（8 条）。
+> 下面 §1–§9 是**批准前**的原始请求内容，保留作为决策依据，**不再代表现状**。
+> 实施范围与当时的具体取舍见下方「2026-11-09 实施记录」。
+
+**批准前的状态（历史）**：本文件只是草案：**未改 `docs/PROTOCOL.md`、未改
+`scripts/check_protocol.py`、未写任何业务代码、未重启服务。**
 批准前 `playback_confirmed` 继续保持恒 `False`。
 
 **日期**：2026-11-09
@@ -154,3 +165,39 @@ interface PlaybackDone {
    若不改，事件只服务 telemetry，行为收益为零。
 4. **不批的备选**：是否接受「删除 `playback_confirmed` 字段、明确不做播放确认」
    ——这是零协议改动的方案，但第 5 节问题保留。
+
+---
+
+## 10. 2026-11-09 实施记录（批准后）
+
+Role 0 批准**最小集** + **空闲基准改为播放结束**。落地提交 `cba2e94`。
+
+**批了什么**
+
+| §9 的问题 | 裁决 |
+| --- | --- |
+| 1. 批不批 `playback_done` 与四个字段？ | **批最小集**：只 `turn_id` + `status`（`completed` / `stopped` / `failed`）。`last_seq` / `played_ms` **后置** |
+| 2. 要不要服务端回包？ | **不回包**。结果留在服务端状态与 telemetry，前端不新增事件 |
+| 3. 空闲基准是否改为播放结束？ | **改**。`completed` / `stopped` 才把连接空闲基准 `last_spoke_at` 从「交付结束」推进到「播放结束」；`failed` 只记录、不推进 |
+| 4. 备选（删字段不做） | 不采纳 |
+
+**没改什么**
+
+- `done.delivery.playback_confirmed` **仍恒 `False`** —— `done` 发得比播放早，
+  协议不承载播放结果（§1 的前提没变）。现有 10 处 `playback_confirmed=False`
+  断言**一条没改**，它们守的仍是「done 不声明播放」这个契约。
+- 不新增 HTTP 路由、不改 `done` 字段集合、不改 `audio` 字段集合。
+
+**落地位置**
+
+| 层 | 位置 |
+| --- | --- |
+| 协议 | `docs/PROTOCOL.md` §六「播放回执 `playback_done`（2026-11-09 Role 0 批准，最小集）」 |
+| 服务端 | `server/app.py` 的 `Connection.note_playback` 与 `/ws` 接收分支（`elif kind == "playback_done"`） |
+| 前端 | `web/app.js` 的 `reportPlayback`：队列自然清空 → `completed`，`stopPlayback` → `stopped`，解码/播放失败 → `failed` |
+| checker | `scripts/check_protocol.py` 的三方认账（PROTOCOL.md / app.js / app.py）——**不是**加进 `emitted_types()` / `frontend_cases()`，那是 client→server 方向 |
+| 契约测试 | `scripts/test_playback_done.py`（8 条）：合法 turn_id 置确认、陈旧 turn_id 忽略、`failed` 不确认、重复上报幂等、旧客户端无事件时行为不变 |
+| 浏览器夹具 | `scripts/test-voice-browser.mjs` 两条可观测断言：自然播完报 `completed`、被打断报 `stopped` |
+
+**幂等与边界**：陈旧或未知 `turn_id` 静默忽略（不取消当前轮、不解锁资源）；
+同一轮重复上报只取第一次终态；`failed` **不得**被当成用户拒绝或情绪信号。

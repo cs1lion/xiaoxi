@@ -228,6 +228,9 @@ S3 视觉垂直切片（与 S2 并行，依赖 D5、D6）
 
 复核方式：只读代码 + 实跑门禁。上表是 2026-10-19 的记录，其中**行号与文件位置会漂移**，按仓库规矩不在此写死新行号，改给核对命令。
 
+> **2026-11-12 更正**：本节 B-1 与 B-3 的结论已过期 —— 两条其实**都做完了**，
+> 见下方「2026-11-12 复核」。原文保留作为当时的判断记录。
+
 - **B-2：已修，本条关闭。** `scripts/test_voice_turns.py` 的隔离装载器已注入 `_connections=set()`（提交 `5676800`），2026-10-29 实跑：`test_voice_turns.py` 32 例 OK、`test_experience_websocket.py` 20 例 OK，两条门禁（`run_gates.py` 的 `voice_turns` / `experience_websocket`）不再是红基线。
 - **B-1：仍未做，且范围比原记录更清楚。** `/ws` 已有同源校验（task-8 落地，在 `@app.websocket("/ws")` 的 handler 头部，拒绝发生在 `accept()` 之前 → 浏览器侧表现为 HTTP 403）；`Connection.bind_editor_insight` 另有自己的 netloc 比对。**缺校验的是** `/ws/proactive` 与 `/ws/interpret`、`/ws/interpret-stream` 三个入口——`server/speech/interpretation.py` 与 `server/speech/stream_interpretation.py` 内 `origin` 出现 0 次。核对命令：
   ```powershell
@@ -236,4 +239,30 @@ S3 视觉垂直切片（与 S2 并行，依赖 D5、D6）
   跨源页仍可切 proactivity、触发 TTS/LLM，P2 判断不变。修法仍按原建议：把 netloc 比对抽成公共依赖统一覆盖所有 `/ws*`；属改 `server/**`，**需用户单独批准**。
 - **B-3：仍未做，判据成立。** 现实现「无 Origin 头即放行」正是为本地脚本留的口子，因此 DNS rebinding 残余风险确实还在；加 Host allowlist 同样属改 server，与 B-1 并成一张卡做更省。
 - **B-4：本轮无法证实或证伪。** 需要真实台账里出现过 blocked/running 单才有 fixture 可录；本轮只读，未查生产库。保持开着的原样。
+
+### 10.2 2026-11-12 复核：B-1 与 B-3 已完成（更正 10.1 的结论）
+
+2026-11-12 只读复核代码，确认 10.1 节的 B-1、B-3 两条**已经做完**，
+当时（2026-10-29）的结论已过期。核对命令（行号会漂移，以函数名为准）：
+
+```powershell
+Select-String -Path server\app.py -Pattern 'def _ws_handshake_allowed' -Context 0,60
+```
+
+| 条目 | 当时的结论 | 现在的实况 |
+| --- | --- | --- |
+| **B-1** 同源校验只覆盖 `/ws`，另三个入口缺校验 | 仍未做 | **已做**。`server/app.py` 的 `_ws_handshake_allowed` 是**四个 WS 端点共用**的判据：`/ws`（`@app.websocket("/ws")`）、`/ws/proactive`、`/ws/interpret`、`/ws/interpret-stream` 都在 handler 头部调用它，拒绝发生在 `accept()` 之前（浏览器侧是 HTTP 403 握手失败）。落地提交 `0eb3625`（2026-10-31）。 |
+| **B-3** 无 Origin 头即放行，DNS rebinding 残余风险 | 仍未做 | **已做**。`_ws_handshake_allowed` 在**没有 Origin 头**时改为校验 Host 白名单（`localhost` / `127.0.0.1` / `::1` / `testserver` + `WS_ALLOWED_HOSTS` 环境变量），不再无条件放行。落地提交 `655e4c8`（2026-11-07）。 |
+
+**为什么当时看不出来**：10.1 节的核对命令是
+`Select-String -Path server\app.py -Pattern '@app\.websocket' -Context 0,18 | Select-String 'origin'`。
+修法把判据从**内联在 `/ws` handler 里**抽成了**模块级公共函数**，
+`@app.websocket` 附近 18 行内自然不再出现 `origin` 字样 —— 命令的取样窗口
+落在新结构之外，得出「缺校验」的错误结论。
+
+**给后续复核的教训**：核对命令的取样窗口（`-Context 0,18`）本身成了结论的前提。
+判据搬了家，取样窗口没跟着搬。复核时应当**按函数名定位**（`-Pattern 'def _ws_handshake_allowed'`），
+而不是按调用点附近的固定行数取样。
+
+**B-2 保持关闭**（见 10.1）。**B-4 仍未动**（需要真实台账里出现过 blocked/running 单才有 fixture 可录）。
 - **S5 的前置**：阻塞条件（executive.py 未提交 durable 改动）已于 `a643cf7`（2026-10-21）收口，文首标注已同步；S5 现在只等 S4 通过。

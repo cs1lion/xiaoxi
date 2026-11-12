@@ -122,4 +122,13 @@ memories 表新增两个可空 REAL 列：`fact_valid_from` / `fact_valid_until`
 
 ## 10. 提交注意
 
-`server/memory/temporal.py` 未被 git 跟踪，而 `manager.py` 已修改并 `from .temporal import temporal_bounds`。**两者必须原子提交**，否则单独提交 manager.py 会令整条 `server.memory` 导入链 `ModuleNotFoundError`。HEAD 自身不含该 import，故 clone HEAD 不会坏；这仅是工作树的提交顺序约束。
+> **2026-11-12 更正**：本节原写「`server/memory/temporal.py` 未被 git 跟踪」，
+> 这条**已经不成立** —— 该文件随 valid-time 全链一起入库了（提交 `0f87efa`，
+> 2026-10-29）。`git ls-files server/memory/temporal.py` 有输出。
+> 当时的提交顺序约束已随原子提交一并消失。
+> `docs/TESTING.md` 的「已跟踪文件引用未跟踪文件」那一节也已把本条列为「已关闭」。
+
+**（历史记录，2026-10-26 当时的状态）**：`server/memory/temporal.py` 未被 git 跟踪，
+而 `manager.py` 已修改并 `from .temporal import temporal_bounds`。**两者必须原子提交**，
+否则单独提交 manager.py 会令整条 `server.memory` 导入链 `ModuleNotFoundError`。
+HEAD 自身不含该 import，故 clone HEAD 不会坏；这仅是工作树的提交顺序约束。
