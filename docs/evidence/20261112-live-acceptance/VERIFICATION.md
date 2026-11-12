@@ -159,9 +159,60 @@ ego-browser nodejs -e "await import('file:///C:/Users/18712/ego/xiaoxi-20261112/
 | --- | --- | --- |
 | 真人语音的 ASR 识别率 | **未验证** | B2 用的是 Fish 合成音（§3） |
 | TTS 音色 / 情绪听感 | **未验证** | 脚本只验字节与容器；「像不像她」是人工判断 |
-| 首字延迟的可用性 | **未验证** | B1 首个 text_delta 15989ms（讯飞 + 思考模式），比 edge_tts 慢；项目不追 500ms 首字，但这个数要单独记 |
-| Fish 逐字对齐接入 `word_timings` | **未做** | 需要流式重构快环交付路径，按 `AGENTS.md` 应先出 ADR |
+| 首字延迟的可用性 | **已测（替身链路）** | 见 §8：生产 `stream()` 路径修好后，`enable_thinking=false` 把首个 text_delta 从 17.2 / 30.3s 压到 6.46 / 6.92s（交错 A/B，各 2 次，全 pass）。仍远高于「500ms 首字」但这个项目不追该目标；读数属讯飞替身，不等于 StepFun 生产 |
+| Fish 逐字对齐接入 `word_timings` | **未做** | 需要流式重构快环交付路径。见 `docs/FISH_XFYUN_CLOSED_LOOP_20261112.md` §3.5 —— **不需要 ADR**，先前那句「按 AGENTS.md 应先出 ADR」是错的：`AGENTS.md` 的项目红线只有 `executive.py` 与重启 8000/8010 两条，`audio.word_timings` 早已是 `PROTOCOL.md` §八 登记的字段（不是新造字段） |
 | Fish 引擎进主链路 | **未做** | 本次只做验收替身；非确定性 + 免费档无 TTFA/DPA 保证，见 §5 |
 | 讯飞的记忆抽取质量 | **未测** | 契约形状已验（`response_format` + memories 结构），内容质量未测 |
 | 浏览器会话里的记忆抽取 | **未发生** | 该轮输入是情绪陈述，没产生记忆；抽取链路（`LLM_EXTRACT_MODEL` 后台任务）本轮没验到 |
 | 长文本合成 | **未测** | 实测 500 字符 65.6 秒；项目微句切分（26/60 字）下不踩到，但绕过切分会 |
+
+## 8. P1 思考开关：同口径前后读数（2026-11-12）
+
+目的：验证 `LLM_ENABLE_THINKING=false` 对**生产对话路径**的首字延迟收益。
+命令、WAV、`--expect-text` 全程不变，只切这一个环境变量。
+
+### 8.1 先发现一个假绿：开关起初对线上无效
+
+第一轮 A/B（`run-20261112-135518` / `135649` / `135825` / `135956`，
+交错 without→with→without→with）读数是 **18.1 / 14.5 / 24.8 / 19.8s** ——
+看似「快了一点」，但两次 `with` 并没有比 `without` 稳定地低一个量级。
+
+原因：`server/llm.py` 里 `complete_raw()` 与 `stream()` **各自拼一份 payload**，
+`enable_thinking` 当时只加进了 `complete_raw()`；而真实对话走的是
+`stream()`（`server/dialogue/orchestrator.py` 的 `_pump_llm`）。
+所以那一轮的「with」实际上**没有下发开关**，差值只是讯飞时段噪声。
+
+> 这四个 run 目录保留，但**不能当作 A/B 读数引用** —— 它们是
+> 「绿灯比事实多说了话」的实例：测试全绿只证明 `complete_raw` 带上了字段。
+
+修复：`stream()` 补同一套三态逻辑，并加
+`scripts/test_llm_enable_thinking.py::EnableThinkingStreamPayloadTests`
+（先红后绿：先看到 `None is not False`，再改实现）。
+现在 `scripts/run_gates.py` 的 `llm_enable_thinking` 门禁 10 条全绿。
+
+### 8.2 修好后的真实读数
+
+同一命令交错跑 2 轮（`without`→`with`→`without`→`with`），四轮 `overall: pass`：
+
+| 轮次 | run | 模式 | 首个 text_delta | 回复 |
+| --- | --- | --- | ---: | --- |
+| 1 | `run-20261112-140607` | without（供应商默认） | 30274.0ms | 正常 |
+| 2 | `run-20261112-140740` | with（`LLM_ENABLE_THINKING=false`） | **6462.7ms** | 正常 |
+| 3 | `run-20261112-140841` | without | 17162.2ms | 正常 |
+| 4 | `run-20261112-141002` | with | **6922.9ms** | 正常 |
+
+- 两侧区间**不重叠**：with 6.46–6.92s，without 17.16–30.27s；
+  相邻配对分别快 **4.7 倍**与 **2.5 倍**（n=2/侧，交错抵消时段漂移）。
+- 六个 run 的 `overall` 都是 `pass`，B1/B2/B3/B4 全过 —— 开关不影响功能。
+- 独立探针（`complete_raw`，生产 payload 形状，每档 3 次）读数一致：
+  现状中位 15633ms（reasoning 162/201/430 字）→ 5809ms（reasoning 0/0/0）。
+
+### 8.3 复现
+
+```powershell
+.\.venv\Scripts\python.exe tmp\run_p1_ab.py   # 交错 A/B/A/B，落盘 tmp/p1_ab.json
+```
+
+脚本读 `run.json` 的 `checkpoints[B1.dialogue].evidence.first_text_delta_ms`
+（不是 `details` —— 早先那版解析器抓错位置，返回 `None`）。
+

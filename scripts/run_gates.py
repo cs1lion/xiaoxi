@@ -1236,6 +1236,13 @@ GATES: dict[str, dict[str, object]] = {
         "cmd": [str(PY), "scripts/test_ci_coverage.py"],
         "skip_regex": r"^\s*SKIP",
     },
+    "llm_enable_thinking": {
+        # 思考模式开关的三态语义：未配置 = 不下发该键（供应商默认行为），
+        # 显式 true/false 才下发。enable_thinking 是供应商特有字段，
+        # 别的 OpenAI 兼容网关不认可能直接 400，所以默认不能带。
+        "cmd": [str(PY), "scripts/test_llm_enable_thinking.py"],
+        "skip_regex": r"^\s*SKIP",
+    },
 }
 
 

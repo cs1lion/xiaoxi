@@ -26,8 +26,8 @@
 - 操作手册：[`docs/LIVE_ACCEPTANCE_GUIDE.md`](LIVE_ACCEPTANCE_GUIDE.md)
 - 证据：`docs/evidence/<YYYYMMDD>-live-acceptance/`
 - 边界：Mock 通过不等于真实通过；体检未就绪时不会开跑 live。
-- 门禁记账（2026-11-12 复跑）：磁盘 `test_*.py` 188 /
-  已登记 184 / 清单 4（`scripts/test_gate_coverage.py` 输出）。
+- 门禁记账（2026-11-12 复跑）：磁盘 `test_*.py` 189 /
+  已登记 185 / 清单 4（`scripts/test_gate_coverage.py` 输出）。
 
 ### 门禁报告（一条命令确认"每道门都真的跑过"）
 

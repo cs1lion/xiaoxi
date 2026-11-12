@@ -1,0 +1,152 @@
+{
+  "schema": "xiaoxi.live_acceptance.doctor/v1",
+  "generated_at": "2026-11-12T13:57:05",
+  "root": "D:\\project\\neurosama",
+  "python": {
+    "executable": "D:\\project\\neurosama\\.venv\\Scripts\\python.exe",
+    "venv": "D:\\project\\neurosama\\.venv\\Scripts\\python.exe",
+    "using_venv": true
+  },
+  "config": {
+    "llm_provider": "openai",
+    "llm_base_url": "https://maas-api.cn-huabei-1.xf-yun.com/v1",
+    "llm_model": "spark-x2.6",
+    "llm_api_key_present": true,
+    "tts_engine": "fish",
+    "tts_model": "stepaudio-2.5-tts",
+    "tts_voice": "livelybreezy-female",
+    "asr_engine": "fish",
+    "asr_model": "small",
+    "asr_model_id": "stepaudio-2.5-asr",
+    "fish_api_key_present": true,
+    "fish_base_url": "https://api.fish.audio",
+    "fish_tts_model": "s2.1-pro-free",
+    "fish_asr_model": "transcribe-1-pro"
+  },
+  "upstream": {
+    "ok": true,
+    "status": 200,
+    "reason": "",
+    "latency_ms": 11714,
+    "excerpt": "{\"choices\":[{\"finish_reason\":\"length\",\"index\":0,\"logprobs\":null,\"matched_stop\":null,\"message\":{\"content\":\"\",\"reasoning_content\":\"用户\",\"role\":\"assistant\",\"tool_calls\":null}}],\"created\":1794463016,\"id\":\"cht000d8bd9@dx1a1ce54996429db503\",\"metadata\":{\"weight_version\":\"default\"},\"model\":\"spark-x2.6\",\"object\":\"chat.completion\",\"usage\":{\"completion_tokens\":1,\"prompt_tokens\":21,\"total_tokens\":22}}"
+  },
+  "checks": [
+    {
+      "id": "runtime.python",
+      "group": "runtime",
+      "status": "ok",
+      "required": false,
+      "summary": "正在用项目 .venv 解释器",
+      "detail": "sys.executable=D:\\project\\neurosama\\.venv\\Scripts\\python.exe；venv=D:\\project\\neurosama\\.venv\\Scripts\\python.exe",
+      "how_to_fix": ""
+    },
+    {
+      "id": "runtime.deps",
+      "group": "runtime",
+      "status": "ok",
+      "required": true,
+      "summary": "httpx/websockets/numpy 可用",
+      "detail": "required=['httpx', 'websockets', 'numpy']",
+      "how_to_fix": ""
+    },
+    {
+      "id": "runtime.ffmpeg",
+      "group": "runtime",
+      "status": "ok",
+      "required": false,
+      "summary": "ffmpeg/ffplay 可用",
+      "detail": "ffmpeg=C:\\ProgramData\\chocolatey\\bin\\ffmpeg.EXE；ffplay=C:\\ProgramData\\chocolatey\\bin\\ffplay.EXE",
+      "how_to_fix": ""
+    },
+    {
+      "id": "env.key",
+      "group": "config",
+      "status": "ok",
+      "required": true,
+      "summary": "LLM_API_KEY 已配置（只看是否存在，不打印值）",
+      "detail": "provider=openai；base_url=https://maas-api.cn-huabei-1.xf-yun.com/v1；model=spark-x2.6",
+      "how_to_fix": ""
+    },
+    {
+      "id": "llm.upstream",
+      "group": "llm",
+      "status": "ok",
+      "required": true,
+      "summary": "上游可用（HTTP 200，11714ms）",
+      "detail": "reason=；excerpt={\"choices\":[{\"finish_reason\":\"length\",\"index\":0,\"logprobs\":null,\"matched_stop\":null,\"message\":{\"content\":\"\",\"reasoning_content\":\"用户\",\"role\":\"assistant\",\"tool_calls\":null}}],\"created\":1794463016,\"id\":\"cht000d8bd9@dx1a1ce54996429db503\",\"metadata\":{\"weight_version\":\"default\"},\"model\":\"spark-x2.6\",\"object\":\"chat.completion\",\"usage\":{\"completion_tokens\":1,\"prompt_tokens\":21,\"total_tokens\":22}}",
+      "how_to_fix": ""
+    },
+    {
+      "id": "tts.engine",
+      "group": "tts",
+      "status": "ok",
+      "required": true,
+      "summary": "fish TTS 真发一次请求成功（s2.1-pro-free，11283 字节，1388ms）",
+      "detail": "s2.1-pro-free 返回 11283 字节",
+      "how_to_fix": ""
+    },
+    {
+      "id": "asr.engine",
+      "group": "asr",
+      "status": "ok",
+      "required": true,
+      "summary": "fish ASR 真发一次请求成功（transcribe-1-pro，1213ms）",
+      "detail": "transcribe-1-pro 返回转写 '<|speaker:0|> [beep]'",
+      "how_to_fix": ""
+    },
+    {
+      "id": "asr.input",
+      "group": "asr",
+      "status": "ok",
+      "required": false,
+      "summary": "检测到 14 个麦克风输入设备；用 --mic 可做真人语音",
+      "detail": "",
+      "how_to_fix": ""
+    },
+    {
+      "id": "env.ports",
+      "group": "io",
+      "status": "info",
+      "required": false,
+      "summary": "用户服务端口状态（本脚本只用独立端口，不重启 8000/8010）",
+      "detail": "8000=空闲，8010=空闲",
+      "how_to_fix": ""
+    },
+    {
+      "id": "io.evidence",
+      "group": "io",
+      "status": "ok",
+      "required": true,
+      "summary": "证据目录可写",
+      "detail": "docs\\evidence\\20261112-live-acceptance\\run-20261112-135649",
+      "how_to_fix": ""
+    },
+    {
+      "id": "io.sandbox",
+      "group": "io",
+      "status": "ok",
+      "required": true,
+      "summary": "可创建临时 DB 沙盘",
+      "detail": "",
+      "how_to_fix": ""
+    }
+  ],
+  "readiness": {
+    "ready": true,
+    "missing": [],
+    "warn": []
+  },
+  "command": {
+    "cwd": "D:\\project\\neurosama",
+    "argv": [
+      "scripts/live_acceptance.py",
+      "--wav",
+      "tmp/asr_input.wav",
+      "--expect-text",
+      "我今天有点累，随便说两句吧。",
+      "--out",
+      "docs/evidence/20261112-live-acceptance"
+    ]
+  },
+  "duration_ms": 15900
+}

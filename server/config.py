@@ -101,6 +101,27 @@ def _load_yaml(name: str) -> dict[str, Any]:
         return yaml.safe_load(fh) or {}
 
 
+def _bool_env(name: str, default: bool | None = None) -> bool | None:
+    """读一个**三态**布尔环境变量：未设 / 空 = None，显式 true/false = 对应布尔。
+
+    为什么需要三态而不是普通 bool：有些开关的「不配置」和「配置成 false」语义不同。
+    最典型的是 `LLM_ENABLE_THINKING` —— 未配置 = 不下发这个字段（供应商自己的
+    默认行为）；配成 false = 明确要求供应商关掉思考。普通 bool 把两者都变成 False，
+    就没法表达「别管它」。
+    """
+    raw = os.getenv(name)
+    if raw is None:
+        return default
+    text = raw.strip().lower()
+    if not text:
+        return default
+    if text in ("1", "true", "yes", "on"):
+        return True
+    if text in ("0", "false", "no", "off"):
+        return False
+    return default
+
+
 def _deep_merge(base: dict[str, Any], override: dict[str, Any]) -> dict[str, Any]:
     """Recursive merge; override wins. Non-dict override replaces wholesale."""
     result = dict(base)
@@ -208,6 +229,24 @@ DEFAULTS: dict[str, Any] = {
     # 同一组对话把上限提到 1200 后 18 轮 0 次截断。上限只是封顶，不改变正常回复的用量。
     "llm_reply_tokens": int(os.getenv("LLM_REPLY_TOKENS", "1200")),
     "llm_reasoning_effort": os.getenv("LLM_REASONING_EFFORT", ""),
+    # 思考模式开关（**供应商特有字段**，三态）。
+    #
+    # 未设 / 空 = 不下发这个键，走供应商自己的默认行为。显式 true/false 才下发。
+    #
+    # 为什么默认不下发：enable_thinking 是某些厂商（讯飞星火等）特有的，
+    # 别的 OpenAI 兼容网关不认这个键，可能直接 400。与 llm_frequency_penalty
+    # 的既有做法一致。
+    #
+    # 为什么需要它：项目只发 reasoning_effort。对**默认开思考**的模型，
+    # reasoning_effort=low 不是「少想一点」，反而是打开思考的另一个入口。
+    # 2026-11-12 实测（讯飞 spark-x2.6，项目真实 persona prompt，每种 2 次中位数）：
+    #   项目现状（reasoning_effort=low）      14878ms，reasoning 152/268 字
+    #   enable_thinking=false                   6755ms，reasoning 0/0
+    #   enable_thinking=false + effort=low      5353ms，reasoning 0/0  ← 最快
+    #   enable_thinking=true                   13600ms
+    #   什么都不带（默认开思考）                21285ms
+    # 即关思考比现状快 2.8 倍，正文长度不变（思考内容从 reasoning 挪到正文）。
+    "llm_enable_thinking": _bool_env("LLM_ENABLE_THINKING", None),
     # 重复抑制。0 = 不下发该字段。个别 OpenAI 兼容网关会因未知字段直接 400，
     # 所以默认关着，确认你的网关支持再在 .env 里开（对话建议 0.2 / 0.2）。
     "llm_frequency_penalty": float(os.getenv("LLM_FREQUENCY_PENALTY", "0")),

@@ -202,7 +202,7 @@ git ls-files .env                 # 必须为空（未入库）
 **已跑**：前者命中 `.gitignore:15`，后者为空。`git status` 只有两个 `docs/evidence/` 目录未跟踪，
 `.env` 不在其中。
 
-### 3.2 P1：给 `llm.py` 加 `enable_thinking` 开关（可选，但建议）
+### 3.2 P1：给 `llm.py` 加 `enable_thinking` 开关（已完成）
 
 **问题**：项目 `server/llm.py:137` 附近只发 `reasoning_effort`，没有 `enable_thinking`。
 讯飞默认开思考，实测人格 prompt 下关掉思考后 content 从 58 字涨到 42 字（不同 prompt 不可直接比）、
@@ -212,13 +212,21 @@ git ls-files .env                 # 必须为空（未入库）
 `server/llm.py` 在 `payload` 组装时按需加 `enable_thinking`。
 **不改默认行为** —— 只在 `.env` 显式配置时才生效。
 
-**为什么不是 P0**：这一步改的是主链路代码（`server/llm.py` 属 Role 0 白名单外但属公共路径），
-在验收替身场景下，讯飞的思考开着也能用（实测 content 非空、finish=stop）。
-等甲路线跑通、真要用讯飞当主路时再做，那时它就是必需项而不是可选项。
+**已完成（2026-11-12）**：三态开关落在 `server/config.py` 的 `_bool_env`，
+`complete_raw()` 与 `stream()` **两处** payload 都下发。
+真实验收交错 A/B（各 2 次，全 `overall: pass`）：
+首个 text_delta 从 **17.2 / 30.3s** 降到 **6.46 / 6.92s**（相邻配对快 2.5 与 4.7 倍）。
+读数与复现见 `docs/evidence/20261112-live-acceptance/VERIFICATION.md` §8。
+
+> **这轮抓到的假绿**：`enable_thinking` 起初只加进 `complete_raw()`，
+> 而生产对话走 `stream()`（另一份 payload），第一轮 A/B 因此看不出效果。
+> 现有门禁 `scripts/test_llm_enable_thinking.py` 补了
+> `EnableThinkingStreamPayloadTests` 把这条路径钉住（10 条全绿）。
 
 **验收命令**：
 ```powershell
-python scripts/test_llm_client.py    # 若该脚本不存在则先补一个覆盖 payload 组的用例
+.\.venv\Scripts\python.exe scripts\test_llm_enable_thinking.py
+.\.venv\Scripts\python.exe scripts\test_llm_client.py
 python scripts/check_protocol.py
 ```
 
@@ -280,7 +288,23 @@ Fish 的 `/v1/tts/stream/with-timestamp` 每 chunk 都给字级 `alignment.segme
 
 **改法**：`tts.py` 加 `_fish()` 分支，用 `httpx` 流式读 SSE，把 `alignment.segments` 累进到
 `_word_timings`（`_measure` 的缓存结构已支持）。注意 `synthesize_profile` 现在返回整段 bytes，
-逐字对齐需要流式重构 —— 这一步要动快环的交付路径，**按 `AGENTS.md` 的红线应先出 ADR 再动**。
+逐字对齐需要流式重构 —— 这一步要动快环的交付路径。
+
+**2026-11-12 更正：不需要 ADR。** 先前这句「按 `AGENTS.md` 的红线应先出 ADR 再动」是**错的**，
+我把「世界工程移交后 ADR 惯例随调色板红线一起失效」误当成了「ADR 是通用前置条件」。核对实况：
+
+- `AGENTS.md:71-72` 的**项目红线只有两条**：改 `server/assistant/executive.py`、重启用户正在用的
+  8000/8010。P4 两条都不碰。
+- `audio.word_timings` **早已是 `PROTOCOL.md` §八 登记的字段**（`:132`），语义现成：
+  `[{text,start,end}]`、相对当前片段的秒数、前端在「顺序 / 完整文本 / 时长范围」都有效时标
+  `alignment:"provider"`。P4 是**让一个新引擎去填一个已有字段**，不是新造字段、不是改契约。
+  当前那句「当前 StepAudio 不提供词时间戳；Edge TTS 可透传真实 `WordBoundary`」需要顺带更新成三家。
+- `docs/agents/domain.md:49-51` 说的是「若输出与既有 ADR 冲突，要显式点出而不是默默覆盖」——
+  这条与「要不要写 ADR」是两件事。既有六份 ADR 全是 pixel-world 的（已随分家移出本仓），
+  没有一份约束语音交付路径，所以 P4 不与任何现行 ADR 冲突。
+
+**结论**：P4 直接做，走正常的「先红后绿 + 门禁 + 证据」流程。**唯一需要先问的是**
+`AGENTS.md` 那两条红线（本次都不碰）。
 
 ---
 

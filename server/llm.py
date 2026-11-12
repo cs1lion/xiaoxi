@@ -137,6 +137,14 @@ class LLM:
         effort = reasoning_effort if reasoning_effort is not None else self.settings.llm_reasoning_effort
         if effort:
             payload["reasoning_effort"] = effort
+        # 思考模式开关。**只在显式配置过时下发** —— enable_thinking 是供应商特有
+        # 字段，别家 OpenAI 兼容网关不认，可能直接 400。未配置 = 不带这个键，
+        # 走供应商自己的默认行为。
+        # 用 getattr 而不是直接取属性：调用方可能传一个不含该键的 settings
+        # 桩（scripts/test_llm_client.py:111 那种 SimpleNamespace）。
+        enable_thinking = getattr(self.settings, "llm_enable_thinking", None)
+        if enable_thinking is not None:
+            payload["enable_thinking"] = enable_thinking
 
         client = await self.client()
         last_error: Exception | None = None
@@ -198,6 +206,11 @@ class LLM:
         effort = reasoning_effort if reasoning_effort is not None else settings.llm_reasoning_effort
         if effort:
             payload["reasoning_effort"] = effort
+        # 与 complete_raw 同一套三态语义：未配置不下发。生产对话走 stream()，
+        # 这条分支漏了字段等于开关对线上无效（2026-11-12 真实验收 A/B 发现）。
+        enable_thinking = getattr(self.settings, "llm_enable_thinking", None)
+        if enable_thinking is not None:
+            payload["enable_thinking"] = enable_thinking
 
         client = await self.client()
         for attempt in range(3):
