@@ -1223,6 +1223,12 @@ GATES: dict[str, dict[str, object]] = {
         "cmd": [str(PY), "scripts/test_ci_test_shard.py"],
         "skip_regex": r"^\s*SKIP",
     },
+    "leak_sampling": {
+        # 泄漏棘轮的抽样完整性：命中的沙盘形态门禁必须全部进抽样，
+        # 被跳过的要按名报出来（不能静默截断）。
+        "cmd": [str(PY), "scripts/test_leak_sampling.py"],
+        "skip_regex": r"^\s*SKIP",
+    },
 }
 
 

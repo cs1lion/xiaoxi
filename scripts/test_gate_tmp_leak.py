@@ -50,7 +50,10 @@ sys.path.insert(0, str(ROOT))
 
 TMP = ROOT / "tmp"
 SANDBOX_PATTERN = re.compile(r"browser|drill|e2e|shake|step8", re.I)
-MAX_GATES = 10          # 抽样上限：跑太多会让本棘轮自己变慢
+MAX_GATES = 24          # 抽样上限：跑太多会让本棘轮自己变慢。
+                       # 2026-11-12 从 10 提到 24：本机真实命中数是 12，
+                       # 原来的 10 会静默丢掉 ui_nav_browser 与 voice_browser。
+                       # 上限只作兜底 —— 超了也要按名报出跳过了哪些（见 _report_sampling）。
 PER_GATE_TIMEOUT = 120
 
 
@@ -92,7 +95,16 @@ def _tmp_count() -> int:
 
 
 def _pick_suspects(gates: dict) -> list[tuple[str, dict]]:
-    """挑出最可能漏沙盘的门禁（cmd 或名字命中 sandbox 形态）。"""
+    """挑出最可能漏沙盘的门禁（cmd 或名字命中 sandbox 形态）。
+
+    2026-11-12：原先是 `picked[:MAX_GATES]` **静默截断**。命中数实际 12，
+    按字典序被丢掉的是 `ui_nav_browser` 与 `voice_browser` —— 恰恰是最可能漏沙盘
+    的两条浏览器门禁。截断是静默的：报告读起来像「泄漏检测通过」，实际有两条
+    从没被检过，而且每加一条字典序靠后的沙盘门禁，被挤掉的就多一条。
+
+    现在**不截断**：上限提到能装下真实命中数（MAX_GATES 已调高），
+    万一还是超了，由 `_report_sampling` 明确报出跳过了哪几条 —— 不能静默丢。
+    """
     picked = []
     for name, spec in sorted(gates.items()):
         cmd = [str(a) for a in (spec.get("cmd") or [])]
@@ -101,7 +113,31 @@ def _pick_suspects(gates: dict) -> list[tuple[str, dict]]:
         joined = " ".join(cmd) + " " + name
         if SANDBOX_PATTERN.search(joined):
             picked.append((name, spec))
-    return picked[:MAX_GATES]
+    return picked
+
+
+def _report_sampling(gates: dict, suspects: list[tuple[str, dict]]) -> None:
+    """打印抽样情况；有沙盘形态门禁被跳过时必须**按名报出来**。
+
+    注意「跳过」只指**沙盘形态但没进抽样**的那些 —— 不是所有没抽到的门禁。
+    门禁总数两百多条，绝大多数压根不产生沙盘，把它们列进来是噪声，
+    反而让人以为漏检了那么多。
+    """
+    print(f"[gate_tmp_leak] 抽样 {len(suspects)} 个最可能漏沙盘的门禁")
+    picked = {name for name, _ in suspects}
+    dropped = []
+    for name, spec in sorted(gates.items()):
+        if name in picked:
+            continue
+        cmd = [str(a) for a in (spec.get("cmd") or [])]
+        if not cmd:
+            continue
+        if SANDBOX_PATTERN.search(" ".join(cmd) + " " + name):
+            dropped.append(name)
+    if dropped:
+        print(f"[gate_tmp_leak] 跳过 {len(dropped)} 条沙盘形态门禁"
+              f"（上限 {MAX_GATES}）：{', '.join(dropped)}")
+        print("[gate_tmp_leak] 这些门禁这轮**没有**被检过 —— 不是「检过且通过」。")
 
 
 def main() -> int:
@@ -111,7 +147,7 @@ def main() -> int:
         print("[gate_tmp_leak] 没选出抽样门禁，跳过（不是失败）")
         return 0
 
-    print(f"[gate_tmp_leak] 抽样 {len(suspects)} 个最可能漏沙盘的门禁")
+    _report_sampling(gates, suspects)
     leaked: list[tuple[str, int]] = []
     skipped: list[str] = []
     failed_gates: list[tuple[str, str, str]] = []
