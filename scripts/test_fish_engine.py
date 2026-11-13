@@ -138,6 +138,7 @@ class FishConfigTests(unittest.TestCase):
             "fish_base_url": "https://api.fish.audio",
             "fish_api_key": "sk-fish-TEST",
             "fish_tts_model": "s2.1-pro-free",
+            "fish_tts_reference_id": "",
             "fish_asr_model": "transcribe-1-pro",
         }.items():
             if not hasattr(self.settings, key):
@@ -149,7 +150,8 @@ class FishConfigTests(unittest.TestCase):
             setattr(self.settings, key, value)
 
     def test_settings_expose_fish_keys(self):
-        for key in ("fish_base_url", "fish_api_key", "fish_tts_model", "fish_asr_model"):
+        for key in ("fish_base_url", "fish_api_key", "fish_tts_model",
+                    "fish_tts_reference_id", "fish_asr_model"):
             self.assertTrue(hasattr(self.settings, key), f"settings 缺 {key}")
 
     def test_fish_engine_is_not_silently_edge(self):
@@ -173,11 +175,13 @@ class FishTtsTests(unittest.TestCase):
 
         self.settings = sc.settings
         self.saved = {k: getattr(self.settings, k) for k in
-                      ("tts_engine", "fish_base_url", "fish_api_key", "fish_tts_model")}
+                      ("tts_engine", "fish_base_url", "fish_api_key",
+                       "fish_tts_model", "fish_tts_reference_id")}
         self.settings.tts_engine = "fish"
         self.settings.fish_base_url = "https://api.fish.audio"
         self.settings.fish_api_key = "sk-fish-TEST"
         self.settings.fish_tts_model = "s2.1-pro-free"
+        self.settings.fish_tts_reference_id = ""
 
     def tearDown(self):
         for key, value in self.saved.items():
@@ -322,6 +326,28 @@ class FishTtsTests(unittest.TestCase):
                 "voice": "v", "instruction": "自然", "rate": "+0%",
                 "pitch": "+0Hz", "volume": "+0%",
             }))
+
+    def test_fish_tts_sends_reference_id_when_configured(self):
+        """音色不钉 reference_id 就会落到账号默认音色；钉住后请求必须带它。"""
+        import asyncio
+
+        self.settings.fish_tts_reference_id = "voice-fixed-001"
+        _, fake = asyncio.run(self._synth("你好呀。", {
+            "voice": "v", "instruction": "自然", "rate": "+0%",
+            "pitch": "+0Hz", "volume": "+0%",
+        }))
+        self.assertEqual(fake.tts_calls[0]["json"].get("reference_id"), "voice-fixed-001")
+
+    def test_fish_tts_omits_reference_id_when_unconfigured(self):
+        """不配时保持旧行为：不强塞 reference_id。"""
+        import asyncio
+
+        self.settings.fish_tts_reference_id = ""
+        _, fake = asyncio.run(self._synth("你好呀。", {
+            "voice": "v", "instruction": "自然", "rate": "+0%",
+            "pitch": "+0Hz", "volume": "+0%",
+        }))
+        self.assertNotIn("reference_id", fake.tts_calls[0]["json"])
 
 
 class FishAsrTests(unittest.TestCase):
