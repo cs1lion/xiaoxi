@@ -392,6 +392,70 @@ class FishAsrTests(unittest.TestCase):
         with self.assertRaises(Exception):
             asyncio.run(recognizer.transcribe(pcm, 16000, language="zh"))
 
+    def test_fish_asr_strips_audio_event_tags(self):
+        """Fish ASR 会把语气/事件写成方括号标签（实测 [疑问]），不能混进用户原话。
+
+        2026-11-13 场景录屏：4 条合成语音里 1 条转写成
+        「晚饭还没想好吃什么，[疑问]你有什么建议吗？」，标签直接进了
+        用户气泡与 LLM 输入。
+        """
+        import asyncio
+
+        import server.speech.asr as asr_mod
+
+        payload = {"text": "[疑问]晚饭还没想好吃什么，[笑声]你有什么建议吗？",
+                   "segments": [], "language_code": "zh"}
+        fake = FakeHttpx(asr_payload=payload)
+
+        async def fake_stream(method, url, **kwargs):
+            fake.asr_calls.append({"url": url, "json": kwargs.get("json"),
+                                   "headers": kwargs.get("headers") or {}})
+            return _Ctx(jsonlib.dumps(payload).encode("utf-8"))
+
+        fake.stream = fake_stream
+        import httpx
+
+        original = httpx.AsyncClient
+        httpx.AsyncClient = lambda *a, **k: fake  # type: ignore[assignment]
+        try:
+            import numpy as np
+
+            recognizer = asr_mod.Recognizer()
+            pcm = (np.sin(np.linspace(0, 200, 8000)) * 8000).astype(np.int16)
+            result = asyncio.run(recognizer.transcribe(pcm, 16000, language="zh"))
+        finally:
+            httpx.AsyncClient = original  # type: ignore[assignment]
+        self.assertEqual(result.text, "晚饭还没想好吃什么，你有什么建议吗？")
+
+    def test_fish_asr_keeps_normal_square_brackets_in_words(self):
+        """只清标签，不动正常文本：含数字的方括号与长句子不误伤。"""
+        import asyncio
+
+        import server.speech.asr as asr_mod
+
+        payload = {"text": "第[2]题不会，[这个说法挺长的不是标签]", "segments": [],
+                   "language_code": "zh"}
+        fake = FakeHttpx(asr_payload=payload)
+
+        async def fake_stream(method, url, **kwargs):
+            return _Ctx(jsonlib.dumps(payload).encode("utf-8"))
+
+        fake.stream = fake_stream
+        import httpx
+
+        original = httpx.AsyncClient
+        httpx.AsyncClient = lambda *a, **k: fake  # type: ignore[assignment]
+        try:
+            import numpy as np
+
+            recognizer = asr_mod.Recognizer()
+            pcm = (np.sin(np.linspace(0, 200, 8000)) * 8000).astype(np.int16)
+            result = asyncio.run(recognizer.transcribe(pcm, 16000, language="zh"))
+        finally:
+            httpx.AsyncClient = original  # type: ignore[assignment]
+        self.assertIn("[2]", result.text)
+        self.assertIn("[这个说法挺长的不是标签]", result.text)
+
 
 class FishPersonaMappingTests(unittest.TestCase):
     """七档 persona 的 instruction 必须能原样进 Fish 方括号 —— 不含 Fish 会误解析的字符。"""
