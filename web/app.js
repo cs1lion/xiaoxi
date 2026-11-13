@@ -2149,6 +2149,7 @@ boot().then(() => {
   if (!select.querySelector('option[value="seed-daily-eyes"]')) select.add(new Option("日常造型 · 眉眼升级", "seed-daily-eyes"));
   if (!select.querySelector('option[value="seed-daily-lids"]')) select.add(new Option("日常造型 · 细腻笑眼", "seed-daily-lids"));
   if (!select.querySelector('option[value="seed-daily-hair"]')) select.add(new Option("日常造型 · 发丝物理", "seed-daily-hair"));
+  if (!select.querySelector('option[value="vroid-mayura"]')) select.add(new Option("下载形象 · スクミズ・シロ（Mayura）", "vroid-mayura"));
   if (!select.querySelector('option[value="external"]')) select.add(new Option("外部 .vrm（自定义）", "external"));
   let selectedModel = "svg";
   select.onchange = async () => {
@@ -2175,31 +2176,44 @@ boot().then(() => {
     status.textContent = "正在加载形象，聊天和语音不受影响…";
     try {
       const choice = select.value;
+      // 下载形象：Mayura 的 スクミズ・シロ（VRoid Hub，VRM0）。模型文件在
+      // web/models/ 下（该目录 .gitignore，不入库）；文件缺失时 catch 里回退。
+      const isDownloaded = choice === "vroid-mayura";
       const isDaily = choice === "seed-daily" || choice === "seed-daily-eyes" || choice === "seed-daily-lids" || choice === "seed-daily-hair";
-      const isSeed = choice === "seed" || choice === "seed-warm" || isDaily;
+      const isSeed = choice === "seed" || choice === "seed-warm" || isDaily || isDownloaded;
       await avatar.setRenderer(isSeed ? "vrm" : choice,
-        choice === "seed-daily-lids" ? "/static/models/seed-daily-lids.vrm" : choice === "seed-daily-eyes" ? "/static/models/seed-daily-eyes.vrm" : choice === "seed-daily-hair" ? "/static/models/seed-daily-hair.vrm" : isDaily ? "/static/models/seed-daily.vrm" : isSeed ? "/static/models/seed-san.vrm" : "/static/models/sample.vrm");
+        isDownloaded ? "/static/models/1610339914738271513.vrm" : choice === "seed-daily-lids" ? "/static/models/seed-daily-lids.vrm" : choice === "seed-daily-eyes" ? "/static/models/seed-daily-eyes.vrm" : choice === "seed-daily-hair" ? "/static/models/seed-daily-hair.vrm" : isDaily ? "/static/models/seed-daily.vrm" : isSeed ? "/static/models/seed-san.vrm" : "/static/models/sample.vrm");
       avatar.svg.setPresentation?.(isSeed);
       avatar.svg.setPalette?.(choice === "seed-warm" ? "warm" : "original");
       selectedModel = choice;
-      status.textContent = isDaily
+      status.textContent = isDownloaded
+        ? "已启用下载形象 スクミズ・シロ · © Mayura · VRoid Hub（VRM Public License 1.0，非商用）"
+        : isDaily
         ? "及肩短发与日常外套已启用 · Seed-san 衍生造型 · 原模型 © VirtualCast, Inc. · VRM Public License 1.0"
         : isSeed
         ? `半身表演已启用${choice === "seed-warm" ? " · 暖杏奶油配色" : ""} · Seed-san © VirtualCast, Inc. · VRM Public License 1.0`
         : avatar.rendererKind === "vrm" ? "3 渲 2 已启用 · 官方测试模型，非最终角色。" : "已切回原版 SVG。";
     } catch (error) {
+      // 默认下载形象缺失/损坏时回退到日常造型，而不是掉回 SVG。
+      if (select.value === "vroid-mayura" && selectedModel === "svg") {
+        select.value = "seed-daily-hair";
+        status.textContent = `下载形象加载失败，回退日常造型：${error.message}`;
+        await select.onchange();
+        return;
+      }
       select.value = selectedModel;
       status.textContent = `加载失败，保留当前形象：${error.message}`;
     } finally { select.disabled = false; }
   };
   const requestedAvatar = new URLSearchParams(location.search).get("avatar");
-  if (["vrm", "seed", "seed-warm", "seed-daily", "seed-daily-eyes", "seed-daily-lids"].includes(requestedAvatar)) {
+  if (["vrm", "seed", "seed-warm", "seed-daily", "seed-daily-eyes", "seed-daily-lids", "seed-daily-hair", "vroid-mayura"].includes(requestedAvatar)) {
     select.value = requestedAvatar;
     select.onchange();
     return;
   }
-  // 默认推荐造型：发丝物理 + 眼睑校准的日常造型（打磨计划修正 #3）；加载失败自动回退 SVG。
-  select.value = "seed-daily-hair";
+  // 默认形象：下载的 スクミズ・シロ（Mayura，VRoid Hub，VRM0）。
+  // 文件在 web/models/ 下且该目录不入库；缺失时 onchange 的 catch 回退日常造型。
+  select.value = "vroid-mayura";
   select.onchange();
 }).catch((err) => {
   console.warn("形象模块启动失败：", err);
