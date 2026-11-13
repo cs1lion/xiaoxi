@@ -1235,7 +1235,7 @@ async function onWsMessage(event) {
       // change the effective endpoint or invalidate an unrelated voice trial.
       experienceMode = experienceUI.activeMode();
       vad.pauseMs = experienceMode === 'off'
-        ? (practiceMode === 'off' ? 900 : Number(el('practicePause').value))
+        ? (practiceMode === 'off' ? 650 : Number(el('practicePause').value))
         : (experienceMode === 'expression' ? Number(el('practicePause').value) : 1200);
       baseline.setContext({ activity: experienceMode !== 'off' ? experienceMode : practiceMode, endpointWaitMs: vad.pauseMs });
       syncModeStrip();
@@ -1816,7 +1816,7 @@ el('practiceApply').onclick = () => {
   checkpoint.clear(); updateResume();
   if (!alwaysListen) teardownMic();
   practiceMode = el('practiceMode').value;
-  vad.pauseMs = practiceMode === 'off' ? 900 : Number(el('practicePause').value);
+  vad.pauseMs = practiceMode === 'off' ? 650 : Number(el('practicePause').value);
   ws.send(JSON.stringify({type:'config',practice:{mode:practiceMode,level:el('practiceLevel').value,correction:el('practiceCorrection').value}}));
   el('practiceReview').disabled = practiceMode === 'off';
   el('practiceStatus').textContent = practiceMode === 'off' ? '已回到普通陪聊。' : '练习已开启：可以用英语打招呼，卡住时用中文求助。收句后回复；不执行任务，不写长期记忆。';

@@ -139,6 +139,7 @@ class FishConfigTests(unittest.TestCase):
             "fish_api_key": "sk-fish-TEST",
             "fish_tts_model": "s2.1-pro-free",
             "fish_tts_reference_id": "",
+            "fish_tts_latency": "balanced",
             "fish_asr_model": "transcribe-1-pro",
         }.items():
             if not hasattr(self.settings, key):
@@ -151,7 +152,7 @@ class FishConfigTests(unittest.TestCase):
 
     def test_settings_expose_fish_keys(self):
         for key in ("fish_base_url", "fish_api_key", "fish_tts_model",
-                    "fish_tts_reference_id", "fish_asr_model"):
+                    "fish_tts_reference_id", "fish_tts_latency", "fish_asr_model"):
             self.assertTrue(hasattr(self.settings, key), f"settings 缺 {key}")
 
     def test_fish_engine_is_not_silently_edge(self):
@@ -176,12 +177,13 @@ class FishTtsTests(unittest.TestCase):
         self.settings = sc.settings
         self.saved = {k: getattr(self.settings, k) for k in
                       ("tts_engine", "fish_base_url", "fish_api_key",
-                       "fish_tts_model", "fish_tts_reference_id")}
+                       "fish_tts_model", "fish_tts_reference_id", "fish_tts_latency")}
         self.settings.tts_engine = "fish"
         self.settings.fish_base_url = "https://api.fish.audio"
         self.settings.fish_api_key = "sk-fish-TEST"
         self.settings.fish_tts_model = "s2.1-pro-free"
         self.settings.fish_tts_reference_id = ""
+        self.settings.fish_tts_latency = "balanced"
 
     def tearDown(self):
         for key, value in self.saved.items():
@@ -348,6 +350,17 @@ class FishTtsTests(unittest.TestCase):
             "pitch": "+0Hz", "volume": "+0%",
         }))
         self.assertNotIn("reference_id", fake.tts_calls[0]["json"])
+
+    def test_fish_tts_latency_is_configurable(self):
+        """延迟档位可配置（默认 balanced，保持现状）；用于按场景调优。"""
+        import asyncio
+
+        self.settings.fish_tts_latency = "normal"
+        _, fake = asyncio.run(self._synth("你好呀。", {
+            "voice": "v", "instruction": "自然", "rate": "+0%",
+            "pitch": "+0Hz", "volume": "+0%",
+        }))
+        self.assertEqual(fake.tts_calls[0]["json"].get("latency"), "normal")
 
 
 class FishAsrTests(unittest.TestCase):
