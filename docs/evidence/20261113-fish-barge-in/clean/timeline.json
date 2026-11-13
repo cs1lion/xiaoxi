@@ -1,0 +1,37 @@
+{
+  "videoT0EpochMs": 1794552074530,
+  "durationMs": 80963,
+  "frames": 3703,
+  "audioTracks": [
+    {
+      "label": "user-01",
+      "at_ms": 999,
+      "seconds": 2.32
+    },
+    {
+      "label": "user-02",
+      "at_ms": 22678,
+      "seconds": 4.27
+    },
+    {
+      "label": "user-03",
+      "at_ms": 52090,
+      "seconds": 2.88
+    },
+    {
+      "label": "assistant-2e9d45",
+      "at_ms": 21719,
+      "seconds": 4.21
+    },
+    {
+      "label": "assistant-1f1ac0",
+      "at_ms": 43945,
+      "seconds": 7.99
+    },
+    {
+      "label": "assistant-a27adc",
+      "at_ms": 72459,
+      "seconds": 3.21
+    }
+  ]
+}
