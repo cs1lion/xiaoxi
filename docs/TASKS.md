@@ -82,6 +82,8 @@
 - [x] R0-3 孤立页归档：blender_study / avatar_preview 移入 web/archive（含 README 索引）；card_preview / notepad_preview 有测试背书保留
 - [x] R0-4 配置翻转：pacing.speech.enabled=true、memory.self_evolution.enabled=true、主动间隔调敏（idle 900s / min_interval 1800s / 复盘 60min）
 - [x] R0-5 默认推荐造型接入：seed-daily-hair 选项 + URL 映射 + 启动默认（失败回退 SVG）
+  - 2026-11-13 起「启动默认」已换为下载形象 `vroid-mayura`（スクミズ・シロ，VRM0），
+    加载失败回退 `seed-daily-hair`；当前口径见 `docs/evidence/20261113-fish-scenario/README.md`，不要按本条回退。
 
 ## Role 2 / Avatar 专项（微句首包提速 + 呼吸落地 + 叠加防抽搐 + 触控热区 + VRM 美化）
 

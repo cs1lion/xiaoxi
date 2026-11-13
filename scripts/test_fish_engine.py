@@ -138,6 +138,8 @@ class FishConfigTests(unittest.TestCase):
             "fish_base_url": "https://api.fish.audio",
             "fish_api_key": "sk-fish-TEST",
             "fish_tts_model": "s2.1-pro-free",
+            "fish_tts_reference_id": "",
+            "fish_tts_latency": "balanced",
             "fish_asr_model": "transcribe-1-pro",
         }.items():
             if not hasattr(self.settings, key):
@@ -149,7 +151,8 @@ class FishConfigTests(unittest.TestCase):
             setattr(self.settings, key, value)
 
     def test_settings_expose_fish_keys(self):
-        for key in ("fish_base_url", "fish_api_key", "fish_tts_model", "fish_asr_model"):
+        for key in ("fish_base_url", "fish_api_key", "fish_tts_model",
+                    "fish_tts_reference_id", "fish_tts_latency", "fish_asr_model"):
             self.assertTrue(hasattr(self.settings, key), f"settings 缺 {key}")
 
     def test_fish_engine_is_not_silently_edge(self):
@@ -173,11 +176,14 @@ class FishTtsTests(unittest.TestCase):
 
         self.settings = sc.settings
         self.saved = {k: getattr(self.settings, k) for k in
-                      ("tts_engine", "fish_base_url", "fish_api_key", "fish_tts_model")}
+                      ("tts_engine", "fish_base_url", "fish_api_key",
+                       "fish_tts_model", "fish_tts_reference_id", "fish_tts_latency")}
         self.settings.tts_engine = "fish"
         self.settings.fish_base_url = "https://api.fish.audio"
         self.settings.fish_api_key = "sk-fish-TEST"
         self.settings.fish_tts_model = "s2.1-pro-free"
+        self.settings.fish_tts_reference_id = ""
+        self.settings.fish_tts_latency = "balanced"
 
     def tearDown(self):
         for key, value in self.saved.items():
@@ -323,6 +329,39 @@ class FishTtsTests(unittest.TestCase):
                 "pitch": "+0Hz", "volume": "+0%",
             }))
 
+    def test_fish_tts_sends_reference_id_when_configured(self):
+        """音色不钉 reference_id 就会落到账号默认音色；钉住后请求必须带它。"""
+        import asyncio
+
+        self.settings.fish_tts_reference_id = "voice-fixed-001"
+        _, fake = asyncio.run(self._synth("你好呀。", {
+            "voice": "v", "instruction": "自然", "rate": "+0%",
+            "pitch": "+0Hz", "volume": "+0%",
+        }))
+        self.assertEqual(fake.tts_calls[0]["json"].get("reference_id"), "voice-fixed-001")
+
+    def test_fish_tts_omits_reference_id_when_unconfigured(self):
+        """不配时保持旧行为：不强塞 reference_id。"""
+        import asyncio
+
+        self.settings.fish_tts_reference_id = ""
+        _, fake = asyncio.run(self._synth("你好呀。", {
+            "voice": "v", "instruction": "自然", "rate": "+0%",
+            "pitch": "+0Hz", "volume": "+0%",
+        }))
+        self.assertNotIn("reference_id", fake.tts_calls[0]["json"])
+
+    def test_fish_tts_latency_is_configurable(self):
+        """延迟档位可配置（默认 balanced，保持现状）；用于按场景调优。"""
+        import asyncio
+
+        self.settings.fish_tts_latency = "normal"
+        _, fake = asyncio.run(self._synth("你好呀。", {
+            "voice": "v", "instruction": "自然", "rate": "+0%",
+            "pitch": "+0Hz", "volume": "+0%",
+        }))
+        self.assertEqual(fake.tts_calls[0]["json"].get("latency"), "normal")
+
 
 class FishAsrTests(unittest.TestCase):
     def setUp(self):
@@ -391,6 +430,70 @@ class FishAsrTests(unittest.TestCase):
         pcm = (np.sin(np.linspace(0, 200, 8000)) * 8000).astype(np.int16)
         with self.assertRaises(Exception):
             asyncio.run(recognizer.transcribe(pcm, 16000, language="zh"))
+
+    def test_fish_asr_strips_audio_event_tags(self):
+        """Fish ASR 会把语气/事件写成方括号标签（实测 [疑问]），不能混进用户原话。
+
+        2026-11-13 场景录屏：4 条合成语音里 1 条转写成
+        「晚饭还没想好吃什么，[疑问]你有什么建议吗？」，标签直接进了
+        用户气泡与 LLM 输入。
+        """
+        import asyncio
+
+        import server.speech.asr as asr_mod
+
+        payload = {"text": "[疑问]晚饭还没想好吃什么，[笑声]你有什么建议吗？",
+                   "segments": [], "language_code": "zh"}
+        fake = FakeHttpx(asr_payload=payload)
+
+        async def fake_stream(method, url, **kwargs):
+            fake.asr_calls.append({"url": url, "json": kwargs.get("json"),
+                                   "headers": kwargs.get("headers") or {}})
+            return _Ctx(jsonlib.dumps(payload).encode("utf-8"))
+
+        fake.stream = fake_stream
+        import httpx
+
+        original = httpx.AsyncClient
+        httpx.AsyncClient = lambda *a, **k: fake  # type: ignore[assignment]
+        try:
+            import numpy as np
+
+            recognizer = asr_mod.Recognizer()
+            pcm = (np.sin(np.linspace(0, 200, 8000)) * 8000).astype(np.int16)
+            result = asyncio.run(recognizer.transcribe(pcm, 16000, language="zh"))
+        finally:
+            httpx.AsyncClient = original  # type: ignore[assignment]
+        self.assertEqual(result.text, "晚饭还没想好吃什么，你有什么建议吗？")
+
+    def test_fish_asr_keeps_normal_square_brackets_in_words(self):
+        """只清标签，不动正常文本：含数字的方括号与长句子不误伤。"""
+        import asyncio
+
+        import server.speech.asr as asr_mod
+
+        payload = {"text": "第[2]题不会，[这个说法挺长的不是标签]", "segments": [],
+                   "language_code": "zh"}
+        fake = FakeHttpx(asr_payload=payload)
+
+        async def fake_stream(method, url, **kwargs):
+            return _Ctx(jsonlib.dumps(payload).encode("utf-8"))
+
+        fake.stream = fake_stream
+        import httpx
+
+        original = httpx.AsyncClient
+        httpx.AsyncClient = lambda *a, **k: fake  # type: ignore[assignment]
+        try:
+            import numpy as np
+
+            recognizer = asr_mod.Recognizer()
+            pcm = (np.sin(np.linspace(0, 200, 8000)) * 8000).astype(np.int16)
+            result = asyncio.run(recognizer.transcribe(pcm, 16000, language="zh"))
+        finally:
+            httpx.AsyncClient = original  # type: ignore[assignment]
+        self.assertIn("[2]", result.text)
+        self.assertIn("[这个说法挺长的不是标签]", result.text)
 
 
 class FishPersonaMappingTests(unittest.TestCase):

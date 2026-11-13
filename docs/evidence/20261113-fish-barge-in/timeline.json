@@ -1,0 +1,32 @@
+{
+  "videoT0EpochMs": 1794551582248,
+  "durationMs": 56335,
+  "frames": 2550,
+  "audioTracks": [
+    {
+      "label": "user-01",
+      "at_ms": 915,
+      "seconds": 2.32
+    },
+    {
+      "label": "user-02",
+      "at_ms": 28199,
+      "seconds": 4.27
+    },
+    {
+      "label": "user-03",
+      "at_ms": 34659,
+      "seconds": 2.88
+    },
+    {
+      "label": "assistant-70bdab",
+      "at_ms": 27217,
+      "seconds": 6.64
+    },
+    {
+      "label": "assistant-aad625",
+      "at_ms": 53208,
+      "seconds": 3.74
+    }
+  ]
+}

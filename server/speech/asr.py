@@ -276,6 +276,12 @@ class Recognizer:
         text = str(body.get("text") or "")
         # Fish 会把说话人标记写成 <|speaker:0|>；单人场景去掉它，别混进转写文本。
         text = re.sub(r"<\|speaker:\d+\|>", " ", text).strip()
+        # Fish 还会把语气/音频事件写成短方括号标签（实测 [疑问]、[笑声]），
+        # 那不是用户说过的话，混进气泡和 LLM 输入会直接改变语义。
+        # 只清「1–6 个汉字/字母」的短标签：带数字的 [2]、长句方括号不动。
+        # 直接删掉而不是换成空格：中文句子中间多一个空格很显眼。
+        text = re.sub(r"\[[A-Za-z\u4e00-\u9fff]{1,6}\]", "", text)
+        text = re.sub(r"\s+", " ", text).strip()
         return Transcript(
             text=text,
             language=str(body.get("language_code") or language or "auto"),
