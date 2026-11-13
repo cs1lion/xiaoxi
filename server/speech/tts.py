@@ -614,6 +614,9 @@ class TTSEngine:
             "chunk_length": 200,
             "latency": "balanced",
         }
+        reference_id = str(profile.get("fish_reference_id") or settings.fish_tts_reference_id or "").strip()
+        if reference_id:
+            payload["reference_id"] = reference_id
         headers = {
             "Authorization": f"Bearer {key}",
             # Fish 用 model **请求头**选模型，不是 body 字段。
