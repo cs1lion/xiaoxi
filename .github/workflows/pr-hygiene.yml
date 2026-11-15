@@ -1,0 +1,47 @@
+name: PR Hygiene
+on:
+  pull_request:
+    branches: ["main", "master"]
+
+jobs:
+  hygiene:
+    name: "PR 卫生检查（临时产物与超大文件）"
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Check for temp artifacts and oversized files
+        shell: bash
+        run: |
+          failed=0
+          while IFS= read -r file; do
+            [ -z "$file" ] && continue
+            [ ! -f "$file" ] && continue
+            base=$(basename "$file")
+            case "$base" in
+              *.pid|.DS_Store|Thumbs.db)
+                echo "Error: forbidden temporary/artifact file detected: $file"
+                failed=1
+                ;;
+            esac
+            size=$(wc -c < "$file")
+            if [ "$size" -gt 2097152 ]; then
+              echo "Error: file exceeds 2MB (2097152 bytes): $file ($size bytes)"
+              failed=1
+            else
+              case "$base" in
+                *.json|*.log|*.txt)
+                  if [ "$size" -gt 512000 ]; then
+                    echo "Error: .json/.log/.txt file exceeds 500KB (512000 bytes): $file ($size bytes)"
+                    failed=1
+                  fi
+                  ;;
+              esac
+            fi
+          done < <(git diff --name-only --diff-filter=AM "origin/${{ github.base_ref }}...HEAD")
+
+          if [ "$failed" -ne 0 ]; then
+            exit 1
+          fi
+          echo "PR hygiene check passed: no forbidden temp artifacts or oversized files found."
