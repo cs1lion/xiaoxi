@@ -1,0 +1,15 @@
+[desktop]
+  PASS  desktop: 鏃犳í鍚戞孩鍑?鈥?overflowX=0
+  FAIL  desktop: <12px 鏂囨湰 鈮?20 澶?鈥?108 澶勶紝渚嬶細10.5px 浣忓湪浣犵數鑴戦噷鐨勩€佸槾鏈夌偣娆?/ 9px 浣犵殑瀹夐潤瑙掕惤 / 10px 01 / 11px 璁颁笅 / 9.5px 寰呭姙 / 9.5px 鏈夊師璇濊瘉鎹?  FAIL  desktop: 瑙︽帶鐩爣 鈮?24px 鈥?INPUT#memHistory 12x12  | BUTTON 21x19 鍋滅敤 | BUTTON 21x19 蹇樻帀 | BUTTON 21x19 鍋滅敤 | BUTTON 21x19 蹇樻帀 | BUTTON 21x19 鍋滅敤
+  PASS  desktop: 褰㈣薄鏉垮楂樻瘮 0.55鈥?.6 鈥?aspect=0.7
+[tablet]
+  PASS  tablet: 鏃犳í鍚戞孩鍑?鈥?overflowX=0
+  FAIL  tablet: <12px 鏂囨湰 鈮?20 澶?鈥?107 澶勶紝渚嬶細10.5px 浣忓湪浣犵數鑴戦噷鐨勩€佸槾鏈夌偣娆?/ 9px 浣犵殑瀹夐潤瑙掕惤 / 10px 01 / 11px 璁颁笅 / 9.5px 寰呭姙 / 9.5px 鏈夊師璇濊瘉鎹?  FAIL  tablet: 瑙︽帶鐩爣 鈮?24px 鈥?INPUT#memHistory 12x12  | BUTTON 21x19 鍋滅敤 | BUTTON 21x19 蹇樻帀 | BUTTON 21x19 鍋滅敤 | BUTTON 21x19 蹇樻帀 | BUTTON 21x19 鍋滅敤
+  FAIL  tablet: 褰㈣薄鏉垮楂樻瘮 0.55鈥?.6 鈥?aspect=0.37
+[mobile]
+  PASS  mobile: 鏃犳í鍚戞孩鍑?鈥?overflowX=0
+  FAIL  mobile: <12px 鏂囨湰 鈮?20 澶?鈥?40 澶勶紝渚嬶細11px 涓€璧峰啓 / 11.5px 鍔犺浇 / 11px 鎺㈢储褰㈣薄瀹為獙瀹?鈫?/ 11.5px 寮€濮嬭褰?/ 11.5px 娓呯┖ / 11.5px 瀵煎嚭 JSON
+  FAIL  mobile: 瑙︽帶鐩爣 鈮?24px 鈥?A 11x150 鎺㈢储褰㈣薄瀹為獙瀹?鈫?  FAIL  mobile: 褰㈣薄鏉垮楂樻瘮 0.55鈥?.6 鈥?aspect=2.88
+  FAIL  mobile: 鎶藉眽涓嶉€忔槑鎴栧甫妯＄硦 鈥?alpha=0 backdrop=none width=340
+
+9 rule(s) failing

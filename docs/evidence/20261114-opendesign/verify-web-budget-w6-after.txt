@@ -1,0 +1,12 @@
+# Web UI gate after W6 (desktop, promoted gate)
+# Command: npm run test:ui-budget
+# Date: 2026-11-15
+# Result: ALL PASS, exit 0 (includes W6 cross-viewport gap spread rule)
+
+[web-1280 1280x800] PASS 7/7, welcome→composer gap 147px
+[web-1440 1440x900] PASS 7/7, welcome→composer gap 164px
+[web-1920 1920x1080] PASS 7/7, welcome→composer gap 171px
+[cross-viewport] PASS 欢迎区→输入区空隙差异 ≤ 40px — spread=24px (web-1280:147, web-1440:164, web-1920:171)
+
+# Before W6 (same session baseline): 147/157/205px, spread 58px
+# Screenshots: docs/evidence/20261114-opendesign/web-{1280,1440,1920}-w6-after.png

@@ -1,0 +1,152 @@
+[sanitize]
+  ok   去掉动作描写和 markdown
+  ok   去掉 emoji
+  ok   省略号归一
+[emotion]
+  ok   收敛
+  ok   调侃
+  ok   默认
+[pacing]
+  ok   超长回复被截断
+  ok   正常回复保留
+  ok   追问过密时不再以问句结尾
+[refusal]
+  ok   冷静期默认值存在
+[memory]
+  ok   同 key 新值覆盖旧值
+  ok   旧值保留为历史
+  ok   历史可查
+  ok   检索能命中
+  ok   纠正生成新记录
+  ok   删除后计数归零
+  ok   删除后检索不到
+  ok   删除后历史也清掉
+[memory tiers]
+  ok   三档分别注入
+  ok   不确定项被标注
+[prompt]
+  ok   提示词包含 绝对不要做的事
+  ok   提示词包含 记忆使用规则
+  ok   提示词包含 安全底线
+  ok   提示词包含 边界
+  ok   提示词包含 【你明确说过的】
+  ok   有 few-shot
+  ok   长度可控
+  ok   无记忆时给出否定信号
+  ok   静态前缀在最前
+  ok   注入的记忆不进静态前缀
+  ok   记忆块排在 few-shot 之后（保住缓存前缀）
+[tts]
+  ok   按句切分
+  ok   没有丢字
+  ok   超长句被切碎
+  ok   情绪映射到不同声学参数
+  ok   七档都带 volume 表演参数
+  ok   七档声学三元组两两不同
+  ok   未知情绪安全回落 base
+  ok   未知情绪回落有显式告警
+  ok   mock 回复池每条都带合法标签
+  ok   mock 标签能从播出文本剥掉
+  ok   stage_samples 每组都带合法标签
+  ok   LRU 容量不超上限
+  ok   淘汰数与写入量自洽
+  ok   未命中计数可查
+  ok   淘汰不误删存活 key 的时间戳
+  ok   重复文本命中缓存且计数递增
+[proactivity]
+  ok   未授权时不开口
+  ok   授权后允许触发
+  ok   冷静期内闭嘴
+  ok   require_authorization 拦住 default_enabled 绕过授权
+  ok   显式关掉协议门后 default_enabled 才生效
+  ok   有授权握手时放行
+[reply guard]
+  ok   截断后仍有可听见的回复
+  ok   兜底不改情绪判定
+[protocol 15]
+  ok   时段背景非空（配置了时区）
+  ok   时段背景声明自己只是背景
+  ok   没接线字段时动态块里没有时段背景
+  ok   接线后时段背景进入动态提示词
+  ok   时段背景排在记忆块之前（保住缓存前缀）
+  ok   _turn_context 填上了时段背景
+  ok   _turn_context 填上了心境字段（无记录时为空字符串）
+  ok   真实装配的提示词里能看到时段背景
+  ok   有活跃心境时注入余温
+  ok   余温要求不演成相反性格
+  ok   心境余温也进入动态提示词
+  ok   有心境时真实装配也带上余温
+  ok   过期后转 easing 仍带余温
+  ok   二次过期后 resolved 不再注入
+  ok   resolved 之后真实装配不再带余温
+  ok   记忆关闭时两段都为空
+  ok   circadian 段能读到 yaml 里的时区
+  ok   mood 段只配 enabled 时保留默认 TTL（嵌套深合并）
+  ok   seed_fork 段能读到
+  ok   mood.enabled=false 真的关掉心境注入
+  ok   seed_fork 配置驱动数量闸门
+  ok   坏掉的 seed_fork（min>max）退回协议常量
+  ok   缺省 seed_fork 时用协议常量
+  ok   _reflect 把 seed_fork 闸门真的传进校验
+[persona blocks]
+  ok   identity 块非空
+  ok   identity 块稳定（重复调用一致）
+  ok   state 块非空
+  ok   state 块稳定（重复调用一致）
+  ok   style 块非空
+  ok   style 块稳定（重复调用一致）
+  ok   tendency 块非空
+  ok   tendency 块稳定（重复调用一致）
+  ok   knowledge 块非空
+  ok   knowledge 块稳定（重复调用一致）
+  ok   pacing 块非空
+  ok   pacing 块稳定（重复调用一致）
+  ok   emotion_hint 块非空
+  ok   emotion_hint 块稳定（重复调用一致）
+  ok   静态 prompt 含 '你是'
+  ok   静态 prompt 含 '绝对不要做的事'
+  ok   静态 prompt 含 '稳定性格'
+  ok   静态 prompt 含 '说话风格'
+  ok   静态 prompt 含 '状态随情境变化'
+  ok   静态 prompt 含 '你知道什么'
+  ok   静态 prompt 含 '节奏规则'
+  ok   静态 prompt 含 '正：'
+  ok   静态 prompt 含 '反：'
+  ok   静态 prompt 含 '边界：'
+  ok   demo_turns 非空
+  ok   demo_turns 角色合法且内容非空
+  ok   demo_turns 以 user/assistant 成对开头
+[internal proxy token]
+  ok   代理读取 internal_token 配置
+  ok   代理校验 x-internal-token 头
+  ok   settings 用属性访问而非 .get()
+  ok   未配置令牌时不拦截
+  ok   配置令牌后可拦截
+[cancel reason]
+  ok   取消前 audit 无 cancelled
+  ok   取消后状态是 done
+  ok   audit 记了 cancelled 标记
+  ok   audit 记了取消原因
+  ok   audit 记了取消时间
+  ok   重复取消幂等
+  ok   正常验收不留 cancelled 标记
+[contract wired into dispatch]
+  ok   BriefingPacket 带 contract_gaps 字段
+  ok   信息不全的单报出缺口
+  ok   缺交付物时 G3 报出
+  ok   缺验收标准时 G4 报出
+  ok   脏输入不抛异常
+  ok   序列化后仍带缺口
+[contract gaps end-to-end]
+  ok   roster 有可用 agent
+  ok   dispatch 成功（状态进 briefing）
+  ok   packet 带 contract_gaps
+  ok   缺口非空（这单信息不全）
+  ok   落库 packet 里有 contract_gaps
+  ok   落库缺口条数与 packet 一致
+  ok   缺口含 check 编号
+  ok   缺口含 missing 清单
+  ok   脏输入时 dispatch 不抛异常
+  ok   脏输入时 contract_gaps 仍是 tuple
+
+=== 134 passed, 0 failed ===

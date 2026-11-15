@@ -1,0 +1,74 @@
+[
+  {
+    "name": "chat-desktop",
+    "url": "/chat",
+    "width": 1440,
+    "height": 900,
+    "status": 200,
+    "domNodes": 935,
+    "title": "灏忔邯 路 鐣欎竴鐐规椂闂寸粰鑷繁",
+    "canvas": 2,
+    "images": 0,
+    "scripts": 7,
+    "bodyText": "璺冲埌瀵硅瘽杈撳叆\n灏廫n灏忔邯\n\n浣忓湪浣犵數鑴戦噷鐨勩€佸槾鏈夌偣娆犵殑 AI 瑙掕壊\n\n浣犵殑瀹夐潤瑙掕惤\n\n鐞愮鐨勫皬浜嬶紝涔熷€煎緱琚浣忋€俓n\n鍏充簬浣犵殑璁板繂\n01\n璁颁笅\n\n鏄剧ず鍘嗗彶鍜屽緟鏍稿璁板綍\n鐢ㄦ埛瑕佹眰瀹夋帓涓€涓矙鐩掓墦鏍凤紝鐢熸垚骞舵牎楠屼竴涓皬鏂囦欢銆俓n寰呭姙\n鏈夊師璇濊瘉鎹甛n褰撳墠\n椤圭洰:浠诲姟\n璁颁簬 2026-10-24锛圲TC锛塡n鎻愪緵涓轰笂涓嬫枃 3 娆★紙涓嶄唬琛ㄦā鍨嬪紩鐢ㄦ纭級\n涓婃浣滀负涓婁笅鏂?2026-11-09锛圲TC锛塡n鍋滅敤\n蹇樻帀\n鏌ョ湅杩欐潯浜嬪疄鐨勫巻鍙茬増鏈琝n鏌ョ湅鍘熻瘽\n鎴戞渶杩戝枩娆㈠湪鍌嶆櫄鍑哄幓鏁ｆ銆俓n浜嬪疄\n鏈夊師璇濊瘉鎹甛n褰撳墠\n杩愬姩:鏁ｆ鏃堕棿\n璁颁簬 2026-10-24锛圲TC锛塡n鎻愪緵涓轰笂涓嬫枃 0 娆★紙涓嶄唬琛ㄦā鍨嬪紩鐢ㄦ纭級\n鍋滅敤\n蹇樻帀\n鏌ョ湅杩欐潯浜嬪疄鐨勫巻鍙茬増鏈琝n鏌ョ湅鍘熻瘽\n鏅氶湠鏄矇鑹茬殑\n浜嬪疄\n鎵嬪姩淇濆瓨\n褰撳墠\n璁颁簬 2026-10-16锛圲TC锛塡n鎻愪緵涓轰笂涓嬫枃 10 娆★紙涓嶄唬琛ㄦā鍨嬪紩鐢ㄦ纭級\n涓婃浣滀负涓婁笅鏂?2026-10-16锛圲TC锛塡n鍋滅敤\n蹇樻帀",
+    "domContentLoaded": 457,
+    "loadEvent": 561,
+    "firstPaint": 268,
+    "errors": []
+  },
+  {
+    "name": "chat-mobile",
+    "url": "/chat",
+    "width": 390,
+    "height": 844,
+    "status": 200,
+    "domNodes": 935,
+    "title": "灏忔邯 路 鐣欎竴鐐规椂闂寸粰鑷繁",
+    "canvas": 2,
+    "images": 0,
+    "scripts": 7,
+    "bodyText": "璺冲埌瀵硅瘽杈撳叆\n璁板繂涓庡亸濂絓n澶滆埅鎵嬪笎\n涓€璧峰啓\n涓€娈靛彧灞炰簬浣犵殑鏃堕棿\n\n鍗?涓€ 路 鐙?澶刓n\n鎶婁粖澶╋紝\n杞昏交鏀惧湪杩欓噷銆俓n\n鑱婁竴浠跺紑蹇冪殑灏忎簨锛屾垨浠€涔堥兘涓嶆兂鍋氥€俓n涓嶇敤缁勭粐濂借瑷€锛屾兂鍒板摢閲屽氨璇村埌鍝噷銆俓n\n鍒嗕韩浠婂ぉ鐨勫皬浜媆n鈫梊n闄垜鏀剧┖涓€浼氬効\n鈫梊n鐞嗕竴鐞嗗緟鍔炰簨椤筡n鈫梊n浠庝竴鍙ャ€屽棬銆嶅紑濮嬶紝涔熷緢濂姐€俓n姝ｅ湪涓€璧峰仛\n鎶婁竴浠朵簨锛屼竴璧峰線涓嬫帹杩沑n閫夋嫨 / 鏂板缓\n\n閫夋嫨鎴栨柊寤哄叡鍚屼簨椤癸紝鍐冲畾鍜屼笅涓€姝ュ氨鑳藉湪瀵硅瘽閲屾帴涓娿€俓n\n閫夋嫨銆佸垱寤轰笌瀵硅瘽鍏宠仈\nPLATE / 01\n灏忔邯 路 渚濈獥\n\n鍦ㄧ嚎\n\n婧猏n鎸変綇宸︿笅瑙掕璇濓紝鎴栬€呮墦瀛椼€俓n杩炵画瀵硅瘽锛氬叧\n鉁╘n鐏靛姩浼撮殢\n\n杩炵画瀵硅瘽锛氬紑鍙ｅ嵆褰曪紝鍋滈】绾︿竴绉掑彂閫侊紱寤鸿鎴磋€虫満銆?,
+    "domContentLoaded": 331,
+    "loadEvent": 405,
+    "firstPaint": 128,
+    "errors": []
+  },
+  {
+    "name": "interpret-desktop",
+    "url": "/interpret.html",
+    "width": 1440,
+    "height": 900,
+    "status": 404,
+    "domNodes": 7,
+    "title": "",
+    "canvas": 0,
+    "images": 0,
+    "scripts": 0,
+    "bodyText": "{\"detail\":\"Not Found\"}",
+    "domContentLoaded": 9,
+    "loadEvent": 10,
+    "firstPaint": 24,
+    "errors": [
+      "console: Failed to load resource: the server responded with a status of 404 (Not Found)"
+    ]
+  },
+  {
+    "name": "notes-desktop",
+    "url": "/notes.html",
+    "width": 1440,
+    "height": 900,
+    "status": 404,
+    "domNodes": 7,
+    "title": "",
+    "canvas": 0,
+    "images": 0,
+    "scripts": 0,
+    "bodyText": "{\"detail\":\"Not Found\"}",
+    "domContentLoaded": 7,
+    "loadEvent": 7,
+    "firstPaint": 24,
+    "errors": [
+      "console: Failed to load resource: the server responded with a status of 404 (Not Found)"
+    ]
+  }
+]

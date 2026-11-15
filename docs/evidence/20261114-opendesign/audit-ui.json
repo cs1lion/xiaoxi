@@ -1,0 +1,808 @@
+[
+  {
+    "viewport": {
+      "name": "desktop",
+      "width": 1440,
+      "height": 900
+    },
+    "overflowX": 0,
+    "wide": [
+      {
+        "tag": "SPAN",
+        "cls": "pa-shaft pa-shaft-b",
+        "right": 1584
+      }
+    ],
+    "smallTargets": [
+      {
+        "tag": "INPUT#manualInput",
+        "text": "",
+        "w": 202,
+        "h": 36
+      },
+      {
+        "tag": "BUTTON#manualAdd",
+        "text": "记下",
+        "w": 46,
+        "h": 36
+      },
+      {
+        "tag": "INPUT#memHistory",
+        "text": "",
+        "w": 12,
+        "h": 12
+      },
+      {
+        "tag": "BUTTON",
+        "text": "停用",
+        "w": 21,
+        "h": 19
+      },
+      {
+        "tag": "BUTTON",
+        "text": "忘掉",
+        "w": 21,
+        "h": 19
+      },
+      {
+        "tag": "BUTTON",
+        "text": "我最近喜欢在傍晚出去散步。",
+        "w": 255,
+        "h": 28
+      },
+      {
+        "tag": "BUTTON",
+        "text": "停用",
+        "w": 21,
+        "h": 19
+      },
+      {
+        "tag": "BUTTON",
+        "text": "忘掉",
+        "w": 21,
+        "h": 19
+      },
+      {
+        "tag": "BUTTON",
+        "text": "晚霞是粉色的",
+        "w": 255,
+        "h": 28
+      },
+      {
+        "tag": "BUTTON",
+        "text": "停用",
+        "w": 21,
+        "h": 19
+      },
+      {
+        "tag": "BUTTON",
+        "text": "忘掉",
+        "w": 21,
+        "h": 19
+      },
+      {
+        "tag": "BUTTON#memRefresh",
+        "text": "刷新",
+        "w": 21,
+        "h": 23
+      },
+      {
+        "tag": "BUTTON#memClear",
+        "text": "清空",
+        "w": 21,
+        "h": 23
+      },
+      {
+        "tag": "SELECT#experienceMode",
+        "text": "普通聊天 / 关闭体验听懂原句表达练习虚构小剧场专注陪伴散步陪伴睡前放松倾诉一起",
+        "w": 255,
+        "h": 38
+      },
+      {
+        "tag": "SELECT#experienceOrigin",
+        "text": "手动提供 / 已手动编辑识别原句（可能有误，请核对）",
+        "w": 255,
+        "h": 38
+      },
+      {
+        "tag": "INPUT#experienceSourceLabel",
+        "text": "",
+        "w": 255,
+        "h": 39
+      },
+      {
+        "tag": "BUTTON#writingToggle",
+        "text": "一起写",
+        "w": 57,
+        "h": 38
+      },
+      {
+        "tag": "SELECT#avatarRenderer",
+        "text": "插画形象 · SVG立体形象 · VRM 示例半身陪聊 · Seed-san半身",
+        "w": 388,
+        "h": 39
+      },
+      {
+        "tag": "A",
+        "text": "探索形象实验室 ↗",
+        "w": 90,
+        "h": 19
+      },
+      {
+        "tag": "SELECT#dialogueIntent",
+        "text": "自动随情绪自然认真犹豫调侃",
+        "w": 388,
+        "h": 39
+      }
+    ],
+    "tinyTextCount": 190,
+    "tinyTextSamples": [
+      {
+        "text": "住在你电脑里的、嘴有点欠的 AI 角色",
+        "size": "10.5px"
+      },
+      {
+        "text": "你的安静角落",
+        "size": "9px"
+      },
+      {
+        "text": "01",
+        "size": "10px"
+      },
+      {
+        "text": "记下",
+        "size": "11px"
+      },
+      {
+        "text": "待办",
+        "size": "9.5px"
+      },
+      {
+        "text": "有原话证据",
+        "size": "9.5px"
+      },
+      {
+        "text": "当前",
+        "size": "9.5px"
+      },
+      {
+        "text": "项目:任务",
+        "size": "9.5px"
+      },
+      {
+        "text": "记于 2026-10-24（UTC）",
+        "size": "9.5px"
+      },
+      {
+        "text": "提供为上下文 3 次（不代表模型引用正确）",
+        "size": "9.5px"
+      }
+    ],
+    "lowContrast": [
+      {
+        "text": "放大",
+        "size": "11px",
+        "ratio": 1.08,
+        "need": 4.5,
+        "color": "rgb(33, 28, 22)",
+        "bg": "rgb(14,21,38)"
+      },
+      {
+        "text": "缩小",
+        "size": "11px",
+        "ratio": 1.08,
+        "need": 4.5,
+        "color": "rgb(33, 28, 22)",
+        "bg": "rgb(14,21,38)"
+      },
+      {
+        "text": "复位",
+        "size": "11px",
+        "ratio": 1.08,
+        "need": 4.5,
+        "color": "rgb(33, 28, 22)",
+        "bg": "rgb(14,21,38)"
+      },
+      {
+        "text": "此刻",
+        "size": "8.5px",
+        "ratio": 3.35,
+        "need": 4.5,
+        "color": "rgb(155, 122, 62)",
+        "bg": "rgb(242,234,218)"
+      }
+    ],
+    "lowContrastCount": 4,
+    "canvases": [
+      {
+        "id": "stageFx",
+        "css": [
+          1140,
+          900
+        ],
+        "buffer": [
+          1140,
+          900
+        ],
+        "dpr": 1,
+        "aspectCss": 1.27
+      },
+      {
+        "id": null,
+        "css": [
+          379,
+          541
+        ],
+        "buffer": [
+          379,
+          541
+        ],
+        "dpr": 1,
+        "aspectCss": 0.7
+      }
+    ],
+    "expensive": {
+      "transition": 118,
+      "rounded": 203,
+      "animation": 8,
+      "filter": 5,
+      "backdrop": 1
+    },
+    "runningAnimations": 8,
+    "shadowOrFilterNodes": 15,
+    "totalNodes": 912
+  },
+  {
+    "viewport": {
+      "name": "tablet",
+      "width": 834,
+      "height": 1112
+    },
+    "overflowX": 0,
+    "wide": [
+      {
+        "tag": "SPAN",
+        "cls": "pa-shaft pa-shaft-b",
+        "right": 1068
+      }
+    ],
+    "smallTargets": [
+      {
+        "tag": "INPUT#manualInput",
+        "text": "",
+        "w": 184,
+        "h": 36
+      },
+      {
+        "tag": "BUTTON#manualAdd",
+        "text": "记下",
+        "w": 46,
+        "h": 36
+      },
+      {
+        "tag": "INPUT#memHistory",
+        "text": "",
+        "w": 12,
+        "h": 12
+      },
+      {
+        "tag": "BUTTON",
+        "text": "停用",
+        "w": 21,
+        "h": 19
+      },
+      {
+        "tag": "BUTTON",
+        "text": "忘掉",
+        "w": 21,
+        "h": 19
+      },
+      {
+        "tag": "BUTTON",
+        "text": "我最近喜欢在傍晚出去散步。",
+        "w": 237,
+        "h": 28
+      },
+      {
+        "tag": "BUTTON",
+        "text": "停用",
+        "w": 21,
+        "h": 19
+      },
+      {
+        "tag": "BUTTON",
+        "text": "忘掉",
+        "w": 21,
+        "h": 19
+      },
+      {
+        "tag": "BUTTON",
+        "text": "晚霞是粉色的",
+        "w": 237,
+        "h": 28
+      },
+      {
+        "tag": "BUTTON",
+        "text": "停用",
+        "w": 21,
+        "h": 19
+      },
+      {
+        "tag": "BUTTON",
+        "text": "忘掉",
+        "w": 21,
+        "h": 19
+      },
+      {
+        "tag": "BUTTON#memRefresh",
+        "text": "刷新",
+        "w": 21,
+        "h": 23
+      },
+      {
+        "tag": "BUTTON#memClear",
+        "text": "清空",
+        "w": 21,
+        "h": 23
+      },
+      {
+        "tag": "SELECT#experienceMode",
+        "text": "普通聊天 / 关闭体验听懂原句表达练习虚构小剧场专注陪伴散步陪伴睡前放松倾诉一起",
+        "w": 237,
+        "h": 38
+      },
+      {
+        "tag": "SELECT#experienceOrigin",
+        "text": "手动提供 / 已手动编辑识别原句（可能有误，请核对）",
+        "w": 237,
+        "h": 38
+      },
+      {
+        "tag": "INPUT#experienceSourceLabel",
+        "text": "",
+        "w": 237,
+        "h": 39
+      },
+      {
+        "tag": "BUTTON#writingToggle",
+        "text": "一起写",
+        "w": 57,
+        "h": 38
+      },
+      {
+        "tag": "SELECT#avatarRenderer",
+        "text": "插画形象 · SVG立体形象 · VRM 示例半身陪聊 · Seed-san半身",
+        "w": 388,
+        "h": 39
+      },
+      {
+        "tag": "A",
+        "text": "探索形象实验室 ↗",
+        "w": 90,
+        "h": 19
+      },
+      {
+        "tag": "SELECT#dialogueIntent",
+        "text": "自动随情绪自然认真犹豫调侃",
+        "w": 388,
+        "h": 39
+      }
+    ],
+    "tinyTextCount": 189,
+    "tinyTextSamples": [
+      {
+        "text": "住在你电脑里的、嘴有点欠的 AI 角色",
+        "size": "10.5px"
+      },
+      {
+        "text": "你的安静角落",
+        "size": "9px"
+      },
+      {
+        "text": "01",
+        "size": "10px"
+      },
+      {
+        "text": "记下",
+        "size": "11px"
+      },
+      {
+        "text": "待办",
+        "size": "9.5px"
+      },
+      {
+        "text": "有原话证据",
+        "size": "9.5px"
+      },
+      {
+        "text": "当前",
+        "size": "9.5px"
+      },
+      {
+        "text": "项目:任务",
+        "size": "9.5px"
+      },
+      {
+        "text": "记于 2026-10-24（UTC）",
+        "size": "9.5px"
+      },
+      {
+        "text": "提供为上下文 3 次（不代表模型引用正确）",
+        "size": "9.5px"
+      }
+    ],
+    "lowContrast": [
+      {
+        "text": "放大",
+        "size": "11px",
+        "ratio": 1.08,
+        "need": 4.5,
+        "color": "rgb(33, 28, 22)",
+        "bg": "rgb(14,21,38)"
+      },
+      {
+        "text": "缩小",
+        "size": "11px",
+        "ratio": 1.08,
+        "need": 4.5,
+        "color": "rgb(33, 28, 22)",
+        "bg": "rgb(14,21,38)"
+      },
+      {
+        "text": "复位",
+        "size": "11px",
+        "ratio": 1.08,
+        "need": 4.5,
+        "color": "rgb(33, 28, 22)",
+        "bg": "rgb(14,21,38)"
+      },
+      {
+        "text": "此刻",
+        "size": "8.5px",
+        "ratio": 3.35,
+        "need": 4.5,
+        "color": "rgb(155, 122, 62)",
+        "bg": "rgb(242,234,218)"
+      }
+    ],
+    "lowContrastCount": 4,
+    "canvases": [
+      {
+        "id": "stageFx",
+        "css": [
+          564,
+          1112
+        ],
+        "buffer": [
+          564,
+          1112
+        ],
+        "dpr": 1,
+        "aspectCss": 0.51
+      },
+      {
+        "id": null,
+        "css": [
+          281,
+          755
+        ],
+        "buffer": [
+          280,
+          754
+        ],
+        "dpr": 1,
+        "aspectCss": 0.37
+      }
+    ],
+    "expensive": {
+      "transition": 118,
+      "rounded": 203,
+      "animation": 8,
+      "filter": 5,
+      "backdrop": 1
+    },
+    "runningAnimations": 8,
+    "shadowOrFilterNodes": 15,
+    "totalNodes": 912
+  },
+  {
+    "viewport": {
+      "name": "mobile",
+      "width": 390,
+      "height": 844
+    },
+    "overflowX": 0,
+    "wide": [
+      {
+        "tag": "BUTTON#externalModelLoad",
+        "cls": "",
+        "right": 436
+      },
+      {
+        "tag": "BUTTON#dialogueReviewToggle",
+        "cls": "",
+        "right": 395
+      },
+      {
+        "tag": "BUTTON#dialogueReviewClear",
+        "cls": "",
+        "right": 395
+      },
+      {
+        "tag": "BUTTON#dialogueReviewExport",
+        "cls": "",
+        "right": 413
+      },
+      {
+        "tag": "BUTTON#faceToggle",
+        "cls": "ghost",
+        "right": 399
+      },
+      {
+        "tag": "BUTTON#followToggle",
+        "cls": "ghost",
+        "right": 399
+      },
+      {
+        "tag": "LABEL",
+        "cls": "",
+        "right": 409
+      },
+      {
+        "tag": "SELECT#emotionSelect",
+        "cls": "",
+        "right": 442
+      },
+      {
+        "tag": "LABEL",
+        "cls": "",
+        "right": 409
+      },
+      {
+        "tag": "SELECT#duplexMode",
+        "cls": "",
+        "right": 442
+      },
+      {
+        "tag": "BUTTON",
+        "cls": "",
+        "right": 393
+      },
+      {
+        "tag": "BUTTON",
+        "cls": "",
+        "right": 393
+      }
+    ],
+    "smallTargets": [
+      {
+        "tag": "BUTTON#sidebarToggle",
+        "text": "记忆与偏好",
+        "w": 38,
+        "h": 38
+      },
+      {
+        "tag": "SELECT#avatarRenderer",
+        "text": "插画形象 · SVG立体形象 · VRM 示例半身陪聊 · Seed-san半身",
+        "w": 26,
+        "h": 39
+      },
+      {
+        "tag": "INPUT#externalModelUrl",
+        "text": "",
+        "w": 26,
+        "h": 40
+      },
+      {
+        "tag": "BUTTON#externalModelLoad",
+        "text": "加载",
+        "w": 40,
+        "h": 57
+      },
+      {
+        "tag": "A",
+        "text": "探索形象实验室 ↗",
+        "w": 11,
+        "h": 150
+      },
+      {
+        "tag": "SELECT#dialogueIntent",
+        "text": "自动随情绪自然认真犹豫调侃",
+        "w": 26,
+        "h": 39
+      },
+      {
+        "tag": "SELECT#dialogueReviewScenario",
+        "text": "短回答长思考多段语音中途打断",
+        "w": 26,
+        "h": 39
+      },
+      {
+        "tag": "BUTTON#dialogueReviewToggle",
+        "text": "开始记录",
+        "w": 32,
+        "h": 90
+      },
+      {
+        "tag": "BUTTON#dialogueReviewClear",
+        "text": "清空",
+        "w": 32,
+        "h": 52
+      },
+      {
+        "tag": "SELECT#dialogueReviewTurns",
+        "text": "",
+        "w": 26,
+        "h": 39
+      },
+      {
+        "tag": "INPUT#dialogueReviewScrub",
+        "text": "",
+        "w": 26,
+        "h": 36
+      },
+      {
+        "tag": "BUTTON#faceToggle",
+        "text": "面部反应：关",
+        "w": 36,
+        "h": 77
+      },
+      {
+        "tag": "BUTTON#followToggle",
+        "text": "视线跟随：开",
+        "w": 36,
+        "h": 77
+      },
+      {
+        "tag": "SELECT#emotionSelect",
+        "text": "自动（随内容变化）自然调侃得意认真收敛轻微不服变小气",
+        "w": 26,
+        "h": 39
+      },
+      {
+        "tag": "SELECT#duplexMode",
+        "text": "耳机 · 平衡外放 · 保守快速打断播放时仅按键打断",
+        "w": 26,
+        "h": 39
+      },
+      {
+        "tag": "BUTTON#resetVoiceMetrics",
+        "text": "清空语音指标",
+        "w": 25,
+        "h": 114
+      },
+      {
+        "tag": "SELECT",
+        "text": "外放 · 安静对话外放 · 播放时保持安静外放 · 键盘 / 风扇外放 · 轻声",
+        "w": 26,
+        "h": 39
+      },
+      {
+        "tag": "SELECT",
+        "text": "电脑外放耳机对照",
+        "w": 26,
+        "h": 39
+      },
+      {
+        "tag": "BUTTON",
+        "text": "开始试验",
+        "w": 30,
+        "h": 96
+      },
+      {
+        "tag": "BUTTON",
+        "text": "结束并保存判定",
+        "w": 30,
+        "h": 155
+      }
+    ],
+    "tinyTextCount": 183,
+    "tinyTextSamples": [
+      {
+        "text": "住在你电脑里的、嘴有点欠的 AI 角色",
+        "size": "10.5px"
+      },
+      {
+        "text": "你的安静角落",
+        "size": "9px"
+      },
+      {
+        "text": "01",
+        "size": "10px"
+      },
+      {
+        "text": "记下",
+        "size": "11px"
+      },
+      {
+        "text": "待办",
+        "size": "9.5px"
+      },
+      {
+        "text": "有原话证据",
+        "size": "9.5px"
+      },
+      {
+        "text": "当前",
+        "size": "9.5px"
+      },
+      {
+        "text": "项目:任务",
+        "size": "9.5px"
+      },
+      {
+        "text": "记于 2026-10-24（UTC）",
+        "size": "9.5px"
+      },
+      {
+        "text": "提供为上下文 3 次（不代表模型引用正确）",
+        "size": "9.5px"
+      }
+    ],
+    "lowContrast": [
+      {
+        "text": "放大",
+        "size": "11px",
+        "ratio": 1.08,
+        "need": 4.5,
+        "color": "rgb(33, 28, 22)",
+        "bg": "rgb(14,21,38)"
+      },
+      {
+        "text": "缩小",
+        "size": "11px",
+        "ratio": 1.08,
+        "need": 4.5,
+        "color": "rgb(33, 28, 22)",
+        "bg": "rgb(14,21,38)"
+      },
+      {
+        "text": "复位",
+        "size": "11px",
+        "ratio": 1.08,
+        "need": 4.5,
+        "color": "rgb(33, 28, 22)",
+        "bg": "rgb(14,21,38)"
+      }
+    ],
+    "lowContrastCount": 3,
+    "canvases": [
+      {
+        "id": "stageFx",
+        "css": [
+          390,
+          844
+        ],
+        "buffer": [
+          390,
+          844
+        ],
+        "dpr": 1,
+        "aspectCss": 0.46
+      },
+      {
+        "id": null,
+        "css": [
+          334,
+          116
+        ],
+        "buffer": [
+          334,
+          116
+        ],
+        "dpr": 1,
+        "aspectCss": 2.88
+      }
+    ],
+    "expensive": {
+      "transition": 118,
+      "rounded": 203,
+      "animation": 8,
+      "filter": 5,
+      "backdrop": 1
+    },
+    "runningAnimations": 7,
+    "shadowOrFilterNodes": 16,
+    "totalNodes": 912
+  }
+]

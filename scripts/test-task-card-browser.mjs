@@ -25,6 +25,8 @@ try{
  });
  await page.goto('http://127.0.0.1:8000/');
  await page.locator('#avatarStage svg:visible, #avatarStage canvas:visible').waitFor();
+ // W1：「一起做」默认折叠，Tab 在折叠体里，先展开。
+ await page.evaluate(() => document.getElementById('workFold')?.setAttribute('open', ''));
  // 助手面板被 workspace 收进"待办" Tab（side#work-tasks 默认 display:none），先切 Tab 再点摘要。
  await page.locator('#work-tasks-tab').click();
  await page.getByText('任务与提醒',{exact:true}).click();

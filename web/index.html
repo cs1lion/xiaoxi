@@ -4,7 +4,7 @@
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <meta name="theme-color" content="#f2eada" />
-<title>阿栖 · 留一点时间给自己</title>
+<title>小溪 · 留一点时间给自己</title>
 <style>html{background:#f2eada;color-scheme:light}</style>
 <link rel="stylesheet" href="/static/fonts/fonts.css" />
 <link rel="stylesheet" href="/static/style.css" />
@@ -32,27 +32,32 @@
 <div class="app">
   <aside class="side" id="sidePanel" aria-label="记忆与偏好">
     <div class="brand">
-      <div class="avatar" id="avatar" aria-hidden="true">栖</div>
-      <div><h1 id="personaName">阿栖</h1><p id="personaTag">正在连接…</p></div>
+      <div class="avatar" id="avatar" aria-hidden="true">溪</div>
+      <div class="brand-text"><h1 id="personaName">小溪</h1><p id="personaTag">正在连接…</p></div>
     </div>
 <div class="side-intro"><span class="eyebrow">你的安静角落</span><p>琐碎的小事，也值得被记住。</p></div>
     <section class="panel">
-      <h2>关于你的记忆 <span class="section-mark">01</span></h2>
-      <!-- 底层布尔位（协议零破坏）：#memoryToggle / #proactiveToggle 仍是唯一状态源，
-           WS config 的 memory / proactivity 字段与 /api/memory/toggle 契约不变；
-           界面入口已收敛为输入区上方的「陪伴心流三态胶囊」。 -->
-      <div class="presence-state" hidden>
-        <input type="checkbox" id="memoryToggle" checked />
-        <input type="checkbox" id="proactiveToggle" checked />
-      </div>
-      <div class="row add"><input id="manualInput" aria-label="手动添加记忆" placeholder="告诉阿栖一件小事…" /><button id="manualAdd">记下</button></div>
-      <p class="hint" id="memoryFeedback" role="status" aria-live="polite"></p>
-      <div class="row"><label><input type="checkbox" id="memHistory" />显示历史和待核对记录</label></div>
-      <div class="mem-list" id="memList"></div>
-      <div class="row foot"><span id="memCount">0 条</span><button class="ghost" id="memRefresh">刷新</button><button class="danger ghost" id="memClear">清空</button></div>
+      <details class="side-fold" id="memoryFold">
+        <summary><h2>关于你的记忆 <span class="section-mark">01</span></h2></summary>
+        <!-- 底层布尔位（协议零破坏）：#memoryToggle / #proactiveToggle 仍是唯一状态源，
+             WS config 的 memory / proactivity 字段与 /api/memory/toggle 契约不变；
+             界面入口已收敛为输入区上方的「陪伴心流三态胶囊」。 -->
+        <div class="presence-state" hidden>
+          <input type="checkbox" id="memoryToggle" checked />
+          <input type="checkbox" id="proactiveToggle" checked />
+        </div>
+        <div class="row add"><input id="manualInput" aria-label="手动添加记忆" placeholder="告诉小溪一件小事…" /><button id="manualAdd">记下</button></div>
+        <p class="hint" id="memoryFeedback" role="status" aria-live="polite"></p>
+        <div class="row"><label><input type="checkbox" id="memHistory" />显示历史和待核对记录</label></div>
+        <div class="mem-list" id="memList"></div>
+        <div class="row foot"><span id="memCount">0 条</span><button class="ghost" id="memRefresh">刷新</button><button class="danger ghost" id="memClear">清空</button></div>
+      </details>
     </section>
-    <div id="experienceMount"></div>
-    <div id="assistantMount"></div>
+    <details class="side-fold shared-workspace-fold" id="workFold">
+      <summary><h2>一起做 <span class="section-mark">02</span></h2></summary>
+      <div id="experienceMount"></div>
+      <div id="assistantMount"></div>
+    </details>
     <p class="side-footer">慢慢来，我们不赶时间。<span aria-hidden="true">✳</span></p>
   </aside>
   <main class="stage">
@@ -136,19 +141,19 @@
         <section id="companionMount" aria-label="正在一起做的事"></section>
         <!-- 协议 §23：主舞台侧翼的全息微光卡片区（Holo-Deck）。小溪递来的积木落在这里；
              传统纯文字聊天气泡在 Voice-First 模式下不再出场，视觉重心交给卡片与抽屉。 -->
-        <section id="holoDeck" class="holo-deck" aria-label="阿栖递来的卡片" aria-live="polite" hidden></section>
+        <section id="holoDeck" class="holo-deck" aria-label="小溪递来的卡片" aria-live="polite" hidden></section>
       </div>
       <div class="plate-wrap">
         <div class="plate">
           <div class="plate-inner">
-            <div class="plate-head"><span>PLATE / 01</span><span><b>阿栖</b> · 依窗</span></div>
+            <div class="plate-head"><span>PLATE / 01</span><span><b>小溪</b> · 依窗</span></div>
             <div class="plate-shadow" aria-hidden="true"></div>
             <div class="avatar-stage" id="avatarStage" aria-hidden="true"></div>
             <div class="plate-vignette" aria-hidden="true"></div>
             <div class="plate-rule" aria-hidden="true"></div>
             <p id="interactionState" class="interaction-state plate-cap">正在连接…</p>
           </div>
-          <div class="plate-seal" aria-hidden="true">栖</div>
+          <div class="plate-seal" aria-hidden="true">溪</div>
         </div>
         <div class="plate-meta"><span>第 01 图版</span><span><b>墨与朱</b> · 纸本</span></div>
       </div>
@@ -176,7 +181,7 @@
           <span class="capsule-stop-label">停止</span>
         </button>
         <div class="input-wrap">
-          <input id="textInput" aria-label="给阿栖的消息" placeholder="想说什么，都可以…" autocomplete="off" />
+          <input id="textInput" aria-label="给小溪的消息" placeholder="想说什么，都可以…" autocomplete="off" />
           <button id="sendBtn" type="button" title="发送" aria-label="发送">
             <svg class="icon" viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><line x1="12" y1="19" x2="12" y2="6"></line><polyline points="6 12 12 6 18 12"></polyline></svg>
           </button>
@@ -210,7 +215,7 @@
   <div class="drawer-body">
     <section id="drawerViewWriting" class="drawer-view" aria-label="一起写">
       <h3>一起写</h3>
-      <p>你来写，阿栖偶尔提一个值得想的点。草稿留在你的浏览器里，离开也不会丢。</p>
+      <p>你来写，小溪偶尔提一个值得想的点。草稿留在你的浏览器里，离开也不会丢。</p>
       <button id="drawerWritingOpen" type="button">打开一起写</button>
     </section>
     <section id="drawerViewCompanion" class="drawer-view" aria-label="共同事项" hidden>

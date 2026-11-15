@@ -1,0 +1,694 @@
+[
+  {
+    "viewport": {
+      "name": "web-1280",
+      "width": 1280,
+      "height": 800
+    },
+    "page": {
+      "scrollHeight": 800,
+      "viewport": 800,
+      "horizontalOverflow": 0
+    },
+    "topbar": {
+      "x": 348,
+      "y": 0,
+      "w": 884,
+      "h": 76,
+      "bottom": 76,
+      "right": 1232
+    },
+    "side": {
+      "x": 0,
+      "y": 0,
+      "w": 300,
+      "h": 800,
+      "bottom": 800,
+      "right": 300
+    },
+    "sideScroll": {
+      "clientHeight": 800,
+      "scrollHeight": 1011,
+      "overflowY": "auto"
+    },
+    "cutOff": [
+      {
+        "tag": "FORM",
+        "text": "体验模式普通聊天 / 关闭体验听懂原句表达练习虚",
+        "bottom": 1512
+      },
+      {
+        "tag": "LABEL",
+        "text": "体验模式普通聊天 / 关闭体验听懂原句表达练习虚",
+        "bottom": 871
+      },
+      {
+        "tag": "SPAN",
+        "text": "体验模式",
+        "bottom": 828
+      },
+      {
+        "tag": "SELECT#experienceMode",
+        "text": "普通聊天 / 关闭体验听懂原句表达练习虚构小剧场",
+        "bottom": 871
+      },
+      {
+        "tag": "LABEL",
+        "text": "原句来源说明手动提供 / 已手动编辑识别原句（可",
+        "bottom": 949
+      },
+      {
+        "tag": "SPAN",
+        "text": "原句来源说明",
+        "bottom": 906
+      },
+      {
+        "tag": "SELECT#experienceOrigin",
+        "text": "手动提供 / 已手动编辑识别原句（可能有误，请核",
+        "bottom": 949
+      },
+      {
+        "tag": "LABEL",
+        "text": "来源标签（可编辑，最多 200 字）",
+        "bottom": 1028
+      }
+    ],
+    "chat": {
+      "x": 414,
+      "y": 125,
+      "w": 386,
+      "h": 381,
+      "bottom": 506,
+      "right": 800
+    },
+    "composer": {
+      "x": 348,
+      "y": 652,
+      "w": 884,
+      "h": 134,
+      "bottom": 786,
+      "right": 1232
+    },
+    "plate": {
+      "x": 842,
+      "y": 137,
+      "w": 381,
+      "h": 471,
+      "bottom": 608,
+      "right": 1222
+    },
+    "avatar": {
+      "x": 843,
+      "y": 138,
+      "w": 379,
+      "h": 469,
+      "bottom": 607,
+      "right": 1221,
+      "aspect": 0.81,
+      "buffer": [
+        378,
+        469
+      ]
+    },
+    "gaps": {
+      "topbarToRoom": 0,
+      "welcomeToComposer": 146,
+      "plateToComposer": 44
+    },
+    "measure": {
+      "welcomeLede": {
+        "width": 386,
+        "fontSize": 9,
+        "cjkRatio": 0.44,
+        "charsPerLineCJK": 43
+      },
+      "botMessage": null,
+      "sideNote": {
+        "width": 176,
+        "fontSize": 10.5,
+        "cjkRatio": 0.74,
+        "charsPerLineCJK": 17
+      }
+    },
+    "overlap": {
+      "sealVsMeta": false,
+      "sealVsCap": false
+    },
+    "lowContrast": [],
+    "fontHistogram": {
+      "8": 2,
+      "9": 5,
+      "10": 3,
+      "11": 28,
+      "12": 99,
+      "13": 34,
+      "14": 10,
+      "21": 1,
+      "22": 1,
+      "58": 4,
+      "10.5": 10,
+      "9.5": 27,
+      "13.5": 13,
+      "11.5": 30,
+      "8.5": 1,
+      "12.5": 1
+    },
+    "nodeCount": 912,
+    "focus": [
+      {
+        "tag": "A",
+        "outline": "solid 2px",
+        "shadow": "none",
+        "isFocusVisible": true
+      },
+      {
+        "tag": "INPUT#manualInput",
+        "outline": "none 3px",
+        "shadow": "none",
+        "isFocusVisible": true
+      },
+      {
+        "tag": "BUTTON#manualAdd",
+        "outline": "solid 2px",
+        "shadow": "none",
+        "isFocusVisible": true
+      },
+      {
+        "tag": "INPUT#memHistory",
+        "outline": "solid 2px",
+        "shadow": "none",
+        "isFocusVisible": true
+      },
+      {
+        "tag": "BUTTON",
+        "outline": "solid 2px",
+        "shadow": "none",
+        "isFocusVisible": true
+      },
+      {
+        "tag": "BUTTON",
+        "outline": "solid 2px",
+        "shadow": "none",
+        "isFocusVisible": true
+      },
+      {
+        "tag": "BUTTON",
+        "outline": "solid 2px",
+        "shadow": "none",
+        "isFocusVisible": true
+      },
+      {
+        "tag": "BUTTON",
+        "outline": "solid 2px",
+        "shadow": "none",
+        "isFocusVisible": true
+      },
+      {
+        "tag": "BUTTON",
+        "outline": "solid 2px",
+        "shadow": "none",
+        "isFocusVisible": true
+      },
+      {
+        "tag": "BUTTON",
+        "outline": "solid 2px",
+        "shadow": "none",
+        "isFocusVisible": true
+      },
+      {
+        "tag": "BUTTON",
+        "outline": "solid 2px",
+        "shadow": "none",
+        "isFocusVisible": true
+      },
+      {
+        "tag": "BUTTON",
+        "outline": "solid 2px",
+        "shadow": "none",
+        "isFocusVisible": true
+      }
+    ]
+  },
+  {
+    "viewport": {
+      "name": "web-1440",
+      "width": 1440,
+      "height": 900
+    },
+    "page": {
+      "scrollHeight": 900,
+      "viewport": 900,
+      "horizontalOverflow": 0
+    },
+    "topbar": {
+      "x": 348,
+      "y": 0,
+      "w": 1044,
+      "h": 76,
+      "bottom": 76,
+      "right": 1392
+    },
+    "side": {
+      "x": 0,
+      "y": 0,
+      "w": 300,
+      "h": 900,
+      "bottom": 900,
+      "right": 300
+    },
+    "sideScroll": {
+      "clientHeight": 900,
+      "scrollHeight": 1011,
+      "overflowY": "auto"
+    },
+    "cutOff": [
+      {
+        "tag": "FORM",
+        "text": "体验模式普通聊天 / 关闭体验听懂原句表达练习虚",
+        "bottom": 1512
+      },
+      {
+        "tag": "LABEL",
+        "text": "原句来源说明手动提供 / 已手动编辑识别原句（可",
+        "bottom": 949
+      },
+      {
+        "tag": "SPAN",
+        "text": "原句来源说明",
+        "bottom": 906
+      },
+      {
+        "tag": "SELECT#experienceOrigin",
+        "text": "手动提供 / 已手动编辑识别原句（可能有误，请核",
+        "bottom": 949
+      },
+      {
+        "tag": "LABEL",
+        "text": "来源标签（可编辑，最多 200 字）",
+        "bottom": 1028
+      },
+      {
+        "tag": "SPAN",
+        "text": "来源标签（可编辑，最多 200 字）",
+        "bottom": 984
+      },
+      {
+        "tag": "INPUT#experienceSourceLabel",
+        "text": "",
+        "bottom": 1028
+      },
+      {
+        "tag": "LABEL",
+        "text": "选中的原句（可编辑，最多 3000 字）",
+        "bottom": 1157
+      }
+    ],
+    "chat": {
+      "x": 414,
+      "y": 125,
+      "w": 546,
+      "h": 453,
+      "bottom": 578,
+      "right": 960
+    },
+    "composer": {
+      "x": 348,
+      "y": 724,
+      "w": 1044,
+      "h": 162,
+      "bottom": 886,
+      "right": 1392
+    },
+    "plate": {
+      "x": 1001,
+      "y": 137,
+      "w": 381,
+      "h": 543,
+      "bottom": 680,
+      "right": 1383
+    },
+    "avatar": {
+      "x": 1002,
+      "y": 138,
+      "w": 379,
+      "h": 541,
+      "bottom": 679,
+      "right": 1382,
+      "aspect": 0.7,
+      "buffer": [
+        379,
+        541
+      ]
+    },
+    "gaps": {
+      "topbarToRoom": 0,
+      "welcomeToComposer": 161,
+      "plateToComposer": 44
+    },
+    "measure": {
+      "welcomeLede": {
+        "width": 546,
+        "fontSize": 9,
+        "cjkRatio": 0.44,
+        "charsPerLineCJK": 61
+      },
+      "botMessage": null,
+      "sideNote": {
+        "width": 176,
+        "fontSize": 10.5,
+        "cjkRatio": 0.74,
+        "charsPerLineCJK": 17
+      }
+    },
+    "overlap": {
+      "sealVsMeta": false,
+      "sealVsCap": false
+    },
+    "lowContrast": [],
+    "fontHistogram": {
+      "8": 2,
+      "9": 7,
+      "10": 3,
+      "11": 28,
+      "12": 99,
+      "13": 34,
+      "14": 10,
+      "15": 1,
+      "21": 1,
+      "22": 1,
+      "58": 4,
+      "10.5": 10,
+      "9.5": 27,
+      "13.5": 12,
+      "11.5": 30,
+      "8.5": 1,
+      "12.5": 1
+    },
+    "nodeCount": 912,
+    "focus": [
+      {
+        "tag": "A",
+        "outline": "solid 2px",
+        "shadow": "none",
+        "isFocusVisible": true
+      },
+      {
+        "tag": "INPUT#manualInput",
+        "outline": "none 3px",
+        "shadow": "none",
+        "isFocusVisible": true
+      },
+      {
+        "tag": "BUTTON#manualAdd",
+        "outline": "solid 2px",
+        "shadow": "none",
+        "isFocusVisible": true
+      },
+      {
+        "tag": "INPUT#memHistory",
+        "outline": "solid 2px",
+        "shadow": "none",
+        "isFocusVisible": true
+      },
+      {
+        "tag": "BUTTON",
+        "outline": "solid 2px",
+        "shadow": "none",
+        "isFocusVisible": true
+      },
+      {
+        "tag": "BUTTON",
+        "outline": "solid 2px",
+        "shadow": "none",
+        "isFocusVisible": true
+      },
+      {
+        "tag": "BUTTON",
+        "outline": "solid 2px",
+        "shadow": "none",
+        "isFocusVisible": true
+      },
+      {
+        "tag": "BUTTON",
+        "outline": "solid 2px",
+        "shadow": "none",
+        "isFocusVisible": true
+      },
+      {
+        "tag": "BUTTON",
+        "outline": "solid 2px",
+        "shadow": "none",
+        "isFocusVisible": true
+      },
+      {
+        "tag": "BUTTON",
+        "outline": "solid 2px",
+        "shadow": "none",
+        "isFocusVisible": true
+      },
+      {
+        "tag": "BUTTON",
+        "outline": "solid 2px",
+        "shadow": "none",
+        "isFocusVisible": true
+      },
+      {
+        "tag": "BUTTON",
+        "outline": "solid 2px",
+        "shadow": "none",
+        "isFocusVisible": true
+      }
+    ]
+  },
+  {
+    "viewport": {
+      "name": "web-1920",
+      "width": 1920,
+      "height": 1080
+    },
+    "page": {
+      "scrollHeight": 1080,
+      "viewport": 1080,
+      "horizontalOverflow": 0
+    },
+    "topbar": {
+      "x": 348,
+      "y": 0,
+      "w": 1524,
+      "h": 76,
+      "bottom": 76,
+      "right": 1872
+    },
+    "side": {
+      "x": 0,
+      "y": 0,
+      "w": 300,
+      "h": 1080,
+      "bottom": 1080,
+      "right": 300
+    },
+    "sideScroll": {
+      "clientHeight": 1080,
+      "scrollHeight": 1080,
+      "overflowY": "auto"
+    },
+    "cutOff": [
+      {
+        "tag": "FORM",
+        "text": "体验模式普通聊天 / 关闭体验听懂原句表达练习虚",
+        "bottom": 1512
+      },
+      {
+        "tag": "LABEL",
+        "text": "选中的原句（可编辑，最多 3000 字）",
+        "bottom": 1157
+      },
+      {
+        "tag": "TEXTAREA#experienceSource",
+        "text": "",
+        "bottom": 1157
+      },
+      {
+        "tag": "LABEL",
+        "text": "译文参考（可编辑，最多 3000 字）",
+        "bottom": 1263
+      },
+      {
+        "tag": "SPAN",
+        "text": "译文参考（可编辑，最多 3000 字）",
+        "bottom": 1192
+      },
+      {
+        "tag": "TEXTAREA#experienceTranslation",
+        "text": "",
+        "bottom": 1263
+      },
+      {
+        "tag": "P",
+        "text": "原句只在「听懂原句 / 表达练习」应用时发送。识",
+        "bottom": 1344
+      },
+      {
+        "tag": "DIV",
+        "text": "导入选中原句（不应用）丢弃邻近原句（仅草稿）清除",
+        "bottom": 1502
+      }
+    ],
+    "chat": {
+      "x": 414,
+      "y": 125,
+      "w": 996,
+      "h": 633,
+      "bottom": 758,
+      "right": 1410
+    },
+    "composer": {
+      "x": 348,
+      "y": 904,
+      "w": 1524,
+      "h": 162,
+      "bottom": 1066,
+      "right": 1872
+    },
+    "plate": {
+      "x": 1451,
+      "y": 137,
+      "w": 412,
+      "h": 723,
+      "bottom": 860,
+      "right": 1863
+    },
+    "avatar": {
+      "x": 1452,
+      "y": 138,
+      "w": 410,
+      "h": 721,
+      "bottom": 859,
+      "right": 1862,
+      "aspect": 0.57,
+      "buffer": [
+        410,
+        721
+      ]
+    },
+    "gaps": {
+      "topbarToRoom": 0,
+      "welcomeToComposer": 209,
+      "plateToComposer": 44
+    },
+    "measure": {
+      "welcomeLede": {
+        "width": 996,
+        "fontSize": 9,
+        "cjkRatio": 0.44,
+        "charsPerLineCJK": 111
+      },
+      "botMessage": null,
+      "sideNote": {
+        "width": 176,
+        "fontSize": 10.5,
+        "cjkRatio": 0.74,
+        "charsPerLineCJK": 17
+      }
+    },
+    "overlap": {
+      "sealVsMeta": false,
+      "sealVsCap": false
+    },
+    "lowContrast": [],
+    "fontHistogram": {
+      "8": 2,
+      "9": 7,
+      "10": 3,
+      "11": 28,
+      "12": 99,
+      "13": 34,
+      "14": 10,
+      "15": 1,
+      "21": 1,
+      "22": 1,
+      "78": 4,
+      "10.5": 10,
+      "9.5": 27,
+      "13.5": 12,
+      "11.5": 30,
+      "8.5": 1,
+      "12.5": 1
+    },
+    "nodeCount": 912,
+    "focus": [
+      {
+        "tag": "A",
+        "outline": "solid 2px",
+        "shadow": "none",
+        "isFocusVisible": true
+      },
+      {
+        "tag": "INPUT#manualInput",
+        "outline": "none 3px",
+        "shadow": "none",
+        "isFocusVisible": true
+      },
+      {
+        "tag": "BUTTON#manualAdd",
+        "outline": "solid 2px",
+        "shadow": "none",
+        "isFocusVisible": true
+      },
+      {
+        "tag": "INPUT#memHistory",
+        "outline": "solid 2px",
+        "shadow": "none",
+        "isFocusVisible": true
+      },
+      {
+        "tag": "BUTTON",
+        "outline": "solid 2px",
+        "shadow": "none",
+        "isFocusVisible": true
+      },
+      {
+        "tag": "BUTTON",
+        "outline": "solid 2px",
+        "shadow": "none",
+        "isFocusVisible": true
+      },
+      {
+        "tag": "BUTTON",
+        "outline": "solid 2px",
+        "shadow": "none",
+        "isFocusVisible": true
+      },
+      {
+        "tag": "BUTTON",
+        "outline": "solid 2px",
+        "shadow": "none",
+        "isFocusVisible": true
+      },
+      {
+        "tag": "BUTTON",
+        "outline": "solid 2px",
+        "shadow": "none",
+        "isFocusVisible": true
+      },
+      {
+        "tag": "BUTTON",
+        "outline": "solid 2px",
+        "shadow": "none",
+        "isFocusVisible": true
+      },
+      {
+        "tag": "BUTTON",
+        "outline": "solid 2px",
+        "shadow": "none",
+        "isFocusVisible": true
+      },
+      {
+        "tag": "BUTTON",
+        "outline": "solid 2px",
+        "shadow": "none",
+        "isFocusVisible": true
+      }
+    ]
+  }
+]

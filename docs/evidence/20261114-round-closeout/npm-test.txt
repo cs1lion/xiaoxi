@@ -1,0 +1,3218 @@
+
+> test
+> npm run test:voice && npm run test:calibration && npm run test:vrm && npm run test:performance-probe && node web/delivery-notice.test.mjs && npm run test:dialogue-gaze && npm run test:avatar-motion && npm run test:avatar-rig && node web/starmap/test_starmap.mjs && node web/executive-state.test.mjs && node web/aqi-flow.test.mjs && node web/context-budget.test.mjs && node web/context-usage.test.mjs && node web/events-v2.test.mjs && node web/memory-panel.test.mjs && node web/task-card.test.mjs && node web/external-model.test.mjs && node web/test_glimmer_bubble.mjs && node web/companion.test.mjs && node web/assistant.test.mjs && node --test web/reconnect.test.mjs && npm run test:blocks
+
+
+> test:voice
+> node web/voice/voice.test.mjs && node web/voice/playback.test.mjs && node web/voice/duplex.test.mjs && node web/voice/capture.test.mjs && node web/voice/checkpoint.test.mjs && node web/voice/baseline.test.mjs
+
+TAP version 13
+# Subtest: 4096 callback consumes its entire second half
+ok 1 - 4096 callback consumes its entire second half
+  ---
+  duration_ms: 1.7777
+  type: 'test'
+  ...
+# Subtest: fractional resampling preserves phase and all sample contributions
+ok 2 - fractional resampling preserves phase and all sample contributions
+  ---
+  duration_ms: 25.7342
+  type: 'test'
+  ...
+# Subtest: framing preserves the tail; PCM is little endian and clipped
+ok 3 - framing preserves the tail; PCM is little endian and clipped
+  ---
+  duration_ms: 0.419
+  type: 'test'
+  ...
+# Subtest: silence stays local; onset includes pre-roll and pauses are conservative
+ok 4 - silence stays local; onset includes pre-roll and pauses are conservative
+  ---
+  duration_ms: 13.7692
+  type: 'test'
+  ...
+# Subtest: playback requires stronger and longer onset, not semantic recognition
+ok 5 - playback requires stronger and longer onset, not semantic recognition
+  ---
+  duration_ms: 1.5036
+  type: 'test'
+  ...
+# Subtest: short transient is invalid; max duration waits for quiet before rearming
+ok 6 - short transient is invalid; max duration waits for quiet before rearming
+  ---
+  duration_ms: 1.603
+  type: 'test'
+  ...
+# Subtest: decode and play preserve server order and idle follows real ending
+ok 7 - decode and play preserve server order and idle follows real ending
+  ---
+  duration_ms: 6.2755
+  type: 'test'
+  ...
+# Subtest: late decode and ended after stop cannot revive or disturb a new generation
+ok 8 - late decode and ended after stop cannot revive or disturb a new generation
+  ---
+  duration_ms: 1.0303
+  type: 'test'
+  ...
+# Subtest: bad audio does not hang following chunks
+ok 9 - bad audio does not hang following chunks
+  ---
+  duration_ms: 2.0162
+  type: 'test'
+  ...
+# Subtest: permission release and rapid reopen dispose only obsolete tracks
+ok 10 - permission release and rapid reopen dispose only obsolete tracks
+  ---
+  duration_ms: 0.5987
+  type: 'test'
+  ...
+# Subtest: denied permission does not prevent a later explicit retry
+ok 11 - denied permission does not prevent a later explicit retry
+  ---
+  duration_ms: 0.4828
+  type: 'test'
+  ...
+# Subtest: all stale tagged events are blocked before consumers; proactive only when idle
+ok 12 - all stale tagged events are blocked before consumers; proactive only when idle
+  ---
+  duration_ms: 0.1841
+  type: 'test'
+  ...
+# Subtest: config acknowledgments remain global and retired IDs are bounded
+ok 13 - config acknowledgments remain global and retired IDs are bounded
+  ---
+  duration_ms: 0.3543
+  type: 'test'
+  ...
+# Subtest: stuck decode times out; bounded queue rejects overload without hanging
+ok 14 - stuck decode times out; bounded queue rejects overload without hanging
+  ---
+  duration_ms: 23.2069
+  type: 'test'
+  ...
+# Subtest: missing onended times out and stops the source
+ok 15 - missing onended times out and stops the source
+  ---
+  duration_ms: 15.5293
+  type: 'test'
+  ...
+1..15
+# tests 15
+# suites 0
+# pass 15
+# fail 0
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 99.1903
+TAP version 13
+# Subtest: one next chunk is decoded before playback ends, without decoding the whole queue
+ok 1 - one next chunk is decoded before playback ends, without decoding the whole queue
+  ---
+  duration_ms: 2.5637
+  type: 'test'
+  ...
+# Subtest: stop drops prefetched audio; late decoding and stale onended cannot revive it
+ok 2 - stop drops prefetched audio; late decoding and stale onended cannot revive it
+  ---
+  duration_ms: 1.1142
+  type: 'test'
+  ...
+# Subtest: uncancellable decodes remain bounded across rapid stops and slot waiting times out
+ok 3 - uncancellable decodes remain bounded across rapid stops and slot waiting times out
+  ---
+  duration_ms: 0.7215
+  type: 'test'
+  ...
+# Subtest: checkpoint resumes only remaining current audio, never a prefetched future sentence
+ok 4 - checkpoint resumes only remaining current audio, never a prefetched future sentence
+  ---
+  duration_ms: 0.78
+  type: 'test'
+  ...
+# Subtest: prefetch failure is skipped in order and following chunks continue
+ok 5 - prefetch failure is skipped in order and following chunks continue
+  ---
+  duration_ms: 0.5112
+  type: 'test'
+  ...
+# Subtest: decode timeout skips a stalled chunk and play timeout stops a source before continuing
+ok 6 - decode timeout skips a stalled chunk and play timeout stops a source before continuing
+  ---
+  duration_ms: 0.6188
+  type: 'test'
+  ...
+# Subtest: pending item, encoded/raw byte and aggregate limits reject before decoding
+ok 7 - pending item, encoded/raw byte and aggregate limits reject before decoding
+  ---
+  duration_ms: 0.3131
+  type: 'test'
+  ...
+# Subtest: decoded byte limit skips expanded audio without retaining or playing it
+ok 8 - decoded byte limit skips expanded audio without retaining or playing it
+  ---
+  duration_ms: 2.3519
+  type: 'test'
+  ...
+# Subtest: reentrant stop during play still disposes the cleanup returned afterwards
+ok 9 - reentrant stop during play still disposes the cleanup returned afterwards
+  ---
+  duration_ms: 0.5486
+  type: 'test'
+  ...
+# Subtest: chunk pause_after_ms spaces the next chunk on the injected clock
+ok 10 - chunk pause_after_ms spaces the next chunk on the injected clock
+  ---
+  duration_ms: 1.1873
+  type: 'test'
+  ...
+# Subtest: stop during a breath pause cancels it and never starts the queued chunk
+ok 11 - stop during a breath pause cancels it and never starts the queued chunk
+  ---
+  duration_ms: 0.9552
+  type: 'test'
+  ...
+# Subtest: items without a usable pause never wait, keeping the legacy schedule
+ok 12 - items without a usable pause never wait, keeping the legacy schedule
+  ---
+  duration_ms: 0.9985
+  type: 'test'
+  ...
+# Subtest: an out-of-contract pause is capped at 400ms instead of stalling playback
+ok 13 - an out-of-contract pause is capped at 400ms instead of stalling playback
+  ---
+  duration_ms: 0.4284
+  type: 'test'
+  ...
+1..13
+# tests 13
+# suites 0
+# pass 13
+# fail 0
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 27.9395
+TAP version 13
+# Subtest: EchoGuard suppresses delayed linear echo across 0..200ms search
+ok 1 - EchoGuard suppresses delayed linear echo across 0..200ms search
+  ---
+  duration_ms: 55.4847
+  type: 'test'
+  ...
+# Subtest: independent double-talk and fresh near-end onset are not suppressed
+ok 2 - independent double-talk and fresh near-end onset are not suppressed
+  ---
+  duration_ms: 7.072
+  type: 'test'
+  ...
+# Subtest: silence, DC, absent/invalid reference fail open and reset correlation history
+ok 3 - silence, DC, absent/invalid reference fail open and reset correlation history
+  ---
+  duration_ms: 1.0306
+  type: 'test'
+  ...
+# Subtest: all modes duck at 120ms, commit at exact voiced duration with owned preroll
+ok 4 - all modes duck at 120ms, commit at exact voiced duration with owned preroll
+  ---
+  duration_ms: 15.0609
+  type: 'test'
+  ...
+# Subtest: <=200ms sound only ducks; 180ms quiet restores without commit
+ok 5 - <=200ms sound only ducks; 180ms quiet restores without commit
+  ---
+  duration_ms: 6.2725
+  type: 'test'
+  ...
+# Subtest: short syllable gaps preserve voiced accumulation, not gap duration
+ok 6 - short syllable gaps preserve voiced accumulation, not gap duration
+  ---
+  duration_ms: 0.9229
+  type: 'test'
+  ...
+# Subtest: isolated sample spikes do not duck and sparse noise never accumulates forever
+ok 7 - isolated sample spikes do not duck and sparse noise never accumulates forever
+  ---
+  duration_ms: 14.1012
+  type: 'test'
+  ...
+# Subtest: missing reference still allows sustained near-end, not blanket suppression
+ok 8 - missing reference still allows sustained near-end, not blanket suppression
+  ---
+  duration_ms: 1.0073
+  type: 'test'
+  ...
+# Subtest: playback tail protects 260ms without hard-banning genuine speech
+ok 9 - playback tail protects 260ms without hard-banning genuine speech
+  ---
+  duration_ms: 2.7975
+  type: 'test'
+  ...
+# Subtest: reset removes old candidates, audio and committed latch
+ok 10 - reset removes old candidates, audio and committed latch
+  ---
+  duration_ms: 2.076
+  type: 'test'
+  ...
+# Subtest: invalid mic is returned verbatim, never voiced or replayed as nonfinite
+ok 11 - invalid mic is returned verbatim, never voiced or replayed as nonfinite
+  ---
+  duration_ms: 1.7463
+  type: 'test'
+  ...
+# Subtest: long playback echo never commits and storage remains bounded
+ok 12 - long playback echo never commits and storage remains bounded
+  ---
+  duration_ms: 40.5038
+  type: 'test'
+  ...
+# Subtest: onset at playback end survives tail expiry with all candidate frames
+ok 13 - onset at playback end survives tail expiry with all candidate frames
+  ---
+  duration_ms: 2.4776
+  type: 'test'
+  ...
+# Subtest: late-tail short sound recovers to VAD and continuation has a bounded lifetime
+ok 14 - late-tail short sound recovers to VAD and continuation has a bounded lifetime
+  ---
+  duration_ms: 0.9263
+  type: 'test'
+  ...
+# Subtest: manual-only mode does not duck or commit during playback and releases after tail
+ok 15 - manual-only mode does not duck or commit during playback and releases after tail
+  ---
+  duration_ms: 6.8823
+  type: 'test'
+  ...
+1..15
+# tests 15
+# suites 0
+# pass 15
+# fail 0
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 169.2899
+TAP version 13
+# Subtest: worklet 44100: aligned mono mix, complete samples, transfer batches, silent output
+ok 1 - worklet 44100: aligned mono mix, complete samples, transfer batches, silent output
+  ---
+  duration_ms: 44.7415
+  type: 'test'
+  ...
+# Subtest: worklet 48000: aligned mono mix, complete samples, transfer batches, silent output
+ok 2 - worklet 48000: aligned mono mix, complete samples, transfer batches, silent output
+  ---
+  duration_ms: 37.2171
+  type: 'test'
+  ...
+# Subtest: worklet absent input zero-fills; stop cancels tail and posts no further messages
+ok 3 - worklet absent input zero-fills; stop cancels tail and posts no further messages
+  ---
+  duration_ms: 1.0418
+  type: 'test'
+  ...
+# Subtest: fallback uses 1024 and merger, preserves aligned samples, mutes, detaches only reference edge
+ok 4 - fallback uses 1024 and merger, preserves aligned samples, mutes, detaches only reference edge
+  ---
+  duration_ms: 4.2567
+  type: 'test'
+  ...
+# Subtest: fallback input timing ignores future output playbackTime (buffer length)
+ok 5 - fallback input timing ignores future output playbackTime (buffer length)
+  ---
+  duration_ms: 0.5024
+  type: 'test'
+  ...
+# Subtest: fallback input timing ignores future output playbackTime (channel fallback length)
+ok 6 - fallback input timing ignores future output playbackTime (channel fallback length)
+  ---
+  duration_ms: 0.3204
+  type: 'test'
+  ...
+# Subtest: fallback without merger reports no reference and emits zeros
+ok 7 - fallback without merger reports no reference and emits zeros
+  ---
+  duration_ms: 0.4671
+  type: 'test'
+  ...
+# Subtest: fallback setup failure disconnects every owned node without stopping stream
+ok 8 - fallback setup failure disconnects every owned node without stopping stream
+  ---
+  duration_ms: 0.4808
+  type: 'test'
+  ...
+# Subtest: onChunk failure stops capture, reports once, and blocks reentrant/late delivery
+ok 9 - onChunk failure stops capture, reports once, and blocks reentrant/late delivery
+  ---
+  duration_ms: 0.5774
+  type: 'test'
+  ...
+# Subtest: worklet module cache, node topology, runtime error and late handlers
+ok 10 - worklet module cache, node topology, runtime error and late handlers
+  ---
+  duration_ms: 0.871
+  type: 'test'
+  ...
+# Subtest: module rejection falls back without leaks and later calls may retry
+ok 11 - module rejection falls back without leaks and later calls may retry
+  ---
+  duration_ms: 0.4708
+  type: 'test'
+  ...
+# Subtest: pending module load allocates no graph; epoch owner can stop immediately after resolve
+ok 12 - pending module load allocates no graph; epoch owner can stop immediately after resolve
+  ---
+  duration_ms: 0.3053
+  type: 'test'
+  ...
+# Subtest: stop inside fallback callback prevents remaining chunks of the same event
+ok 13 - stop inside fallback callback prevents remaining chunks of the same event
+  ---
+  duration_ms: 0.2704
+  type: 'test'
+  ...
+# Subtest: partial worklet graph failure closes port before fallback
+ok 14 - partial worklet graph failure closes port before fallback
+  ---
+  duration_ms: 0.3032
+  type: 'test'
+  ...
+1..14
+# tests 14
+# suites 0
+# pass 14
+# fail 0
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 102.6488
+TAP version 13
+# Subtest: checkpoint replays only remaining current audio once and expires locally
+ok 1 - checkpoint replays only remaining current audio once and expires locally
+  ---
+  duration_ms: 1.0461
+  type: 'test'
+  ...
+# Subtest: metrics retain bounded scalar samples, no audio or transcripts
+ok 2 - metrics retain bounded scalar samples, no audio or transcripts
+  ---
+  duration_ms: 0.8324
+  type: 'test'
+  ...
+# Subtest: VAD adopts duplex pre-roll once, then endpoints normally
+ok 3 - VAD adopts duplex pre-roll once, then endpoints normally
+  ---
+  duration_ms: 2.2144
+  type: 'test'
+  ...
+1..3
+# tests 3
+# suites 0
+# pass 3
+# fail 0
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 12.9294
+TAP version 13
+# Subtest: collection is off until a valid trial with live capture starts
+ok 1 - collection is off until a valid trial with live capture starts
+  ---
+  duration_ms: 1.1711
+  type: 'test'
+  ...
+# Subtest: a captured token isolates late callbacks, including after clear
+ok 2 - a captured token isolates late callbacks, including after clear
+  ---
+  duration_ms: 0.5544
+  type: 'test'
+  ...
+# Subtest: exports retain whitelisted metadata and never raw IDs, text, PCM, settings labels or secrets
+ok 3 - exports retain whitelisted metadata and never raw IDs, text, PCM, settings labels or secrets
+  ---
+  duration_ms: 0.8932
+  type: 'test'
+  ...
+# Subtest: browser AEC/NS/AGC settings remain unknown unless actual boolean values are supplied
+ok 4 - browser AEC/NS/AGC settings remain unknown unless actual boolean values are supplied
+  ---
+  duration_ms: 0.134
+  type: 'test'
+  ...
+# Subtest: activity and endpoint wait are bounded fixed context and separated in summaries
+ok 5 - activity and endpoint wait are bounded fixed context and separated in summaries
+  ---
+  duration_ms: 1.2062
+  type: 'test'
+  ...
+# Subtest: actual microphone settings/reference changes invalidate an active fixed setup
+ok 6 - actual microphone settings/reference changes invalidate an active fixed setup
+  ---
+  duration_ms: 0.1566
+  type: 'test'
+  ...
+# Subtest: input timing source is a bounded setup enum and changing it invalidates a trial
+ok 7 - input timing source is a bounded setup enum and changing it invalidates a trial
+  ---
+  duration_ms: 0.1886
+  type: 'test'
+  ...
+# Subtest: last energy is coalesced per turn and older arrivals do not replace its latest time
+ok 8 - last energy is coalesced per turn and older arrivals do not replace its latest time
+  ---
+  duration_ms: 3.1231
+  type: 'test'
+  ...
+# Subtest: mode/capture changes invalidate a trial without affecting later ready setup
+ok 9 - mode/capture changes invalidate a trial without affecting later ready setup
+  ---
+  duration_ms: 0.3617
+  type: 'test'
+  ...
+# Subtest: event, turn and trial duration limits invalidate instead of silently truncating valid samples
+ok 10 - event, turn and trial duration limits invalidate instead of silently truncating valid samples
+  ---
+  duration_ms: 0.6747
+  type: 'test'
+  ...
+# Subtest: malformed event times and identifiers are rejected without polluting the current trial
+ok 11 - malformed event times and identifiers are rejected without polluting the current trial
+  ---
+  duration_ms: 0.1717
+  type: 'test'
+  ...
+# Subtest: voice timing summaries include endpoint wait and separate text modalities and trial environments
+ok 12 - voice timing summaries include endpoint wait and separate text modalities and trial environments
+  ---
+  duration_ms: 0.4194
+  type: 'test'
+  ...
+# Subtest: gate proxies distinguish initial energy onset from the later candidate and stop request
+ok 13 - gate proxies distinguish initial energy onset from the later candidate and stop request
+  ---
+  duration_ms: 0.1899
+  type: 'test'
+  ...
+# Subtest: recovered candidate or unrelated manual stop never masquerades as a committed interruption
+ok 14 - recovered candidate or unrelated manual stop never masquerades as a committed interruption
+  ---
+  duration_ms: 0.2313
+  type: 'test'
+  ...
+# Subtest: decode and scheduled chunk gaps report browser operations, allowing overlap but excluding resumed/cancelled seams
+ok 15 - decode and scheduled chunk gaps report browser operations, allowing overlap but excluding resumed/cancelled seams
+  ---
+  duration_ms: 0.3424
+  type: 'test'
+  ...
+# Subtest: resume audio cannot become the first response audio timing sample
+ok 16 - resume audio cannot become the first response audio timing sample
+  ---
+  duration_ms: 0.1955
+  type: 'test'
+  ...
+# Subtest: only manual completed-trial outcomes count false/missed/correction, with no fabricated hourly rate
+ok 17 - only manual completed-trial outcomes count false/missed/correction, with no fabricated hourly rate
+  ---
+  duration_ms: 0.2429
+  type: 'test'
+  ...
+# Subtest: invalid outcome values stay unrated and exported snapshots do not mutate the collector
+ok 18 - invalid outcome values stay unrated and exported snapshots do not mutate the collector
+  ---
+  duration_ms: 0.4028
+  type: 'test'
+  ...
+# Subtest: trial retention is bounded and explicitly reports discarded samples
+ok 19 - trial retention is bounded and explicitly reports discarded samples
+  ---
+  duration_ms: 0.3748
+  type: 'test'
+  ...
+# Subtest: nonfinite closing clock makes a trial invalid
+ok 20 - nonfinite closing clock makes a trial invalid
+  ---
+  duration_ms: 0.1533
+  type: 'test'
+  ...
+# Subtest: finishing a quiet trial after its duration bound cannot create a valid sample
+ok 21 - finishing a quiet trial after its duration bound cannot create a valid sample
+  ---
+  duration_ms: 0.2024
+  type: 'test'
+  ...
+1..21
+# tests 21
+# suites 0
+# pass 21
+# fail 0
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 20.9163
+
+> test:calibration
+> node --experimental-default-type=module --test web/avatar/test_calibration.js
+
+TAP version 13
+# Subtest: fixed poses drive actual morphs, close half-open eyes fully, and recover exactly
+ok 1 - fixed poses drive actual morphs, close half-open eyes fully, and recover exactly
+  ---
+  duration_ms: 16.1795
+  type: 'test'
+  ...
+# Subtest: absolute overrides are bounded and composed before blink; expression/gaze/mouth do not invalidate registration
+ok 2 - absolute overrides are bounded and composed before blink; expression/gaze/mouth do not invalidate registration
+  ---
+  duration_ms: 4.4881
+  type: 'test'
+  ...
+# Subtest: exit restores driving state, displayed morphs and live bone transforms without replacing rest quaternions
+ok 3 - exit restores driving state, displayed morphs and live bone transforms without replacing rest quaternions
+  ---
+  duration_ms: 2.1721
+  type: 'test'
+  ...
+# Subtest: an already paused Avatar stays paused on exit
+ok 4 - an already paused Avatar stays paused on exit
+  ---
+  duration_ms: 1.7006
+  type: 'test'
+  ...
+# Subtest: fixed eye calibration clears manual hand inspection and restores thumb pose and selection on exit
+ok 5 - fixed eye calibration clears manual hand inspection and restores thumb pose and selection on exit
+  ---
+  duration_ms: 1.6235
+  type: 'test'
+  ...
+# Subtest: exit preserves the real gesture transition controller, interrupted state, quaternion origins and enable flag
+ok 6 - exit preserves the real gesture transition controller, interrupted state, quaternion origins and enable flag
+  ---
+  duration_ms: 1.6842
+  type: 'test'
+  ...
+# Subtest: camera and lighting restore at full precision and repeated entry establishes a fresh registration
+ok 7 - camera and lighting restore at full precision and repeated entry establishes a fresh registration
+  ---
+  duration_ms: 2.1293
+  type: 'test'
+  ...
+# Subtest: disposing the renderer while paused invalidates calibration without restarting a disposed avatar
+ok 8 - disposing the renderer while paused invalidates calibration without restarting a disposed avatar
+  ---
+  duration_ms: 2.6496
+  type: 'test'
+  ...
+# Subtest: a renderer request invalidates the old session and safely releases its paused RAF
+ok 9 - a renderer request invalidates the old session and safely releases its paused RAF
+  ---
+  duration_ms: 1.933
+  type: 'test'
+  ...
+# Subtest: camera, viewport, appearance and asset changes explicitly invalidate registration
+ok 10 - camera, viewport, appearance and asset changes explicitly invalidate registration
+  ---
+  duration_ms: 2.377
+  type: 'test'
+  ...
+# Subtest: real viewport resize invalidates the frozen session and exit preserves the new aspect/framing
+ok 11 - real viewport resize invalidates the frozen session and exit preserves the new aspect/framing
+  ---
+  duration_ms: 4.2262
+  type: 'test'
+  ...
+# Subtest: untrusted numeric pose values emit bounded finite JSON and report actual capabilities/occlusion limitations
+ok 12 - untrusted numeric pose values emit bounded finite JSON and report actual capabilities/occlusion limitations
+  ---
+  duration_ms: 2.6552
+  type: 'test'
+  ...
+1..12
+# tests 12
+# suites 0
+# pass 12
+# fail 0
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 225.8022
+
+> test:vrm
+> node web/avatar/test_vrm.js
+
+ok 1 - neutral is still, open-eyed, and silent
+ok 2 - dt is finite and bounded after tab suspension
+ok 3 - mapping does not mutate input, uses limited rotations and +Z gaze
+ok 4 - bad inputs never emit non-finite numbers
+ok 5 - vowels partition mouth opening and stay silent when closed
+ok 6 - all five vowel shapes can receive positive weight
+ok 7 - unilateral blinks do not stack generic blink
+ok 8 - capability filtering only writes present shapes and falls back for vowels
+ok 9 - restrained emotion uses mouth and brow cues
+ok 10 - emotion overrides and binary emotion never suppress lips, gaze, or blink
+10 VRM mapping tests passed
+(node:28480) [MODULE_TYPELESS_PACKAGE_JSON] Warning: Module type of file:///D:/project/neurosama/web/avatar/test_vrm.js is not specified and it doesn't parse as CommonJS.
+Reparsing as ES module because module syntax was detected. This incurs a performance overhead.
+To eliminate this warning, add "type": "module" to D:\project\neurosama\package.json.
+(Use `node --trace-warnings ...` to show where the warning was created)
+
+> test:performance-probe
+> node --experimental-default-type=module --test web/avatar/test_performance_probe.js
+
+TAP version 13
+# Subtest: measures the existing frame, true RAF timestamp and submission CPU wall; restores inherited methods
+ok 1 - measures the existing frame, true RAF timestamp and submission CPU wall; restores inherited methods
+  ---
+  duration_ms: 4.5635
+  type: 'test'
+  ...
+# Subtest: requires normal playback, prevents duplicate ownership, completes once and can be reused
+ok 2 - requires normal playback, prevents duplicate ownership, completes once and can be reused
+  ---
+  duration_ms: 0.8157
+  type: 'test'
+  ...
+# Subtest: GPU queries are polled without blocking and linked to the actual render submission
+ok 3 - GPU queries are polled without blocking and linked to the actual render submission
+  ---
+  duration_ms: 0.3825
+  type: 'test'
+  ...
+# Subtest: disjoint results are discarded rather than presented as valid GPU timings
+ok 4 - disjoint results are discarded rather than presented as valid GPU timings
+  ---
+  duration_ms: 0.4344
+  type: 'test'
+  ...
+# Subtest: foreign active GPU queries are respected
+ok 5 - foreign active GPU queries are respected
+  ---
+  duration_ms: 0.2519
+  type: 'test'
+  ...
+# Subtest: unavailable GPU results drain until deadline and delete pending queries
+ok 6 - unavailable GPU results drain until deadline and delete pending queries
+  ---
+  duration_ms: 0.3068
+  type: 'test'
+  ...
+# Subtest: renderer change ends measurement and restores both methods
+ok 7 - renderer change ends measurement and restores both methods
+  ---
+  duration_ms: 0.2331
+  type: 'test'
+  ...
+# Subtest: stop preserves methods replaced by a later owner
+ok 8 - stop preserves methods replaced by a later owner
+  ---
+  duration_ms: 0.2785
+  type: 'test'
+  ...
+# Subtest: context loss ends measurement and releases listeners and methods
+ok 9 - context loss ends measurement and releases listeners and methods
+  ---
+  duration_ms: 0.3955
+  type: 'test'
+  ...
+# Subtest: a stop delivered inside render waits for the frame finally blocks
+ok 10 - a stop delivered inside render waits for the frame finally blocks
+  ---
+  duration_ms: 0.4014
+  type: 'test'
+  ...
+# Subtest: a frame exception still records CPU duration and allows method restoration
+ok 11 - a frame exception still records CPU duration and allows method restoration
+  ---
+  duration_ms: 0.2443
+  type: 'test'
+  ...
+1..11
+# tests 11
+# suites 0
+# pass 11
+# fail 0
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 128.2884
+(node:40868) [MODULE_TYPELESS_PACKAGE_JSON] Warning: Module type of file:///D:/project/neurosama/web/delivery-notice.js is not specified and it doesn't parse as CommonJS.
+Reparsing as ES module because module syntax was detected. This incurs a performance overhead.
+To eliminate this warning, add "type": "module" to D:\project\neurosama\package.json.
+(Use `node --trace-warnings ...` to show where the warning was created)
+TAP version 13
+# Subtest: deliveryNotes 瑕嗙洊鍥涚闄嶇骇涓庣粍鍚?ok 1 - deliveryNotes 瑕嗙洊鍥涚闄嶇骇涓庣粍鍚?  ---
+  duration_ms: 1.0221
+  type: 'test'
+  ...
+# Subtest: voiceFirstNotice 鍙姤闊抽渚ч檷绾?ok 2 - voiceFirstNotice 鍙姤闊抽渚ч檷绾?  ---
+  duration_ms: 0.1413
+  type: 'test'
+  ...
+# Subtest: 涓ゅ鍑哄彛瀵归煶棰戦檷绾у繀椤诲悓婧?ok 3 - 涓ゅ鍑哄彛瀵归煶棰戦檷绾у繀椤诲悓婧?  ---
+  duration_ms: 0.766
+  type: 'test'
+  ...
+# Subtest: app.js 涓ゅ鍑哄彛閮芥帴浜嗗悓涓€涓ā鍧楋紙闃叉帴绾胯鍒狅級
+ok 4 - app.js 涓ゅ鍑哄彛閮芥帴浜嗗悓涓€涓ā鍧楋紙闃叉帴绾胯鍒狅級
+  ---
+  duration_ms: 0.7817
+  type: 'test'
+  ...
+# Subtest: 鐣稿舰杈撳叆涓嶆姏涔熶笉璇姤
+ok 5 - 鐣稿舰杈撳叆涓嶆姏涔熶笉璇姤
+  ---
+  duration_ms: 0.2747
+  type: 'test'
+  ...
+1..5
+# tests 5
+# suites 0
+# pass 5
+# fail 0
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 9.7749
+
+> test:dialogue-gaze
+> node --experimental-default-type=module --test web/avatar/test_dialogue_gaze.js web/avatar/test_dialogue_expression.js web/avatar/test_dialogue_intent.js web/avatar/test_dialogue_review.js web/avatar/test_dialogue_gaze_integration.js
+
+TAP version 13
+# Subtest: listening waits before a small lift and settles during long attentive listening
+ok 1 - listening waits before a small lift and settles during long attentive listening
+  ---
+  duration_ms: 3.621
+  type: 'test'
+  ...
+# Subtest: thinking brow follows gaze onset and uses the actual temporary glance side
+ok 2 - thinking brow follows gaze onset and uses the actual temporary glance side
+  ---
+  duration_ms: 0.5324
+  type: 'test'
+  ...
+# Subtest: thinking -> preparing preserves an averted phase and repeated labels do not restart it
+ok 3 - thinking -> preparing preserves an averted phase and repeated labels do not restart it
+  ---
+  duration_ms: 0.2194
+  type: 'test'
+  ...
+# Subtest: quick listening and quickly cancelled thinking never produce a delayed flash
+ok 4 - quick listening and quickly cancelled thinking never produce a delayed flash
+  ---
+  duration_ms: 0.4999
+  type: 'test'
+  ...
+# Subtest: actual speech waits for gaze return before adding soft eyes; preparation adds no smile
+ok 5 - actual speech waits for gaze return before adding soft eyes; preparation adds no smile
+  ---
+  duration_ms: 1.2077
+  type: 'test'
+  ...
+# Subtest: negative, focused and unknown emotion labels never gain an automatic smile
+ok 6 - negative, focused and unknown emotion labels never gain an automatic smile
+  ---
+  duration_ms: 6.5294
+  type: 'test'
+  ...
+# Subtest: returning gaze, yielding and idle release existing cues instead of leaving a held brow
+ok 7 - returning gaze, yielding and idle release existing cues instead of leaving a held brow
+  ---
+  duration_ms: 1.8958
+  type: 'test'
+  ...
+# Subtest: explicit stop cancels delayed work; a new state or new turn can cue again
+ok 8 - explicit stop cancels delayed work; a new state or new turn can cue again
+  ---
+  duration_ms: 1.6806
+  type: 'test'
+  ...
+# Subtest: graceful stop decays the current pose and cannot resurrect on repeated old frames
+ok 9 - graceful stop decays the current pose and cannot resurrect on repeated old frames
+  ---
+  duration_ms: 0.9488
+  type: 'test'
+  ...
+# Subtest: suspension observes current timing so an entire missed aversion is not replayed
+ok 10 - suspension observes current timing so an entire missed aversion is not replayed
+  ---
+  duration_ms: 0.9067
+  type: 'test'
+  ...
+# Subtest: disable and an inactive director retire current cues
+ok 11 - disable and an inactive director retire current cues
+  ---
+  duration_ms: 2.0541
+  type: 'test'
+  ...
+# Subtest: three styles scale small brows and lid cues without changing timing
+ok 12 - three styles scale small brows and lid cues without changing timing
+  ---
+  duration_ms: 1.9945
+  type: 'test'
+  ...
+# Subtest: reduced motion scales both brows and eyelids to 45 percent with matching timing
+ok 13 - reduced motion scales both brows and eyelids to 45 percent with matching timing
+  ---
+  duration_ms: 1.7136
+  type: 'test'
+  ...
+# Subtest: only the calibrated lower-lid profile receives lower deltas; old models keep smile separate
+ok 14 - only the calibrated lower-lid profile receives lower deltas; old models keep smile separate
+  ---
+  duration_ms: 2.1424
+  type: 'test'
+  ...
+# Subtest: outputs only six additive face keys and samples cannot mutate internal state
+ok 15 - outputs only six additive face keys and samples cannot mutate internal state
+  ---
+  duration_ms: 2.2362
+  type: 'test'
+  ...
+# Subtest: invalid dt, ages and tags never generate NaN or unknown parameter writes
+ok 16 - invalid dt, ages and tags never generate NaN or unknown parameter writes
+  ---
+  duration_ms: 1.1099
+  type: 'test'
+  ...
+# Subtest: absolute phaseAge can skip stale preparation, while stopped audio phaseAge cannot advance a speech cue
+ok 17 - absolute phaseAge can skip stale preparation, while stopped audio phaseAge cannot advance a speech cue
+  ---
+  duration_ms: 1.8789
+  type: 'test'
+  ...
+# Subtest: brow rise, speech rise and release stay consistent at 30, 60 and 144 FPS
+ok 18 - brow rise, speech rise and release stay consistent at 30, 60 and 144 FPS
+  ---
+  duration_ms: 3.4164
+  type: 'test'
+  ...
+# Subtest: real director phase timing drives delayed brows and audio starts independently of generated text
+ok 19 - real director phase timing drives delayed brows and audio starts independently of generated text
+  ---
+  duration_ms: 1.4911
+  type: 'test'
+  ...
+# Subtest: serious presentation keeps smaller brows and cannot inherit automatic smile from neutral speech
+ok 20 - serious presentation keeps smaller brows and cannot inherit automatic smile from neutral speech
+  ---
+  duration_ms: 2.385
+  type: 'test'
+  ...
+# Subtest: hesitation explicitly selected leaves a later single-side brow after aversion and no reply smile
+ok 21 - hesitation explicitly selected leaves a later single-side brow after aversion and no reply smile
+  ---
+  duration_ms: 1.3488
+  type: 'test'
+  ...
+# Subtest: teasing waits for actual speech and viewer-return phase before brow then asymmetric eyes
+ok 22 - teasing waits for actual speech and viewer-return phase before brow then asymmetric eyes
+  ---
+  duration_ms: 1.5374
+  type: 'test'
+  ...
+# Subtest: negative and unknown emotions veto explicit teasing speaking cues and retire earlier soft eyes
+ok 23 - negative and unknown emotions veto explicit teasing speaking cues and retire earlier soft eyes
+  ---
+  duration_ms: 9.8987
+  type: 'test'
+  ...
+# Subtest: intent precedence is explicit and switching presentation cannot resurrect a cancelled old cue
+ok 24 - intent precedence is explicit and switching presentation cannot resurrect a cancelled old cue
+  ---
+  duration_ms: 1.4445
+  type: 'test'
+  ...
+# Subtest: paused speech timing never advances a delayed teasing cue
+ok 25 - paused speech timing never advances a delayed teasing cue
+  ---
+  duration_ms: 0.6808
+  type: 'test'
+  ...
+# Subtest: new intent transitions remain stable at 30, 60 and 144 FPS and scale reduced motion once
+ok 26 - new intent transitions remain stable at 30, 60 and 144 FPS and scale reduced motion once
+  ---
+  duration_ms: 1.8621
+  type: 'test'
+  ...
+# Subtest: idle does not seize an untouched gaze target; sample is isolated
+ok 27 - idle does not seize an untouched gaze target; sample is isolated
+  ---
+  duration_ms: 2.9559
+  type: 'test'
+  ...
+# Subtest: listening and monitoring attend to the viewer with bounded quiet micro motion
+ok 28 - listening and monitoring attend to the viewer with bounded quiet micro motion
+  ---
+  duration_ms: 0.385
+  type: 'test'
+  ...
+# Subtest: a first waiting glance has a delay, bounded hold, return and sparse repeat
+ok 29 - a first waiting glance has a delay, bounded hold, return and sparse repeat
+  ---
+  duration_ms: 0.7065
+  type: 'test'
+  ...
+# Subtest: thinking to preparing retains its first waiting clock and same-state updates are idempotent
+ok 30 - thinking to preparing retains its first waiting clock and same-state updates are idempotent
+  ---
+  duration_ms: 0.225
+  type: 'test'
+  ...
+# Subtest: emotion, text deltas and generation done never start speech or prematurely return a glance
+ok 31 - emotion, text deltas and generation done never start speech or prematurely return a glance
+  ---
+  duration_ms: 0.4706
+  type: 'test'
+  ...
+# Subtest: the actual audio start returns attention, never the schedule or a UI speaking label
+ok 32 - the actual audio start returns attention, never the schedule or a UI speaking label
+  ---
+  duration_ms: 0.3074
+  type: 'test'
+  ...
+# Subtest: frame time cannot make frozen audio start; suspended AudioContext does not make start zero audible
+ok 33 - frame time cannot make frozen audio start; suspended AudioContext does not make start zero audible
+  ---
+  duration_ms: 0.1997
+  type: 'test'
+  ...
+# Subtest: forward queued fragments preserve live speech and inter-sentence gaps keep viewer attention
+ok 34 - forward queued fragments preserve live speech and inter-sentence gaps keep viewer attention
+  ---
+  duration_ms: 0.1985
+  type: 'test'
+  ...
+# Subtest: a skipped complete audio fragment records spoken history without a one-frame speech flash
+ok 35 - a skipped complete audio fragment records spoken history without a one-frame speech flash
+  ---
+  duration_ms: 0.3253
+  type: 'test'
+  ...
+# Subtest: newTurn clears speech and history, including a simultaneous speaking request
+ok 36 - newTurn clears speech and history, including a simultaneous speaking request
+  ---
+  duration_ms: 0.528
+  type: 'test'
+  ...
+# Subtest: ending speech cancels future clips, and final completion releases viewer only once
+ok 37 - ending speech cancels future clips, and final completion releases viewer only once
+  ---
+  duration_ms: 0.2034
+  type: 'test'
+  ...
+# Subtest: endSpeech with a pending turn also cancels a scheduled clip without simulating audible speech
+ok 38 - endSpeech with a pending turn also cancels a scheduled clip without simulating audible speech
+  ---
+  duration_ms: 0.1184
+  type: 'test'
+  ...
+# Subtest: interrupt and playback stop retract all clips and waiting plans immediately
+ok 39 - interrupt and playback stop retract all clips and waiting plans immediately
+  ---
+  duration_ms: 0.1951
+  type: 'test'
+  ...
+# Subtest: temporary ducked yielding retains audible clips and can resume speaking until an actual interruption
+ok 40 - temporary ducked yielding retains audible clips and can resume speaking until an actual interruption
+  ---
+  duration_ms: 0.1329
+  type: 'test'
+  ...
+# Subtest: empty recognized speech returns to idle and retracts future audio
+ok 41 - empty recognized speech returns to idle and retracts future audio
+  ---
+  duration_ms: 0.174
+  type: 'test'
+  ...
+# Subtest: recoverable delivery errors preserve audio, while fatal errors retract attention and queued clips
+ok 42 - recoverable delivery errors preserve audio, while fatal errors retract attention and queued clips
+  ---
+  duration_ms: 0.2265
+  type: 'test'
+  ...
+# Subtest: generic stop cancels pending audio and never grabs an initially idle target
+ok 43 - generic stop cancels pending audio and never grabs an initially idle target
+  ---
+  duration_ms: 0.6435
+  type: 'test'
+  ...
+# Subtest: recording and thinking event duplicates are idempotent; a new turn id retracts queued speech
+ok 44 - recording and thinking event duplicates are idempotent; a new turn id retracts queued speech
+  ---
+  duration_ms: 0.2068
+  type: 'test'
+  ...
+# Subtest: an external suspension advances plans and recovers only the current target
+ok 45 - an external suspension advances plans and recovers only the current target
+  ---
+  duration_ms: 0.1354
+  type: 'test'
+  ...
+# Subtest: an unchanged target is resubmitted when manual or expression ownership ends
+ok 46 - an unchanged target is resubmitted when manual or expression ownership ends
+  ---
+  duration_ms: 0.1075
+  type: 'test'
+  ...
+# Subtest: suspended cancellation defers one release and cannot replay its previous away target
+ok 47 - suspended cancellation defers one release and cannot replay its previous away target
+  ---
+  duration_ms: 0.1441
+  type: 'test'
+  ...
+# Subtest: actual audio can start and end during suspension without resurrecting a thinking glance
+ok 48 - actual audio can start and end during suspension without resurrecting a thinking glance
+  ---
+  duration_ms: 0.1244
+  type: 'test'
+  ...
+# Subtest: reduced motion scales displacement and micro radius without forcing any face channels
+ok 49 - reduced motion scales displacement and micro radius without forcing any face channels
+  ---
+  duration_ms: 0.2142
+  type: 'test'
+  ...
+# Subtest: disable cancels future speech and releases once; enable does not replay a previous glance
+ok 50 - disable cancels future speech and releases once; enable does not replay a previous glance
+  ---
+  duration_ms: 0.1604
+  type: 'test'
+  ...
+# Subtest: invalid inputs cannot poison state, target, tuning or clocks
+ok 51 - invalid inputs cannot poison state, target, tuning or clocks
+  ---
+  duration_ms: 0.2686
+  type: 'test'
+  ...
+# Subtest: clock replacement and backward schedules retract old stream clips
+ok 52 - clock replacement and backward schedules retract old stream clips
+  ---
+  duration_ms: 0.1308
+  type: 'test'
+  ...
+# Subtest: phase and target agree at the same physical times over 30, 60 and 144 fps
+ok 53 - phase and target agree at the same physical times over 30, 60 and 144 fps
+  ---
+  duration_ms: 16.1497
+  type: 'test'
+  ...
+# Subtest: large frame gaps evaluate the present target rather than replay missed away events
+ok 54 - large frame gaps evaluate the present target rather than replay missed away events
+  ---
+  duration_ms: 0.2095
+  type: 'test'
+  ...
+# Subtest: three immutable styles expose bounded face and existing eye-head coordination tuning
+ok 55 - three immutable styles expose bounded face and existing eye-head coordination tuning
+  ---
+  duration_ms: 0.3347
+  type: 'test'
+  ...
+# Subtest: identical variation seeds create one common blueprint for a fair three-style comparison
+ok 56 - identical variation seeds create one common blueprint for a fair three-style comparison
+  ---
+  duration_ms: 0.2848
+  type: 'test'
+  ...
+# Subtest: each style enforces a finite turn budget and keeps attending after it is exhausted
+ok 57 - each style enforces a finite turn budget and keeps attending after it is exhausted
+  ---
+  duration_ms: 0.3474
+  type: 'test'
+  ...
+# Subtest: new turns vary timing and directions reproducibly, without reseeding on repeated messages
+ok 58 - new turns vary timing and directions reproducibly, without reseeding on repeated messages
+  ---
+  duration_ms: 0.7545
+  type: 'test'
+  ...
+# Subtest: the exported plan seed reproduces its exact schedule independently of prior turn history
+ok 59 - the exported plan seed reproduces its exact schedule independently of prior turn history
+  ---
+  duration_ms: 0.1659
+  type: 'test'
+  ...
+# Subtest: sampling never draws randomness, changes the plan, or lets callers mutate a shared glance
+ok 60 - sampling never draws randomness, changes the plan, or lets callers mutate a shared glance
+  ---
+  duration_ms: 1.3523
+  type: 'test'
+  ...
+# Subtest: style changes preserve scheduled and audible speech, waiting age, and the original blueprint
+ok 61 - style changes preserve scheduled and audible speech, waiting age, and the original blueprint
+  ---
+  duration_ms: 0.3416
+  type: 'test'
+  ...
+# Subtest: switching to a smaller budget returns a later glance without restarting its elapsed plan
+ok 62 - switching to a smaller budget returns a later glance without restarting its elapsed plan
+  ---
+  duration_ms: 0.1969
+  type: 'test'
+  ...
+# Subtest: resetVariation changes only the next turn and never clears a currently audible or scheduled clip
+ok 63 - resetVariation changes only the next turn and never clears a currently audible or scheduled clip
+  ---
+  duration_ms: 0.1796
+  type: 'test'
+  ...
+# Subtest: fast real replies preempt the planned first glance in all styles
+ok 64 - fast real replies preempt the planned first glance in all styles
+  ---
+  duration_ms: 0.1959
+  type: 'test'
+  ...
+# Subtest: phaseAge uses absolute glance time and audio time rather than the first observed frame
+ok 65 - phaseAge uses absolute glance time and audio time rather than the first observed frame
+  ---
+  duration_ms: 0.1693
+  type: 'test'
+  ...
+# Subtest: all generated plans stay finite and separate under extreme valid tuning
+ok 66 - all generated plans stay finite and separate under extreme valid tuning
+  ---
+  duration_ms: 0.5305
+  type: 'test'
+  ...
+# Subtest: invalid styles and seeds leave the current performance intact
+ok 67 - invalid styles and seeds leave the current performance intact
+  ---
+  duration_ms: 0.416
+  type: 'test'
+  ...
+# Subtest: suspended plans exhaust normally and never replay their missed budget when ownership returns
+ok 68 - suspended plans exhaust normally and never replay their missed budget when ownership returns
+  ---
+  duration_ms: 0.2585
+  type: 'test'
+  ...
+# Subtest: a variable plan matches at its exact phase boundaries across 30, 60 and 144 fps
+ok 69 - a variable plan matches at its exact phase boundaries across 30, 60 and 144 fps
+  ---
+  duration_ms: 40.1778
+  type: 'test'
+  ...
+# Subtest: explicit neutral intent retains the default seeded attention behavior in every style
+ok 70 - explicit neutral intent retains the default seeded attention behavior in every style
+  ---
+  duration_ms: 0.8862
+  type: 'test'
+  ...
+# Subtest: intent timing freezes at waiting start while the shared blueprint remains reproducible
+ok 71 - intent timing freezes at waiting start while the shared blueprint remains reproducible
+  ---
+  duration_ms: 0.5859
+  type: 'test'
+  ...
+# Subtest: live intent changes scale an ongoing glance without moving its frozen onset or end
+ok 72 - live intent changes scale an ongoing glance without moving its frozen onset or end
+  ---
+  duration_ms: 0.1828
+  type: 'test'
+  ...
+# Subtest: switching intent cannot postpone a finished glance and replay its expired phase
+ok 73 - switching intent cannot postpone a finished glance and replay its expired phase
+  ---
+  duration_ms: 0.4157
+  type: 'test'
+  ...
+# Subtest: intent budget reductions release a later glance and expanding after its end never revives it
+ok 74 - intent budget reductions release a later glance and expanding after its end never revives it
+  ---
+  duration_ms: 0.1581
+  type: 'test'
+  ...
+# Subtest: live intent changes preserve future and audible audio clips and use the actual speech clock
+ok 75 - live intent changes preserve future and audible audio clips and use the actual speech clock
+  ---
+  duration_ms: 0.2528
+  type: 'test'
+  ...
+# Subtest: invalid director intents leave active output and frozen planning untouched
+ok 76 - invalid director intents leave active output and frozen planning untouched
+  ---
+  duration_ms: 0.2168
+  type: 'test'
+  ...
+# Subtest: changing intent after stop cannot restore old clips or replay a discarded waiting plan
+ok 77 - changing intent after stop cannot restore old clips or replay a discarded waiting plan
+  ---
+  duration_ms: 0.1201
+  type: 'test'
+  ...
+# Subtest: turning off chat pointer following restores viewer gaze while idle
+ok 78 - turning off chat pointer following restores viewer gaze while idle
+  ---
+  duration_ms: 9.0776
+  type: 'test'
+  ...
+# Subtest: waiting survives generation events and duplicate thinking until the actual audio boundary
+ok 79 - waiting survives generation events and duplicate thinking until the actual audio boundary
+  ---
+  duration_ms: 13.039
+  type: 'test'
+  ...
+# Subtest: a listening body/brow gesture does not freeze micro-saccades
+ok 80 - a listening body/brow gesture does not freeze micro-saccades
+  ---
+  duration_ms: 15.1499
+  type: 'test'
+  ...
+# Subtest: default thinking keeps its brow/head track while the dialogue schedule owns gaze
+ok 81 - default thinking keeps its brow/head track while the dialogue schedule owns gaze
+  ---
+  duration_ms: 2.8023
+  type: 'test'
+  ...
+# Subtest: explicit gesture gaze, including zero, retains sole ownership
+ok 82 - explicit gesture gaze, including zero, retains sole ownership
+  ---
+  duration_ms: 5.6321
+  type: 'test'
+  ...
+# Subtest: settled explicit emotion gaze is protected and manual forward overrides it
+ok 83 - settled explicit emotion gaze is protected and manual forward overrides it
+  ---
+  duration_ms: 19.2701
+  type: 'test'
+  ...
+# Subtest: sentence gaps retain viewer attention and cancellation cannot revive an old scheduled clip
+ok 84 - sentence gaps retain viewer attention and cancellation cannot revive an old scheduled clip
+  ---
+  duration_ms: 7.6688
+  type: 'test'
+  ...
+# Subtest: eye previews, full blink and speech retain their respective ownership
+ok 85 - eye previews, full blink and speech retain their respective ownership
+  ---
+  duration_ms: 3.2975
+  type: 'test'
+  ...
+# Subtest: thinking pre-act adds micro tilt and one light blink without touching gaze
+ok 86 - thinking pre-act adds micro tilt and one light blink without touching gaze
+  ---
+  duration_ms: 4.1465
+  type: 'test'
+  ...
+# Subtest: thinking pre-act retires on first audio, done, interruption and a new turn
+ok 87 - thinking pre-act retires on first audio, done, interruption and a new turn
+  ---
+  duration_ms: 1.1671
+  type: 'test'
+  ...
+# Subtest: reduced motion degrades the thinking pre-act to a static wait
+ok 88 - reduced motion degrades the thinking pre-act to a static wait
+  ---
+  duration_ms: 3.1892
+  type: 'test'
+  ...
+# Subtest: a breath chunk blinks once at the pause and keeps the mouth relaxed through it
+ok 89 - a breath chunk blinks once at the pause and keeps the mouth relaxed through it
+  ---
+  duration_ms: 1.5304
+  type: 'test'
+  ...
+# Subtest: idle micro-motion stacking is soft-limited above the knee and identical below it
+ok 90 - idle micro-motion stacking is soft-limited above the knee and identical below it
+  ---
+  duration_ms: 4.6563
+  type: 'test'
+  ...
+# Subtest: pointer taps trigger region feedback while drags gaze and pinches pass through
+ok 91 - pointer taps trigger region feedback while drags gaze and pinches pass through
+  ---
+  duration_ms: 1.659
+  type: 'test'
+  ...
+# Subtest: touch feedback retires its own preview and pokes escalate to a pout
+ok 92 - touch feedback retires its own preview and pokes escalate to a pout
+  ---
+  duration_ms: 7.4747
+  type: 'test'
+  ...
+# Subtest: attention micro context is bounded and reset restores the configured idle context
+ok 93 - attention micro context is bounded and reset restores the configured idle context
+  ---
+  duration_ms: 1.3361
+  type: 'test'
+  ...
+# Subtest: dialogue cues fill missing brow and V3 lid channels without touching speech or eye opening
+ok 94 - dialogue cues fill missing brow and V3 lid channels without touching speech or eye opening
+  ---
+  duration_ms: 4.6397
+  type: 'test'
+  ...
+# Subtest: explicit emotion or gesture lid zero protects both shapes on its side
+ok 95 - explicit emotion or gesture lid zero protects both shapes on its side
+  ---
+  duration_ms: 7.877
+  type: 'test'
+  ...
+# Subtest: manual and preview ownership exclude dialogue face cues and interruption clears pending cue
+ok 96 - manual and preview ownership exclude dialogue face cues and interruption clears pending cue
+  ---
+  duration_ms: 7.285
+  type: 'test'
+  ...
+# Subtest: changing dialogue style during actual speech preserves clips and changes face/context scale
+ok 97 - changing dialogue style during actual speech preserves clips and changes face/context scale
+  ---
+  duration_ms: 8.829
+  type: 'test'
+  ...
+# Subtest: head context keeps target allocation conserved and eyes lead the delayed head
+ok 98 - head context keeps target allocation conserved and eyes lead the delayed head
+  ---
+  duration_ms: 0.3811
+  type: 'test'
+  ...
+# Subtest: the real RAF host skips stale waiting glances while body integration remains capped
+ok 99 - the real RAF host skips stale waiting glances while body integration remains capped
+  ---
+  duration_ms: 6.4922
+  type: 'test'
+  ...
+# Subtest: automatic intent follows the actual matching target and manual selection wins over emotion
+ok 100 - automatic intent follows the actual matching target and manual selection wins over emotion
+  ---
+  duration_ms: 1.4336
+  type: 'test'
+  ...
+# Subtest: invalid public intent values cannot mutate a manual mode, active plan, or queued speech
+ok 101 - invalid public intent values cannot mutate a manual mode, active plan, or queued speech
+  ---
+  duration_ms: 2.177
+  type: 'test'
+  ...
+# Subtest: changing live intent preserves waiting timing and audio while updating permitted gaze amplitude
+ok 102 - changing live intent preserves waiting timing and audio while updating permitted gaze amplitude
+  ---
+  duration_ms: 3.6208
+  type: 'test'
+  ...
+# Subtest: configured teasing brow and smile ownership protects existing expression while the free right brow animates
+ok 103 - configured teasing brow and smile ownership protects existing expression while the free right brow animates
+  ---
+  duration_ms: 4.7982
+  type: 'test'
+  ...
+# Subtest: serious and hesitant replies never add smile and preserve mouth playback and full blink
+ok 104 - serious and hesitant replies never add smile and preserve mouth playback and full blink
+  ---
+  duration_ms: 8.1697
+  type: 'test'
+  ...
+# Subtest: calibration exit restores manual intent, frozen plan, expression and live queued audio clock
+ok 105 - calibration exit restores manual intent, frozen plan, expression and live queued audio clock
+  ---
+  duration_ms: 7.5006
+  type: 'test'
+  ...
+# Subtest: interruption cancels queued audio and delayed intent cues even after changing presentation
+ok 106 - interruption cancels queued audio and delayed intent cues even after changing presentation
+  ---
+  duration_ms: 6.2031
+  type: 'test'
+  ...
+# Subtest: auto follows the two supported presentation labels and never guesses hesitation
+ok 107 - auto follows the two supported presentation labels and never guesses hesitation
+  ---
+  duration_ms: 0.7708
+  type: 'test'
+  ...
+# Subtest: manual presentation intent takes precedence over emotion without inferring from text
+ok 108 - manual presentation intent takes precedence over emotion without inferring from text
+  ---
+  duration_ms: 0.1814
+  type: 'test'
+  ...
+# Subtest: invalid manual values safely resolve neutral and object prototype keys are not profiles
+ok 109 - invalid manual values safely resolve neutral and object prototype keys are not profiles
+  ---
+  duration_ms: 0.117
+  type: 'test'
+  ...
+# Subtest: shared profiles are immutable, bounded and cap rather than expand glance budgets
+ok 110 - shared profiles are immutable, bounded and cap rather than expand glance budgets
+  ---
+  duration_ms: 1.7979
+  type: 'test'
+  ...
+# Subtest: default is inactive and neither events nor frames implicitly authorize a turn
+ok 111 - default is inactive and neither events nor frames implicitly authorize a turn
+  ---
+  duration_ms: 1.6215
+  type: 'test'
+  ...
+# Subtest: start and stop keep completed turns; repeated current ID does not restart its clock
+ok 112 - start and stop keep completed turns; repeated current ID does not restart its clock
+  ---
+  duration_ms: 0.6104
+  type: 'test'
+  ...
+# Subtest: new authorized turns finish their predecessor and reject old events and end IDs
+ok 113 - new authorized turns finish their predecessor and reject old events and end IDs
+  ---
+  duration_ms: 0.2363
+  type: 'test'
+  ...
+# Subtest: frame throttling uses elapsed milliseconds, independent of render frame count
+ok 114 - frame throttling uses elapsed milliseconds, independent of render frame count
+  ---
+  duration_ms: 1.8238
+  type: 'test'
+  ...
+# Subtest: the default clock records valid real runtime timestamps without a separate timer
+ok 115 - the default clock records valid real runtime timestamps without a separate timer
+  ---
+  duration_ms: 0.8238
+  type: 'test'
+  ...
+# Subtest: generated text and early done do not become spoken text or end the turn
+ok 116 - generated text and early done do not become spoken text or end the turn
+  ---
+  duration_ms: 0.2757
+  type: 'test'
+  ...
+# Subtest: actual sentence playback, gaps and interruption remain separately reconstructible
+ok 117 - actual sentence playback, gaps and interruption remain separately reconstructible
+  ---
+  duration_ms: 0.4247
+  type: 'test'
+  ...
+# Subtest: frame evidence copies rendered parameters, ownership, emotion, cues and audio clock
+ok 118 - frame evidence copies rendered parameters, ownership, emotion, cues and audio clock
+  ---
+  duration_ms: 0.1956
+  type: 'test'
+  ...
+# Subtest: bounded samples stop growing while later playback events can still be captured
+ok 119 - bounded samples stop growing while later playback events can still be captured
+  ---
+  duration_ms: 0.3477
+  type: 'test'
+  ...
+# Subtest: duration limit completes a long turn at the exact cutoff and does not silently restart it
+ok 120 - duration limit completes a long turn at the exact cutoff and does not silently restart it
+  ---
+  duration_ms: 0.3705
+  type: 'test'
+  ...
+# Subtest: snapshot alone also enforces the real elapsed duration cutoff
+ok 121 - snapshot alone also enforces the real elapsed duration cutoff
+  ---
+  duration_ms: 0.1671
+  type: 'test'
+  ...
+# Subtest: retention includes current turn and only keeps the configured newest completed turns
+ok 122 - retention includes current turn and only keeps the configured newest completed turns
+  ---
+  duration_ms: 0.2895
+  type: 'test'
+  ...
+# Subtest: text and events are bounded independently and explicitly flag truncation
+ok 123 - text and events are bounded independently and explicitly flag truncation
+  ---
+  duration_ms: 1.2079
+  type: 'test'
+  ...
+# Subtest: snapshots cannot mutate recorded turns, metadata, frames or limits
+ok 124 - snapshots cannot mutate recorded turns, metadata, frames or limits
+  ---
+  duration_ms: 0.3658
+  type: 'test'
+  ...
+# Subtest: clear deletes all saved text and metadata but preserves the recording switch
+ok 125 - clear deletes all saved text and metadata but preserves the recording switch
+  ---
+  duration_ms: 0.3605
+  type: 'test'
+  ...
+# Subtest: lightweight list and single-turn lookup are isolated and include current status
+ok 126 - lightweight list and single-turn lookup are isolated and include current status
+  ---
+  duration_ms: 0.426
+  type: 'test'
+  ...
+# Subtest: lightweight read methods also retire a turn whose time limit has expired
+ok 127 - lightweight read methods also retire a turn whose time limit has expired
+  ---
+  duration_ms: 0.1439
+  type: 'test'
+  ...
+# Subtest: raw audio, credential metadata, binary text and arbitrary fields are never copied
+ok 128 - raw audio, credential metadata, binary text and arbitrary fields are never copied
+  ---
+  duration_ms: 0.2413
+  type: 'test'
+  ...
+# Subtest: bad clock values, nonfinite parameters, malformed IDs and capability errors remain JSON safe
+ok 129 - bad clock values, nonfinite parameters, malformed IDs and capability errors remain JSON safe
+  ---
+  duration_ms: 0.3299
+  type: 'test'
+  ...
+1..129
+# tests 129
+# suites 0
+# pass 129
+# fail 0
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 441.2066
+
+> test:avatar-motion
+> node --experimental-default-type=module --test web/avatar/test_motion.js web/avatar/test_lipsync.js web/avatar/test_affect.js web/avatar/test_intensity.js web/avatar/test_speech_plan.js web/avatar/test_performance.js web/avatar/test_stage_camera.js
+
+TAP version 13
+# arousal / valence 浠庨厤缃鍑烘潵
+#   ok   鍞ら啋搴︽帴杩戦厤缃€?#   ok   鏁堜环鎺ヨ繎閰嶇疆鍊?# 缂洪厤缃椂閫€鍥炰腑鎬э紝鑰屼笉鏄?0 鎴栧穿婧?#   ok   鍥為€€鍒?base 涓斿敜閱掑害闈為浂
+#   ok   绌鸿〃涔熶笉宕╀笖鏈夊悎鐞嗗€?#   ok   绌鸿〃鏃朵笉鏄?0锛? 浼氳鎴愮潯鐫€/鍗′綇锛?# 鍒嗙骇寮哄害锛歛rousal 鍐冲畾琛ㄦ儏鎵撳澶?#   ok   楂樺敜閱掑害涓嬭〃鎯呮洿澶?#   ok   浣庡敜閱掑害涓嬭〃鎯呬笉涓洪浂锛堝惁鍒欒鎴愬崱浣忥級
+#   ok   寮哄急宸窛鑷冲皯 1.6 鍊?#   ok   楂樺敜閱掑害鎺ヨ繎婊″€间絾涓嶈秺鐣?# 鎯呮劅缁村害鍦ㄦ儏缁垏鎹㈡椂骞虫粦杩囨浮锛堜笉璺冲彉锛?#   ok   鍞ら啋搴﹀崟姝ュ彉鍖栨湁鐣?#   ok   瓒冲鏃堕棿鍚庢敹鏁涘埌鐩爣
+#   ok   杩囨浮鏄笎杩涚殑锛堜腑閫旂‘瀹炵粡杩囦腑闂村€硷級
+# 鍞ら啋搴?-> 鍛煎惛棰戠巼
+#   ok   骞抽潤楗辨弧鏃跺懆鏈熺瓑浜庨厤缃€?#   ok   楂樺敜閱掓椂鍛ㄦ湡鏄庢樉鍙樼煭
+#   ok   鍛煎惛鍛ㄦ湡鏈変笅闄愶紝涓嶄細鍙樻垚 0
+#   ok   鐘洶鏃跺懠鍚稿彉闀匡紙娴呰€屾參锛?# 鍞ら啋搴?-> 鍛煎惛娣卞害锛堟縺鍔ㄦ椂鍛兼皵鍙樻祬锛?#   ok   楂樺敜閱掑害鍛煎惛鏇存祬
+# 鏁堜环 -> 鐪ㄧ溂鐤忓瘑锛堟闈㈡洿棰戠箒锛?#   ok   姝ｉ潰鎯呯华鐪ㄧ溂鏇撮绻?#   ok   璐熼潰鎯呯华鐪ㄧ溂鏇寸█鐤?#   ok   鍗曡皟锛氭闈?> 涓€?> 璐熼潰
+#   ok   涓€х湪鐪肩巼钀藉湪瀹炴祴鍖洪棿 8~21 娆?鍒?# 鍞ら啋搴?-> 鐪艰烦鏃堕暱锛堟縺鍔ㄦ椂鍙樻參锛?#   ok   楂樺敜閱掑害鏃剁溂璺虫洿鎱紙瀹炴祴鍏崇郴锛?#   ok   涓よ€呬粛鍦ㄥ悎娉曟椂闀垮尯闂村唴
+# 鐪艰烦-鐪ㄧ溂浜掔浉鎶戝埗锛圤PN 闂ㄦ帶锛?#   ok   鐪艰烦杩涜涓粷涓嶇湪鐪?#   ok   鐪艰烦缁撴潫鍚庤ˉ浜嗛偅涓€娆＄湪鐪?# 鐪ㄧ溂鏈熼棿涓嶅彂璧风溂璺?#   ok   鐪ㄧ溂鏈熼棿鐪艰烦琚嫆
+#   ok   涓嶇湪鏃跺彲浠ュ彂璧风溂璺?# 鎵€鏈夎緭鍑洪兘鏄湁闄愬€?#   ok   鎵€鏈夐┍鍔ㄨ緭鍑哄潎涓烘湁闄愬€?# 鐬冲瓟閫氶亾鐙珛浜庤〃鎯?#   ok   arousal 鑳借鐏岃繘 idle 骞惰鍒?#   ok   valence 鑳借鐏岃繘 idle 骞惰鍒?#   ok   鐏屽叆 NaN 涓嶄細姹℃煋鐘舵€?#   ok   鐏屽叆瓒婄晫鍊间細琚す浣?# 鍏ㄩ儴閫氳繃
+# Subtest: web\\avatar\\test_affect.js
+ok 1 - web\\avatar\\test_affect.js
+  ---
+  duration_ms: 335.2623
+  type: 'test'
+  ...
+# 鎯呯华琛ㄥ叡 7 椤? base / 璋冧緝 / 寰楁剰 / 璁ょ湡 / 鏀舵暃 / 杞诲井涓嶆湇 / 鍙樺皬姘?# 姣忎釜鎯呯华閮藉甫 arousal / valence
+#   ok   base 鏈?arousal
+#   ok   base 鏈?valence
+#   ok   璋冧緝 鏈?arousal
+#   ok   璋冧緝 鏈?valence
+#   ok   寰楁剰 鏈?arousal
+#   ok   寰楁剰 鏈?valence
+#   ok   璁ょ湡 鏈?arousal
+#   ok   璁ょ湡 鏈?valence
+#   ok   鏀舵暃 鏈?arousal
+#   ok   鏀舵暃 鏈?valence
+#   ok   杞诲井涓嶆湇 鏈?arousal
+#   ok   杞诲井涓嶆湇 鏈?valence
+#   ok   鍙樺皬姘?鏈?arousal
+#   ok   鍙樺皬姘?鏈?valence
+# 浣嶇Щ澧炵泭鐪熺殑鎷夊紑浜?#   ok   鏈€浣庡鐩?>= 0.45锛堜笉鏄鐮嶅埌闆讹級
+#   ok   鏈€楂樺鐩?> 0.75锛堝己鎯呯华鐪熺殑鏇村己锛?#   ok   寮哄急鎯呯华鐨勫鐩婂樊 > 20%
+#     base   arousal=0.25 valence=0.15 gain=0.587
+#     璋冧緝     arousal=0.55 valence=0.60 gain=0.753
+#     寰楁剰     arousal=0.85 valence=0.85 gain=0.918
+#     璁ょ湡     arousal=0.60 valence=-0.15 gain=0.780
+#     鏀舵暃     arousal=0.20 valence=-0.25 gain=0.560
+#     杞诲井涓嶆湇   arousal=0.50 valence=-0.40 gain=0.725
+#     鍙樺皬姘?   arousal=0.25 valence=-0.70 gain=0.588
+# 楂樺敜閱掓儏缁殑鐬冲瓟鏇村ぇ锛堢敓鐞嗛€氶亾鐪熺殑琚┍鍔級
+#   ok   寰楁剰鐨勭灣瀛?> 鏀舵暃鐨勭灣瀛?# 鍏ㄩ儴閫氳繃
+# Subtest: web\\avatar\\test_intensity.js
+ok 2 - web\\avatar\\test_intensity.js
+  ---
+  duration_ms: 273.3621
+  type: 'test'
+  ...
+# 杈圭晫鏉′欢
+#   ok   t=0 鏈夊€硷紙涓嶆槸 null锛?#   ok   t=dur 鏈夊€?#   ok   t 杩滆秴鏃堕暱鏈夊€间笖涓嶅穿
+#   ok   绌烘枃鏈篃鑳介噰鏍?#   ok   鍏ㄧ┖鐧?+ duration=0 涓嶅穿
+# 杈撳嚭鎭掑湪鍚堟硶鑼冨洿锛堜笉鍙橀噺锛?#   ok   鎵€鏈夋枃鏈?鎵€鏈夐噰鏍风偣锛氭湁闄愬€间笖 open鈭圼0,1]
+# 杩炵画鎬э細涓嶈兘鏈夋柇鐐?#   ok   娌℃湁瀛ょ珛鐨勫ぇ璺冲彉锛堟柇鐐癸級
+# 鍙屽攪闂悎鐨勬椂闀垮湪鐢熺悊鑼冨洿鍐?# 鎻愬墠鍏卞彂闊筹細鍢存瘮澹伴煶鏃╁姩
+#   ok   鐢ㄧ殑鏄互鍏冮煶璧峰鐨勯煶鑺?#   ok   鎻愬墠閲忕獥鍙ｅ瓨鍦紙a0 < t0锛?#   ok   闊宠妭寮€濮嬪墠鍢村凡鍦ㄦ垚褰?#   ok   鎻愬墠閲忔湁瀹為檯閲忕骇锛?20ms锛?# 鎶楁贩鍚堬細鍙屽攪闊冲繀椤荤湡鐨勯棴鍚?#   ok   闂悎娈典腑閮?open 鍩烘湰涓?0
+#   ok   鎵€鏈?b/p/m 閮芥爣浜?closure
+# 鎶楁贩鍚堜笉鑳借繃搴︼細鍏冮煶浠嶈寮犲緱寮€
+#   ok   鍏冮煶鍖?open 鎺ヨ繎婊″€?#   ok   杩炶鏃跺厓闊充粛鑳藉紶寮€
+# 鎻愬墠閲忔湁缁濆涓婇檺
+#   ok   娌℃湁浠讳綍娈电殑鎻愬墠閲忚秴杩囦笂闄?# 鏃堕棿杞撮暱搴﹀畧鎭?#   ok   鏈€鍚庝竴娈典笉瓒呭嚭鏃堕暱
+#   ok   娈垫暟涓嶄负 0
+#   ok   娈垫寜鏃堕棿鏈夊簭涓?t1>=t0
+# 璇磋瘽鏃跺槾涓嶈兘涓€鐩存槸鍚屼竴褰㈢姸
+#   ok   寮犲彛骞呭害鏈夎冻澶熷彉鍖栬寖鍥?#   ok   鍙栧€间笉鏄皯鏁板嚑妗ｏ紙璇存槑鍦ㄦ贩鍚堣€岄潪鏌ヨ〃锛?# 鍏ㄩ儴閫氳繃
+# Subtest: web\\avatar\\test_lipsync.js
+ok 3 - web\\avatar\\test_lipsync.js
+  ---
+  duration_ms: 239.2101
+  type: 'test'
+  ...
+# spring 鑳介噺鍗曡皟琛板噺
+#   ok   f=1.5 zeta=0.58
+#   ok   f=1.1 zeta=0.4
+#   ok   f=4 zeta=0.34
+#   ok   f=2.4 zeta=0.7
+#   ok   f=1.2 zeta=1
+#   ok   f=1 zeta=1.6
+# 瑙ｆ瀽瑙ｅ垵鍊兼潯浠?x(0)=x0, v(0)=v0
+#   ok   f=1.5 zeta=0.58
+#   ok   f=1.1 zeta=0.4
+#   ok   f=4 zeta=0.34
+#   ok   f=1.2 zeta=1
+#   ok   f=1 zeta=1.6
+#   ok   f=1 zeta=0.0001
+#   ok   f=1 zeta=0.9999
+#   ok   f=1 zeta=1.0001
+# 闈欐鏃舵敹鏁涘埌涓嶅姩鐐?#   ok   f=1.5 zeta=0.58
+#   ok   f=1.1 zeta=0.4
+#   ok   f=1.2 zeta=1
+# 璺ㄥ抚鐜囦竴鑷达細涓€姝?dt 蹇呴』绛変簬 N 姝?dt/N锛堣宸?< 1e-12锛?#   ok   f=1.5 zeta=0.58 鎷嗕袱姝?#   ok   f=1.5 zeta=0.58 鎷嗗洓姝?#   ok   f=1.5 zeta=0.58 鎷嗕笁姝?#   ok   f=1.1 zeta=0.4 鎷嗕袱姝?#   ok   f=1.1 zeta=0.4 鎷嗗洓姝?#   ok   f=1.1 zeta=0.4 鎷嗕笁姝?#   ok   f=4 zeta=0.34 鎷嗕袱姝?#   ok   f=4 zeta=0.34 鎷嗗洓姝?#   ok   f=4 zeta=0.34 鎷嗕笁姝?#   ok   f=1.2 zeta=1 鎷嗕袱姝?#   ok   f=1.2 zeta=1 鎷嗗洓姝?#   ok   f=1.2 zeta=1 鎷嗕笁姝?#   ok   f=1 zeta=1.6 鎷嗕袱姝?#   ok   f=1 zeta=1.6 鎷嗗洓姝?#   ok   f=1 zeta=1.6 鎷嗕笁姝?# 杩囬樆灏煎尯涓嶄骇鐢熸尟鑽?#   ok   f=1.2 zeta=1 鏃犺繃鍐?#   ok   f=1 zeta=1.6 鏃犺繃鍐?#   ok   f=1 zeta=3 鏃犺繃鍐?# 澶ф闀跨ǔ瀹氭€?#   ok   19Hz @ 60fps 涓嶅彂鏁?#   ok   dt=5s 涓€姝ュ埌浣嶄笖涓嶅彂鏁?# 鐪ㄧ溂娉㈠舰
+#   ok   鐫佺溂娈垫槑鏄鹃暱浜庨棴鐪兼
+# 娉ㄨ鐐?#   ok   custom 娉ㄨ鐐逛笅寰壂瑙嗕笉鎶涘紓甯?# 鎱㈠眰绮剧鐘舵€?#   ok   闈欑疆浼氱姱鍥般€佷簰鍔ㄤ細鍥炵
+# 鍏ㄩ儴閫氳繃
+# Subtest: web\\avatar\\test_motion.js
+ok 4 - web\\avatar\\test_motion.js
+  ---
+  duration_ms: 198.6085
+  type: 'test'
+  ...
+# Performance director: legacy + semantic audio scheduling assertions passed
+# Subtest: web\\avatar\\test_performance.js
+ok 5 - web\\avatar\\test_performance.js
+  ---
+  duration_ms: 150.4039
+  type: 'test'
+  ...
+# ok 1 - only supported LLM envelopes suppress the legacy fallback
+# ok 2 - anchors use codepoints and their exact occurrence
+# ok 3 - intent cannot select arbitrary gestures or bones
+# ok 4 - strength is finite, bounded and never copied as a rotation
+# ok 5 - up to two ordered, nonoverlapping anchors survive
+# ok 6 - complete provider timestamps map the later repeated phrase
+# ok 7 - provider punctuation and whitespace do not shift anchor offsets
+# ok 8 - partial, mismatched or malformed provider timings fall back as a whole
+# ok 9 - empty and invalid audio duration are handled safely
+# 9 speech plan tests passed
+# Subtest: web\\avatar\\test_speech_plan.js
+ok 6 - web\\avatar\\test_speech_plan.js
+  ---
+  duration_ms: 132.7723
+  type: 'test'
+  ...
+# Subtest: idle camera keeps the base framing and a slight 3/4 yaw
+ok 7 - idle camera keeps the base framing and a slight 3/4 yaw
+  ---
+  duration_ms: 1.1639
+  type: 'test'
+  ...
+# Subtest: speaking pushes in and up, then releases without overshoot
+ok 8 - speaking pushes in and up, then releases without overshoot
+  ---
+  duration_ms: 1.3477
+  type: 'test'
+  ...
+# Subtest: enter is quicker than exit and half-way is the mode switch
+ok 9 - enter is quicker than exit and half-way is the mode switch
+  ---
+  duration_ms: 0.2446
+  type: 'test'
+  ...
+# Subtest: suspended or invalid dt changes nothing
+ok 10 - suspended or invalid dt changes nothing
+  ---
+  duration_ms: 0.1593
+  type: 'test'
+  ...
+# Subtest: config guards fall back instead of producing broken framing
+ok 11 - config guards fall back instead of producing broken framing
+  ---
+  duration_ms: 0.2155
+  type: 'test'
+  ...
+# Subtest: morph weights only keep asset-present names and clamp to 0..1
+ok 12 - morph weights only keep asset-present names and clamp to 0..1
+  ---
+  duration_ms: 0.7675
+  type: 'test'
+  ...
+1..12
+# tests 12
+# suites 0
+# pass 12
+# fail 0
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 393.8229
+
+> test:avatar-rig
+> node --experimental-default-type=module --test web/avatar/test_render.js web/avatar/test_pose_transition.js web/avatar/test_gesture_poses.js web/avatar/test_gesture_paths.js web/avatar/test_finger_poses.js web/avatar/test_finger_rig.js web/avatar/test_body_poses.js web/avatar/test_body_rig.js web/avatar/test_hand_poses.js web/avatar/test_hand_rig.js web/avatar/test_face_shading.js web/avatar/test_hair_physics.js
+
+TAP version 13
+# Subtest: body support is opt-in for the exact Daily profile and leaves other rigs alone
+ok 1 - body support is opt-in for the exact Daily profile and leaves other rigs alone
+  ---
+  duration_ms: 1.3219
+  type: 'test'
+  ...
+# Subtest: rest, cancelled, unknown and zero-strength frames contain no body offset
+ok 2 - rest, cancelled, unknown and zero-strength frames contain no body offset
+  ---
+  duration_ms: 0.6067
+  type: 'test'
+  ...
+# Subtest: audited directions stay modest and do not add chest roll or other joint offsets
+ok 3 - audited directions stay modest and do not add chest roll or other joint offsets
+  ---
+  duration_ms: 0.3919
+  type: 'test'
+  ...
+# Subtest: the existing envelope scales support without introducing phase-driven motion
+ok 4 - the existing envelope scales support without introducing phase-driven motion
+  ---
+  duration_ms: 0.6186
+  type: 'test'
+  ...
+# Subtest: strength activates continuously and monotonically through the protocol minimum
+ok 5 - strength activates continuously and monotonically through the protocol minimum
+  ---
+  duration_ms: 0.971
+  type: 'test'
+  ...
+# Subtest: reduced motion preserves exact rest and limits all support offsets to forty percent
+ok 6 - reduced motion preserves exact rest and limits all support offsets to forty percent
+  ---
+  duration_ms: 0.4853
+  type: 'test'
+  ...
+# Subtest: production timing reaches rest, full support and retraction without endpoint jumps
+ok 7 - production timing reaches rest, full support and retraction without endpoint jumps
+  ---
+  duration_ms: 0.7737
+  type: 'test'
+  ...
+# Subtest: malformed numeric input remains finite within the audited amplitude caps
+ok 8 - malformed numeric input remains finite within the audited amplitude caps
+  ---
+  duration_ms: 1.1761
+  type: 'test'
+  ...
+# Subtest: sampling neither mutates semantic frames nor shares target arrays with callers
+ok 9 - sampling neither mutates semantic frames nor shares target arrays with callers
+  ---
+  duration_ms: 0.3799
+  type: 'test'
+  ...
+# Subtest: only available Daily joints are captured without sharing their binding rotations
+ok 10 - only available Daily joints are captured without sharing their binding rotations
+  ---
+  duration_ms: 3.412
+  type: 'test'
+  ...
+# Subtest: zero-time mode changes preserve actual body rotations and do not restart arm transitions
+ok 11 - zero-time mode changes preserve actual body rotations and do not restart arm transitions
+  ---
+  duration_ms: 4.3477
+  type: 'test'
+  ...
+# Subtest: cancelled gestures recover on renderer time and long deltas stay bounded
+ok 12 - cancelled gestures recover on renderer time and long deltas stay bounded
+  ---
+  duration_ms: 2.8081
+  type: 'test'
+  ...
+# Subtest: production draw retains mapped spine/head and local arm targets, then aims gaze in the final head frame
+ok 13 - production draw retains mapped spine/head and local arm targets, then aims gaze in the final head frame
+  ---
+  duration_ms: 24.9734
+  type: 'test'
+  ...
+# Subtest: both independent face materials switch from captured originals, including shared references, without accumulating
+ok 14 - both independent face materials switch from captured originals, including shared references, without accumulating
+  ---
+  duration_ms: 11.5298
+  type: 'test'
+  ...
+# Subtest: exact model and MToon name guards preserve unsupported materials and preload mode choice
+ok 15 - exact model and MToon name guards preserve unsupported materials and preload mode choice
+  ---
+  duration_ms: 4.8597
+  type: 'test'
+  ...
+# Subtest: material comparison leaves lights, camera, geometry, textures and active motion state intact
+ok 16 - material comparison leaves lights, camera, geometry, textures and active motion state intact
+  ---
+  duration_ms: 2.0388
+  type: 'test'
+  ...
+# Subtest: fixed calibration restores the selected mode and exact live colors without replacing materials or captured originals
+ok 17 - fixed calibration restores the selected mode and exact live colors without replacing materials or captured originals
+  ---
+  duration_ms: 8.1426
+  type: 'test'
+  ...
+# Subtest: shade-only edits invalidate fixed registration and a stale calibration safely restores its prior appearance
+ok 18 - shade-only edits invalidate fixed registration and a stale calibration safely restores its prior appearance
+  ---
+  duration_ms: 3.2945
+  type: 'test'
+  ...
+# Subtest: production turning, blinking and mouth movement agree across material comparison modes
+ok 19 - production turning, blinking and mouth movement agree across material comparison modes
+  ---
+  duration_ms: 2.8453
+  type: 'test'
+  ...
+# Subtest: the profile is limited to the exact Daily model and generic samples leave fingers alone
+ok 20 - the profile is limited to the exact Daily model and generic samples leave fingers alone
+  ---
+  duration_ms: 1.3324
+  type: 'test'
+  ...
+# Subtest: relaxed rest covers 24 regular joints with mirrored curl and distinct fingers
+ok 21 - relaxed rest covers 24 regular joints with mirrored curl and distinct fingers
+  ---
+  duration_ms: 0.6771
+  type: 'test'
+  ...
+# Subtest: only the gesturing right hand opens and every expression retains slight curl
+ok 22 - only the gesturing right hand opens and every expression retains slight curl
+  ---
+  duration_ms: 2.3995
+  type: 'test'
+  ...
+# Subtest: empty, unknown, canceled, and zero-strength frames return relaxed rest
+ok 23 - empty, unknown, canceled, and zero-strength frames return relaxed rest
+  ---
+  duration_ms: 1.1993
+  type: 'test'
+  ...
+# Subtest: envelope gates opening continuously without phase-dependent motion
+ok 24 - envelope gates opening continuously without phase-dependent motion
+  ---
+  duration_ms: 3.5223
+  type: 'test'
+  ...
+# Subtest: strength opens gently, with continuous activation through the protocol minimum
+ok 25 - strength opens gently, with continuous activation through the protocol minimum
+  ---
+  duration_ms: 3.4465
+  type: 'test'
+  ...
+# Subtest: reduced motion keeps relaxed rest while reducing expressive changes
+ok 26 - reduced motion keeps relaxed rest while reducing expressive changes
+  ---
+  duration_ms: 0.9825
+  type: 'test'
+  ...
+# Subtest: malformed numeric frames stay finite and cannot exceed relaxed curl bounds
+ok 27 - malformed numeric frames stay finite and cannot exceed relaxed curl bounds
+  ---
+  duration_ms: 1.0109
+  type: 'test'
+  ...
+# Subtest: returned samples cannot mutate later finger targets
+ok 28 - returned samples cannot mutate later finger targets
+  ---
+  duration_ms: 0.425
+  type: 'test'
+  ...
+# Subtest: only adapted normalized joints are captured; partial mappings retain their bind rotations
+ok 29 - only adapted normalized joints are captured; partial mappings retain their bind rotations
+  ---
+  duration_ms: 2.2777
+  type: 'test'
+  ...
+# Subtest: relaxation composes with bind pose; zero delta and mode switches keep actual joint pose
+ok 30 - relaxation composes with bind pose; zero delta and mode switches keep actual joint pose
+  ---
+  duration_ms: 5.6908
+  type: 'test'
+  ...
+# Subtest: cancelled expression returns to relaxed rest without advancing its audio clock or arm transition
+ok 31 - cancelled expression returns to relaxed rest without advancing its audio clock or arm transition
+  ---
+  duration_ms: 5.2211
+  type: 'test'
+  ...
+# Subtest: suspended-tab deltas are bounded and reduced motion preserves relaxed rest
+ok 32 - suspended-tab deltas are bounded and reduced motion preserves relaxed rest
+  ---
+  duration_ms: 1.955
+  type: 'test'
+  ...
+# Subtest: paths retain exact rest and all existing full-envelope targets
+ok 33 - paths retain exact rest and all existing full-envelope targets
+  ---
+  duration_ms: 8.2037
+  type: 'test'
+  ...
+# Subtest: reference targets ignore paths and the live envelope at every strength and phase
+ok 34 - reference targets ignore paths and the live envelope at every strength and phase
+  ---
+  duration_ms: 5.2745
+  type: 'test'
+  ...
+# Subtest: prepared paths change the intermediate shape without altering comparison or generic behavior
+ok 35 - prepared paths change the intermediate shape without altering comparison or generic behavior
+  ---
+  duration_ms: 0.5917
+  type: 'test'
+  ...
+# Subtest: each authored path segment stays inside its endpoint angles without overshoot
+ok 36 - each authored path segment stays inside its endpoint angles without overshoot
+  ---
+  duration_ms: 22.22
+  type: 'test'
+  ...
+# Subtest: paths have matching middle velocities without a forced middle stop
+ok 37 - paths have matching middle velocities without a forced middle stop
+  ---
+  duration_ms: 0.9388
+  type: 'test'
+  ...
+# Subtest: director envelope keeps path velocity gentle at lift, arrival, and return
+ok 38 - director envelope keeps path velocity gentle at lift, arrival, and return
+  ---
+  duration_ms: 1.4837
+  type: 'test'
+  ...
+# Subtest: wave and denial wrist sway waits until the hand has passed preparation
+ok 39 - wave and denial wrist sway waits until the hand has passed preparation
+  ---
+  duration_ms: 0.7949
+  type: 'test'
+  ...
+# Subtest: reduced motion keeps the .4 endpoint while limiting added preparation
+ok 40 - reduced motion keeps the .4 endpoint while limiting added preparation
+  ---
+  duration_ms: 1.6466
+  type: 'test'
+  ...
+# Subtest: reduced preparation bounds peak quaternion steps under production timing
+ok 41 - reduced preparation bounds peak quaternion steps under production timing
+  ---
+  duration_ms: 102.0914
+  type: 'test'
+  ...
+# Subtest: malformed path samples remain finite and later samples are isolated
+ok 42 - malformed path samples remain finite and later samples are isolated
+  ---
+  duration_ms: 0.5949
+  type: 'test'
+  ...
+# Subtest: the path switch follows daily calibration and resets snapshots without moving actual arms
+ok 43 - the path switch follows daily calibration and resets snapshots without moving actual arms
+  ---
+  duration_ms: 0.943
+  type: 'test'
+  ...
+# Subtest: generic poses preserve the four existing authored targets
+ok 44 - generic poses preserve the four existing authored targets
+  ---
+  duration_ms: 2.4809
+  type: 'test'
+  ...
+# Subtest: generic strength and reduced motion keep the existing multiplicative behavior
+ok 45 - generic strength and reduced motion keep the existing multiplicative behavior
+  ---
+  duration_ms: 0.3812
+  type: 'test'
+  ...
+# Subtest: reference samples use requested strength independently of the live envelope
+ok 46 - reference samples use requested strength independently of the live envelope
+  ---
+  duration_ms: 0.3769
+  type: 'test'
+  ...
+# Subtest: wave and denial retain their authored wrist phase behavior
+ok 47 - wave and denial retain their authored wrist phase behavior
+  ---
+  duration_ms: 0.2078
+  type: 'test'
+  ...
+# Subtest: unknown or missing gestures return no arm offsets and invalid inputs stay finite
+ok 48 - unknown or missing gestures return no arm offsets and invalid inputs stay finite
+  ---
+  duration_ms: 0.598
+  type: 'test'
+  ...
+# Subtest: sampled arrays cannot mutate the next gesture target
+ok 49 - sampled arrays cannot mutate the next gesture target
+  ---
+  duration_ms: 0.1573
+  type: 'test'
+  ...
+# Subtest: the calibrated profile is limited to the exact authored Daily model
+ok 50 - the calibrated profile is limited to the exact authored Daily model
+  ---
+  duration_ms: 0.3528
+  type: 'test'
+  ...
+# Subtest: Daily poses bend the local-X forearm instead of merely twisting it at normal speech strengths
+ok 51 - Daily poses bend the local-X forearm instead of merely twisting it at normal speech strengths
+  ---
+  duration_ms: 2.4942
+  type: 'test'
+  ...
+# Subtest: Daily strength smoothly reaches rest and honors reduced motion
+ok 52 - Daily strength smoothly reaches rest and honors reduced motion
+  ---
+  duration_ms: 1.3483
+  type: 'test'
+  ...
+# Subtest: Daily wave and denial add small wrist sway without changing the upper or lower arm target
+ok 53 - Daily wave and denial add small wrist sway without changing the upper or lower arm target
+  ---
+  duration_ms: 0.6149
+  type: 'test'
+  ...
+# Subtest: Daily invalid input stays finite, and later samples are isolated
+ok 54 - Daily invalid input stays finite, and later samples are isolated
+  ---
+  duration_ms: 0.7608
+  type: 'test'
+  ...
+# Subtest: renderer calibration switch resets transition snapshots without moving the actual arm
+ok 55 - renderer calibration switch resets transition snapshots without moving the actual arm
+  ---
+  duration_ms: 1.3897
+  type: 'test'
+  ...
+# Subtest: hair physics toggles from captured originals without accumulating, and only affects hair bones
+ok 56 - hair physics toggles from captured originals without accumulating, and only affects hair bones
+  ---
+  duration_ms: 7.5753
+  type: 'test'
+  ...
+# Subtest: strength scales linearly and is clamped, and unsupported models report unavailable
+ok 57 - strength scales linearly and is clamped, and unsupported models report unavailable
+  ---
+  duration_ms: 2.9528
+  type: 'test'
+  ...
+# Subtest: fixed calibration restores selected hair physics mode, strength and exact settings
+ok 58 - fixed calibration restores selected hair physics mode, strength and exact settings
+  ---
+  duration_ms: 13.2365
+  type: 'test'
+  ...
+# Subtest: changing hair physics settings invalidates fixed registration
+ok 59 - changing hair physics settings invalidates fixed registration
+  ---
+  duration_ms: 3.123
+  type: 'test'
+  ...
+# Subtest: complete hand profile is confined to exact Daily and exposes 30 unique joint names
+ok 60 - complete hand profile is confined to exact Daily and exposes 30 unique joint names
+  ---
+  duration_ms: 2.9666
+  type: 'test'
+  ...
+# Subtest: automatic regular fingers exactly retain the existing finger target contract
+ok 61 - automatic regular fingers exactly retain the existing finger target contract
+  ---
+  duration_ms: 16.8477
+  type: 'test'
+  ...
+# Subtest: rest thumb targets mirror each measured curl axis and self retains conservative relaxation
+ok 62 - rest thumb targets mirror each measured curl axis and self retains conservative relaxation
+  ---
+  duration_ms: 0.7374
+  type: 'test'
+  ...
+# Subtest: wave, deny and palm continuously open only the gesturing thumb with no phase oscillator
+ok 63 - wave, deny and palm continuously open only the gesturing thumb with no phase oscillator
+  ---
+  duration_ms: 2.3434
+  type: 'test'
+  ...
+# Subtest: unknown, cancelled, zero-envelope and zero-strength frames return rest
+ok 64 - unknown, cancelled, zero-envelope and zero-strength frames return rest
+  ---
+  duration_ms: 0.8668
+  type: 'test'
+  ...
+# Subtest: automatic reduced motion scales every expressive delta by .4 and leaves rest unchanged
+ok 65 - automatic reduced motion scales every expressive delta by .4 and leaves rest unchanged
+  ---
+  duration_ms: 1.2689
+  type: 'test'
+  ...
+# Subtest: three complete inspection poses have distinct bounded curl and preserve the other automatic hand
+ok 66 - three complete inspection poses have distinct bounded curl and preserve the other automatic hand
+  ---
+  duration_ms: 1.8784
+  type: 'test'
+  ...
+# Subtest: inspection replaces the full selected hand independent of gesture strength, timing and reduced mode
+ok 67 - inspection replaces the full selected hand independent of gesture strength, timing and reduced mode
+  ---
+  duration_ms: 1.876
+  type: 'test'
+  ...
+# Subtest: left and right inspection targets are mirrored without accumulating automatic targets
+ok 68 - left and right inspection targets are mirrored without accumulating automatic targets
+  ---
+  duration_ms: 1.0418
+  type: 'test'
+  ...
+# Subtest: invalid inspection input is ignored and does not partially alter a hand
+ok 69 - invalid inspection input is ignored and does not partially alter a hand
+  ---
+  duration_ms: 1.2865
+  type: 'test'
+  ...
+# Subtest: malformed numeric fields are finite and bounded, including conversion failures
+ok 70 - malformed numeric fields are finite and bounded, including conversion failures
+  ---
+  duration_ms: 1.3506
+  type: 'test'
+  ...
+# Subtest: thumb activation is continuous at zero, the .15 threshold and envelope boundaries
+ok 71 - thumb activation is continuous at zero, the .15 threshold and envelope boundaries
+  ---
+  duration_ms: 1.1279
+  type: 'test'
+  ...
+# Subtest: returned targets and preview inputs cannot mutate future targets or each other
+ok 72 - returned targets and preview inputs cannot mutate future targets or each other
+  ---
+  duration_ms: 0.4632
+  type: 'test'
+  ...
+# Subtest: captures all 30 supported joints and keeps cloned bind poses for the thumbs
+ok 73 - captures all 30 supported joints and keeps cloned bind poses for the thumbs
+  ---
+  duration_ms: 14.2099
+  type: 'test'
+  ...
+# Subtest: manual hand targets switch from actual pose without touching bind or arm transition state
+ok 74 - manual hand targets switch from actual pose without touching bind or arm transition state
+  ---
+  duration_ms: 13.0001
+  type: 'test'
+  ...
+# Subtest: disable clears manual selection at zero time and every joint returns to its binding
+ok 75 - disable clears manual selection at zero time and every joint returns to its binding
+  ---
+  duration_ms: 12.51
+  type: 'test'
+  ...
+# Subtest: completion, speech, another gesture and cancellation end inspection, then recover using renderer time
+ok 76 - completion, speech, another gesture and cancellation end inspection, then recover using renderer time
+  ---
+  duration_ms: 70.4675
+  type: 'test'
+  ...
+# Subtest: partial rigs skip missing fingers, unadapted models remain unchanged and invalid controls reject
+ok 77 - partial rigs skip missing fingers, unadapted models remain unchanged and invalid controls reject
+  ---
+  duration_ms: 2.8548
+  type: 'test'
+  ...
+# Subtest: large deltas are bounded and dispose removes stale inspection state
+ok 78 - large deltas are bounded and dispose removes stale inspection state
+  ---
+  duration_ms: 0.6324
+  type: 'test'
+  ...
+# ok 1 - a replacement starts from actual rotations, not the previous target
+# ok 2 - angular distance determines a finite duration bounded to 0.35 seconds
+# ok 3 - zero-weight incoming envelopes still compare against the approved destination pose
+# ok 4 - stable identity captures actual rotations only once
+# ok 5 - interruption cancels logical speech immediately and recovers with a frozen clock
+# ok 6 - rapid replacements and recovery always snapshot the latest actual pose
+# ok 7 - render delta is bounded and diagnostics cannot mutate the controller
+# ok 8 - same-time samples are stable and same-pose restart creates one replacement
+# ok 9 - Avatar interruption preserves the specific reason across repeated stopSpeaking calls
+# ok 10 - missing descriptors reset snapshots for a fixed calibration pose
+# ok 11 - unstarted cues emit no transition and deliberate rest gaps stay rest
+# ok 12 - renderer diagnostics and comparison toggle are safe before mount
+# 12 pose transition tests passed
+# Subtest: web\\avatar\\test_pose_transition.js
+ok 11 - web\\avatar\\test_pose_transition.js
+  ---
+  duration_ms: 214.0021
+  type: 'test'
+  ...
+# svg 鎸傝浇涓庣粯鍒?#   ok   绌哄Э鎬佽窇 120 甯т笉鎶涘紓甯?#   ok   浜у嚭鑺傜偣鏁伴噺鍚堢悊
+#   ok   鏃?NaN / Infinity 灞炴€?# 鐪肩潙闅忕溂鐞冧笂涓嬪姩
+#   ok   鐪肩悆涓嬬湅鏃朵笂鐪肩潙鍘嬩笅鏉?# 鏋佺鍙傛暟
+#   ok   鍏?1 涓嶆姏寮傚父
+#   ok   鍏?1 鏃?NaN
+#   ok   鍏?-1 涓嶆姏寮傚父
+#   ok   鍏?-1 鏃?NaN
+#   ok   绗戠溂+寮犲彛 涓嶆姏寮傚父
+#   ok   绗戠溂+寮犲彛 鏃?NaN
+#   ok   鐪肩悆鍒板簳 涓嶆姏寮傚父
+#   ok   鐪肩悆鍒板簳 鏃?NaN
+# 铏硅啘缂╂斁 ParamEyeBallForm
+#   ok   涓綅涓嶇缉鏀?#   ok   +1 鏀惧ぇ铏硅啘
+#   ok   -1 鏀跺皬铏硅啘
+#   ok   缂╂斁鍏充簬铏硅啘涓績瀵圭О
+#   ok   铏硅啘缂╂斁涓庣灣瀛旂缉鏀惧悓鏃剁敓鏁?#   ok   铏硅啘鏀惧ぇ鍚庢棤 NaN
+# 闀挎椂闂磋繍琛屼笉婕傜Щ
+#   ok   鐪肩悆鎸佺画涓婄湅 600 甯ф棤 NaN
+#   ok   涓婄溂鐫戞病鏈夊鍒扮溂鐫涘簳閮ㄤ互涓?# 鍏ㄩ儴閫氳繃
+# Subtest: web\\avatar\\test_render.js
+ok 12 - web\\avatar\\test_render.js
+  ---
+  duration_ms: 340.7808
+  type: 'test'
+  ...
+1..80
+# tests 80
+# suites 0
+# pass 80
+# fail 0
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 797.7233
+TAP version 13
+# Subtest: toRenderModel 鏁寸悊鑺傜偣銆佽竟銆佸害鏁般€佺粺璁?ok 1 - toRenderModel 鏁寸悊鑺傜偣銆佽竟銆佸害鏁般€佺粺璁?  ---
+  duration_ms: 2.6758
+  type: 'test'
+  ...
+# Subtest: toRenderModel 瀵圭己瀛楁涓庤剰鏁版嵁鏈夐槻寰?ok 2 - toRenderModel 瀵圭己瀛楁涓庤剰鏁版嵁鏈夐槻寰?  ---
+  duration_ms: 0.6945
+  type: 'test'
+  ...
+# Subtest: classifyEmpty 鍖哄垎鍏抽棴銆佺┖鍥俱€佹绱㈡棤缁撴灉
+ok 3 - classifyEmpty 鍖哄垎鍏抽棴銆佺┖鍥俱€佹绱㈡棤缁撴灉
+  ---
+  duration_ms: 0.6386
+  type: 'test'
+  ...
+# Subtest: 妫€绱㈠幓鎶栵細杩炵画杈撳叆鍙彂涓€娆¤姹備笖閲囩敤鏈€鍚庝竴娆″叧閿瘝
+ok 4 - 妫€绱㈠幓鎶栵細杩炵画杈撳叆鍙彂涓€娆¤姹備笖閲囩敤鏈€鍚庝竴娆″叧閿瘝
+  ---
+  duration_ms: 1.9312
+  type: 'test'
+  ...
+# Subtest: 妫€绱?flush / run / cancel 涓庤繃鏈熷搷搴斾涪寮?ok 5 - 妫€绱?flush / run / cancel 涓庤繃鏈熷搷搴斾涪寮?  ---
+  duration_ms: 0.4529
+  type: 'test'
+  ...
+# Subtest: 妫€绱㈠け璐ヨ蛋 onError 涓斾笉娓叉煋
+ok 6 - 妫€绱㈠け璐ヨ蛋 onError 涓斾笉娓叉煋
+  ---
+  duration_ms: 0.2195
+  type: 'test'
+  ...
+# Subtest: narrate 鐘舵€佹満锛歩dle -> pending -> playing -> done -> idle
+ok 7 - narrate 鐘舵€佹満锛歩dle -> pending -> playing -> done -> idle
+  ---
+  duration_ms: 0.4776
+  type: 'test'
+  ...
+# Subtest: narrate 鐘舵€佹満锛歜usy 閿欒涓嶅甫 turn_id 涔熸寜蹇欑澶勭悊锛屽喎鍗村悗鍙噸璇?ok 8 - narrate 鐘舵€佹満锛歜usy 閿欒涓嶅甫 turn_id 涔熸寜蹇欑澶勭悊锛屽喎鍗村悗鍙噸璇?  ---
+  duration_ms: 0.2866
+  type: 'test'
+  ...
+# Subtest: narrate 鐘舵€佹満锛歜usy 閿欒甯︿换鎰?turn_id 鍚屾牱鎸夊繖纰屽鐞?ok 9 - narrate 鐘舵€佹満锛歜usy 閿欒甯︿换鎰?turn_id 鍚屾牱鎸夊繖纰屽鐞?  ---
+  duration_ms: 0.3423
+  type: 'test'
+  ...
+# Subtest: narrate 鐘舵€佹満锛歜arge_in 鎵撴柇鍥?idle锛宻top 鏈湴绔嬪嵆鍥?idle
+ok 10 - narrate 鐘舵€佹満锛歜arge_in 鎵撴柇鍥?idle锛宻top 鏈湴绔嬪嵆鍥?idle
+  ---
+  duration_ms: 0.4444
+  type: 'test'
+  ...
+# Subtest: narrate 鐘舵€佹満锛氶潪蹇欑 error 涓庣瓑寰呰秴鏃堕兘鍥?idle
+ok 11 - narrate 鐘舵€佹満锛氶潪蹇欑 error 涓庣瓑寰呰秴鏃堕兘鍥?idle
+  ---
+  duration_ms: 0.8433
+  type: 'test'
+  ...
+# Subtest: narrate 鐘舵€佹満锛氬埆鐨勮疆娆′簨浠朵笉骞叉壈锛宨sIdle 涓哄亣鏃朵笉鑳藉紑濮?ok 12 - narrate 鐘舵€佹満锛氬埆鐨勮疆娆′簨浠朵笉骞叉壈锛宨sIdle 涓哄亣鏃朵笉鑳藉紑濮?  ---
+  duration_ms: 0.3411
+  type: 'test'
+  ...
+# Subtest: REST 瀹㈡埛绔細URL 鍙傛暟銆乴imit 涓婇檺銆?04 涓庡紓甯?ok 13 - REST 瀹㈡埛绔細URL 鍙傛暟銆乴imit 涓婇檺銆?04 涓庡紓甯?  ---
+  duration_ms: 1.7177
+  type: 'test'
+  ...
+# Subtest: REST 瀹㈡埛绔細loadNode 鎴愬姛璺緞銆佺己 ID 鎶涢敊銆乲inds 閫忎紶銆乴imit 杈圭晫
+ok 14 - REST 瀹㈡埛绔細loadNode 鎴愬姛璺緞銆佺己 ID 鎶涢敊銆乲inds 閫忎紶銆乴imit 杈圭晫
+  ---
+  duration_ms: 0.396
+  type: 'test'
+  ...
+# Subtest: narrate锛歴ubscribe 鏀跺揩鐓?/ unsubscribe 鍋滄敹 / reset 娓呭畾鏃跺櫒鍥?idle
+ok 15 - narrate锛歴ubscribe 鏀跺揩鐓?/ unsubscribe 鍋滄敹 / reset 娓呭畾鏃跺櫒鍥?idle
+  ---
+  duration_ms: 0.2005
+  type: 'test'
+  ...
+1..15
+# tests 15
+# suites 0
+# pass 15
+# fail 0
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 21.4173
+(node:24352) [MODULE_TYPELESS_PACKAGE_JSON] Warning: Module type of file:///D:/project/neurosama/web/executive-state.js is not specified and it doesn't parse as CommonJS.
+Reparsing as ES module because module syntax was detected. This incurs a performance overhead.
+To eliminate this warning, add "type": "module" to D:\project\neurosama\package.json.
+(Use `node --trace-warnings ...` to show where the warning was created)
+TAP version 13
+# Subtest: 鍒氭墦杩囧瓧 -> 瀹夐潤
+ok 1 - 鍒氭墦杩囧瓧 -> 瀹夐潤
+  ---
+  duration_ms: 0.781
+  type: 'test'
+  ...
+# Subtest: 鍋滀笅瓒呰繃闈欓粯绐?-> 鍙互寮€鍙?ok 2 - 鍋滀笅瓒呰繃闈欓粯绐?-> 鍙互寮€鍙?  ---
+  duration_ms: 0.0972
+  type: 'test'
+  ...
+# Subtest: 杈圭晫锛氭濂界瓑浜庨潤榛樼獥鐨勯偅涓€鐬笉绠楀畨闈?ok 3 - 杈圭晫锛氭濂界瓑浜庨潤榛樼獥鐨勯偅涓€鐬笉绠楀畨闈?  ---
+  duration_ms: 0.1263
+  type: 'test'
+  ...
+# Subtest: 涓€娆￠兘娌℃墦瀛?-> 涓嶅畨闈?ok 4 - 涓€娆￠兘娌℃墦瀛?-> 涓嶅畨闈?  ---
+  duration_ms: 0.1509
+  type: 'test'
+  ...
+# Subtest: 鍐欎綔瀹藉睆瑙嗗浘閲屼竴寰嬪畨闈?ok 5 - 鍐欎綔瀹藉睆瑙嗗浘閲屼竴寰嬪畨闈?  ---
+  duration_ms: 0.109
+  type: 'test'
+  ...
+# Subtest: reset 涔嬪悗鍥炲埌鍒濆鐘舵€?ok 6 - reset 涔嬪悗鍥炲埌鍒濆鐘舵€?  ---
+  duration_ms: 0.2754
+  type: 'test'
+  ...
+# Subtest: markTyping 鍙樉寮忕粰鏃堕棿鎴筹紝娴嬭瘯涓嶅繀绛夌湡瀹炴椂闂?ok 7 - markTyping 鍙樉寮忕粰鏃堕棿鎴筹紝娴嬭瘯涓嶅繀绛夌湡瀹炴椂闂?  ---
+  duration_ms: 0.1671
+  type: 'test'
+  ...
+# Subtest: 瀹夐潤鏃跺彧鎶ユ暟涓嶅嚭澹?ok 8 - 瀹夐潤鏃跺彧鎶ユ暟涓嶅嚭澹?  ---
+  duration_ms: 0.1099
+  type: 'test'
+  ...
+# Subtest: 瀹夐潤鏃跺崱鐗囦笉楂樹寒锛岄伩鍏嶈瑙変笂涔熷湪鍌?ok 9 - 瀹夐潤鏃跺崱鐗囦笉楂樹寒锛岄伩鍏嶈瑙変笂涔熷湪鍌?  ---
+  duration_ms: 0.2273
+  type: 'test'
+  ...
+1..9
+# tests 9
+# suites 0
+# pass 9
+# fail 0
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 10.9607
+(node:10636) [MODULE_TYPELESS_PACKAGE_JSON] Warning: Module type of file:///D:/project/neurosama/web/aqi-flow.js is not specified and it doesn't parse as CommonJS.
+Reparsing as ES module because module syntax was detected. This incurs a performance overhead.
+To eliminate this warning, add "type": "module" to D:\project\neurosama\package.json.
+(Use `node --trace-warnings ...` to show where the warning was created)
+TAP version 13
+# Subtest: 鍒氭墦杩囧瓧 -> 瀹夐潤锛屾秷鎭寕璧蜂笉寮?ok 1 - 鍒氭墦杩囧瓧 -> 瀹夐潤锛屾秷鎭寕璧蜂笉寮?  ---
+  duration_ms: 0.7772
+  type: 'test'
+  ...
+# Subtest: 鍋滀笅瓒呰繃闈欓粯绐?-> 鍙互寮癸紝鎸夊師搴忚ˉ寮?ok 2 - 鍋滀笅瓒呰繃闈欓粯绐?-> 鍙互寮癸紝鎸夊師搴忚ˉ寮?  ---
+  duration_ms: 1.2031
+  type: 'test'
+  ...
+# Subtest: 杈圭晫锛氭濂界瓑浜庨潤榛樼獥鐨勯偅涓€鐬笉绠楀畨闈?ok 3 - 杈圭晫锛氭濂界瓑浜庨潤榛樼獥鐨勯偅涓€鐬笉绠楀畨闈?  ---
+  duration_ms: 0.1149
+  type: 'test'
+  ...
+# Subtest: 涓€娆￠兘娌℃墦瀛?-> 涓嶅畨闈欙紝涓嶈鎸傝捣
+ok 4 - 涓€娆￠兘娌℃墦瀛?-> 涓嶅畨闈欙紝涓嶈鎸傝捣
+  ---
+  duration_ms: 0.092
+  type: 'test'
+  ...
+# Subtest: 鍐欎綔瀹藉睆瑙嗗浘閲屼竴寰嬪畨闈?ok 5 - 鍐欎綔瀹藉睆瑙嗗浘閲屼竴寰嬪畨闈?  ---
+  duration_ms: 0.1699
+  type: 'test'
+  ...
+# Subtest: 鎸傝捣鐨勬秷鎭唴瀹瑰師鏍蜂繚鐣欙細涓嶆敼鍐欍€佷笉閲嶆帓銆佷笉涓㈠瓧娈?ok 6 - 鎸傝捣鐨勬秷鎭唴瀹瑰師鏍蜂繚鐣欙細涓嶆敼鍐欍€佷笉閲嶆帓銆佷笉涓㈠瓧娈?  ---
+  duration_ms: 0.1024
+  type: 'test'
+  ...
+# Subtest: 瀹夐潤鏃跺彧鎶ユ暟涓嶅偓锛屽仠鎵嬪悗鎵嶈濂圭炕
+ok 7 - 瀹夐潤鏃跺彧鎶ユ暟涓嶅偓锛屽仠鎵嬪悗鎵嶈濂圭炕
+  ---
+  duration_ms: 0.1487
+  type: 'test'
+  ...
+# Subtest: reset 涔嬪悗鍥炲埌鍒濆鐘舵€侊紝寰呴槄闃熷垪涓€骞舵竻绌?ok 8 - reset 涔嬪悗鍥炲埌鍒濆鐘舵€侊紝寰呴槄闃熷垪涓€骞舵竻绌?  ---
+  duration_ms: 0.116
+  type: 'test'
+  ...
+# Subtest: drain 涔嬪悗鍐嶆鎸傝捣浠?1 閲嶆柊璁℃暟
+ok 9 - drain 涔嬪悗鍐嶆鎸傝捣浠?1 閲嶆柊璁℃暟
+  ---
+  duration_ms: 0.2873
+  type: 'test'
+  ...
+1..9
+# tests 9
+# suites 0
+# pass 9
+# fail 0
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 11.4585
+(node:18684) [MODULE_TYPELESS_PACKAGE_JSON] Warning: Module type of file:///D:/project/neurosama/web/context-budget.js is not specified and it doesn't parse as CommonJS.
+Reparsing as ES module because module syntax was detected. This incurs a performance overhead.
+To eliminate this warning, add "type": "module" to D:\project\neurosama\package.json.
+(Use `node --trace-warnings ...` to show where the warning was created)
+TAP version 13
+# Subtest: 鎶ゆ爮锛歶sage 涓?undefined / null / {} 鏃朵笉鍑哄瓧
+ok 1 - 鎶ゆ爮锛歶sage 涓?undefined / null / {} 鏃朵笉鍑哄瓧
+  ---
+  duration_ms: 2.3187
+  type: 'test'
+  ...
+# Subtest: 鎶ゆ爮锛歴chema_version 涓嶄负 1 鏃朵笉鍑哄瓧
+ok 2 - 鎶ゆ爮锛歴chema_version 涓嶄负 1 鏃朵笉鍑哄瓧
+  ---
+  duration_ms: 0.1313
+  type: 'test'
+  ...
+# Subtest: 鎶ゆ爮锛歟nabled 涓嶆槸甯冨皵鏃朵笉鍑哄瓧
+ok 3 - 鎶ゆ爮锛歟nabled 涓嶆槸甯冨皵鏃朵笉鍑哄瓧
+  ---
+  duration_ms: 0.1031
+  type: 'test'
+  ...
+# Subtest: 鍏抽棴璁板繂鏃剁粰鍑哄叧闂€佽鏄庯紝棰勭畻娈典笉鍐嶅睍寮€
+ok 4 - 鍏抽棴璁板繂鏃剁粰鍑哄叧闂€佽鏄庯紝棰勭畻娈典笉鍐嶅睍寮€
+  ---
+  duration_ms: 0.3782
+  type: 'test'
+  ...
+# Subtest: 寮€鍚絾涓夋鍏ㄧ┖ -> 娌℃湁鍒楀嚭琛ュ厖璧勬枡
+ok 5 - 寮€鍚絾涓夋鍏ㄧ┖ -> 娌℃湁鍒楀嚭琛ュ厖璧勬枡
+  ---
+  duration_ms: 0.2993
+  type: 'test'
+  ...
+# Subtest: 棰勭畻娈碉細scope 涓?unit 姝ｇ‘涓?used_chars 涓?max_chars 鍧囦负鏈夋晥鏁?ok 6 - 棰勭畻娈碉細scope 涓?unit 姝ｇ‘涓?used_chars 涓?max_chars 鍧囦负鏈夋晥鏁?  ---
+  duration_ms: 0.246
+  type: 'test'
+  ...
+# Subtest: 棰勭畻娈碉細used_chars 涓?0 浠嶇畻鏈夋晥
+ok 7 - 棰勭畻娈碉細used_chars 涓?0 浠嶇畻鏈夋晥
+  ---
+  duration_ms: 0.5634
+  type: 'test'
+  ...
+# Subtest: 棰勭畻娈碉細used_chars 涓鸿礋鍒欐暣娈甸绠椾笉灞曠ず
+ok 8 - 棰勭畻娈碉細used_chars 涓鸿礋鍒欐暣娈甸绠椾笉灞曠ず
+  ---
+  duration_ms: 0.3479
+  type: 'test'
+  ...
+# Subtest: 棰勭畻娈碉細used_chars 闈炴暣鏁板悓鏍锋暣娈典笉灞曠ず
+ok 9 - 棰勭畻娈碉細used_chars 闈炴暣鏁板悓鏍锋暣娈典笉灞曠ず
+  ---
+  duration_ms: 0.3305
+  type: 'test'
+  ...
+# Subtest: 棰勭畻娈碉細max_chars 闈炴暣鏁板垯鏁存棰勭畻涓嶅睍绀?ok 10 - 棰勭畻娈碉細max_chars 闈炴暣鏁板垯鏁存棰勭畻涓嶅睍绀?  ---
+  duration_ms: 0.32
+  type: 'test'
+  ...
+# Subtest: 棰勭畻娈碉細scope 涓嶇鍒欎笉灞曠ず
+ok 11 - 棰勭畻娈碉細scope 涓嶇鍒欎笉灞曠ず
+  ---
+  duration_ms: 0.1427
+  type: 'test'
+  ...
+# Subtest: 棰勭畻娈碉細unit 涓嶇鍒欎笉灞曠ず
+ok 12 - 棰勭畻娈碉細unit 涓嶇鍒欎笉灞曠ず
+  ---
+  duration_ms: 0.0826
+  type: 'test'
+  ...
+# Subtest: 棰勭畻娈碉細omitted_items 澶т簬 0 鏃惰拷鍔犵渷鐣ヨ鏄?ok 13 - 棰勭畻娈碉細omitted_items 澶т簬 0 鏃惰拷鍔犵渷鐣ヨ鏄?  ---
+  duration_ms: 0.0825
+  type: 'test'
+  ...
+# Subtest: 棰勭畻娈碉細omitted_items 涓?0 鏃朵笉杩藉姞
+ok 14 - 棰勭畻娈碉細omitted_items 涓?0 鏃朵笉杩藉姞
+  ---
+  duration_ms: 0.0727
+  type: 'test'
+  ...
+# Subtest: 棰勭畻娈碉細omitted_items 闈炴硶鍊间竴寰嬩笉杩藉姞
+ok 15 - 棰勭畻娈碉細omitted_items 闈炴硶鍊间竴寰嬩笉杩藉姞
+  ---
+  duration_ms: 0.1257
+  type: 'test'
+  ...
+# Subtest: 椤规暟娈碉細items 涓烘暟缁勬椂鎶ラ」鏁帮紝鍚?0 椤?ok 16 - 椤规暟娈碉細items 涓烘暟缁勬椂鎶ラ」鏁帮紝鍚?0 椤?  ---
+  duration_ms: 0.1101
+  type: 'test'
+  ...
+# Subtest: 椤规暟娈碉細items 涓嶆槸鏁扮粍鍒欎笉鎶?ok 17 - 椤规暟娈碉細items 涓嶆槸鏁扮粍鍒欎笉鎶?  ---
+  duration_ms: 0.0906
+  type: 'test'
+  ...
+# Subtest: 鏈睍绀烘锛歰mitted_usage_items 澶т簬 0 鏃舵姤鏈睍绀烘暟
+ok 18 - 鏈睍绀烘锛歰mitted_usage_items 澶т簬 0 鏃舵姤鏈睍绀烘暟
+  ---
+  duration_ms: 0.1541
+  type: 'test'
+  ...
+# Subtest: 鏈睍绀烘锛歰mitted_usage_items 涓?0 鏃朵笉鎶?ok 19 - 鏈睍绀烘锛歰mitted_usage_items 涓?0 鏃朵笉鎶?  ---
+  duration_ms: 0.9468
+  type: 'test'
+  ...
+# Subtest: 鏈睍绀烘锛歰mitted_usage_items 闈炴硶鍊间竴寰嬩笉鎶?ok 20 - 鏈睍绀烘锛歰mitted_usage_items 闈炴硶鍊间竴寰嬩笉鎶?  ---
+  duration_ms: 0.1231
+  type: 'test'
+  ...
+# Subtest: 涓夋榻愬叏鏃舵寜 棰勭畻銆侀」鏁般€佹湭灞曠ず 椤哄簭鐢?路 杩炴帴
+ok 21 - 涓夋榻愬叏鏃舵寜 棰勭畻銆侀」鏁般€佹湭灞曠ず 椤哄簭鐢?路 杩炴帴
+  ---
+  duration_ms: 0.1464
+  type: 'test'
+  ...
+# Subtest: 缂洪绠楁鏃讹紝椤规暟涓庢湭灞曠ず浠嶆寜璇ラ『搴忕敤 路 杩炴帴
+ok 22 - 缂洪绠楁鏃讹紝椤规暟涓庢湭灞曠ず浠嶆寜璇ラ『搴忕敤 路 杩炴帴
+  ---
+  duration_ms: 0.1129
+  type: 'test'
+  ...
+1..22
+# tests 22
+# suites 0
+# pass 22
+# fail 0
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 19.311
+(node:3352) [MODULE_TYPELESS_PACKAGE_JSON] Warning: Module type of file:///D:/project/neurosama/web/context-usage.js is not specified and it doesn't parse as CommonJS.
+Reparsing as ES module because module syntax was detected. This incurs a performance overhead.
+To eliminate this warning, add "type": "module" to D:\project\neurosama\package.json.
+(Use `node --trace-warnings ...` to show where the warning was created)
+TAP version 13
+# Subtest: validId锛氭帴鍙楁櫘閫氬瓧绗︿覆
+ok 1 - validId锛氭帴鍙楁櫘閫氬瓧绗︿覆
+  ---
+  duration_ms: 0.9422
+  type: 'test'
+  ...
+# Subtest: validId锛?56 瀛楃涓婇檺鏀捐锛?57 鎷掔粷
+ok 2 - validId锛?56 瀛楃涓婇檺鏀捐锛?57 鎷掔粷
+  ---
+  duration_ms: 0.1488
+  type: 'test'
+  ...
+# Subtest: validId锛氭嫆缁濈┖涓蹭笌绾┖鐧?ok 3 - validId锛氭嫆缁濈┖涓蹭笌绾┖鐧?  ---
+  duration_ms: 0.0846
+  type: 'test'
+  ...
+# Subtest: validId锛氭嫆缁濆惈 NUL 鐨勫瓧绗︿覆
+ok 4 - validId锛氭嫆缁濆惈 NUL 鐨勫瓧绗︿覆
+  ---
+  duration_ms: 0.184
+  type: 'test'
+  ...
+# Subtest: validId锛氭帴鍙楁鏁存暟
+ok 5 - validId锛氭帴鍙楁鏁存暟
+  ---
+  duration_ms: 0.0984
+  type: 'test'
+  ...
+# Subtest: validId锛氭嫆缁?0銆佽礋鏁颁笌灏忔暟
+ok 6 - validId锛氭嫆缁?0銆佽礋鏁颁笌灏忔暟
+  ---
+  duration_ms: 0.0779
+  type: 'test'
+  ...
+# Subtest: validId锛氭嫆缁?null / undefined / NaN
+ok 7 - validId锛氭嫆缁?null / undefined / NaN
+  ---
+  duration_ms: 0.1326
+  type: 'test'
+  ...
+# Subtest: validId锛氭嫆缁濆叾浠栫被鍨?ok 8 - validId锛氭嫆缁濆叾浠栫被鍨?  ---
+  duration_ms: 0.0979
+  type: 'test'
+  ...
+# Subtest: validCount锛氭帴鍙?0 涓庢鏁存暟
+ok 9 - validCount锛氭帴鍙?0 涓庢鏁存暟
+  ---
+  duration_ms: 0.2677
+  type: 'test'
+  ...
+# Subtest: validCount锛氭嫆缁濊礋鏁?ok 10 - validCount锛氭嫆缁濊礋鏁?  ---
+  duration_ms: 0.287
+  type: 'test'
+  ...
+# Subtest: validCount锛氭嫆缁濋潪鏁存暟
+ok 11 - validCount锛氭嫆缁濋潪鏁存暟
+  ---
+  duration_ms: 0.1309
+  type: 'test'
+  ...
+# Subtest: validCount锛氭嫆缁?NaN 涓?Infinity
+ok 12 - validCount锛氭嫆缁?NaN 涓?Infinity
+  ---
+  duration_ms: 0.073
+  type: 'test'
+  ...
+# Subtest: validCount锛氭嫆缁濋潪鏁板瓧绫诲瀷
+ok 13 - validCount锛氭嫆缁濋潪鏁板瓧绫诲瀷
+  ---
+  duration_ms: 0.0597
+  type: 'test'
+  ...
+# Subtest: validCount锛歂umber.MAX_SAFE_INTEGER 鏀捐锛?1 鎷掔粷
+ok 14 - validCount锛歂umber.MAX_SAFE_INTEGER 鏀捐锛?1 鎷掔粷
+  ---
+  duration_ms: 0.0557
+  type: 'test'
+  ...
+# Subtest: appendContextUsage 鎶ゆ爮锛歝ontainer 涓虹┖鐩存帴杩斿洖 null
+ok 15 - appendContextUsage 鎶ゆ爮锛歝ontainer 涓虹┖鐩存帴杩斿洖 null
+  ---
+  duration_ms: 0.2804
+  type: 'test'
+  ...
+# Subtest: appendContextUsage 鎶ゆ爮锛歶sage 涓虹┖鐩存帴杩斿洖 null
+ok 16 - appendContextUsage 鎶ゆ爮锛歶sage 涓虹┖鐩存帴杩斿洖 null
+  ---
+  duration_ms: 0.079
+  type: 'test'
+  ...
+# Subtest: appendContextUsage 鎶ゆ爮锛歴chema_version 涓嶆槸 1 鐩存帴杩斿洖 null
+ok 17 - appendContextUsage 鎶ゆ爮锛歴chema_version 涓嶆槸 1 鐩存帴杩斿洖 null
+  ---
+  duration_ms: 0.0713
+  type: 'test'
+  ...
+# Subtest: appendContextUsage 鎶ゆ爮锛歟nabled 涓嶆槸甯冨皵鐩存帴杩斿洖 null
+ok 18 - appendContextUsage 鎶ゆ爮锛歟nabled 涓嶆槸甯冨皵鐩存帴杩斿洖 null
+  ---
+  duration_ms: 0.0608
+  type: 'test'
+  ...
+1..18
+# tests 18
+# suites 0
+# pass 18
+# fail 0
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 14.5465
+(node:16748) [MODULE_TYPELESS_PACKAGE_JSON] Warning: Module type of file:///D:/project/neurosama/web/events-v2.js is not specified and it doesn't parse as CommonJS.
+Reparsing as ES module because module syntax was detected. This incurs a performance overhead.
+To eliminate this warning, add "type": "module" to D:\project\neurosama\package.json.
+(Use `node --trace-warnings ...` to show where the warning was created)
+TAP version 13
+# Subtest: v=2 涓斾節绫讳簨浠跺悕涔嬩竴鐨勫抚鎵嶆槸 v2 甯?ok 1 - v=2 涓斾節绫讳簨浠跺悕涔嬩竴鐨勫抚鎵嶆槸 v2 甯?  ---
+  duration_ms: 0.9782
+  type: 'test'
+  ...
+# Subtest: 缂?id / 闈炴暣鏁?seq / 鍋?ts 鐨勫抚鏁存潯蹇界暐
+ok 2 - 缂?id / 闈炴暣鏁?seq / 鍋?ts 鐨勫抚鏁存潯蹇界暐
+  ---
+  duration_ms: 0.2456
+  type: 'test'
+  ...
+# Subtest: 鍚?id 閲嶅甯у彧浜や粯涓€娆★紝涓嶄骇鐢熼噸澶?UI
+ok 3 - 鍚?id 閲嶅甯у彧浜や粯涓€娆★紝涓嶄骇鐢熼噸澶?UI
+  ---
+  duration_ms: 0.1898
+  type: 'test'
+  ...
+# Subtest: 鍘婚噸琛ㄦ湁鐣岋細瓒呬笂闄愪涪鏈€鑰?id锛屾柊 id 鐓у父宸ヤ綔
+ok 4 - 鍘婚噸琛ㄦ湁鐣岋細瓒呬笂闄愪涪鏈€鑰?id锛屾柊 id 鐓у父宸ヤ綔
+  ---
+  duration_ms: 0.1754
+  type: 'test'
+  ...
+# Subtest: 涔卞簭甯ф寜 seq 琛ラ綈鍚庝緷搴忎氦浠?ok 5 - 涔卞簭甯ф寜 seq 琛ラ綈鍚庝緷搴忎氦浠?  ---
+  duration_ms: 0.728
+  type: 'test'
+  ...
+# Subtest: 缂哄彛绛変笉鏉ワ紙at-most-once 琚涪锛夋椂绐楀彛婧㈠嚭鎸夊簭璺宠繃锛岀敾闈笉鍗℃
+ok 6 - 缂哄彛绛変笉鏉ワ紙at-most-once 琚涪锛夋椂绐楀彛婧㈠嚭鎸夊簭璺宠繃锛岀敾闈笉鍗℃
+  ---
+  duration_ms: 0.3695
+  type: 'test'
+  ...
+# Subtest: 杩熷埌甯э紙seq 宸茶繃锛夋爣 late 鐓у父浜や粯锛屼氦鐢?UI 鐘舵€佸眰鎷掔粷鍥為€€
+ok 7 - 杩熷埌甯э紙seq 宸茶繃锛夋爣 late 鐓у父浜や粯锛屼氦鐢?UI 鐘舵€佸眰鎷掔粷鍥為€€
+  ---
+  duration_ms: 0.127
+  type: 'test'
+  ...
+# Subtest: resetConnection 閲嶇畻 seq 璧风偣浣嗕繚鐣?id 鍘婚噸锛堟柇绾胯ˉ榻愪細閲嶆斁鏃у抚锛?ok 8 - resetConnection 閲嶇畻 seq 璧风偣浣嗕繚鐣?id 鍘婚噸锛堟柇绾胯ˉ榻愪細閲嶆斁鏃у抚锛?  ---
+  duration_ms: 0.792
+  type: 'test'
+  ...
+# Subtest: TASK_STATE_CHANGE / STEP_STATE_CHANGE 褰掔害鍑轰换鍔″崱涓庢楠?ok 9 - TASK_STATE_CHANGE / STEP_STATE_CHANGE 褰掔害鍑轰换鍔″崱涓庢楠?  ---
+  duration_ms: 0.5435
+  type: 'test'
+  ...
+# Subtest: CONTRACT_PROPOSED 褰掔害鍑哄绾﹀崱锛涘悓 contract_id 鏂扮増鏈鐩栨棫鐗堟湰
+ok 10 - CONTRACT_PROPOSED 褰掔害鍑哄绾﹀崱锛涘悓 contract_id 鏂扮増鏈鐩栨棫鐗堟湰
+  ---
+  duration_ms: 0.4561
+  type: 'test'
+  ...
+# Subtest: ASK_USER 褰掔害鍑烘彁闂崱锛宮arkAnswered 鍙瓟鏈€鏂颁竴鏉℃湭绛旂殑
+ok 11 - ASK_USER 褰掔害鍑烘彁闂崱锛宮arkAnswered 鍙瓟鏈€鏂颁竴鏉℃湭绛旂殑
+  ---
+  duration_ms: 0.261
+  type: 'test'
+  ...
+# Subtest: TOOL_EXECUTION 褰掔害鍑哄伐鍏锋祦姘达紙steps_done/steps_total锛屾棤 progress 鍋囨潯锛?ok 12 - TOOL_EXECUTION 褰掔害鍑哄伐鍏锋祦姘达紙steps_done/steps_total锛屾棤 progress 鍋囨潯锛?  ---
+  duration_ms: 0.1883
+  type: 'test'
+  ...
+# Subtest: VERIFICATION_REPORT / DELIVERY_EFFECT / MEMORY_UPDATE / AGENT_PRESENCE 鍚勮嚜褰掔害
+ok 13 - VERIFICATION_REPORT / DELIVERY_EFFECT / MEMORY_UPDATE / AGENT_PRESENCE 鍚勮嚜褰掔害
+  ---
+  duration_ms: 0.3073
+  type: 'test'
+  ...
+# Subtest: AGENT_PRESENCE 鍥涙€佷箣澶栫殑瀹夊叏蹇界暐
+ok 14 - AGENT_PRESENCE 鍥涙€佷箣澶栫殑瀹夊叏蹇界暐
+  ---
+  duration_ms: 0.083
+  type: 'test'
+  ...
+# Subtest: DELIVERY_EFFECT 鍚?effect_id 浜屾鍒拌揪鍙洿鏂扮姸鎬侊紝涓嶉噸澶嶅崰浣?ok 15 - DELIVERY_EFFECT 鍚?effect_id 浜屾鍒拌揪鍙洿鏂扮姸鎬侊紝涓嶉噸澶嶅崰浣?  ---
+  duration_ms: 0.0996
+  type: 'test'
+  ...
+# Subtest: 杩熷埌甯т笉鍥為€€鐢婚潰锛氭棫 ts 鐨?TASK/STEP 鐘舵€佽 ts 瀹堝崼鎷︿笅
+ok 16 - 杩熷埌甯т笉鍥為€€鐢婚潰锛氭棫 ts 鐨?TASK/STEP 鐘舵€佽 ts 瀹堝崼鎷︿笅
+  ---
+  duration_ms: 0.1413
+  type: 'test'
+  ...
+# Subtest: 鍚屽唴瀹逛笉鍚屼俊灏佺殑 TASK 浜嬩欢涓嶈Е鍙戝彲瑙佸彉鍖栵紙涓嶄骇鐢熼噸澶?UI锛?ok 17 - 鍚屽唴瀹逛笉鍚屼俊灏佺殑 TASK 浜嬩欢涓嶈Е鍙戝彲瑙佸彉鍖栵紙涓嶄骇鐢熼噸澶?UI锛?  ---
+  duration_ms: 0.0906
+  type: 'test'
+  ...
+# Subtest: 浜斾釜鍛戒护閮借兘鏋勯€狅紝蹇呭～瀛楁涓?request_id 榻愬叏
+ok 18 - 浜斾釜鍛戒护閮借兘鏋勯€狅紝蹇呭～瀛楁涓?request_id 榻愬叏
+  ---
+  duration_ms: 1.586
+  type: 'test'
+  ...
+# Subtest: 缂哄繀濉瓧娈电殑鍛戒护涓嶆瀯閫狅紝鎶ョ己澶卞瓧娈靛悕
+ok 19 - 缂哄繀濉瓧娈电殑鍛戒护涓嶆瀯閫狅紝鎶ョ己澶卞瓧娈靛悕
+  ---
+  duration_ms: 0.2454
+  type: 'test'
+  ...
+# Subtest: 绫诲瀷鏍￠獙锛歝onfirmed_slots 闈炲瓧绗︿覆鏁扮粍 / answer 闈炲瓧绗︿覆 / reason 瓒婄晫閮芥嫆缁?ok 20 - 绫诲瀷鏍￠獙锛歝onfirmed_slots 闈炲瓧绗︿覆鏁扮粍 / answer 闈炲瓧绗︿覆 / reason 瓒婄晫閮芥嫆缁?  ---
+  duration_ms: 0.1196
+  type: 'test'
+  ...
+# Subtest: request_id 骞傜瓑閿細澶栭儴浼犲叆鍒欏鐢紙缃戠粶閲嶅彂锛夛紝鍚﹀垯姣忔鏂扮敓鎴?ok 21 - request_id 骞傜瓑閿細澶栭儴浼犲叆鍒欏鐢紙缃戠粶閲嶅彂锛夛紝鍚﹀垯姣忔鏂扮敓鎴?  ---
+  duration_ms: 0.1763
+  type: 'test'
+  ...
+# Subtest: handleFrame 鍙 v2 甯э紱v1 浜嬩欢鍘熸牱鏀捐缁欐棫閾捐矾
+ok 22 - handleFrame 鍙 v2 甯э紱v1 浜嬩欢鍘熸牱鏀捐缁欐棫閾捐矾
+  ---
+  duration_ms: 0.1828
+  type: 'test'
+  ...
+# Subtest: 鏈煡 type锛堝惈琚鐨?TASK_SNAPSHOT锛夋暣鏉″悶鎺変笉杩?v1 閾捐矾銆佷笉杩涚姸鎬?ok 23 - 鏈煡 type锛堝惈琚鐨?TASK_SNAPSHOT锛夋暣鏉″悶鎺変笉杩?v1 閾捐矾銆佷笉杩涚姸鎬?  ---
+  duration_ms: 0.1282
+  type: 'test'
+  ...
+# Subtest: 璁㈤槄鑰呮敹鍒板揩鐓э紱閲嶅/鍚屽唴瀹瑰抚涓嶉噸澶嶅箍鎾紙涓嶄骇鐢熼噸澶?UI锛?ok 24 - 璁㈤槄鑰呮敹鍒板揩鐓э紱閲嶅/鍚屽唴瀹瑰抚涓嶉噸澶嶅箍鎾紙涓嶄骇鐢熼噸澶?UI锛?  ---
+  duration_ms: 0.1492
+  type: 'test'
+  ...
+# Subtest: sendCommand 缁忔敞鍏ョ殑閫氶亾鍙戝嚭锛涢€氶亾鏈氨缁椂鍛戒护鐓у父杩斿洖锛堢暀寰呴噸鍙戯級
+ok 25 - sendCommand 缁忔敞鍏ョ殑閫氶亾鍙戝嚭锛涢€氶亾鏈氨缁椂鍛戒护鐓у父杩斿洖锛堢暀寰呴噸鍙戯級
+  ---
+  duration_ms: 0.2644
+  type: 'test'
+  ...
+# Subtest: ANSWER 鍙戝嚭鍚庤浠诲姟鏈€鏂版彁闂爣璁颁负宸茬瓟骞跺箍鎾?ok 26 - ANSWER 鍙戝嚭鍚庤浠诲姟鏈€鏂版彁闂爣璁颁负宸茬瓟骞跺箍鎾?  ---
+  duration_ms: 0.1544
+  type: 'test'
+  ...
+# Subtest: 甯搁噺涓庡崗璁榻愶細涔濈被浜嬩欢 + 浜斿懡浠わ紝鏃犵姝㈤」
+ok 27 - 甯搁噺涓庡崗璁榻愶細涔濈被浜嬩欢 + 浜斿懡浠わ紝鏃犵姝㈤」
+  ---
+  duration_ms: 0.0677
+  type: 'test'
+  ...
+# Subtest: 蹇収鏄覆鏌撳绾︼細鍏ㄩ儴闆嗗悎閮芥槸鏁扮粍锛堟覆鏌撳眰鐢?length/閬嶅巻锛屼笉鐢?Map API锛?ok 28 - 蹇収鏄覆鏌撳绾︼細鍏ㄩ儴闆嗗悎閮芥槸鏁扮粍锛堟覆鏌撳眰鐢?length/閬嶅巻锛屼笉鐢?Map API锛?  ---
+  duration_ms: 0.1551
+  type: 'test'
+  ...
+1..28
+# tests 28
+# suites 0
+# pass 28
+# fail 0
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 22.5045
+(node:16104) [MODULE_TYPELESS_PACKAGE_JSON] Warning: Module type of file:///D:/project/neurosama/web/memory-panel.js is not specified and it doesn't parse as CommonJS.
+Reparsing as ES module because module syntax was detected. This incurs a performance overhead.
+To eliminate this warning, add "type": "module" to D:\project\neurosama\package.json.
+(Use `node --trace-warnings ...` to show where the warning was created)
+TAP version 13
+# Subtest: 鍋滅敤鏍囩锛氬彧鏈夋樉寮?disabled === true 鎵嶅嚭瀛?ok 1 - 鍋滅敤鏍囩锛氬彧鏈夋樉寮?disabled === true 鎵嶅嚭瀛?  ---
+  duration_ms: 1.6593
+  type: 'test'
+  ...
+# Subtest: 鏇存柊鏃堕棿锛歶pdated_at 鏅氫簬 created_at 鎵嶅嚭銆屾洿鏂颁簬銆?ok 2 - 鏇存柊鏃堕棿锛歶pdated_at 鏅氫簬 created_at 鎵嶅嚭銆屾洿鏂颁簬銆?  ---
+  duration_ms: 1.2864
+  type: 'test'
+  ...
+# Subtest: 鏇存柊鏃堕棿锛氭湭缂栬緫杩囷紙鐩哥瓑锛変笉鍑哄瓧锛岄伩鍏嶄笌銆岃浜庛€嶉噸澶?ok 3 - 鏇存柊鏃堕棿锛氭湭缂栬緫杩囷紙鐩哥瓑锛変笉鍑哄瓧锛岄伩鍏嶄笌銆岃浜庛€嶉噸澶?  ---
+  duration_ms: 0.1395
+  type: 'test'
+  ...
+# Subtest: 鏇存柊鏃堕棿锛氬€掗€€鎴栫己澶变笉鍑哄瓧锛屼笉缂栭€犳棩鏈?ok 4 - 鏇存柊鏃堕棿锛氬€掗€€鎴栫己澶变笉鍑哄瓧锛屼笉缂栭€犳棩鏈?  ---
+  duration_ms: 0.2105
+  type: 'test'
+  ...
+# Subtest: 鍘熻瘽寮曠敤锛歭inked 涓旀湁娑堟伅 id 鎵嶅嚭銆屽師璇濆嚭鑷秷鎭?\#N銆?ok 5 - 鍘熻瘽寮曠敤锛歭inked 涓旀湁娑堟伅 id 鎵嶅嚭銆屽師璇濆嚭鑷秷鎭?\#N銆?  ---
+  duration_ms: 0.1862
+  type: 'test'
+  ...
+# Subtest: 鍋滅敤鎿嶄綔锛歛ctive 鏈仠鐢?鈫?鍋滅敤锛坉isabled:true锛?ok 6 - 鍋滅敤鎿嶄綔锛歛ctive 鏈仠鐢?鈫?鍋滅敤锛坉isabled:true锛?  ---
+  duration_ms: 0.6134
+  type: 'test'
+  ...
+# Subtest: 鍋滅敤鎿嶄綔锛歛ctive 宸插仠鐢?鈫?鍚敤锛坉isabled:false锛夛紝缂哄瓧娈垫寜鏈仠鐢ㄥ鐞?ok 7 - 鍋滅敤鎿嶄綔锛歛ctive 宸插仠鐢?鈫?鍚敤锛坉isabled:false锛夛紝缂哄瓧娈垫寜鏈仠鐢ㄥ鐞?  ---
+  duration_ms: 0.1639
+  type: 'test'
+  ...
+# Subtest: 鍋滅敤鎿嶄綔锛氶潪 active 鐘舵€佷笉鎻愪緵寮€鍏斥€斺€斿畠浠湰鏉ュ氨涓嶈繘瑁呴厤
+ok 8 - 鍋滅敤鎿嶄綔锛氶潪 active 鐘舵€佷笉鎻愪緵寮€鍏斥€斺€斿畠浠湰鏉ュ氨涓嶈繘瑁呴厤
+  ---
+  duration_ms: 0.0797
+  type: 'test'
+  ...
+# Subtest: 蹇樻帀鎿嶄綔锛氬彧鏈?active 琛屾彁渚涒€斺€擠ELETE 鍒犳暣鏉¤韩浠介摼锛屽惈褰撳墠鐢熸晥琛?ok 9 - 蹇樻帀鎿嶄綔锛氬彧鏈?active 琛屾彁渚涒€斺€擠ELETE 鍒犳暣鏉¤韩浠介摼锛屽惈褰撳墠鐢熸晥琛?  ---
+  duration_ms: 0.2798
+  type: 'test'
+  ...
+# Subtest: 蹇樻帀鎿嶄綔锛氶潪 active 琛屼笉鎻愪緵鎸夐挳鈥斺€斿湪寰呮牳瀵?鍘嗗彶琛屼笂鐐瑰畠浼氳鍒犵敓鏁堣蹇?ok 10 - 蹇樻帀鎿嶄綔锛氶潪 active 琛屼笉鎻愪緵鎸夐挳鈥斺€斿湪寰呮牳瀵?鍘嗗彶琛屼笂鐐瑰畠浼氳鍒犵敓鏁堣蹇?  ---
+  duration_ms: 0.3319
+  type: 'test'
+  ...
+# Subtest: 蹇樻帀璇存槑锛氶潪 active 琛岀粰涓€鍙ヨВ閲婏紝鍒鎸夐挳娑堝け鍍?bug
+ok 11 - 蹇樻帀璇存槑锛氶潪 active 琛岀粰涓€鍙ヨВ閲婏紝鍒鎸夐挳娑堝け鍍?bug
+  ---
+  duration_ms: 0.2821
+  type: 'test'
+  ...
+# Subtest: 纭垹闄ょ‘璁ゆ枃妗堬細蹇呴』鍐欐槑鍒犻櫎鍚庝笉鍙仮澶嶏紝涓斿甫涓婃槸鍝潯璁板繂
+ok 12 - 纭垹闄ょ‘璁ゆ枃妗堬細蹇呴』鍐欐槑鍒犻櫎鍚庝笉鍙仮澶嶏紝涓斿甫涓婃槸鍝潯璁板繂
+  ---
+  duration_ms: 0.1655
+  type: 'test'
+  ...
+# Subtest: 蹇樻帀鏁存潯浜嬪疄锛氶潪 active 涓旀湁 key 鎵嶇粰鍏ュ彛锛沘ctive 宸叉湁蹇樻帀涓嶉噸澶?ok 13 - 蹇樻帀鏁存潯浜嬪疄锛氶潪 active 涓旀湁 key 鎵嶇粰鍏ュ彛锛沘ctive 宸叉湁蹇樻帀涓嶉噸澶?  ---
+  duration_ms: 0.1164
+  type: 'test'
+  ...
+# Subtest: 蹇樻帀鏁存潯浜嬪疄纭鏂囨锛氳娓呬細杩炲甫褰撳墠鐢熸晥琛岋紝涓斾笉鍙仮澶?ok 14 - 蹇樻帀鏁存潯浜嬪疄纭鏂囨锛氳娓呬細杩炲甫褰撳墠鐢熸晥琛岋紝涓斾笉鍙仮澶?  ---
+  duration_ms: 0.1155
+  type: 'test'
+  ...
+# Subtest: 鍘嗗彶鏃堕棿绾匡細鎸?key 杩斿洖鐨?items 鍙暀鐘舵€?鍊?鏃ユ湡锛岀己鏃ユ湡涓嶇紪
+ok 15 - 鍘嗗彶鏃堕棿绾匡細鎸?key 杩斿洖鐨?items 鍙暀鐘舵€?鍊?鏃ユ湡锛岀己鏃ユ湡涓嶇紪
+  ---
+  duration_ms: 0.2365
+  type: 'test'
+  ...
+1..15
+# tests 15
+# suites 0
+# pass 15
+# fail 0
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 18.3253
+(node:40880) [MODULE_TYPELESS_PACKAGE_JSON] Warning: Module type of file:///D:/project/neurosama/web/task-card.js is not specified and it doesn't parse as CommonJS.
+Reparsing as ES module because module syntax was detected. This incurs a performance overhead.
+To eliminate this warning, add "type": "module" to D:\project\neurosama\package.json.
+(Use `node --trace-warnings ...` to show where the warning was created)
+TAP version 13
+# Subtest: 鐘舵€佹爣绛撅細浜斾釜宸茬煡鐘舵€佹湁涓枃锛屾湭鐭ョ姸鎬佸師鏍烽檷绾?ok 1 - 鐘舵€佹爣绛撅細浜斾釜宸茬煡鐘舵€佹湁涓枃锛屾湭鐭ョ姸鎬佸師鏍烽檷绾?  ---
+  duration_ms: 0.7611
+  type: 'test'
+  ...
+# Subtest: 鍏宠仈鎻愰啋锛氬彧鍙栧悓 task_id 涓斿湪鐢熷懡鍛ㄦ湡鍐呯殑涓変釜鐘舵€?ok 2 - 鍏宠仈鎻愰啋锛氬彧鍙栧悓 task_id 涓斿湪鐢熷懡鍛ㄦ湡鍐呯殑涓変釜鐘舵€?  ---
+  duration_ms: 0.6391
+  type: 'test'
+  ...
+# Subtest: 淇濆瓨澶辫触锛歷ersion conflict 璧颁笓灞炴枃妗堬紙鏈嶅姟绔?store.py:237 鐨勬椿濂戠害锛?ok 3 - 淇濆瓨澶辫触锛歷ersion conflict 璧颁笓灞炴枃妗堬紙鏈嶅姟绔?store.py:237 鐨勬椿濂戠害锛?  ---
+  duration_ms: 0.1157
+  type: 'test'
+  ...
+1..3
+# tests 3
+# suites 0
+# pass 3
+# fail 0
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 9.0025
+(node:31808) [MODULE_TYPELESS_PACKAGE_JSON] Warning: Module type of file:///D:/project/neurosama/web/external-model.js is not specified and it doesn't parse as CommonJS.
+Reparsing as ES module because module syntax was detected. This incurs a performance overhead.
+To eliminate this warning, add "type": "module" to D:\project\neurosama\package.json.
+(Use `node --trace-warnings ...` to show where the warning was created)
+TAP version 13
+# Subtest: 绌轰笌闈炲瓧绗︿覆杈撳叆琚嫆锛屼笖缁欏嚭鐞嗙敱
+ok 1 - 绌轰笌闈炲瓧绗︿覆杈撳叆琚嫆锛屼笖缁欏嚭鐞嗙敱
+  ---
+  duration_ms: 0.744
+  type: 'test'
+  ...
+# Subtest: 瓒呴暱鍦板潃琚嫆锛坔ttps 涓庣珯鍐呰矾寰勯兘绠楋級
+ok 2 - 瓒呴暱鍦板潃琚嫆锛坔ttps 涓庣珯鍐呰矾寰勯兘绠楋級
+  ---
+  duration_ms: 0.1028
+  type: 'test'
+  ...
+# Subtest: 鍚堟硶 https 閾炬帴閫氳繃锛涚暩褰笌涓嶅畨鍏?scheme 琚嫆
+ok 3 - 鍚堟硶 https 閾炬帴閫氳繃锛涚暩褰笌涓嶅畨鍏?scheme 琚嫆
+  ---
+  duration_ms: 0.6995
+  type: 'test'
+  ...
+# Subtest: 绔欏唴 /static/ 璺緞閫氳繃
+ok 4 - 绔欏唴 /static/ 璺緞閫氳繃
+  ---
+  duration_ms: 0.1236
+  type: 'test'
+  ...
+# Subtest: 鍗忚鐩稿 URL 涓庡弽鏂滄潬琚嫆鈥斺€斿畠浠笉鏄珯鍐呰矾寰?ok 5 - 鍗忚鐩稿 URL 涓庡弽鏂滄潬琚嫆鈥斺€斿畠浠笉鏄珯鍐呰矾寰?  ---
+  duration_ms: 0.1879
+  type: 'test'
+  ...
+1..5
+# tests 5
+# suites 0
+# pass 5
+# fail 0
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 9.0044
+TAP version 13
+# Subtest: show makes a valid mumble visible and dedups by event_id
+ok 1 - show makes a valid mumble visible and dedups by event_id
+  ---
+  duration_ms: 0.7643
+  type: 'test'
+  ...
+# Subtest: empty/invalid mumble never shows
+ok 2 - empty/invalid mumble never shows
+  ---
+  duration_ms: 0.0994
+  type: 'test'
+  ...
+# Subtest: expand carries the real context for鎺ヨ瘽
+ok 3 - expand carries the real context for鎺ヨ瘽
+  ---
+  duration_ms: 0.6342
+  type: 'test'
+  ...
+# Subtest: dismiss clears and is idempotent
+ok 4 - dismiss clears and is idempotent
+  ---
+  duration_ms: 0.1259
+  type: 'test'
+  ...
+# Subtest: poll expires naturally past expires_at
+ok 5 - poll expires naturally past expires_at
+  ---
+  duration_ms: 0.212
+  type: 'test'
+  ...
+# Subtest: update refreshes the same bubble and can extend its life
+ok 6 - update refreshes the same bubble and can extend its life
+  ---
+  duration_ms: 0.1769
+  type: 'test'
+  ...
+# Subtest: update on a hidden bubble is a no-op
+ok 7 - update on a hidden bubble is a no-op
+  ---
+  duration_ms: 0.0844
+  type: 'test'
+  ...
+# Subtest: show normalizes malformed event fields instead of passing them through
+ok 8 - show normalizes malformed event fields instead of passing them through
+  ---
+  duration_ms: 0.1041
+  type: 'test'
+  ...
+# Subtest: expand is refused unless a bubble is actually visible
+ok 9 - expand is refused unless a bubble is actually visible
+  ---
+  duration_ms: 0.2911
+  type: 'test'
+  ...
+# Subtest: missing callbacks never throw
+ok 10 - missing callbacks never throw
+  ---
+  duration_ms: 0.4152
+  type: 'test'
+  ...
+1..10
+# tests 10
+# suites 0
+# pass 10
+# fail 0
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 11.7551
+(node:10840) [MODULE_TYPELESS_PACKAGE_JSON] Warning: Module type of file:///D:/project/neurosama/web/companion.js is not specified and it doesn't parse as CommonJS.
+Reparsing as ES module because module syntax was detected. This incurs a performance overhead.
+To eliminate this warning, add "type": "module" to D:\project\neurosama\package.json.
+(Use `node --trace-warnings ...` to show where the warning was created)
+TAP version 13
+# Subtest: defersToAssistantGate 鍙纭闂ㄤ笌鍥炴墽
+ok 1 - defersToAssistantGate 鍙纭闂ㄤ笌鍥炴墽
+  ---
+  duration_ms: 0.8629
+  type: 'test'
+  ...
+# Subtest: 甯︾‘璁ら棬鐨勭粨鏋滃繀椤昏浣嶇粰鍔╂墜纭闂?ok 2 - 甯︾‘璁ら棬鐨勭粨鏋滃繀椤昏浣嶇粰鍔╂墜纭闂?  ---
+  duration_ms: 0.3066
+  type: 'test'
+  ...
+# Subtest: 甯﹀洖鎵х殑缁撴灉鍚屾牱璁╀綅锛屽苟閫氱煡鍏卞悓浜嬮」闈㈡澘
+ok 3 - 甯﹀洖鎵х殑缁撴灉鍚屾牱璁╀綅锛屽苟閫氱煡鍏卞悓浜嬮」闈㈡澘
+  ---
+  duration_ms: 0.1426
+  type: 'test'
+  ...
+1..3
+# tests 3
+# suites 0
+# pass 3
+# fail 0
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 10.159
+(node:13620) [MODULE_TYPELESS_PACKAGE_JSON] Warning: Module type of file:///D:/project/neurosama/web/assistant.js is not specified and it doesn't parse as CommonJS.
+Reparsing as ES module because module syntax was detected. This incurs a performance overhead.
+To eliminate this warning, add "type": "module" to D:\project\neurosama\package.json.
+(Use `node --trace-warnings ...` to show where the warning was created)
+TAP version 13
+# Subtest: 闈㈡澘杩樻病鍚姩鏃讹紝缁撴灉涓嶈娓叉煋涔熶笉鎶涢敊
+ok 1 - 闈㈡澘杩樻病鍚姩鏃讹紝缁撴灉涓嶈娓叉煋涔熶笉鎶涢敊
+  ---
+  duration_ms: 1.12
+  type: 'test'
+  ...
+# Subtest: preferences 杩樺湪閫斾腑鏃讹紝纭闂ㄥ凡缁忓氨缁?ok 2 - preferences 杩樺湪閫斾腑鏃讹紝纭闂ㄥ凡缁忓氨缁?  ---
+  duration_ms: 2.922
+  type: 'test'
+  ...
+# Subtest: 浠诲姟鏈嶅姟鍚姩澶辫触鍚庯紝纭闂ㄤ緷鐒跺彲杈?ok 3 - 浠诲姟鏈嶅姟鍚姩澶辫触鍚庯紝纭闂ㄤ緷鐒跺彲杈?  ---
+  duration_ms: 0.8942
+  type: 'test'
+  ...
+# Subtest: 纭闂ㄧ殑鎵瑰噯鎸夐挳鐪熺殑浼氳皟鐢ㄧ‘璁ゆ帴鍙?ok 4 - 纭闂ㄧ殑鎵瑰噯鎸夐挳鐪熺殑浼氳皟鐢ㄧ‘璁ゆ帴鍙?  ---
+  duration_ms: 0.8462
+  type: 'test'
+  ...
+1..4
+# tests 4
+# suites 0
+# pass 4
+# fail 0
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 16.9135
+TAP version 13
+# (node:39884) [MODULE_TYPELESS_PACKAGE_JSON] Warning: Module type of file:///D:/project/neurosama/web/reconnect.js is not specified and it doesn't parse as CommonJS.
+# Reparsing as ES module because module syntax was detected. This incurs a performance overhead.
+# To eliminate this warning, add "type": "module" to D:\\project\\neurosama\\package.json.
+# (Use `node --trace-warnings ...` to show where the warning was created)
+# Subtest: 鎸囨暟閫€閬匡細1s 璧锋銆佺炕鍊嶃€?5s 灏侀《
+ok 1 - 鎸囨暟閫€閬匡細1s 璧锋銆佺炕鍊嶃€?5s 灏侀《
+  ---
+  duration_ms: 0.8936
+  type: 'test'
+  ...
+# Subtest: reset 鍚庝粠 baseMs 閲嶆柊璧烽€€閬?ok 2 - reset 鍚庝粠 baseMs 閲嶆柊璧烽€€閬?  ---
+  duration_ms: 0.2047
+  type: 'test'
+  ...
+# Subtest: 鑷畾涔?base/max 鐢熸晥锛岄暱鏃堕棿鏂嚎涓嶄細婧㈠嚭
+ok 3 - 鑷畾涔?base/max 鐢熸晥锛岄暱鏃堕棿鏂嚎涓嶄細婧㈠嚭
+  ---
+  duration_ms: 0.2853
+  type: 'test'
+  ...
+1..3
+# tests 3
+# suites 0
+# pass 3
+# fail 0
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 127.4091
+
+> test:blocks
+> node web/test_blocks.mjs
+
+TAP version 13
+# Subtest: 涓冪绉湪 kind 涓庡崗璁?搂23.2 瀵归綈锛圧ENDERERS 涓€涓笉灏戯級
+ok 1 - 涓冪绉湪 kind 涓庡崗璁?搂23.2 瀵归綈锛圧ENDERERS 涓€涓笉灏戯級
+  ---
+  duration_ms: 1.0053
+  type: 'test'
+  ...
+# Subtest: parseCmd 鍙 <verb>:<payload>锛屾湭鐭ュ舰鎬?verb 涓虹┖
+ok 2 - parseCmd 鍙 <verb>:<payload>锛屾湭鐭ュ舰鎬?verb 涓虹┖
+  ---
+  duration_ms: 0.1735
+  type: 'test'
+  ...
+# Subtest: summarizeAqiBlocks 鏍￠獙淇″皝骞剁粺璁″彲娓叉煋鍧?ok 3 - summarizeAqiBlocks 鏍￠獙淇″皝骞剁粺璁″彲娓叉煋鍧?  ---
+  duration_ms: 0.2119
+  type: 'test'
+  ...
+# Subtest: summarizeAqiBlocks 瀵瑰潖淇″皝/绌哄潡瀹夊叏闄嶇骇
+ok 4 - summarizeAqiBlocks 瀵瑰潖淇″皝/绌哄潡瀹夊叏闄嶇骇
+  ---
+  duration_ms: 0.148
+  type: 'test'
+  ...
+# Subtest: 瀵煎嚭鐨?kind 娓呭崟涓庣湡瀹炴覆鏌撳櫒涓€涓€瀵瑰簲锛堜竴涓兘涓嶈兘灏戯級
+ok 5 - 瀵煎嚭鐨?kind 娓呭崟涓庣湡瀹炴覆鏌撳櫒涓€涓€瀵瑰簲锛堜竴涓兘涓嶈兘灏戯級
+  ---
+  duration_ms: 0.2649
+  type: 'test'
+  ...
+1..5
+# tests 5
+# suites 0
+# pass 5
+# fail 0
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 10.2778
