@@ -164,6 +164,9 @@ try {
  await page.locator('.assistant-section[aria-label="行动确认与结果"]').waitFor({state:'attached'});
  assert(await page.locator('.assistant-panel:not([data-interaction-preferences])').count()===1,'Retry recovers one assistant panel without duplicates');
  await page.route('**/api/memory/manual',route=>route.fulfill({status:503,json:{detail:'Unavailable'}}));
+ // 「关于你的记忆」现在默认折叠（W1），手动输入也在折叠体内；:167 之前必须先展开，
+ // 否则 Playwright 等不到可见元素（30s 超时红）。下面的 :180 只管记忆列表那一段。
+ await page.evaluate(()=>document.getElementById('memoryFold')?.setAttribute('open',''));
  await page.locator('#manualInput').fill('测试草稿，不写入真实记忆');
  await page.locator('#manualAdd').click();
  await page.waitForFunction(()=>document.querySelector('#memoryFeedback').textContent.includes('没有记下'));

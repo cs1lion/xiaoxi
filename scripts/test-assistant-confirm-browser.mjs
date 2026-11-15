@@ -87,6 +87,8 @@ async function fresh() {
   await page.goto('http://assistant-confirm.test/');
   await page.waitForFunction(() => window.confirmHarness?.ws?.readyState === 1);
   await resultArea.waitFor({ state: 'attached' });
+  // W1：助手面板搬进默认折叠的「一起做」(#workFold)，点 Tab 前必须先展开。
+  await page.evaluate(() => document.getElementById('workFold')?.setAttribute('open', ''));
   // The real workspace keeps action cards under the explicit "待办" tab.
   await page.locator('#work-tasks-tab').click();
 }

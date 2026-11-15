@@ -463,6 +463,12 @@ export function mountExperience({ sendConfig, sendText, onSwitch }) {
   controls();
   function reveal() {
     panel.open = true;
+    // W1 把「一起做」整块装进默认折叠的 #workFold：外层 details 关着时面板不渲染，
+    // 下面这句 focus 会落空（入口按钮看起来"没反应"，键盘用户也到不了摘要）。
+    // 展开所有 details 祖先，而不只是直接父节点，避免以后再套一层就静默坏掉。
+    for (let node = panel.parentElement; node; node = node.parentElement) {
+      if (node instanceof HTMLDetailsElement) node.open = true;
+    }
     panel.scrollIntoView({ block: "nearest" });
     panel.querySelector("summary")?.focus({ preventScroll: true });
   }

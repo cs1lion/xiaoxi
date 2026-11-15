@@ -123,6 +123,8 @@ async function exportedBaseline() {
 }
 try {
   await page.goto('http://voice.test/');
+  // W1：侧栏两块默认折叠，本门禁后面要点进折叠体（陪伴面板 / 记忆列表）。
+  await page.evaluate(()=>{for(const id of ['memoryFold','workFold'])document.getElementById(id)?.setAttribute('open','');});
   await page.waitForFunction(()=>window.voiceHarness?.ws?.readyState===1);
   await personaRequested;
   await page.locator('#presenceCapsule').click();
@@ -138,6 +140,8 @@ try {
     'late persona defaults cannot silently change subsequent configs');
   checks.push('slow persona response preserves acknowledged speech and startup configs omit unknown preference');
   await page.reload();
+  // reload 会丢掉上一步的 open 属性（HTML 里的默认就是折叠）。
+  await page.evaluate(()=>{for(const id of ['memoryFold','workFold'])document.getElementById(id)?.setAttribute('open','');});
   await page.waitForFunction(()=>window.voiceHarness?.ws?.readyState===1);
   await page.locator('#emotionSelect option[value="base"]').waitFor({state:'attached'});
   assert.equal(await page.locator('#emotionSelect').inputValue(), 'base', 'daily speech starts with natural');
