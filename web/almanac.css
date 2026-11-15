@@ -20,7 +20,10 @@
   --text:var(--ink); --accent:var(--verm); --accent-2:var(--gold-text);
   --accent-deep:var(--verm-deep); --accent-soft:#f1e2cd; --danger:var(--verm-deep); --star:var(--gold);
   --r-control:2px; --r-field:2px; --r-panel:2px; --r-chip:2px;
-  --fs-body:14px; --fs-content:13.5px; --fs-meta:10px;
+  --fs-body:14px; --fs-content:13.5px;
+  /* 桌面端可读性下限（W2）：中文标签一律 ≥12px；--fs-micro 只留给全大写英文
+   * 与纯数字眉标（PLATE / 01、时间戳、序号），下限 11px。 */
+  --fs-meta:12px; --fs-micro:11px;
 }
 
 *{box-sizing:border-box}
@@ -43,7 +46,10 @@ button{cursor:pointer}
 .side{display:flex;flex-direction:column;min-height:0;padding:26px 22px 18px;
   border-right:1px solid rgba(33,28,22,.22);
   background:linear-gradient(180deg,rgba(238,228,210,.9),rgba(233,222,201,.96));
-  overflow-y:auto;scrollbar-width:thin;font-size:13px}
+  overflow-y:auto;scrollbar-width:thin;scrollbar-color:var(--rule) transparent;font-size:13px}
+.side::-webkit-scrollbar{width:8px}
+.side::-webkit-scrollbar-track{background:transparent}
+.side::-webkit-scrollbar-thumb{background:var(--rule);border-radius:0}
 .brand{display:flex;align-items:center;gap:12px}
 .brand .avatar{display:grid;place-items:center;flex:none;width:44px;height:44px;
   border:1px solid var(--verm);border-radius:0;color:var(--verm);
@@ -51,17 +57,29 @@ button{cursor:pointer}
   isolation:auto}
 .brand .avatar::after{display:none}
 .brand h1{margin:0;font:600 21px/1.3 var(--serif);letter-spacing:.12em;color:var(--ink)}
-.brand p{margin:2px 0 0;font-size:10.5px;color:var(--muted);letter-spacing:.02em}
+.brand p{margin:2px 0 0;font-size:var(--fs-meta);color:var(--muted);letter-spacing:.02em}
 .side-intro{margin:24px 0 0;padding-top:12px;border-top:1px solid var(--rule)}
-.eyebrow{font:9px var(--mono);letter-spacing:.24em;color:var(--gold-text)}
+.eyebrow{font:var(--fs-meta)/1.6 var(--mono);letter-spacing:.12em;color:var(--gold-text)}
 .side-intro p{margin:6px 0 0;font:13px/1.8 var(--serif);color:var(--ink-2)}
 .panel{margin:20px 0 0;padding:13px 0 0;border:0;border-top:1px solid var(--rule);
   border-radius:0;background:none;box-shadow:none}
 .panel h2{display:flex;align-items:baseline;justify-content:space-between;gap:10px;
   margin:0 0 10px;font:600 12px/1.4 var(--sans);letter-spacing:.08em;color:var(--ink)}
-.section-mark{font:10px var(--mono);color:var(--verm);letter-spacing:.1em;margin-left:auto}
+.section-mark{font:var(--fs-micro) var(--mono);color:var(--verm);letter-spacing:.1em;margin-left:auto}
+/* W1 折叠分区：记忆与工作便笺都可收起，收起的标题仍显示分区名与编号。
+ * 侧栏 1280×800 下原本有 211px 内容落在视口外且只有 1px 滚动条——折叠后
+ * 首屏只留一个摘要行，不再有「内容被静默截断」。 */
+.side-fold{display:block}
+.side-fold>summary{display:flex;align-items:baseline;gap:8px;list-style:none;cursor:pointer;
+  min-height:32px;padding:0}
+.side-fold>summary::-webkit-details-marker{display:none}
+.side-fold>summary>h2{flex:1;margin:0}
+.side-fold>summary::after{content:"收起";font:var(--fs-meta)/1.4 var(--sans);
+  letter-spacing:.04em;color:var(--faint);white-space:nowrap}
+.side-fold:not([open])>summary::after{content:"展开"}
+.side-fold>summary:hover::after{color:var(--ink)}
 .row{display:flex;align-items:center;gap:7px;margin:10px 0}
-.row label{display:flex;align-items:center;gap:8px;font-size:11.5px;color:var(--muted)}
+.row label{display:flex;align-items:center;gap:8px;font-size:12px;color:var(--muted);min-height:28px}
 .row.add{margin-top:4px}
 .row.add input{flex:1;min-width:0;height:36px;padding:0 2px;border:0;border-bottom:1px solid var(--rule);
   border-radius:0;background:none;font-size:12px;color:var(--ink);min-height:0}
@@ -70,7 +88,7 @@ button{cursor:pointer}
 .row.add button{flex:none;min-height:36px;padding:0 11px;border:1px solid var(--ink-2);
   border-radius:1px;background:none;font-size:11px;color:var(--ink)}
 .row.add button:hover{background:rgba(255,251,240,.5);border-color:var(--ink)}
-.row input[type=checkbox]{width:12px;height:12px;min-height:0;accent-color:var(--verm)}
+.row input[type=checkbox],#memHistory{width:24px;height:24px;min-width:24px;min-height:24px;min-height:24px;accent-color:var(--verm);flex:none}
 .mem-list{max-height:220px;overflow:auto;display:flex;flex-direction:column;gap:0;margin-top:12px}
 .mem-list:empty::before{content:"还没有记忆。聊着聊着，慢慢认识你。";display:block;
   margin:14px 0 0;padding:11px 0 11px 12px;border-left:1px solid var(--rule);
@@ -78,21 +96,22 @@ button{cursor:pointer}
 .mem{border-bottom:1px solid var(--rule-soft);padding:9px 0;font-size:12px;overflow-wrap:anywhere}
 .mem .val{padding:4px 0;border:0;border-radius:0;background:none;min-height:0;color:var(--ink)}
 .mem .val:hover{background:rgba(255,251,240,.55)}
-.mem .meta{display:flex;gap:5px;align-items:center;flex-wrap:wrap;margin-top:5px;
-  font:9.5px var(--mono);color:var(--faint)}
-.mem .meta .ghost{border:0;background:none;padding:2px 0;min-height:0;
-  font:10.5px var(--sans);color:var(--muted)}
+.mem .meta{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-top:5px;
+  font:11px var(--mono);color:var(--faint)}
+.mem .meta .ghost{border:0;background:none;padding:4px 8px;min-height:28px;min-width:44px;
+  display:inline-flex;align-items:center;justify-content:center;
+  font:12px var(--sans);color:var(--muted)}
 .mem .meta .ghost:hover{background:none;color:var(--ink)}
 .mem .meta .ghost.danger{color:var(--verm)}
 /* S2 软停用行：仍在库里、可恢复，字色退到 faint 一档 */
 .mem.is-disabled .val{color:var(--faint)}
 /* S2 证据链（何时说过）：原话引文走衬线 + 金色引线，出处走等宽小字 */
 .mem details{margin-top:4px}
-.mem summary{min-height:0;padding:3px 0;font:9.5px var(--mono);letter-spacing:.08em;
+.mem summary{min-height:28px;padding:3px 0;font:12px var(--mono);letter-spacing:.04em;
   color:var(--gold-text)}
 .mem blockquote{margin:4px 0 0;padding-left:10px;border-left:2px solid var(--gold);
   font:12px/1.75 var(--serif);color:var(--ink-2)}
-.mem details p{margin:4px 0 0;font:9.5px var(--mono);color:var(--faint)}
+.mem details p{margin:4px 0 0;font:11px var(--mono);color:var(--faint)}
 /* 硬删除二次确认：确认条占满一行，文案先说清不可恢复 */
 .mem .meta .confirm{display:flex;flex-wrap:wrap;align-items:center;gap:4px 8px;
   flex-basis:100%;margin-top:4px;padding:6px 8px;border-left:2px solid var(--verm);
@@ -102,18 +121,18 @@ button{cursor:pointer}
 /* 按 key 对齐的历史版本链；与「显示历史」的整表行不同 */
 .mem-history-row{display:flex;flex-wrap:wrap;gap:4px 8px;align-items:baseline;
   padding:4px 0;border-top:1px dotted var(--rule-soft);font:10px/1.7 var(--mono);color:var(--muted)}
-.tag{padding:1px 5px;border-radius:1px;background:none;border:1px solid var(--rule-soft);color:var(--muted)}
+.tag{padding:2px 6px;border-radius:1px;background:none;border:1px solid var(--rule-soft);color:var(--muted);font-size:11px}
 .tag.inferred{color:var(--gold-text)}.tag.uncertain{color:var(--verm)}
 .hint{color:var(--muted);font-size:11px;line-height:1.75;margin:7px 0 0}
-.row.foot{font:10px var(--mono);color:var(--faint);gap:10px;margin-bottom:0;margin-top:12px;
-  letter-spacing:.06em}
+.row.foot{font:12px var(--mono);color:var(--faint);gap:8px;margin-bottom:0;margin-top:12px;
+  letter-spacing:.04em}
 .row.foot>span{margin-right:auto}
-.row.foot button{border:0;background:none;padding:4px 0;font:10.5px var(--sans);color:var(--muted);min-height:0}
+.row.foot button{border:0;background:none;padding:4px 8px;font:12px var(--sans);color:var(--muted);min-height:28px;min-width:44px;display:inline-flex;align-items:center}
 .row.foot button.danger{color:var(--verm)}
 summary{cursor:pointer;min-height:30px;font-size:13px;font-weight:600}
 .side-footer{display:flex;align-items:center;justify-content:space-between;gap:12px;
   margin:auto 0 0;padding-top:16px;border-top:1px solid var(--rule);
-  font:9.5px var(--mono);letter-spacing:.08em;color:var(--faint)}
+  font:12px/1.6 var(--mono);letter-spacing:.04em;color:var(--faint)}
 .side-footer span{font:12px var(--serif);color:var(--verm);display:grid;place-items:center;
   width:22px;height:22px;border:1px solid var(--verm);transform:rotate(-3deg)}
 .side input:not([type=checkbox]),.side select{border:0;border-bottom:1px solid var(--rule);
@@ -129,8 +148,8 @@ summary{cursor:pointer;min-height:30px;font-size:13px;font-weight:600}
   padding:0;border-bottom:1px solid rgba(33,28,22,.26);color:var(--muted);font-size:12px}
 .masthead{display:flex;align-items:baseline;gap:12px}
 .masthead b{font:600 13px/1.4 var(--serif);letter-spacing:.14em;color:var(--ink)}
-.masthead span{font:9px var(--mono);letter-spacing:.14em;color:var(--faint)}
-.connection{display:flex;align-items:center;gap:7px;margin-left:16px;font-size:10.5px;color:var(--muted)}
+.masthead span{font:var(--fs-micro) var(--mono);letter-spacing:.14em;color:var(--faint)}
+.connection{display:flex;align-items:center;gap:7px;margin-left:16px;font-size:12px;color:var(--muted)}
 .dot{width:5px;height:5px;border-radius:50%;background:var(--gold);flex:none;box-shadow:none}
 .dot.on{background:var(--gold);box-shadow:0 0 0 3px rgba(155,122,62,.14)}
 .dot.busy{background:var(--verm)}
@@ -139,29 +158,31 @@ summary{cursor:pointer;min-height:30px;font-size:13px;font-weight:600}
 .dot.reconnecting{background:var(--verm);animation:ops-breathe 2.4s var(--ease) infinite}
 .spacer{flex:1}
 .topbar .ghost{display:inline-flex;align-items:center;min-height:38px;padding:0 10px;
-  border:1px solid transparent;border-radius:1px;background:none;color:var(--ink-2);font-size:11.5px}
+  border:1px solid transparent;border-radius:1px;background:none;color:var(--ink-2);font-size:12px}
 .topbar .ghost:hover{border-color:var(--rule);background:rgba(255,250,240,.4)}
 .preferences>summary{display:grid;place-items:center;width:38px;min-height:38px;padding:0;
   border:1px solid transparent;border-radius:1px;background:none;color:var(--ink-2)}
 .preferences>summary:hover{border-color:var(--rule);background:rgba(255,250,240,.4)}
 .sidebar-toggle,.topbar .sidebar-toggle{display:none}
 .room-label{display:flex;align-items:center;gap:12px;flex:none;height:31px;
-  font:9.5px var(--mono);letter-spacing:.18em;color:var(--faint)}
+  font:var(--fs-micro) var(--mono);letter-spacing:.14em;color:var(--faint)}
 .room-line{width:23px;height:1px;background:var(--rule)}
-.room-label>span:last-child,.room-folio{margin-left:auto;font:9.5px var(--mono);
-  letter-spacing:.18em;color:var(--verm);writing-mode:horizontal-tb}
+.room-label>span:last-child,.room-folio{margin-left:auto;font:var(--fs-micro) var(--mono);
+  letter-spacing:.14em;color:var(--verm);writing-mode:horizontal-tb}
 
 /* ---------- 工作区：索引 / 正文 / 图版 ---------- */
 .workspace{display:grid;grid-template-columns:34px minmax(0,1fr) 400px;gap:32px;
   flex:1;min-height:0;padding-top:18px}
 .folio{display:flex;flex-direction:column;align-items:center;gap:14px;padding-top:4px;
-  writing-mode:vertical-rl;font:9px var(--mono);letter-spacing:.36em;color:var(--faint)}
+  writing-mode:vertical-rl;font:var(--fs-micro) var(--mono);letter-spacing:.24em;color:var(--faint)}
 .folio::before{content:"";width:1px;height:52px;background:var(--rule)}
 .editorial{display:flex;flex-direction:column;min-width:0;min-height:0}
 .chat{flex:1;min-height:0;overflow-y:auto;display:flex;flex-direction:column;gap:18px;
-  padding:0;scrollbar-width:thin;scroll-behavior:smooth}
-.welcome{margin:auto 0;padding:0 0 16px;animation:arrive .6s var(--ease) both}
-.kicker{margin:0 0 14px;font:9px var(--mono);letter-spacing:.3em;color:var(--gold-text)}
+  padding:0;scrollbar-width:thin;scroll-behavior:smooth;max-width:1120px;width:100%}
+/* W6: 首屏纵向平衡——屏高增加时欢迎区整体下移，多余留白沉到欢迎区上方，
+ * 使欢迎区底到输入区顶的间距在桌面三档保持稳定。 */
+.welcome{margin-top:auto;margin-bottom:clamp(8px,2vh,24px);padding:0 0 16px;animation:arrive .6s var(--ease) both}
+.kicker{margin:0 0 14px;font:var(--fs-micro) var(--mono);letter-spacing:.22em;color:var(--gold-text)}
 .welcome h2{margin:0;font:600 70px/1.14 var(--serif);letter-spacing:.02em;color:var(--ink);
   /* 中文标点的比例宽度：把「，」和「。」收进字面框，大字号下断句才不会漏风。 */
   font-feature-settings:"palt" 1}
@@ -172,7 +193,7 @@ summary{cursor:pointer;min-height:30px;font-size:13px;font-weight:600}
   /* 双划线压到字脚以下：原来贴着基线，70px 下会横穿「这里」的收笔。 */
   border-top:2px solid var(--verm);border-bottom:1px solid rgba(155,122,62,.65)}
 .heading-dot{color:var(--verm)}
-.welcome .lede,.welcome>p:not(.kicker){margin:18px 0 0;max-width:440px;
+.welcome .lede,.welcome>p:not(.kicker){margin:18px 0 0;max-width:min(560px,52ch);
   font:15px/1.95 var(--serif);color:var(--ink-2)}
 .welcome .kicker{margin:0 0 14px;font:9px var(--mono);letter-spacing:.3em;color:var(--gold-text)}
 .suggestions{max-width:500px;margin-top:24px;border-top:1px solid var(--ink);
@@ -193,7 +214,7 @@ summary{cursor:pointer;min-height:30px;font-size:13px;font-weight:600}
 .suggestions button:hover span:last-child{opacity:1;transform:translate(2px,-2px)}
 .suggestions button.draft-picked{border-color:var(--verm);box-shadow:none;background:rgba(255,251,240,.55)}
 .welcome-note,.welcome #draftFeedback{display:block;margin:13px 0 0;max-width:none;
-  min-height:0;font:9px var(--mono);letter-spacing:.1em;color:var(--faint)}
+  min-height:0;font:var(--fs-meta) var(--mono);letter-spacing:.06em;color:var(--faint)}
 .msg{max-width:92%;padding:0;border:0;border-radius:0;background:none;white-space:pre-wrap;
   overflow-wrap:anywhere;font:15px/1.9 var(--serif);animation:arrive .22s var(--ease) both}
 .msg.user{align-self:flex-end;text-align:right;color:var(--ink-2);border-left:0;border-right:2px solid var(--verm);
@@ -214,12 +235,14 @@ summary{cursor:pointer;min-height:30px;font-size:13px;font-weight:600}
 .msg.companion-proposal,.msg.companion-result{width:min(100%,580px);max-width:100%}
 
 /* ---------- 图版：把 3D 人物放进一个被照亮的窗口 ---------- */
-.plate-wrap{display:flex;flex-direction:column;min-width:0;min-height:0;padding-top:2px}
+/* W3: 形象卡比例随屏高漂移 0.81→0.57；锁定 4:5 并给高度上限，1920 不再被拉长。 */
+.plate-wrap{display:flex;flex-direction:column;min-width:0;min-height:0;padding-top:2px;
+  height:min(64vh,600px);max-height:100%}
 .plate{position:relative;display:flex;flex-direction:column;flex:1;min-height:0;padding:10px;
   border:1px solid var(--rule);background:linear-gradient(145deg,#eee3cf,#e6d8bf);
   box-shadow:4px 7px 0 rgba(33,28,22,.06),0 30px 60px -44px rgba(33,28,22,.8);
   transform:rotate(.35deg)}
-.plate-inner{position:relative;flex:1;min-height:0;overflow:hidden;background:#17130f;
+.plate-inner{position:relative;aspect-ratio:4/5;width:100%;height:auto;flex:1 1 auto;min-height:0;overflow:hidden;background:#17130f;
   isolation:isolate;border:1px solid rgba(33,28,22,.4)}
 .plate-inner::before{content:"";position:absolute;inset:0;z-index:0;
   background:radial-gradient(ellipse at 50% 30%,rgba(218,171,106,.3),transparent 54%),
@@ -228,8 +251,8 @@ summary{cursor:pointer;min-height:30px;font-size:13px;font-weight:600}
 .plate-inner::after{content:"";position:absolute;inset:10px;z-index:4;
   border:1px solid rgba(196,168,112,.32);pointer-events:none}
 .plate-head{position:absolute;top:16px;left:17px;right:17px;z-index:5;display:flex;
-  justify-content:space-between;font:8px var(--mono);letter-spacing:.22em;
-  color:rgba(242,234,218,.66)}
+  justify-content:space-between;font:var(--fs-micro) var(--mono);letter-spacing:.14em;
+  color:rgba(242,234,218,.72)}
 .plate-head b{font-weight:400;color:var(--gold)}
 .avatar-stage{position:absolute;inset:0;z-index:2;width:auto;height:auto;max-width:none;
   max-height:none;min-height:0;pointer-events:none;display:block;overflow:hidden}
@@ -247,14 +270,14 @@ summary{cursor:pointer;min-height:30px;font-size:13px;font-weight:600}
 .plate-rule{position:absolute;left:20px;right:20px;bottom:44px;z-index:3;height:1px;
   background:linear-gradient(90deg,transparent,rgba(196,168,112,.5),transparent)}
 .plate-cap{position:absolute;left:17px;bottom:16px;z-index:5;margin:0;
-  font:8.5px var(--mono);letter-spacing:.18em;color:rgba(242,234,218,.7)}
+  font:var(--fs-micro) var(--mono);letter-spacing:.12em;color:rgba(242,234,218,.76)}
 .plate-cap b{font-weight:400;color:var(--gold)}
 .plate-seal{position:absolute;right:-9px;bottom:-9px;z-index:6;display:grid;place-items:center;
   width:38px;height:38px;border:1.5px solid var(--verm);background:rgba(251,247,238,.82);
   color:var(--verm);font:17px var(--serif);transform:rotate(-4deg)}
 .plate-meta{display:flex;align-items:baseline;justify-content:space-between;gap:12px;
   margin-top:14px;padding-top:8px;border-top:1px solid var(--rule);
-  font:9px var(--mono);letter-spacing:.14em;color:var(--faint)}
+  font:var(--fs-micro) var(--mono);letter-spacing:.1em;color:var(--faint)}
 .plate-meta b{font-weight:400;color:var(--ink-2)}
 
 /* 旧的高亮/悬浮角色样式在新构图里不再需要 */
@@ -270,13 +293,13 @@ summary{cursor:pointer;min-height:30px;font-size:13px;font-weight:600}
   border-left:1px solid rgba(155,122,62,.18);border-right:1px solid rgba(155,122,62,.18)}
 .companion-heading h2{font:600 13.5px/1.5 var(--sans);color:var(--ink)}
 .companion-heading small,.companion-hint,.companion-source,.companion-fact>span,
-.companion-fact>small{color:var(--muted);font-size:11px}
-.companion-heading button,.companion-actions button,.companion-result button{font-size:11px;
-  padding:5px 9px;border:1px solid var(--ink-2);border-radius:1px;background:none;color:var(--ink)}
+.companion-fact>small{color:var(--muted);font-size:12px}
+.companion-heading button,.companion-actions button,.companion-result button{font-size:12px;
+  padding:6px 10px;border:1px solid var(--ink-2);border-radius:1px;background:none;color:var(--ink)}
 .companion-facts{gap:10px;margin:7px 0;padding-top:7px;border-top:1px solid var(--rule-soft)}
 .companion-fact p{font:12px/1.75 var(--serif);color:var(--ink-2)}
 .companion-feedback{font-size:11px;color:var(--verm)}
-.companion-manager>summary{font:10px var(--mono);letter-spacing:.1em;color:var(--faint)}
+.companion-manager>summary{font:12px var(--mono);letter-spacing:.06em;color:var(--faint)}
 .companion-panel input,.companion-panel select,.companion-proposal textarea{border:1px solid var(--rule);
   border-radius:1px;background:var(--paper);font-size:12px}
 
@@ -319,7 +342,7 @@ summary{cursor:pointer;min-height:30px;font-size:13px;font-weight:600}
 
 /* ---------- 输入区：一张纸上的横线 ---------- */
 .composer{flex:none;padding-top:10px;border-top:1px solid rgba(33,28,22,.26);
-  margin:0;position:relative}
+  margin:0;position:relative;max-width:1120px;width:100%}
 .latest-message{border:1px solid var(--rule);border-radius:1px;background:var(--paper-3);
   color:var(--verm);box-shadow:2px 3px 0 rgba(33,28,22,.05);font:10px var(--mono)}
 .subtitle{color:var(--ink-2);font:12.5px/1.7 var(--serif);padding:0 2px;min-height:22px}
@@ -328,10 +351,10 @@ summary{cursor:pointer;min-height:30px;font-size:13px;font-weight:600}
 .meter-fill{background:var(--verm);border-radius:0}
 .mode-line{display:flex;align-items:center;gap:10px;min-height:30px;padding:0 2px;
   font-size:11.5px;color:var(--muted)}
-.mode-label{font:8.5px var(--mono);letter-spacing:.2em;color:var(--gold)}
+.mode-label{font:12px/1.4 var(--sans);letter-spacing:.08em;color:var(--gold-text);font-weight:600}
 .mode-strip{display:inline-flex;align-items:center;gap:2px;flex-wrap:wrap;padding:0;margin:0}
-.mode-chip{min-height:26px;padding:0 8px;border:0;border-radius:0;background:none;
-  color:var(--muted);font:11.5px var(--sans);white-space:nowrap;position:relative}
+.mode-chip{min-height:28px;padding:0 8px;border:0;border-radius:0;background:none;
+  color:var(--muted);font:12px var(--sans);white-space:nowrap;position:relative}
 .mode-chip:hover{background:none;color:var(--ink)}
 .mode-chip.is-on,.mode-chip.mode-action[aria-pressed="true"]{color:var(--verm);font-weight:600}
 .mode-chip.is-on::after,.mode-chip.mode-action[aria-pressed="true"]::after{content:"";
@@ -341,12 +364,12 @@ summary{cursor:pointer;min-height:30px;font-size:13px;font-weight:600}
   padding:4px 9px 4px 7px;border:1px solid var(--rule);border-radius:1px;
   background:rgba(28,24,19,.9);backdrop-filter:blur(24px) saturate(180%);
   -webkit-backdrop-filter:blur(24px) saturate(180%);color:#f3ead8;
-  font-size:11px;line-height:1.4;min-height:26px;box-shadow:none;
+  font-size:12px;line-height:1.4;min-height:28px;box-shadow:none;
   --presence-dot:#d7b06a;--presence-line:var(--rule);--presence-glow:rgba(215,176,106,.25)}
 .presence-capsule:hover{box-shadow:0 0 0 3px var(--presence-glow)}
 .presence-capsule:active{transform:var(--press)}
 .presence-orb{width:6px;height:6px;box-shadow:0 0 6px var(--presence-dot)}
-.presence-glyph{font-size:11px}
+.presence-glyph{font-size:12px}
 .presence-label{letter-spacing:.04em;white-space:nowrap}
 .presence-capsule.is-lively{--presence-dot:#d7b06a;--presence-line:#8a7440;
   border-color:#8a7440;box-shadow:none}
@@ -359,12 +382,12 @@ summary{cursor:pointer;min-height:30px;font-size:13px;font-weight:600}
   box-shadow:3px 3px 0 rgba(33,28,22,.07)}
 .capsule .mic{display:inline-flex;align-items:center;justify-content:center;gap:8px;flex:none;
   min-width:98px;min-height:44px;padding:0 14px;border:1px solid var(--ink);border-radius:1px;
-  background:var(--ink);color:var(--paper-3);font-size:11.5px;user-select:none;touch-action:none}
+  background:var(--ink);color:var(--paper-3);font-size:12px;user-select:none;touch-action:none}
 .capsule .mic:hover{background:#332c23;border-color:#332c23}
 .capsule .mic.recording{background:var(--verm);border-color:var(--verm);color:var(--paper-3)}
 .capsule-stop{display:inline-flex;align-items:center;justify-content:center;gap:6px;
   min-height:44px;min-width:44px;padding:0 10px;border:1px solid transparent;border-radius:1px;
-  background:none;color:var(--muted);font-size:11.5px}
+  background:none;color:var(--muted);font-size:12px}
 .capsule-stop:hover{border-color:var(--rule);background:none;color:var(--ink)}
 .capsule-stop.is-active{background:#f5e3de;border-color:var(--verm);color:var(--verm)}
 .input-wrap{position:relative;flex:1;min-width:0;display:flex}
@@ -384,7 +407,7 @@ summary{cursor:pointer;min-height:30px;font-size:13px;font-weight:600}
 .capsule-drawer[aria-expanded="true"]{background:rgba(255,251,240,.6);border-color:var(--ink-2)}
 .composer-foot{display:flex;align-items:center;justify-content:space-between;gap:15px;
   padding:5px 2px 0}
-.composer-foot .hint{font:9px var(--mono);letter-spacing:.04em;color:var(--faint);white-space:nowrap}
+.composer-foot .hint{font:12px/1.6 var(--mono);letter-spacing:.02em;color:var(--faint);white-space:nowrap}
 .composer-signature{font:9px var(--mono);color:var(--faint);white-space:nowrap}
 
 /* ---------- 设置：一张可抽出的纸 ---------- */

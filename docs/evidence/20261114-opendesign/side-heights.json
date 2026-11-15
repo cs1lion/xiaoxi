@@ -1,0 +1,203 @@
+{
+  "1280x800": {
+    "scrollH": 1011,
+    "clientH": 800,
+    "kids": [
+      {
+        "tag": "div.brand",
+        "h": 55,
+        "children": [
+          45,
+          49
+        ]
+      },
+      {
+        "tag": "div.side-intro",
+        "h": 64,
+        "children": [
+          11,
+          23
+        ]
+      },
+      {
+        "tag": "section.panel",
+        "h": 373,
+        "children": [
+          17,
+          0,
+          36,
+          0,
+          20,
+          220,
+          23
+        ]
+      },
+      {
+        "tag": "div#experienceMount",
+        "h": 64,
+        "children": [
+          44
+        ]
+      },
+      {
+        "tag": "section.shared-workspace.panel",
+        "h": 307,
+        "children": [
+          0,
+          47,
+          223,
+          0,
+          0,
+          0,
+          0
+        ]
+      },
+      {
+        "tag": "p.side-footer",
+        "h": 39,
+        "children": [
+          23
+        ]
+      }
+    ],
+    "memList": {
+      "h": 220,
+      "scrollH": 488,
+      "rows": 3
+    }
+  },
+  "1440x900": {
+    "scrollH": 1011,
+    "clientH": 900,
+    "kids": [
+      {
+        "tag": "div.brand",
+        "h": 55,
+        "children": [
+          45,
+          49
+        ]
+      },
+      {
+        "tag": "div.side-intro",
+        "h": 64,
+        "children": [
+          11,
+          23
+        ]
+      },
+      {
+        "tag": "section.panel",
+        "h": 373,
+        "children": [
+          17,
+          0,
+          36,
+          0,
+          20,
+          220,
+          23
+        ]
+      },
+      {
+        "tag": "div#experienceMount",
+        "h": 64,
+        "children": [
+          44
+        ]
+      },
+      {
+        "tag": "section.shared-workspace.panel",
+        "h": 307,
+        "children": [
+          0,
+          47,
+          223,
+          0,
+          0,
+          0,
+          0
+        ]
+      },
+      {
+        "tag": "p.side-footer",
+        "h": 39,
+        "children": [
+          23
+        ]
+      }
+    ],
+    "memList": {
+      "h": 220,
+      "scrollH": 488,
+      "rows": 3
+    }
+  },
+  "1920x1080": {
+    "scrollH": 1080,
+    "clientH": 1080,
+    "kids": [
+      {
+        "tag": "div.brand",
+        "h": 55,
+        "children": [
+          45,
+          49
+        ]
+      },
+      {
+        "tag": "div.side-intro",
+        "h": 64,
+        "children": [
+          11,
+          23
+        ]
+      },
+      {
+        "tag": "section.panel",
+        "h": 373,
+        "children": [
+          17,
+          0,
+          36,
+          0,
+          20,
+          220,
+          23
+        ]
+      },
+      {
+        "tag": "div#experienceMount",
+        "h": 64,
+        "children": [
+          44
+        ]
+      },
+      {
+        "tag": "section.shared-workspace.panel",
+        "h": 307,
+        "children": [
+          0,
+          47,
+          223,
+          0,
+          0,
+          0,
+          0
+        ]
+      },
+      {
+        "tag": "p.side-footer",
+        "h": 39,
+        "children": [
+          23
+        ]
+      }
+    ],
+    "memList": {
+      "h": 220,
+      "scrollH": 488,
+      "rows": 3
+    }
+  }
+}

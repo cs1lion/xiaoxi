@@ -1,0 +1,26 @@
+[web-1280 1280x800]
+  PASS  鏃犳í鍚戞孩鍑?鈥?overflowX=0
+  FAIL  <12px 鍙鏂囨湰 鈮?20 鈥?41 澶勶細10.5px 浣忓湪浣犵數鑴戦噷鐨勩€佸槾鏈?/ 9px 浣犵殑瀹夐潤瑙掕惤 / 10px 01 / 11px 璁颁笅 / 9.5px 寰呭姙
+  FAIL  瀵规瘮搴︿笉杈炬爣 = 0 鈥?8.5px "姝ゅ埢" 3.35/4.5
+  FAIL  渚ф爮鍐呭涓嶈闈欓粯鎴柇锛坰lack 鈮?8px锛?鈥?slack=211px, 婊氬姩鏉?1px
+  FAIL  瑙︽帶/鐐瑰嚮鐩爣 鈮?24px 鈥?INPUT#memHistory 12x12  | BUTTON 21x19 鍋滅敤 | BUTTON 21x19 蹇樻帀 | BUTTON#memRefresh 21x23 鍒锋柊 | BUTTON#memClear 21x23 娓呯┖
+  PASS  褰㈣薄鍗℃瘮渚?0.66鈥?.85 鈥?aspect=0.81
+  PASS  杈撳叆鍖哄搴?鈮?1120px 鈥?width=884
+[web-1440 1440x900]
+  PASS  鏃犳í鍚戞孩鍑?鈥?overflowX=0
+  FAIL  <12px 鍙鏂囨湰 鈮?20 鈥?43 澶勶細10.5px 浣忓湪浣犵數鑴戦噷鐨勩€佸槾鏈?/ 9px 浣犵殑瀹夐潤瑙掕惤 / 10px 01 / 11px 璁颁笅 / 9.5px 寰呭姙
+  FAIL  瀵规瘮搴︿笉杈炬爣 = 0 鈥?8.5px "姝ゅ埢" 3.35/4.5
+  FAIL  渚ф爮鍐呭涓嶈闈欓粯鎴柇锛坰lack 鈮?8px锛?鈥?slack=111px, 婊氬姩鏉?1px
+  FAIL  瑙︽帶/鐐瑰嚮鐩爣 鈮?24px 鈥?INPUT#memHistory 12x12  | BUTTON 21x19 鍋滅敤 | BUTTON 21x19 蹇樻帀 | BUTTON#memRefresh 21x23 鍒锋柊 | BUTTON#memClear 21x23 娓呯┖
+  PASS  褰㈣薄鍗℃瘮渚?0.66鈥?.85 鈥?aspect=0.7
+  PASS  杈撳叆鍖哄搴?鈮?1120px 鈥?width=1044
+[web-1920 1920x1080]
+  PASS  鏃犳í鍚戞孩鍑?鈥?overflowX=0
+  FAIL  <12px 鍙鏂囨湰 鈮?20 鈥?44 澶勶細10.5px 浣忓湪浣犵數鑴戦噷鐨勩€佸槾鏈?/ 9px 浣犵殑瀹夐潤瑙掕惤 / 10px 01 / 11px 璁颁笅 / 9.5px 寰呭姙
+  FAIL  瀵规瘮搴︿笉杈炬爣 = 0 鈥?8.5px "姝ゅ埢" 3.35/4.5
+  PASS  渚ф爮鍐呭涓嶈闈欓粯鎴柇锛坰lack 鈮?8px锛?鈥?slack=0px, 婊氬姩鏉?1px
+  FAIL  瑙︽帶/鐐瑰嚮鐩爣 鈮?24px 鈥?INPUT#memHistory 12x12  | BUTTON 21x19 鍋滅敤 | BUTTON 21x19 蹇樻帀 | BUTTON#memRefresh 21x23 鍒锋柊 | BUTTON#memClear 21x23 娓呯┖
+  FAIL  褰㈣薄鍗℃瘮渚?0.66鈥?.85 鈥?aspect=0.57
+  FAIL  杈撳叆鍖哄搴?鈮?1120px 鈥?width=1524
+
+13 rule(s) failing

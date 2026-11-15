@@ -319,6 +319,19 @@ new MutationObserver(muts => {
 }).observe(chat, { childList: true, subtree: true, characterData: true });
 
 /* ---------------- 文本气泡 ---------------- */
+function trimChatVirtualization() {
+  const msgs = chat.querySelectorAll('.msg');
+  if (msgs.length <= 50) return;
+  const keep = 50;
+  for (let i = 0; i < msgs.length - keep; i++) {
+    const m = msgs[i];
+    if (!m.style.contentVisibility) {
+      m.style.contentVisibility = 'auto';
+      m.style.containIntrinsicSize = 'auto 120px';
+    }
+  }
+}
+
 function addBubble(role, text) {
   const node = document.createElement("div");
   node.className = `msg ${role === "user" ? "user" : "bot"}`;
@@ -329,6 +342,7 @@ function addBubble(role, text) {
   time.textContent = new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
   node.appendChild(time);
   chat.appendChild(node);
+  trimChatVirtualization();
   scheduleConstellation();
   return node;
 }
@@ -561,7 +575,7 @@ function renderGlimmer() {
 
 const glimmer = createGlimmer({
   onExpand: (ctx) => {
-    // 把真实上下文带进普通对话：经既有输入框发起一轮，让阿栖接着这个念头讲。
+    // 把真实上下文带进普通对话：经既有输入框发起一轮，让小溪接着这个念头讲。
     try { el("textInput").value = ctx.text; el("sendBtn").click(); } catch (_) {}
   },
   onDismiss: () => renderGlimmer(),

@@ -4,7 +4,10 @@
 .writing-header p{font-size:13px;color:var(--muted);margin:5px 0 0}
 .writing-header button{white-space:nowrap;min-height:44px}
 body.is-writing .side{display:block!important;position:fixed;inset:76px 0 0;width:auto;padding:20px 24px;background:var(--bg);border:0;box-shadow:none;overflow:visible;z-index:6}
-body.is-writing .side>*:not(.shared-workspace){display:none!important}
+/* 一起做分区默认折叠（W1）；进入写作模式时自动展开并隐藏折叠摘要 */
+body.is-writing .side>*:not(.shared-workspace):not(.shared-workspace-fold){display:none!important}
+body.is-writing .shared-workspace-fold{display:block!important}
+body.is-writing .shared-workspace-fold>summary{display:none!important}
 body.is-writing .shared-workspace{width:min(1100px,100%);height:auto;margin:0 auto;display:flex;flex-direction:column;min-height:0;padding:16px 20px;background:var(--panel);box-shadow:0 8px 34px rgba(33,28,22,.26)}
 body.is-writing .shared-workspace>[role=tablist],body.is-writing #work-feedback,body.is-writing #work-note-draft{display:none!important}
 body.is-writing #work-notes{flex:1;min-height:0}

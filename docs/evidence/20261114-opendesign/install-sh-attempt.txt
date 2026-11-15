@@ -1,0 +1,10 @@
+OpenDesign install.sh: '/usr/bin/od' does not look like the OpenDesign CLI.
+
+On macOS, Linux, and WSL2, /usr/bin/od is the system octal-dump command and can
+shadow OpenDesign's CLI. Put the OpenDesign CLI earlier on PATH, then re-run
+this command.
+
+If you installed the macOS desktop app via the DMG or Homebrew cask, the app
+bundle does not add an 'od' shim to your shell PATH. Launch OpenDesign and use
+Settings -> MCP server to copy the client-specific install snippet instead;
+that snippet uses absolute paths and avoids the system 'od' collision.

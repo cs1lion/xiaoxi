@@ -1,0 +1,268 @@
+[
+  [
+    "9.5px | div#memList > div.mem.mem-new > div.meta > span",
+    {
+      "count": 4,
+      "sample": "项目:任务"
+    }
+  ],
+  [
+    "9.5px | div#memList > div.mem.mem-new > div.meta > span.tag",
+    {
+      "count": 3,
+      "sample": "待办"
+    }
+  ],
+  [
+    "10.5px | aside#sidePanel > div.brand > div.brand-text > p#personaTag",
+    {
+      "count": 1,
+      "sample": "住在你电脑里的、嘴有点欠的 "
+    }
+  ],
+  [
+    "9px | div.app > aside#sidePanel > div.side-intro > span.eyebrow",
+    {
+      "count": 1,
+      "sample": "你的安静角落"
+    }
+  ],
+  [
+    "10px | aside#sidePanel > section.panel > h2 > span.section-mark",
+    {
+      "count": 1,
+      "sample": "01"
+    }
+  ],
+  [
+    "11px | aside#sidePanel > section.panel > div.row.add > button#manualAdd",
+    {
+      "count": 1,
+      "sample": "记下"
+    }
+  ],
+  [
+    "10.5px | div#memList > div.mem.mem-new > div.meta > button.ghost",
+    {
+      "count": 1,
+      "sample": "停用"
+    }
+  ],
+  [
+    "10.5px | div#memList > div.mem.mem-new > div.meta > button.ghost.danger",
+    {
+      "count": 1,
+      "sample": "忘掉"
+    }
+  ],
+  [
+    "9.5px | div#memList > div.mem.mem-new > details.mem-history > summary",
+    {
+      "count": 1,
+      "sample": "查看这条事实的历史版本"
+    }
+  ],
+  [
+    "9.5px | div#memList > div.mem.mem-new > details > summary",
+    {
+      "count": 1,
+      "sample": "查看原话"
+    }
+  ],
+  [
+    "10px | aside#sidePanel > section.panel > div.row.foot > span#memCount",
+    {
+      "count": 1,
+      "sample": "3 条当前记忆"
+    }
+  ],
+  [
+    "10.5px | aside#sidePanel > section.panel > div.row.foot > button#memRefresh",
+    {
+      "count": 1,
+      "sample": "刷新"
+    }
+  ],
+  [
+    "10.5px | aside#sidePanel > section.panel > div.row.foot > button#memClear",
+    {
+      "count": 1,
+      "sample": "清空"
+    }
+  ],
+  [
+    "9px | main.stage > header.topbar > div.masthead > span",
+    {
+      "count": 1,
+      "sample": "ALMANAC OF SMA"
+    }
+  ],
+  [
+    "10.5px | main.stage > header.topbar > div.connection > span#status",
+    {
+      "count": 1,
+      "sample": "在线"
+    }
+  ],
+  [
+    "11.5px | div.app > main.stage > header.topbar > button#writingToggle",
+    {
+      "count": 1,
+      "sample": "一起写"
+    }
+  ],
+  [
+    "9px | div.app > main.stage > div.workspace > div.folio",
+    {
+      "count": 1,
+      "sample": "夜 航 手 帐"
+    }
+  ],
+  [
+    "9px | div.editorial > div#chat > section#welcome > p.kicker",
+    {
+      "count": 1,
+      "sample": "卷 一 · 独 处"
+    }
+  ],
+  [
+    "9px | div.editorial > div#chat > section#welcome > span#draftFeedback",
+    {
+      "count": 1,
+      "sample": "从一句「嗨」开始，也很好。"
+    }
+  ],
+  [
+    "11px | div > div.companion-heading > div > small",
+    {
+      "count": 1,
+      "sample": "正在一起做"
+    }
+  ],
+  [
+    "11px | div > div.companion-heading > div.companion-actions > button",
+    {
+      "count": 1,
+      "sample": "选择 / 新建"
+    }
+  ],
+  [
+    "11px | div.editorial > section#companionMount > div > p.companion-hint",
+    {
+      "count": 1,
+      "sample": "选择或新建共同事项，决定和下"
+    }
+  ],
+  [
+    "10px | div.editorial > section#companionMount > details.companion-manager > summary",
+    {
+      "count": 1,
+      "sample": "选择、创建与对话关联"
+    }
+  ],
+  [
+    "8px | div.plate > div.plate-inner > div.plate-head > span",
+    {
+      "count": 1,
+      "sample": "PLATE / 01"
+    }
+  ],
+  [
+    "8px | div.plate-inner > div.plate-head > span > b",
+    {
+      "count": 1,
+      "sample": "小溪"
+    }
+  ],
+  [
+    "9px | div.workspace > div.plate-wrap > div.plate-meta > span",
+    {
+      "count": 1,
+      "sample": "第 01 图版"
+    }
+  ],
+  [
+    "9px | div.plate-wrap > div.plate-meta > span > b",
+    {
+      "count": 1,
+      "sample": "墨与朱"
+    }
+  ],
+  [
+    "11.5px | div.app > main.stage > div.composer > div.mode-line",
+    {
+      "count": 1,
+      "sample": "此刻\n        连续对"
+    }
+  ],
+  [
+    "8.5px | main.stage > div.composer > div.mode-line > span.mode-label",
+    {
+      "count": 1,
+      "sample": "此刻"
+    }
+  ],
+  [
+    "11.5px | div.composer > div.mode-line > div#modeStrip > button#bargeToggle",
+    {
+      "count": 1,
+      "sample": "连续对话：关"
+    }
+  ],
+  [
+    "11px | main.stage > div.composer > div.mode-line > button#presenceCapsule",
+    {
+      "count": 1,
+      "sample": "✨\n          灵动"
+    }
+  ],
+  [
+    "11px | div.composer > div.mode-line > button#presenceCapsule > span.presence-glyph",
+    {
+      "count": 1,
+      "sample": "✨"
+    }
+  ],
+  [
+    "11px | div.composer > div.mode-line > button#presenceCapsule > span.presence-label",
+    {
+      "count": 1,
+      "sample": "灵动伴随"
+    }
+  ],
+  [
+    "11.5px | main.stage > div.composer > div.capsule > button#micBtn",
+    {
+      "count": 1,
+      "sample": "按住说话"
+    }
+  ],
+  [
+    "11.5px | div.composer > div.capsule > button#micBtn > span.mic-label",
+    {
+      "count": 1,
+      "sample": "按住说话"
+    }
+  ],
+  [
+    "11.5px | main.stage > div.composer > div.capsule > button#stopBtn",
+    {
+      "count": 1,
+      "sample": "停止"
+    }
+  ],
+  [
+    "11.5px | div.composer > div.capsule > button#stopBtn > span.capsule-stop-label",
+    {
+      "count": 1,
+      "sample": "停止"
+    }
+  ],
+  [
+    "9px | main.stage > div.composer > div.composer-foot > p#voiceHint",
+    {
+      "count": 1,
+      "sample": "连续对话：开口即录，停顿约一"
+    }
+  ]
+]

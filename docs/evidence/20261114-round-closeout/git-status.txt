@@ -1,0 +1,28 @@
+ M config/persona.yaml
+ M evals/memory_recall_synonyms.tsv
+ M scripts/test-voice-browser.mjs
+ M scripts/test_memory_retrieval.py
+ M server/memory/retriever.py
+ M web/app.js
+ M web/index.html
+ M web/style.css
+?? docs/evidence/20261113-a1-avatar-preflight/
+?? docs/evidence/20261113-edd-kickoff/
+?? docs/evidence/20261113-m2-allergy-nonlex/
+?? docs/evidence/20261113-memory-asr-lexicon/
+?? docs/evidence/20261113-memory-cat-nickname/
+?? docs/evidence/20261113-memory-farming-cue/
+?? docs/evidence/20261113-p1-prod-lexicon/
+?? docs/evidence/20261113-p2-allergy-fallback/
+?? docs/evidence/20261113-p3-browser-baselines/
+?? docs/evidence/20261113-p3-browser-boundary/
+?? docs/evidence/20261113-p3-browser-continue/
+?? docs/evidence/20261113-p4-live-eval-preflight/
+?? docs/evidence/20261113-q1-signal-audit/
+?? docs/evidence/20261113-q1b1-verification-matrix/
+?? docs/evidence/20261114-p4-live-openrouter/
+?? docs/evidence/20261114-round-closeout/
+?? docs/evidence/20261114-screen-recording/
+?? docs/evidence/20261114-xiaoxi-screen-recording/
+?? docs/process/EDD.md
+?? docs/process/VERIFICATION_MATRIX.md

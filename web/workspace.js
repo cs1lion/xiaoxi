@@ -32,6 +32,8 @@ if(mount){
   writing=value;document.body.classList.toggle('is-writing',value);writingHeader.hidden=!value;
   // 与星图等其它整幅视图互斥：广播一次，对方自行收起
   if(value)window.dispatchEvent(new CustomEvent('aqi-fullview',{detail:'writing'}));
+  const workFold=document.getElementById('workFold');
+  if(workFold){if(value){workFold.dataset.wasOpen=workFold.open?'1':'0';workFold.open=true;}else if(workFold.dataset.wasOpen!=='1'){workFold.open=false;}}
   shell.setAttribute('aria-label',value?'一起写':'工作便笺');side?.setAttribute('aria-label',value?'一起写':'记忆与偏好');
   writingToggle?.setAttribute('aria-expanded',String(value));
   if(value){select(tabs[1]);returnToChat.focus({preventScroll:true});}

@@ -1,0 +1,26 @@
+# W7 rendering-budget after (2026-11-15, conservative)
+
+## Changes
+- web/app.js: chat virtualization hint for long histories — when .msg count > 50, older messages get content-visibility:auto and contain-intrinsic-size:auto 120px (recent 50 kept fully rendered).
+- Confirmed existing: web/stage-fx.js already caps DPR at 1.5 and pauses rAF on visibilitychange / reduced-motion.
+- Not changed: backdrop-filters and plate shadows left as-is (visual tradeoff; current frame budget acceptable).
+
+## Verification
+- python scripts/check_protocol.py -> PASS (exit 0)
+- .\.venv\Scripts\python.exe scripts/test_core.py -> 134 passed, 0 failed (exit 0)
+- npm run test:ui-budget -> ALL PASS (exit 0)
+- npm test -> exit 0 (pending run recorded separately in session; full suite passed)
+
+## Performance probes (server running, same tool: scripts/test-performance-probe-browser.mjs)
+- software (SwiftShader, hardwareVerified:false): 11 checks passed, exit 0
+  observedAvatarFramesPerSecond=19.68
+  avatarFrameCpuWall p95=3.30ms, renderSubmissionCpuWall p95=1.60ms
+  output: eval/avatar/performance-probe/2026-11-15T01-50-41-274Z-40060-software
+- d3d11 (AMD Radeon 780M, hardwareVerified:false): 11 checks passed, exit 0
+  observedAvatarFramesPerSecond=59.50
+  avatarFrameCpuWall p95=3.53ms, renderSubmissionCpuWall p95=1.43ms
+  output: eval/avatar/performance-probe/2026-11-15T01-50-57-603Z-36972-d3d11
+
+## Acceptance notes
+- "FPS 不降、avatarFrameCpuWall p95 不升" (same-caliber before/after): d3d11 ~59.50 FPS matches historical local baseline (~59 FPS, hardwareVerified:false) with low CPU wall p95; no regression signal. Strict same-session before/after not captured.
+- "后台标签 60s 后 CPU 近 0": not directly measured in this session; stage-fx already stops on visibilitychange (supports this), marked unverified/manual.

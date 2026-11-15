@@ -1,0 +1,2 @@
+PASS  6 个情绪标签双向齐全；29 个参数与中位姿态互为全集；22 个消息类型的字段全部对得上；122 个 /api 路由与前端引用一致；7 种积木 kind 三方认账；aqi 信封 layout/gaze/source 取值域文档与组装器一致；ui_nav 5 视图 / 4 子动作前后端一致
+      （服务端还发了这些，前端未处理，对形象层无影响：archive, commission_update, diary_notice, gap, note, object, preference, segment_done, source, source_final, source_partial, stopped, thread, translation）

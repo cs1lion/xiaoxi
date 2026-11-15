@@ -1,0 +1,37 @@
+# Web UI gate after implementation (W1-W5, desktop)
+# Baseline: docs/evidence/20261114-opendesign/verify-web-budget-baseline.txt (13 rule failures, exit 1)
+# Command: node docs/evidence/20261114-opendesign/verify-ui-budget.mjs
+# Date: 2026-11-15 (same gate, same viewports 1280/1440/1920)
+# Result: ALL PASS, exit 0
+
+[web-1280 1280x800]
+  PASS  无横向溢出 — overflowX=0
+  PASS  <12px 可见文本 ≤ 20 — 10 处
+  PASS  对比度不达标 = 0 — ok
+  PASS  侧栏内容不被静默截断（slack ≤ 8px） — slack=0px, 滚动条=1px
+  PASS  触控/点击目标 ≥ 24px — ok
+  PASS  形象卡比例 0.66–0.85 — aspect=0.84
+  PASS  输入区宽度 ≤ 1120px — width=884
+[web-1440 1440x900]
+  PASS  无横向溢出 — overflowX=0
+  PASS  <12px 可见文本 ≤ 20 — 10 处
+  PASS  对比度不达标 = 0 — ok
+  PASS  侧栏内容不被静默截断（slack ≤ 8px） — slack=0px, 滚动条=1px
+  PASS  触控/点击目标 ≥ 24px — ok
+  PASS  形象卡比例 0.66–0.85 — aspect=0.74
+  PASS  输入区宽度 ≤ 1120px — width=1044
+[web-1920 1920x1080]
+  PASS  无横向溢出 — overflowX=0
+  PASS  <12px 可见文本 ≤ 20 — 10 处
+  PASS  对比度不达标 = 0 — ok
+  PASS  侧栏内容不被静默截断（slack ≤ 8px） — slack=0px, 滚动条=1px
+  PASS  触控/点击目标 ≥ 24px — ok
+  PASS  形象卡比例 0.66–0.85 — aspect=0.76
+  PASS  输入区宽度 ≤ 1120px — width=1120
+
+# Screenshots: docs/evidence/20261114-opendesign/web-{1280,1440,1920}-after.png
+# Verification (2026-11-15):
+#   python scripts/check_protocol.py -> PASS, exit 0
+#   .\.venv\Scripts\python.exe scripts/test_core.py -> 134 passed, 0 failed, exit 0
+#   npm test -> exit 0 (all TAP/node subtests pass)
+# Server stopped after verification.

@@ -31,6 +31,7 @@
     "test:dialogue-gaze:v3:browser": "node scripts/test-dialogue-intent-review-browser.mjs",
     "test:dialogue-gaze:regressions": "node scripts/test-dialogue-gaze-regressions.mjs",
     "calibrate:eyes:v3": "node scripts/sync-eye-calibration.mjs && node scripts/capture-eye-calibration.mjs --manifest config/avatar-eye-calibration-v3.json --url http://127.0.0.1:8000/static/avatar_lab.html?model=daily-lids",
+    "test:ui-budget": "node scripts/verify-ui-budget.mjs",
     "vendor:avatar": "node scripts/vendor-avatar.mjs"
   },
   "dependencies": {

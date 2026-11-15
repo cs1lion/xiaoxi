@@ -133,6 +133,7 @@ try {
  await page.locator('#sidebarToggle').click();
  await page.locator('#presenceCapsule').focus();
  assert(await page.locator('#presenceCapsule').evaluate(el=>document.activeElement===el),'Presence capsule is keyboard focusable');
+ await page.evaluate(()=>document.getElementById('workFold')?.setAttribute('open',''));
  await page.locator('#work-tasks-tab').click();
  await page.locator('.assistant-panel:not([data-interaction-preferences]) summary').click();
  await page.screenshot({path:'eval/ui/mobile-preferences.png',fullPage:true});
@@ -151,6 +152,7 @@ try {
  await page.route('**/api/preferences/proactivity',route=>route.fulfill({status:404,json:{detail:'Not Found'}}));
  await page.reload();
  await page.locator('#sidebarToggle').click();
+ await page.evaluate(()=>document.getElementById('workFold')?.setAttribute('open',''));
  await page.locator('#work-tasks-tab').click();
  await page.getByRole('button',{name:'重新连接任务服务'}).waitFor();
  assert((await page.locator('.assistant-panel:not([data-interaction-preferences]) .assistant-error').textContent()).includes('聊天仍可继续'),'Unavailable service explains recovery without blocking chat');
@@ -175,6 +177,7 @@ try {
  assert((await page.locator('#presenceCapsule .presence-label').innerText())==='静默旁观','Failed preference save rolls the capsule back');
  assert(await page.evaluate(()=>document.getElementById('memoryToggle').checked)===true,'Failed save rolls the memory bit back');
  await page.locator('#sidebarToggle').click();   // 后续记忆列表断言需要侧栏展开
+ await page.evaluate(()=>document.getElementById('memoryFold')?.setAttribute('open',''));
  // status:'active' 是 0f87efa（valid-time）之后的硬要求：memoryForgetControl 对
  // 非 active 行返回 null（防整链误删），fixture 不给 status 就没有「忘掉」按钮，
  // :133 永远超时——ui_browser 门禁红的真身是 fixture 过期，不是环境问题。
