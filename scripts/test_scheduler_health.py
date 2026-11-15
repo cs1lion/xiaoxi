@@ -58,8 +58,15 @@ async def transient_failure_then_success() -> None:
     task = asyncio.create_task(
         scheduler(service, state, base_delay=0.01, max_delay=0.02))
     try:
+        # 轮询必须等「成功已写回」，不能等 scan_count：scheduler() 先 attempt()
+        # 再 await to_thread(scan_due)，计数器在 success() 之前就跳了。CI 上 4 分片
+        # 抢 CPU 时线程跳变慢，于是 wait_for(scan_count >= 3) 会在第三次扫描还没
+        # 返回时命中，紧接着读到的仍是 last_success_at=None / 2 次失败（2026-11-15
+        # run 43665594770 的 14 passed, 3 failed 即此窗口）。本机快，窗口通常
+        # 刚好落在线程已回写完的一侧，表现为偶发红。
+        succeeded = await wait_for(lambda: state.last_success_at is not None)
         check("transient failure does not stop the loop",
-              await wait_for(lambda: state.scan_count >= 3), str(state.snapshot()))
+              succeeded and state.scan_count >= 3, str(state.snapshot()))
         check("success timestamp is recorded", state.last_success_at is not None)
         check("consecutive failures reset after success", state.consecutive_failures == 0)
         check("last error remains available for diagnosis",
