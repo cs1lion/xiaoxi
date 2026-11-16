@@ -38,7 +38,7 @@ import { createAqiFlow, aqiPendingMessage } from "./aqi-flow.js";
 import { normalizeUiNav, drawerViewFor, shouldCloseDrawer, shouldOpenSidePanel,
   shouldOpenStarmap, gazeAfter } from "./ui_nav.js";
 import { v2Hub } from "./events-v2.js";
-import { createCompanionPresence } from "./companion-presence.js";
+import { createCompanionPresence, resolveGlimmerAction } from "./companion-presence.js";
 let companionPresence = null;
 import { createReconnectScheduler } from "./reconnect.js";
 bootAssistant().catch(error => console.warn('助手面板启动失败', error));
@@ -578,6 +578,17 @@ function renderGlimmer() {
 
 const glimmer = createGlimmer({
   onExpand: (ctx) => {
+     const action = resolveGlimmerAction(ctx?.source_refs);
+     if (action.kind === "fold" && action.foldId) {
+        const side = el("sidePanel");
+        if (side && !side.classList.contains("is-open")) el("sidebarToggle")?.click();
+        const fold = el(action.foldId);
+        if (fold) {
+           fold.open = true;
+           fold.scrollIntoView?.({ block: "nearest" });
+           return;
+        }
+     }
     // 把真实上下文带进普通对话：经既有输入框发起一轮，让小溪接着这个念头讲。
     try { el("textInput").value = ctx.text; el("sendBtn").click(); } catch (_) {}
   },
