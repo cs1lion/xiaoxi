@@ -98,7 +98,18 @@ class ChooseContentTest(unittest.TestCase):
         self.assertEqual(A.choose_content(), (None, []))
         self.assertEqual(A.choose_content(mood={"narrative": "  "}), (None, []))
         self.assertEqual(A.choose_content(discovery={"text": ""}, mood=None, spark=None, child_seed=None), (None, []))
-
+    def test_lesson_and_pending_work_hints(self):
+        text, refs = A.choose_content(discovery={"text": "发现一条新线索", "source_refs": ["mem:1"]}, lesson={"id": 7, "action": "先列提纲再动笔"})
+        self.assertEqual((text, refs), ("发现一条新线索", ["mem:1"]))
+        text, refs = A.choose_content(lesson={"id": 42, "action": "写完先通读一遍"})
+        self.assertEqual((text, refs), ("写完先通读一遍", ["lesson:42"]))
+        text, refs = A.choose_content(pending_work={"id": "draft-1", "title": "昨晚的草稿还差结尾"})
+        self.assertEqual((text, refs), ("昨晚的草稿还差结尾", ["work:draft-1"]))
+        mumble = A.build_mumble(text=text, reason="ambient_work_hint", source_refs=refs, now=1000.0)
+        self.assertEqual(mumble["type"], "mumble")
+        self.assertEqual(mumble["source_refs"], ["work:draft-1"])
+        self.assertEqual(A.hint_from_lesson(None), (None, []))
+        self.assertEqual(A.hint_from_pending_work({}), (None, []))
 
 class BackoffThresholdTest(unittest.TestCase):
     def test_first_contact_keeps_base(self):
