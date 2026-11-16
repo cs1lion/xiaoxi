@@ -38,6 +38,8 @@ import { createAqiFlow, aqiPendingMessage } from "./aqi-flow.js";
 import { normalizeUiNav, drawerViewFor, shouldCloseDrawer, shouldOpenSidePanel,
   shouldOpenStarmap, gazeAfter } from "./ui_nav.js";
 import { v2Hub } from "./events-v2.js";
+import { createCompanionPresence } from "./companion-presence.js";
+let companionPresence = null;
 import { createReconnectScheduler } from "./reconnect.js";
 bootAssistant().catch(error => console.warn('助手面板启动失败', error));
 bootCompanion().catch(error => console.warn('共同事项启动失败', error));
@@ -352,6 +354,7 @@ function setStatus(text, state, interaction = state === 'busy' ? 'preparing' : s
   statusDot.className = `dot ${state || ""}`;
   reflectInteractionState(interaction, text);
   avatar.setDialogueState(interaction);
+  companionPresence?.update({ dialogueState: interaction });
 }
 
 /* ---------------- 音频 / 轮次 ---------------- */
@@ -597,6 +600,33 @@ function handleAmbient(msg) {
     if (glimmer.show({ ...msg, expires_at: Date.now() + ttl })) renderGlimmer();
   }
 }
+
+companionPresence = createCompanionPresence({
+  onCue: (cue, prevMode) => {
+    if (cue.override) {
+      if (cue.eyeExpression) avatar.setEyeExpression?.(cue.eyeExpression, cue.eyeDuration ? { duration: cue.eyeDuration } : undefined);
+      if (cue.emotion) avatar.setEmotion?.(cue.emotion, cue.emotionDuration || 0);
+      if (cue.gesture) avatar.gesture?.play?.(cue.gesture, avatar.clock);
+      if (cue.gaze) avatar.idle?.setGazeTarget?.(cue.gaze.x, cue.gaze.y);
+      if (cue.bubble && proactiveLocallyIdle() && glimmer.show({
+        event_id: `task_done_${Date.now()}`,
+        text: cue.bubble,
+        expires_at: Date.now() + 8000,
+      })) {
+        renderGlimmer();
+      }
+    } else if (cue.resetGaze && (prevMode === "writing" || prevMode === "working")) {
+      avatar.resetGaze?.();
+      avatar.setEyeExpression?.("neutral");
+    }
+  },
+});
+window.addEventListener("aqi-writing-change", (e) => {
+  companionPresence?.update({ writing: !!e?.detail?.writing });
+});
+v2Hub.subscribe((snap) => {
+  companionPresence?.update({ v2Snapshot: snap });
+});
 
 // 微光气泡自然消散：只在可见时轮询，避免常驻开销。
 setInterval(() => { if (glimmer.status !== "hidden") { glimmer.poll(Date.now()); renderGlimmer(); } }, 1000);
