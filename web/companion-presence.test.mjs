@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { createCompanionPresence } from "./companion-presence.js";
+import { createCompanionPresence, resolveGlimmerAction } from "./companion-presence.js";
 
 const events = [];
 const presence = createCompanionPresence({
@@ -45,5 +45,8 @@ assert.equal(doneCue.mode, "celebrate");
 assert.equal(doneCue.gesture, "nod");
 assert.equal(doneCue.eyeExpression, "happy");
 assert.ok(doneCue.bubble);
+assert.deepEqual(resolveGlimmerAction(["memory:123"]), { kind: "fold", foldId: "memoryFold" });
+assert.deepEqual(resolveGlimmerAction(["work:draft"]), { kind: "fold", foldId: "workFold" });
+assert.deepEqual(resolveGlimmerAction([]), { kind: "chat", foldId: null });
 
 console.log("companion-presence tests passed");
