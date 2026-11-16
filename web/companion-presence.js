@@ -161,3 +161,29 @@ export function createCompanionPresence({ onCue } = {}) {
     },
   };
 }
+export function resolveGlimmerAction(sourceRefs = []) {
+  const refs = Array.isArray(sourceRefs) ? sourceRefs : [];
+  for (const raw of refs) {
+    const ref = String(raw || "").trim().toLowerCase();
+    if (
+      ref === "memory" ||
+      ref.startsWith("memory:") ||
+      ref.startsWith("pref:") ||
+      ref.startsWith("preference:") ||
+      ref.startsWith("lesson:")
+    ) {
+      return { kind: "fold", foldId: "memoryFold" };
+    }
+    if (
+      ref === "work" ||
+      ref.startsWith("work:") ||
+      ref.startsWith("task:") ||
+      ref.startsWith("commission:") ||
+      ref.startsWith("draft:") ||
+      ref.startsWith("note:")
+    ) {
+      return { kind: "fold", foldId: "workFold" };
+    }
+  }
+  return { kind: "chat", foldId: null };
+}
