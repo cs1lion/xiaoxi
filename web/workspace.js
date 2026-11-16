@@ -39,6 +39,7 @@ if(mount){
   if(value){select(tabs[1]);returnToChat.focus({preventScroll:true});}
   else writingToggle?.focus({preventScroll:true});
   syncEditor();
+window.dispatchEvent(new CustomEvent('aqi-writing-change',{detail:{writing}}));
  }
  if(writingToggle)writingToggle.onclick=()=>setWriting(!writing);
 window.addEventListener('aqi-fullview',event=>{if(event.detail!=='writing'&&writing)setWriting(false);});
