@@ -883,6 +883,17 @@ GATES: dict[str, dict[str, object]] = {
         "cmd": [str(PY), "scripts/test_procedural_memory_diagnostics.py"],
         "skip_regex": r"^\s*SKIP",
     },
+    "pm_fixture_lease_identity": {
+        # 2026-11-17 CI 红回归：夹具 lease 曾以调用方自报的 label 命名，同一路径
+        # 换个 label（ensure_cases='cases' vs pm_induction_fixture='cases-induction'）
+        # 就互相看不见租约。创建者退出时删掉另一个分片仍在读的
+        # eval/research/procedural_memory_eval_cases.json，
+        # test_procedural_memory_diagnostics 随后报 SnapshotError。
+        # 现按路径取键；本门禁用两个真进程复现「创建者先退出」，亚秒级、
+        # 临时目录、零服务零 Key，进 ALWAYS_REQUIRED。
+        "cmd": [str(PY), "scripts/test_pm_fixture_lease_identity.py"],
+        "skip_regex": r"^\s*SKIP",
+    },
     "procedural_memory_eval": {
         # 2026-11-09 Role 0 裁决：维持 SKIP，不合成夹具。
         # cases/oracles 从未入库（/eval 清理时删除），而 oracles 的 human_card 是
@@ -1318,7 +1329,7 @@ ALWAYS_REQUIRED = ("protocol", "core", "doc_drift", "process_trail", "process_tr
                    "durable_clarification_cap", "durable_mcp", "durable_mcp_live",
                    "durable_authorization_ui", "world_bridge", "gateway_env",
                     # 纯离线、亚秒级、零服务零 Key：进 always 档，否则黄金命令不跑它们。
-                    "llm_enable_thinking", "fish_word_timings")
+                    "llm_enable_thinking", "fish_word_timings", "pm_fixture_lease_identity")
 
 
 # unittest 原生 skip 的汇总行：`OK (skipped=N)`，且只认 N>0（`[1-9]\d*` 天然排除

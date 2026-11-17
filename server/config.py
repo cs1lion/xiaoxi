@@ -288,6 +288,8 @@ DEFAULTS: dict[str, Any] = {
     "fish_base_url": os.getenv("FISH_BASE_URL", "https://api.fish.audio"),
     "fish_api_key": os.getenv("FISH_API_KEY", ""),
     "fish_tts_model": os.getenv("FISH_TTS_MODEL", "s2.1-pro-free"),
+    "fish_tts_reference_id": os.getenv("FISH_TTS_REFERENCE_ID", ""),
+    "fish_tts_latency": os.getenv("FISH_TTS_LATENCY", "balanced"),
     "fish_asr_model": os.getenv("FISH_ASR_MODEL", "transcribe-1-pro"),
     # 供应商在每个音频块前后各垫了约 0.36s / 0.38s 静音。微句链路把这段静音和
     # pacing.yaml 里设计的呼吸停顿叠加起来，实际句间空隙达到 0.9~1.1s，人听起来

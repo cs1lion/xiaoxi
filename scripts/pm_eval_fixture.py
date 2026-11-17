@@ -16,6 +16,12 @@ fixed on-disk path.
 Concurrency (``ci_test_shard.py --workers 4``): writers take a file lock and
 register a per-process lease.  The process that created a file removes it only
 after the last lease is gone; readers never overwrite a pre-existing fixture.
+
+Leases are keyed by the **fixture path**, never by a caller-chosen label.  Labels
+used to name the lease files, so two callers that shared one path under different
+labels (``ensure_cases`` vs ``pm_induction_fixture.install``) could not see each
+other's lease: the creator's cleanup deleted a fixture another process was still
+reading, and the next snapshot read failed with ``SnapshotError``.
 """
 
 from __future__ import annotations
@@ -223,14 +229,20 @@ def _file_lock(directory):
         os.close(descriptor)
 
 
-def _cleanup(path, lease, created, label):
+def _lease_prefix(path):
+    # 同一路径只认一把「共享租约」，与调用方自报的 label 无关。
+    key = hashlib.sha1(os.path.abspath(path).encode('utf-8')).hexdigest()[:16]
+    return path.parent / f'.pm-fixture-{key}-'
+
+
+def _cleanup(path, lease, created):
     try:
         with _file_lock(path.parent):
             try:
                 lease.unlink()
             except OSError:
                 pass
-            if created and not list(path.parent.glob(f'.pm-fixture-{label}-*.lease')):
+            if created and not list(path.parent.glob(_lease_prefix(path).name + '*.lease')):
                 try:
                     path.unlink()
                 except OSError:
@@ -239,30 +251,29 @@ def _cleanup(path, lease, created, label):
         pass
 
 
-def _ensure(path, payload, label, validator):
+def _ensure(path, payload, validator):
     with _file_lock(path.parent):
         created = not path.exists()
         if created:
             path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding='utf-8')
-        lease = path.parent / f'.pm-fixture-{label}-{os.getpid()}.lease'
+        lease = Path(str(_lease_prefix(path)) + f'{os.getpid()}.lease')
         if not lease.exists():
             lease.write_text('1', encoding='utf-8')
-            atexit.register(_cleanup, path, lease, created, label)
+            atexit.register(_cleanup, path, lease, created)
     try:
         return validator(json.loads(path.read_text(encoding='utf-8-sig')))
     except (OSError, ValueError, TypeError, KeyError):
         return False
 
 
-def ensure_file(path, payload, label, validator):
-    return _ensure(path, payload, label, validator)
+def ensure_file(path, payload, validator):
+    return _ensure(path, payload, validator)
 
 
 def ensure_cases(*, require_version=False):
-    return _ensure(CASE_PATH, build_sources(), 'cases',
+    return _ensure(CASE_PATH, build_sources(),
                    lambda value: cases_valid(value, require_version=require_version))
 
 
 def ensure_diagnostic_inputs():
-    return _ensure(INPUT_PATH, build_diagnostic_inputs(), 'diagnostic-inputs',
-                   diagnostic_inputs_valid)
+    return _ensure(INPUT_PATH, build_diagnostic_inputs(), diagnostic_inputs_valid)

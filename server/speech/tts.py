@@ -612,8 +612,11 @@ class TTSEngine:
             "normalize": True,
             # 流式端点参数：一次请求远小于 200 字，分块只为边生成边下发。
             "chunk_length": 200,
-            "latency": "balanced",
+            "latency": str(getattr(settings, "fish_tts_latency", "balanced") or "balanced"),
         }
+        reference_id = str(profile.get("fish_reference_id") or settings.fish_tts_reference_id or "").strip()
+        if reference_id:
+            payload["reference_id"] = reference_id
         headers = {
             "Authorization": f"Bearer {key}",
             # Fish 用 model **请求头**选模型，不是 body 字段。

@@ -120,7 +120,7 @@ def install(target_module) -> Path:
     # 也不会在 ci_test_shard --workers 4 的并发进程里被别人提前删掉。
     subprocess_fixture = pm_eval_fixture.CASE_PATH
     available = pm_eval_fixture.ensure_file(
-        subprocess_fixture, sources, 'cases-induction', pm_eval_fixture.cases_valid)
+        subprocess_fixture, sources, pm_eval_fixture.cases_valid)
 
     def load_sources():
         # 深拷贝，避免调用方改到共享数据（与原实现返回 deepcopy 同口径）。
