@@ -166,28 +166,29 @@ def build_mumble(*, text: str, reason: str, voice: bool = False, bubble: Any = N
 def hint_from_lesson(lesson: Any) -> tuple[str | None, list[str]]:
     if not isinstance(lesson, dict):
         return None, []
-        text = str(lesson.get("action") or lesson.get("text") or "").strip()
-        if not text:
-            return None, []
-        refs = list(lesson.get("source_refs") or [])
-        if not refs:
-            lesson_id = lesson.get("id") or "active"
-            refs = [f"lesson:{lesson_id}"]
-        return text, refs
+    text = str(lesson.get("action") or lesson.get("text") or "").strip()
+    if not text:
+        return None, []
+    refs = list(lesson.get("source_refs") or [])
+    if not refs:
+        lesson_id = lesson.get("id") or "active"
+        refs = [f"lesson:{lesson_id}"]
+    return text, refs
 
 
 def hint_from_pending_work(work: Any) -> tuple[str | None, list[str]]:
     if not isinstance(work, dict):
         return None, []
-        text = str(work.get("text") or work.get("title") or "").strip()
-        if not text:
-            return None, []
-        refs = list(work.get("source_refs") or [])
-        if not refs:
-            work_id = work.get("id") or "active"
-            refs = [f"work:{work_id}"]
-        return text, refs
-            
+    text = str(work.get("text") or work.get("title") or "").strip()
+    if not text:
+        return None, []
+    refs = list(work.get("source_refs") or [])
+    if not refs:
+        work_id = work.get("id") or "active"
+        refs = [f"work:{work_id}"]
+    return text, refs
+
+
 def choose_content(
     *,
     discovery: Any = None,
