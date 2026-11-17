@@ -137,4 +137,4 @@ def valid(value):
 
 
 def ensure():
-    return pm_eval_fixture.ensure_file(BOUNDARY_PATH, build_cases(), 'boundary-cases', valid)
+    return pm_eval_fixture.ensure_file(BOUNDARY_PATH, build_cases(), valid)
