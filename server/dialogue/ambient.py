@@ -163,26 +163,60 @@ def build_mumble(*, text: str, reason: str, voice: bool = False, bubble: Any = N
         event["bubble"] = bubble if isinstance(bubble, dict) else {"text": str(bubble), "ttl_ms": int(expires_in * 1000)}
     return event
 
+def hint_from_lesson(lesson: Any) -> tuple[str | None, list[str]]:
+    if not isinstance(lesson, dict):
+        return None, []
+    text = str(lesson.get("action") or lesson.get("text") or "").strip()
+    if not text:
+        return None, []
+    refs = list(lesson.get("source_refs") or [])
+    if not refs:
+        lesson_id = lesson.get("id") or "active"
+        refs = [f"lesson:{lesson_id}"]
+    return text, refs
 
-def choose_content(*, discovery: Any = None, mood: Any = None, spark: Any = None,
-                   child_seed: Any = None) -> tuple[str | None, list[str]]:
-    """Real content only (§16.2): (text, source_refs) or (None, []).
 
-    Prefers a recent reflection discovery, then the mood afterglow, then a surfaced
-    spark, then a fresh child seed. Returns (None, []) when nothing real exists so
-    the caller stays silent instead of fabricating a completed reflection.
-    """
-    if isinstance(discovery, dict) and isinstance(discovery.get("text"), str) and discovery["text"].strip():
-        return discovery["text"].strip(), list(discovery.get("source_refs") or [])
-    if isinstance(mood, dict) and isinstance(mood.get("narrative"), str) and mood["narrative"].strip():
-        return mood["narrative"].strip(), list(mood.get("source_refs") or [])
-    if isinstance(spark, dict) and isinstance(spark.get("text"), str) and spark["text"].strip():
-        return spark["text"].strip(), []
-    if isinstance(child_seed, dict) and isinstance(child_seed.get("question"), str) and child_seed["question"].strip():
-        return child_seed["question"].strip(), list(child_seed.get("source_refs") or [])
+def hint_from_pending_work(work: Any) -> tuple[str | None, list[str]]:
+    if not isinstance(work, dict):
+        return None, []
+    text = str(work.get("text") or work.get("title") or "").strip()
+    if not text:
+        return None, []
+    refs = list(work.get("source_refs") or [])
+    if not refs:
+        work_id = work.get("id") or "active"
+        refs = [f"work:{work_id}"]
+    return text, refs
+
+
+def choose_content(
+    *,
+    discovery: Any = None,
+    mood: Any = None,
+    spark: Any = None,
+    child_seed: Any = None,
+    lesson: Any = None,
+    pending_work: Any = None,
+) -> tuple[str | None, list[str]]:
+    if isinstance(discovery, dict) and str(discovery.get("text") or "").strip():
+        return str(discovery["text"]).strip(), list(discovery.get("source_refs") or [])
+    if isinstance(mood, dict) and str(mood.get("narrative") or "").strip():
+        return str(mood["narrative"]).strip(), list(mood.get("source_refs") or [])
+    if isinstance(spark, dict) and str(spark.get("text") or "").strip():
+        return str(spark["text"]).strip(), []
+    if isinstance(child_seed, dict) and str(child_seed.get("question") or "").strip():
+        return str(child_seed["question"]).strip(), list(child_seed.get("source_refs") or [])
+    if lesson is not None:
+        text, refs = hint_from_lesson(lesson)
+        if text:
+            return text, refs
+    if pending_work is not None:
+        text, refs = hint_from_pending_work(pending_work)
+        if text:
+            return text, refs
     return None, []
 
 
 __all__ = ["AMBIENT_DEFAULTS", "SUPERVISOR_ACTIONS", "TIERS", "ambient_cfg", "backoff_threshold",
-           "build_micro_act", "build_mumble", "choose_content", "config_number",
-           "new_event_id", "select_tier"]
+    "build_micro_act", "build_mumble", "choose_content", "config_number",
+    "hint_from_lesson", "hint_from_pending_work", "new_event_id", "select_tier"]
