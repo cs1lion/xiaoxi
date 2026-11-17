@@ -115,14 +115,25 @@ export function computePresenceCue({
     bubble: null,
   };
 }
+export function summarizeDiaryNotice(diary) {
+  if (!diary) return "";
+  const raw =
+    typeof diary === "string"
+      ? diary
+      : diary.summary || diary.text || diary.content || diary.title || "";
+  const clean = String(raw).replace(/\s+/g, " ").trim();
+  if (!clean) return "";
+  return clean.length > 36 ? `${clean.slice(0, 35)}…` : clean;
+}
 
-export function createCompanionPresence({ onCue } = {}) {
+
+export function createCompanionPresence({ onCue, bubbleCooldownMs = 30000, now = () => Date.now() } = {}) {
   let dialogueState = "idle";
   let writing = false;
   let activeTasks = 0;
   let completedTasks = 0;
   let lastMode = "idle";
-
+  let lastBubbleAt = -Infinity;
   return {
     snapshot() {
       return { dialogueState, writing, activeTasks, completedTasks, mode: lastMode };
@@ -151,12 +162,43 @@ export function createCompanionPresence({ onCue } = {}) {
         activeTasks,
         justCompletedTask,
       });
+    if (cue.bubble) {
+      const ts = Number(now());
+      if (bubbleCooldownMs > 0 && ts - lastBubbleAt < bubbleCooldownMs) {
+        cue.bubble = null;
+      } else {
+        lastBubbleAt = ts;
+      }
+    }
 
       if (cue.mode !== lastMode || justCompletedTask) {
         const prevMode = lastMode;
         lastMode = cue.mode;
         if (typeof onCue === "function") onCue(cue, prevMode);
       }
+      return cue;
+    },
+    notifyDiary(diary) {
+      const notice = summarizeDiaryNotice(diary);
+      if (!notice) return null;
+      const ts = Number(now());
+      if (bubbleCooldownMs > 0 && ts - lastBubbleAt < bubbleCooldownMs) {
+        return null;
+      }
+      lastBubbleAt = ts;
+      const cue = {
+        mode: lastMode,
+        override: false,
+        resetGaze: false,
+        eyeExpression: lastMode === "speaking" ? "warm" : "happy",
+        eyeDuration: 2200,
+        emotion: "温柔",
+        emotionDuration: 2200,
+        gesture: "nod",
+        gaze: null,
+        bubble: notice,
+      };
+      if (typeof onCue === "function") onCue(cue, lastMode);
       return cue;
     },
   };
