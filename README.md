@@ -24,6 +24,11 @@
 - **置信度分级记忆检索**：检索结果按【明确说过】、【推测】、【不确定】三档确定性装配 System Prompt，设置负向约束防止预训练常识盲目补全；支持记忆硬删除与 Lessons 自进化周期蒸馏。
 - **遥测熔断与 L1/L2 评估闭环**：结合 L1（查真实回执）与 L2（查登记判例）双层确定性评估，自动将反馈闭环归纳注入 Prompt，打回上限 2 次。
 
+### Design Decisions & Non-Goals
+- **Why split System 1 / System 2**: Voice interaction breaks if tool calls block the dialogue turn. System 1 stays strictly non-blocking for streaming ASR → TTS, while complex delegations offload asynchronously to Orchestrator-Workers in System 2.
+- **Why 3-tier confidence memory**: Treating uncertain recollections as ground truth causes hallucinated personal facts. Memory is injected with explicit confidence tiers (`Explicit` / `Inferred` / `Uncertain`) plus negative constraints against pretraining fill-ins.
+- **Non-Goal**: Unbounded autonomous retries — identical step signatures trip a 3x circuit breaker, and L1/L2 deterministic evaluation caps rework at 2 retries.
+
 ## 核心模块结构 (Directory Structure)
 
 - `server/`: 核心后端服务
