@@ -1,3 +1,11 @@
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="./assets/hero-dark.svg">
+    <source media="(prefers-color-scheme: light)" srcset="./assets/hero-light.svg">
+    <img alt="xiaoxi — Dual-System Personal Voice Agent" src="./assets/hero-dark.svg" width="100%">
+  </picture>
+</p>
+
 # 小溪 (Xiaoxi)
 ![Python 3.11+](//img.shields.io/badge/Python-3.11%2B-blue) ![FastAPI Async](//img.shields.io/badge/FastAPI-Async-green) ![Protocol MCP](//img.shields.io/badge/Protocol-MCP-orange) ![Loop System 1 & 2](//img.shields.io/badge/Loop-System%201%20%26%202-purple)
 个人中文语音 Agent 系统，基于 **台前语音快环 (System 1)** 与 **幕后 Agent 慢环 (System 2)** 双环异步协作架构设计。
